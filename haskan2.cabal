@@ -93,6 +93,11 @@ library
                       DataKinds
 
 executable haskan2
+    if os(windows)
+      ghc-options:         -optl-mconsole -O2 -threaded
+    else
+      ghc-options:         -O2 -threaded
+
     main-is:          Main.hs
 
     -- Modules included in this executable, other than Main.
