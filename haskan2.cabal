@@ -1,0 +1,109 @@
+cabal-version:      2.4
+name:               haskan2
+version:            0.1.0.0
+
+-- A short (one-line) description of the package.
+-- synopsis:
+
+-- A longer description of the package.
+-- description:
+
+-- A URL where users can report bugs.
+-- bug-reports:
+
+-- The license under which the package is released.
+-- license:
+author:             Omg Bebebe
+maintainer:         omgbebebe@gmail.com
+
+-- A copyright notice.
+-- copyright:
+-- category:
+extra-source-files: CHANGELOG.md
+
+library
+    exposed-modules:  Graphics.Haskan
+                      Graphics.Haskan.Logger
+                      Graphics.Haskan.Camera
+                      Graphics.Haskan.Events
+                      Graphics.Haskan.Engine
+                      Graphics.Haskan.Resources
+                      Graphics.Haskan.Vertex
+                      Graphics.Haskan.Window
+                      Graphics.Haskan.Mesh
+                      Graphics.Haskan.Face
+                      Graphics.Haskan.Model
+                      Graphics.Haskan.Utils.ObjLoader
+                      Graphics.Haskan.Utils.PieLoader
+                      Graphics.Haskan.Vulkan.Buffer
+                      Graphics.Haskan.Vulkan.CommandBuffer
+                      Graphics.Haskan.Vulkan.CommandPool
+                      Graphics.Haskan.Vulkan.DescriptorSet
+                      Graphics.Haskan.Vulkan.DescriptorSetLayout
+                      Graphics.Haskan.Vulkan.DescriptorPool
+                      Graphics.Haskan.Vulkan.Device
+                      Graphics.Haskan.Vulkan.Fence
+                      Graphics.Haskan.Vulkan.Framebuffer
+                      Graphics.Haskan.Vulkan.GraphicsPipeline
+                      Graphics.Haskan.Vulkan.ImageView
+                      Graphics.Haskan.Vulkan.Instance
+                      Graphics.Haskan.Vulkan.Memory
+                      Graphics.Haskan.Vulkan.PipelineLayout
+                      Graphics.Haskan.Vulkan.PhysicalDevice
+                      Graphics.Haskan.Vulkan.RenderPass
+                      Graphics.Haskan.Vulkan.Render
+                      Graphics.Haskan.Vulkan.ShaderModule
+                      Graphics.Haskan.Vulkan.Shaders.Texture
+                      Graphics.Haskan.Vulkan.Semaphore
+                      Graphics.Haskan.Vulkan.Swapchain
+                      Graphics.Haskan.Vulkan.Texture
+                      Graphics.Haskan.Vulkan.Types
+                      Graphics.Haskan.Vulkan.VertexFormat
+
+    -- LANGUAGE extensions used by modules in this package.
+    -- other-extensions:
+    build-depends:    base ^>=4.17.0.0
+                    , bytestring
+                    , async
+                    , clock
+                    , stm
+                    , text
+                    , fast-logger
+                    , vulkan-api
+                    , gltf-codec
+                    , managed
+                    , sdl2
+                    , lens
+                    , linear
+                    , JuicyPixels
+                    , unordered-containers
+                    , vector
+                    -- for vulkan
+                    , contravariant
+                    , fir
+                    , pretty-simple
+                    , say
+                    , megaparsec
+                    , scientific
+                    , hashable
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+                      OverloadedStrings
+                      DataKinds
+
+executable haskan2
+    main-is:          Main.hs
+
+    -- Modules included in this executable, other than Main.
+    -- other-modules:
+
+    -- LANGUAGE extensions used by modules in this package.
+    -- other-extensions:
+    build-depends:    base ^>=4.17.0.0
+                    , haskan2
+--                     ,gltf-codec
+    hs-source-dirs:   app
+    default-language: GHC2021
+    default-extensions:
+                      OverloadedStrings
