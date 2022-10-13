@@ -1,7 +1,7 @@
 module Main where
 
+import Graphics.Haskan qualified as Haskan
 import System.Environment (getArgs)
-import qualified Graphics.Haskan as Haskan
 
 main :: IO ()
 main = do

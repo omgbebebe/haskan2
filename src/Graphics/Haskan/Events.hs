@@ -1,10 +1,7 @@
 module Graphics.Haskan.Events where
 
--- sdl2
-import qualified SDL
-
--- haskan
 import Graphics.Haskan.Resources (MonadManaged, alloc_)
+import SDL qualified
 
 managedEvents :: MonadManaged m => m ()
 managedEvents =
