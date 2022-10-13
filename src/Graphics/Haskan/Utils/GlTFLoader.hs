@@ -1,7 +1,7 @@
 module Graphics.Haskan.Utils.GlTFLoader where
 
-import Control.Monad.IO.Class (MonadIO, liftIO)
 import Codec.GlTF (GlTF, fromFile)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 
 load :: (MonadFail m, MonadIO m) => m GlTF
 load = do
