@@ -1,59 +1,56 @@
 module Graphics.Haskan.Utils.PieLoader where
 
--- base
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Functor (void)
 import Data.Maybe (fromMaybe)
+import Data.Scientific (toRealFloat)
+import Data.Text (Text)
+import Data.Text.IO qualified as T
 import Data.Void
-
--- linear
-import Linear (V2(..), V3(..))
-
--- megaparsec
+import Linear (V2 (..), V3 (..))
 import Text.Megaparsec
 import Text.Megaparsec.Char
 import Text.Megaparsec.Char.Lexer hiding (space)
 
--- scientific
-import Data.Scientific (toRealFloat)
-
--- text
-import Data.Text (Text)
-import qualified Data.Text.IO as T
-
 type Vertex = V3 Float
-data Triangle =
-  Triangle { indices :: V3 Int
-           , uvs :: V3 (V2 Float)
-           } deriving (Eq, Show)
 
-data Animation =
-  Animation { animTime :: Int
-            , cycleCount :: Int
-            , frameCount :: Int
-            , frames :: [AnimationFrame]
-            } deriving (Eq, Show)
+data Triangle = Triangle
+  { indices :: V3 Int,
+    uvs :: V3 (V2 Float)
+  }
+  deriving (Eq, Show)
 
-data AnimationFrame =
-  AnimationFrame { animPos :: V3 Int
-                 , animRot :: V3 Int
-                 , animScale :: V3 Int
-                 } deriving (Eq, Show)
+data Animation = Animation
+  { animTime :: Int,
+    cycleCount :: Int,
+    frameCount :: Int,
+    frames :: [AnimationFrame]
+  }
+  deriving (Eq, Show)
+
+data AnimationFrame = AnimationFrame
+  { animPos :: V3 Int,
+    animRot :: V3 Int,
+    animScale :: V3 Int
+  }
+  deriving (Eq, Show)
 
 type Connector = V3 Float
 
-data PieLevel =
-  PieLevel { vertices :: [Vertex]
-           , triangles :: [Triangle]
-           , animation :: Maybe Animation
-           , connectors :: [Connector]
-           } deriving (Eq, Show)
+data PieLevel = PieLevel
+  { vertices :: [Vertex],
+    triangles :: [Triangle],
+    animation :: Maybe Animation,
+    connectors :: [Connector]
+  }
+  deriving (Eq, Show)
 
-data Pie =
-  Pie { pieVersion :: Int
-      , textureName :: Text
-      , levels :: [PieLevel]
-      } deriving (Eq, Show)
+data Pie = Pie
+  { pieVersion :: Int,
+    textureName :: Text,
+    levels :: [PieLevel]
+  }
+  deriving (Eq, Show)
 
 type Parser = Parsec Void Text
 
@@ -100,7 +97,7 @@ connectorP :: Parser Connector
 connectorP = tab *> v3FloatP <* newline
 
 pointP :: Parser Vertex
-pointP = tab *> fmap (*0.1) v3FloatP <* newline
+pointP = tab *> fmap (* 0.1) v3FloatP <* newline
 
 polygonP :: Int -> Parser Triangle
 polygonP pieVersion = do
@@ -114,7 +111,7 @@ polygonP pieVersion = do
   (void newline <|> eof)
   case pieVersion of
     3 -> pure $ Triangle indices (V3 uv1 uv2 uv3)
-    2 -> pure $ Triangle indices (V3 (uv1/256.0) (uv2/256.0) (uv3/256.0))
+    2 -> pure $ Triangle indices (V3 (uv1 / 256.0) (uv2 / 256.0) (uv3 / 256.0))
 
 animationP :: Parser Animation
 animationP = do
@@ -126,14 +123,15 @@ animationP = do
   pure $ Animation time cycles frames animFrames
 
 animationFrameP :: Parser AnimationFrame
-animationFrameP = do
-  void tab
-  _frameIndex <- uintP
-  AnimationFrame
-    <$> v3IntP
-    <*> v3IntP
-    <*> v3IntP
-  <* (void newline <|> eof)
+animationFrameP =
+  do
+    void tab
+    _frameIndex <- uintP
+    AnimationFrame
+      <$> v3IntP
+      <*> v3IntP
+      <*> v3IntP
+    <* (void newline <|> eof)
 
 skipSpaces :: Parser ()
 skipSpaces = skipMany separatorChar

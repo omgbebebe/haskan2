@@ -1,49 +1,43 @@
-{-# language GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+
 module Graphics.Haskan.Vulkan.VertexFormat where
 
--- base
 import Control.Applicative
 import Data.Functor.Contravariant
-import Data.Word (Word8)
-import qualified Foreign.C
- 
--- contravariant
 import Data.Functor.Contravariant.Divisible
-
--- linear
+import Data.Word (Word8)
+import Foreign.C qualified
+import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Graphics.Vulkan.Marshal.Create (set, setAt, setListRef, setStrRef, setVkRef, (&*))
+import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Linear (V2, V3, V4)
 
--- vulkan-api
-import qualified Graphics.Vulkan.Core_1_0 as Vulkan
-import qualified Graphics.Vulkan.Marshal.Create as Vulkan
-import Graphics.Vulkan.Marshal.Create (set, setAt, setVkRef, setListRef, setStrRef, (&*))
+newtype Component = Component {format :: Vulkan.VkFormat}
+  deriving (Show)
 
-newtype Component =
-  Component { format :: Vulkan.VkFormat } deriving Show
-
-newtype VertexFormat v =
-  VertexFormat (Const [Component] v)
+newtype VertexFormat v
+  = VertexFormat (Const [Component] v)
   deriving (Contravariant, Divisible, Show)
 
 v2_s32float :: VertexFormat (V2 Foreign.C.CFloat)
 v2_s32float =
   VertexFormat
     ( Const
-        ( [ Component { format = Vulkan.VK_FORMAT_R32G32_SFLOAT}] )
+        ([Component {format = Vulkan.VK_FORMAT_R32G32_SFLOAT}])
     )
 
 v3_s32float :: VertexFormat (V3 Foreign.C.CFloat)
 v3_s32float =
   VertexFormat
     ( Const
-        ( [ Component { format = Vulkan.VK_FORMAT_R32G32B32_SFLOAT}] )
+        ([Component {format = Vulkan.VK_FORMAT_R32G32B32_SFLOAT}])
     )
 
 v4_word8 :: VertexFormat (V4 Word8)
 v4_word8 =
   VertexFormat
     ( Const
-        ( [ Component { format = Vulkan.VK_FORMAT_R8G8B8A8_UINT}] )
+        ([Component {format = Vulkan.VK_FORMAT_R8G8B8A8_UINT}])
     )
 
 strideSize :: VertexFormat v -> Int
@@ -62,21 +56,20 @@ componentSize c =
     Vulkan.VK_FORMAT_R8G8B8A8_UINT ->
       4 * 1
 
-attributeDescriptions :: Int -> VertexFormat v -> [ Vulkan.VkVertexInputAttributeDescription ]
-attributeDescriptions binding ( VertexFormat (Const components) ) =
+attributeDescriptions :: Int -> VertexFormat v -> [Vulkan.VkVertexInputAttributeDescription]
+attributeDescriptions binding (VertexFormat (Const components)) =
   getZipList
     ( toAttributeDescription
         <$> ZipList components
         <*> ZipList (scanl (+) 0 (map componentSize components))
-        <*> ZipList [0..]
+        <*> ZipList [0 ..]
     )
-
   where
     toAttributeDescription :: Component -> Int -> Int -> Vulkan.VkVertexInputAttributeDescription
-    toAttributeDescription (Component format) offset location=
+    toAttributeDescription (Component format) offset location =
       Vulkan.createVk
-        (  set @"location" (fromIntegral location)
-        &* set @"binding" (fromIntegral binding)
-        &* set @"format" format
-        &* set @"offset" (fromIntegral offset)
+        ( set @"location" (fromIntegral location)
+            &* set @"binding" (fromIntegral binding)
+            &* set @"format" format
+            &* set @"offset" (fromIntegral offset)
         )

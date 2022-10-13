@@ -1,18 +1,14 @@
 module Graphics.Haskan.Vulkan.PhysicalDevice
-  (selectPhysicalDevice
-  ,surfaceExtent
-  ) where
+  ( selectPhysicalDevice,
+    surfaceExtent,
+  )
+where
 
--- base
 import Control.Monad.IO.Class (MonadIO, liftIO)
-
--- vulkan-api
-import qualified Graphics.Vulkan as Vulkan
-import qualified Graphics.Vulkan.Core_1_0 as Vulkan
-import qualified Graphics.Vulkan.Ext as Vulkan
-
--- haskan
 import Graphics.Haskan.Resources (allocaAndPeek, peekVkList)
+import Graphics.Vulkan qualified as Vulkan
+import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Graphics.Vulkan.Ext qualified as Vulkan
 
 selectPhysicalDevice :: MonadIO m => Vulkan.VkInstance -> m Vulkan.VkPhysicalDevice
 selectPhysicalDevice inst = do
@@ -25,6 +21,5 @@ peekPhysicalDevice = pure . head
 surfaceExtent :: MonadIO m => Vulkan.VkPhysicalDevice -> Vulkan.VkSurfaceKHR -> m Vulkan.VkExtent2D
 surfaceExtent pdev surface = do
   caps <- liftIO $ allocaAndPeek (Vulkan.vkGetPhysicalDeviceSurfaceCapabilitiesKHR pdev surface)
-  let
-    currentExtent = Vulkan.getField @"currentExtent" caps
+  let currentExtent = Vulkan.getField @"currentExtent" caps
   pure currentExtent

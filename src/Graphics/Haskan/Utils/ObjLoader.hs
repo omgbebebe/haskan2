@@ -1,48 +1,41 @@
 module Graphics.Haskan.Utils.ObjLoader where
 
--- base
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Functor (void)
 import Data.Maybe (fromMaybe)
+import Data.Scientific (toRealFloat)
+import Data.Text (Text)
+import Data.Text.IO qualified as T
 import Data.Void
-
--- linear
-import Linear (V2(..), V3(..), V4(..))
-
--- megaparsec
+import Graphics.Haskan.Vertex qualified as Haskan
+import Linear (V2 (..), V3 (..), V4 (..))
 import Text.Megaparsec
 import Text.Megaparsec.Char
 import Text.Megaparsec.Char.Lexer hiding (space)
 import Text.Megaparsec.Debug
 
--- scientific
-import Data.Scientific (toRealFloat)
-
--- text
-import Data.Text (Text)
-import qualified Data.Text.IO as T
-
--- haskan
-import qualified Graphics.Haskan.Vertex as Haskan
-
-
 type Vertex = V3 Float
+
 type Normal = V3 Float
+
 type UV = V2 Float
+
 type Index = Int
 
-type FaceTriplet = (Index,Index,Index)
+type FaceTriplet = (Index, Index, Index)
+
 data Face
   = Triangle (V3 FaceTriplet)
   | Quad (V4 FaceTriplet)
-  deriving Show
+  deriving (Show)
 
-data Obj
-  = Obj { v :: [Vertex]
-        , vt :: [UV]
-        , vn :: [Normal]
-        , f :: [Face]
-        } deriving Show
+data Obj = Obj
+  { v :: [Vertex],
+    vt :: [UV],
+    vn :: [Normal],
+    f :: [Face]
+  }
+  deriving (Show)
 
 type Parser = Parsec Void Text
 
@@ -63,7 +56,6 @@ objP = do
   s <- sModeP
   faces <- facesP
   pure $ Obj vs vts vns faces
-
 
 objNameP :: Parser String
 objNameP = do
@@ -97,10 +89,10 @@ faceP :: Parser Face
 faceP = do
   points <- faceTripletsP
   case points of
-    [a,b,c,d] -> pure $ Quad (V4 a b c d)
-    [a,b,c] -> pure $ Triangle (V3 a b c)
+    [a, b, c, d] -> pure $ Quad (V4 a b c d)
+    [a, b, c] -> pure $ Triangle (V3 a b c)
     _ -> fail "can't parse face"
-   
+
 faceTripletsP :: Parser [FaceTriplet]
 faceTripletsP = do
   void $ string "f " <* skipSpaces
@@ -113,7 +105,7 @@ faceTripletP = do
   index <- uintP <* char '/'
   uv <- uintP <* char '/'
   normal <- uintP
-  pure (fromIntegral (index-1), fromIntegral (uv-1), fromIntegral (normal-1))
+  pure (fromIntegral (index - 1), fromIntegral (uv - 1), fromIntegral (normal - 1))
 
 skipSpaces :: Parser ()
 skipSpaces = skipMany separatorChar
