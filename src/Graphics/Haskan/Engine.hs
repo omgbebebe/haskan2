@@ -1,4 +1,3 @@
-{-# LANGUAGE DatatypeContexts #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE RecordWildCards #-}
 
@@ -107,18 +106,6 @@ type Position = V3 Float
 type Distance = Float
 
 type Orientation = (Linear.Quaternion.Quaternion Float)
-
-{-
-data Camera
-  = LookAt { camPos :: Position
-           , camLookAt :: Position
-           }
-  | Orbital { camTarget :: Position
-            , camDistance :: Distance
-            , camOrientation :: Orientation
-            , camDumping :: Maybe (V2 Float)
-            }
--}
 
 data WorldState cam = WorldState
   { activeCamera :: TVar cam
