@@ -35,6 +35,7 @@ library
                       Graphics.Haskan.Model
                       Graphics.Haskan.Utils.ObjLoader
                       Graphics.Haskan.Utils.PieLoader
+                      Graphics.Haskan.Utils.GlTFLoader
                       Graphics.Haskan.Vulkan.Buffer
                       Graphics.Haskan.Vulkan.CommandBuffer
                       Graphics.Haskan.Vulkan.CommandPool
