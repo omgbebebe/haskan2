@@ -6,6 +6,7 @@ let
           cabal-install
         ]);
   libs = [ SDL2 glfw3 glm zlib pcre vulkan-loader vulkan-validation-layers vulkan-tools vulkan-tools-lunarg shaderc ];
+  hls = haskell-language-server.override { supportedGhcVersions = [ "924" "942" ]; };
 in
 pkgs.stdenv.mkDerivation {
   name = "Haskan";

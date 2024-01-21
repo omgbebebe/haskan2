@@ -123,9 +123,11 @@ data GameState cam = GameState
 data ControlMessage
   = Terminate
 
--- mainLoop :: MonadIO m => EventsQueue -> RenderContext -> m ()
--- mainLoop eventsQueue ctx@RenderContext{..} = do
--- mainLoop :: MonadIO m => HaskanConfig -> RenderContext -> m Bool
+-- | The main loop that runs the game engine. It initializes systems like the window, 
+-- rendering, input handling, and game state update. It launches separate threads for 
+-- rendering, game state updates, and input handling, and synchronizes between them using 
+-- channels and MVars. The function takes the mesh name to render and engine configuration
+-- as arguments. It sets up the initial game state with default values.
 mainLoop :: MonadIO m => String -> EngineConfig -> m ()
 mainLoop meshName EngineConfig {..} = do
   logI "starting mainLoop"
@@ -189,6 +191,9 @@ mainLoop meshName EngineConfig {..} = do
   SDL.quit
   logI "mainLoop finished"
 
+-- | Render a frame in the render loop. Checks for control messages, gets the 
+-- current camera state, updates the uniform buffer, draws the frame, presents 
+-- it, and handles restarting/terminating conditions.
 renderFrameLoop ::
   (MonadFail m, MonadIO m, Camera cam) =>
   RenderContext ->
@@ -249,6 +254,10 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
         mvpMemory
         tvCamera
 
+-- | Main rendering loop. 
+--
+-- Sets up Vulkan resources like device, pipeline, buffers etc. and enters the main
+-- loop which renders frames continuously.
 renderLoop ::
   (Camera cam, MonadFail m, MonadManaged m) =>
   Vulkan.VkPhysicalDevice ->
@@ -376,6 +385,12 @@ projectionMatrix =
       0.1 -- near plane
       10000.0 -- far plane
 
+-- | stateUpdateLoop is the main game loop that updates the game state 
+-- based on input events and simulation ticks. It takes the target FPS, 
+-- current GameState, a finished semaphore, input event queue, and control 
+-- channel. Inside the loop it reads input events, updates the camera and 
+-- player state, runs physics simulation ticks, and loops again until 
+-- terminated by a control signal.
 stateUpdateLoop :: (Camera cam, MonadIO m) => Integer -> GameState cam -> MVar () -> TQueue ActionEvent -> TChan ControlMessage -> m ()
 stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue controlChannel = liftIO $ do
   control <- STM.atomically $ TChan.dupTChan controlChannel
