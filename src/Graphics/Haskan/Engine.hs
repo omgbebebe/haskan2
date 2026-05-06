@@ -437,10 +437,9 @@ updateCamera ::
   TVar cam ->
   [Camera.Modifier Foreign.C.CFloat] ->
   STM ()
-updateCamera tvCamera mods = STM.modifyTVar' tvCamera $
-  \cam -> Camera.update cam mods
+updateCamera tv mods = STM.modifyTVar' tv (Camera.update <*> pure mods)
 
-data Event
+data Event    
 
 data KeyModifier
   = LShift
