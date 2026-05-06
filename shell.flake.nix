@@ -6,17 +6,6 @@ let
   ghc = haskell.packages.${compiler}.ghcWithPackages (ps: with ps; [
     cabal-install
     haskell-language-server
-    vector-sized
-    text-short
-    typelits-witnesses
-    finite-typelits
-    generic-monoid
-    ghc-typelits-knownnat
-    ghc-typelits-natnormalise
-    half
-    tree-view
-    variant
-    atomic-file-ops
   ]);
 
   nativeLibs = [
