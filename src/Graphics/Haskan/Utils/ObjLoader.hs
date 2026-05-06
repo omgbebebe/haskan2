@@ -1,3 +1,7 @@
+-- | Module for loading Wavefront .obj 3D model files.
+-- Defines parsers and data types for vertices, normals, texture coordinates, 
+-- faces, and full .obj model contents. Exports main parseObj function to parse
+-- an .obj file from a filepath into an Obj data structure.
 module Graphics.Haskan.Utils.ObjLoader where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)

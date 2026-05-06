@@ -11,6 +11,7 @@ import Graphics.Haskan.Resources (alloc, alloc_)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
 import SDL qualified
+-- import SDL.Raw.Video (createWindowFrom)
 import SDL.Video.Vulkan qualified
 
 managedWindow ::
@@ -23,7 +24,8 @@ managedWindow title (width, height) = do
   window <-
     alloc
       "SDL Window"
-      (createWindow title (width, height))
+     (createWindow title (width, height))
+      -- (createWindowFrom 1)
       SDL.destroyWindow
 
   alloc_
