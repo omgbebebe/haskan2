@@ -472,11 +472,6 @@ defaultBindings =
       (([LShift], SDL.KeycodeQ), Escape)
     ]
 
-updateGameState :: Camera cam => TVar (GameState cam) -> TQueue Event -> STM ()
-updateGameState gameState tqEvents = do
-  events <- TQueue.flushTQueue tqEvents
-  pure ()
-
 modifiersToList :: SDL.KeyModifier -> [KeyModifier]
 modifiersToList SDL.KeyModifier {..} = map fst . filter snd $
   [ (LShift,   keyModifierLeftShift)
