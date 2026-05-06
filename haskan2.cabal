@@ -63,7 +63,7 @@ library
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
-    build-depends:    base >=4.17 && <4.22
+    build-depends:    base >=4.17 && <4.24
                     , bytestring
                     , clock
                     , stm
@@ -103,7 +103,7 @@ executable haskan2
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
-    build-depends:    base >=4.17 && <4.22
+    build-depends:    base >=4.17 && <4.24
                     , haskan2
 --                     ,gltf-codec
     hs-source-dirs:   app
