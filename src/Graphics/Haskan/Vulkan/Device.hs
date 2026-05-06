@@ -4,6 +4,7 @@ import Control.Monad (filterM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.&.))
+import Data.List (nub)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, peekVkList_)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -43,16 +44,17 @@ createRenderDevice pdev surface layers = do
           else
             if null presentQueueFamilies
               then fail "Cannot find queue family with Presentation support"
-              else map fst [head graphicsQueueFamilies, head presentQueueFamilies] -- TODO: more clever selection needed
+              else nub $ map fst [head graphicsQueueFamilies, head presentQueueFamilies] -- TODO: more clever selection needed
   device <- createDevice pdev queueFamilyIndices layers
-  let (graphicsQueueFamilyIndex : presentQueueFamilyIndex : []) = queueFamilyIndices
+  let graphicsQueueFamilyIndex = head queueFamilyIndices
+      presentQueueFamilyIndex = if length queueFamilyIndices > 1 then queueFamilyIndices !! 1 else graphicsQueueFamilyIndex
   pure (device, (graphicsQueueFamilyIndex, presentQueueFamilyIndex))
 
 createDevice :: MonadIO m => Vulkan.VkPhysicalDevice -> [Int] -> [String] -> m Vulkan.VkDevice
 createDevice dev queueFamilyIndices enabledLayers = do
   let deviceFlags = Vulkan.VK_ZERO_FLAGS
       queueFlags = Vulkan.VK_ZERO_FLAGS
-      enabledExtensions = [Vulkan.VK_KHR_SWAPCHAIN_EXTENSION_NAME, Vulkan.VK_KHR_SWAPCHAIN_EXTENSION_NAME]
+      enabledExtensions = [Vulkan.VK_KHR_SWAPCHAIN_EXTENSION_NAME]
       enabledFeatures = Vulkan.VK_NULL
       queueCreateInfos :: [Vulkan.VkDeviceQueueCreateInfo]
       queueCreateInfos =
