@@ -2,7 +2,6 @@ module Graphics.Haskan.Vulkan.PipelineLayout where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
-import Data.Traversable (for)
 import Foreign.Ptr qualified
 import Graphics.Haskan.Resources (alloc, alloc_, allocaAndPeek, allocaAndPeek_, peekVkList, peekVkList_)
 import Graphics.Vulkan qualified as Vulkan

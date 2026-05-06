@@ -1,6 +1,5 @@
 packages:
   ./
-  ./3rdparty/gltf/gltf-codec/
   ./3rdparty/fir/
 
 write-ghc-environment-files: always

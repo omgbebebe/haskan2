@@ -12,36 +12,25 @@ import Control.Concurrent.STM.TChan qualified as TChan
 import Control.Concurrent.STM.TQueue (TQueue)
 import Control.Concurrent.STM.TQueue qualified as TQueue
 import Control.Concurrent.STM.TVar (TVar)
-import Control.Lens ((&), (.~))
 import Control.Monad (replicateM, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Managed (MonadManaged, runManaged, using, with)
-import Data.Coerce (coerce)
+import Control.Monad.Managed (MonadManaged, runManaged, with)
 import Data.Foldable (for_)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable (..))
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
-import Debug.Trace
-import FIR
-  ( ModuleRequirements (..),
-    Struct (End, (:&)),
-    runCompilationsTH,
-  )
 import FIR qualified
 import Foreign.C qualified
 import GHC.Generics
 import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
-import Graphics.Haskan.Events qualified as Events
-import Graphics.Haskan.Face qualified as Face
-import Graphics.Haskan.Logger (logI, showT)
+import Graphics.Haskan.Logger (logI)
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
 import Graphics.Haskan.Resources (throwVkResult)
 import Graphics.Haskan.Utils.ObjLoader qualified as ObjLoader
-import Graphics.Haskan.Utils.PieLoader qualified as PieLoader
 import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
@@ -65,11 +54,9 @@ import Graphics.Haskan.Window qualified as Window
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
-import Linear (M44, V2 (..), V3 (..), V4 (..), fromQuaternion)
-import Linear.Matrix (identity, m33_to_m44, translation, (!*!))
-import Linear.Matrix qualified
+import Linear (M44, V2 (..), V3 (..))
+import Linear.Matrix (identity, transpose, (!*!))
 import Linear.Projection qualified
-import Linear.Quaternion qualified
 import SDL qualified
 import System.Clock (Clock (..), getTime, toNanoSecs)
 
@@ -103,8 +90,6 @@ data FrameTime = FrameTime
 type Position = V3 Float
 
 type Distance = Float
-
-type Orientation = (Linear.Quaternion.Quaternion Float)
 
 data WorldState cam = WorldState
   { activeCamera :: TVar cam
@@ -233,7 +218,7 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
       pure (True, True)
 
   frameEndTime <- liftIO $ toNanoSecs <$> getTime Monotonic
-  if (needRestart)
+  if needRestart
     then liftIO $ do
       logI "waiting IDLE state for device"
       Vulkan.vkDeviceWaitIdle device >>= throwVkResult
@@ -494,29 +479,14 @@ updateGameState gameState tqEvents = do
   pure ()
 
 modifiersToList :: SDL.KeyModifier -> [KeyModifier]
-modifiersToList SDL.KeyModifier {..} =
-  []
-    <> if keyModifierLeftShift
-      then [LShift]
-      else
-        []
-          <> if keyModifierRightShift
-            then [RShift]
-            else
-              []
-                <> if keyModifierLeftCtrl
-                  then [LCtrl]
-                  else
-                    []
-                      <> if keyModifierRightCtrl
-                        then [RCtrl]
-                        else
-                          []
-                            <> if keyModifierLeftAlt
-                              then [LAlt]
-                              else
-                                []
-                                  <> if keyModifierRightAlt then [RAlt] else []
+modifiersToList SDL.KeyModifier {..} = map fst . filter snd $
+  [ (LShift,   keyModifierLeftShift)
+  , (RShift,   keyModifierRightShift)
+  , (LCtrl,    keyModifierLeftCtrl)
+  , (RCtrl,    keyModifierRightCtrl)
+  , (LAlt,     keyModifierLeftAlt)
+  , (RAlt,     keyModifierRightAlt)
+  ]
 
 payloadToActionEvent :: SDL.EventPayload -> Maybe ActionEvent
 payloadToActionEvent SDL.QuitEvent = Just (Escape, True)

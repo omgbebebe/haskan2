@@ -33,7 +33,7 @@ createBuffer ::
   (Vulkan.VkBufferUsageBitmask Vulkan.FlagMask) ->
   m (Vulkan.VkBuffer, Vulkan.VkMemoryRequirements)
 createBuffer dev data' usage = do
-  let size = fromIntegral ((length data') * (Foreign.sizeOf (head data')))
+  let size = if null data' then 0 else fromIntegral ((length data') * (Foreign.sizeOf (head data')))
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
@@ -96,7 +96,7 @@ copyDataToDeviceMemory ::
   [a] ->
   m ()
 copyDataToDeviceMemory dev memory data' = liftIO $ do
-  let size = fromIntegral ((length data') * (Foreign.sizeOf (head data')))
+  let size = if null data' then 0 else fromIntegral ((length data') * (Foreign.sizeOf (head data')))
 
   memPtr <-
     allocaAndPeek (Vulkan.vkMapMemory dev memory 0 size Vulkan.VK_ZERO_FLAGS)

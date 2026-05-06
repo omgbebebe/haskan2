@@ -23,7 +23,7 @@ data Vertex = Vertex
 
 instance Storable Vertex where
   sizeOf _ = strideSize vertexFormat
-  alignment _ = 64
+  alignment _ = strideSize vertexFormat
   peek ptr =
     let vPosSz = sizeOf (undefined :: V3 Foreign.C.CFloat)
         vTexUVSz = sizeOf (undefined :: V2 Foreign.C.CFloat)

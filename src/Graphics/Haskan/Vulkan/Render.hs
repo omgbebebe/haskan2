@@ -1,8 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Vulkan.Render
-  ( RenderContext (..),
-    RenderResult (..),
+  ( RenderResult (..),
     drawFrame,
     presentFrame,
     createRenderContext,

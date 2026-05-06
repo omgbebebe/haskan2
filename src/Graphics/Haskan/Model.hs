@@ -3,8 +3,8 @@
 module Graphics.Haskan.Model where
 
 import Data.HashMap.Strict qualified as HashMap
-import Data.List (concatMap, elemIndex, mapAccumL, sort, sortBy, sortOn)
-import Data.Maybe (fromJust, fromMaybe)
+import Data.List (concatMap, mapAccumL, sort, sortBy, sortOn)
+import Data.Maybe (fromMaybe)
 import Data.Word (Word32)
 import Debug.Trace
 import Foreign.C qualified
@@ -215,34 +215,32 @@ removeDoubles =
     ([], [])
 
 normalizeMesh vertices indices =
-  let stride (a : b : c : xs) = ((a, b, c) : stride xs)
-      stride [] = []
-      stride _ = fail "index list must contain triplets"
+  let minIdx [x, y, z] | x <= y && x <= z = 0
+                       | y <= x && y <= z = 1
+                       | otherwise         = 2
+      rotate n (a, b, c) =
+        case mod n 3 of
+          0 -> (a, b, c)
+          1 -> (b, c, a)
+          _ -> (c, a, b)
+      stride' (a : b : c : xs) = (a, b, c) : stride' xs
+      stride' [] = []
       faces =
-        map
-          ( \(a, b, c) ->
-              let minIndex = fromJust (elemIndex (minimum [a, b, c]) [a, b, c])
-                  (f, s, t) = case minIndex of
-                    0 -> (a, b, c)
-                    1 -> (b, c, a)
-                    2 -> (c, a, b)
-               in (f, s, t) -- (vertices !! f, vertices !! s, vertices !! t)
-          )
-          (stride indices)
+        fmap (\(a, b, c) -> rotate (minIdx [a, b, c]) (a, b, c))
+             (stride' indices)
    in --    normals = map (\(a,b,c) -> calcNormal a b c) faces
       Face <$> faces
 
 normalizeIndices indices =
-  map
-    ( \(a, b, c) ->
-        let minIndex = fromJust (elemIndex (minimum [a, b, c]) [a, b, c])
-            (f, s, t) = case minIndex of
-              0 -> (a, b, c)
-              1 -> (b, c, a)
-              2 -> (c, a, b)
-         in (f, s, t) -- (vertices !! f, vertices !! s, vertices !! t)
-    )
-    indices
+  let minIdx [x, y, z] | x <= y && x <= z = 0
+                       | y <= x && y <= z = 1
+                       | otherwise         = 2
+      rotate n (a, b, c) =
+        case mod n 3 of
+          0 -> (a, b, c)
+          1 -> (b, c, a)
+          _ -> (c, a, b)
+   in fmap (\(a, b, c) -> rotate (minIdx [a, b, c]) (a, b, c)) indices
 
 rotateFace n (a, b, c) =
   case n of
@@ -266,11 +264,8 @@ normalizePair (a, b) =
     EQ -> (a, rotateFace 1 b)
     _ -> (a, b)
 
-normPass faces = scanl (\b a -> if (compareFst3 a b) == EQ then rotateFace 1 a else a) (head faces) (tail faces)
+normPass faces = case faces of
+  [] -> []
+  x : xs -> scanl (\b a -> if compareFst3 a b == EQ then rotateFace 1 a else a) x xs
 
-isNormalized faces = all id $ isNormalized' faces
-
-isNormalized' :: [(Int, Int, Int)] -> [Bool]
-isNormalized' (a : b : rest) = (EQ /= (compareFst3 a b)) : isNormalized' (b : rest)
-isNormalized' (a : []) = []
-isNormalized' [] = []
+isNormalized faces = all (EQ /=) $ zipWith compareFst3 faces (tail faces)

@@ -133,7 +133,7 @@ managedDepthView ::
   m Vulkan.VkImageView
 managedDepthView dev img depthFormat =
   alloc
-    "ImageView"
+    "DepthImageView"
     (createDepthView dev img depthFormat)
     (\ptr -> Vulkan.vkDestroyImageView dev ptr Vulkan.vkNullPtr)
 
