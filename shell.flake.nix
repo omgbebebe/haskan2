@@ -1,12 +1,9 @@
-{ pkgs, compiler ? "ghc98" }:
+{ pkgs, compiler ? "ghc9141" }:
 
 with pkgs;
 
 let
-  ghc = haskell.packages.${compiler}.ghcWithPackages (ps: with ps; [
-    cabal-install
-    haskell-language-server
-  ]);
+  ghc = haskell.compiler.${compiler};
 
   nativeLibs = [
     SDL2
@@ -15,11 +12,17 @@ let
     vulkan-tools
     vulkan-tools-lunarg
     shaderc
+    zlib
   ];
 in
 mkShell {
   name = "haskan-dev";
-  buildInputs = [ pkg-config ghc ] ++ nativeLibs;
+  buildInputs = [
+    ghc
+    cabal-install
+    haskell-language-server
+    pkg-config
+  ] ++ nativeLibs;
   shellHook = ''
     export LD_LIBRARY_PATH="${lib.makeLibraryPath nativeLibs}:$LD_LIBRARY_PATH"
     echo "Haskan dev shell — GHC $(ghc --numeric-version)"

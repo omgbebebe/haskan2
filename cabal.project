@@ -4,3 +4,11 @@ packages:
   ./3rdparty/fir/
 
 write-ghc-environment-files: always
+
+allow-newer:
+  boring:base
+  , constraints-extras:base
+  , *:base
+  , *:template-haskell
+  , *:containers
+  , *:ghc-bignum
