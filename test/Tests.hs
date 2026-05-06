@@ -15,7 +15,7 @@ main = do
 
   putStrLn "All stub tests passed"  
 
-assertEq :: (Eq a) => String -> a -> a -> IO ()
+assertEq :: (Eq a, Show a) => String -> a -> a -> IO ()
 assertEq label x y 
   | x == y    = return ()
   | otherwise = putStr $ "FAIL: " ++ label
