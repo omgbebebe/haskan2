@@ -23,65 +23,65 @@ extra-source-files: CHANGELOG.md
 
 library
     exposed-modules:  Graphics.Haskan
-                      Graphics.Haskan.Logger
-                      Graphics.Haskan.Camera
-                      Graphics.Haskan.Events
-                      Graphics.Haskan.Engine
-                      Graphics.Haskan.Resources
-                      Graphics.Haskan.Vertex
-                      Graphics.Haskan.Window
-                      Graphics.Haskan.Mesh
-                      Graphics.Haskan.Face
-                      Graphics.Haskan.Model
-                      Graphics.Haskan.Utils.ObjLoader
-                      Graphics.Haskan.Utils.PieLoader
-                      Graphics.Haskan.Vulkan.Buffer
-                      Graphics.Haskan.Vulkan.CommandBuffer
-                      Graphics.Haskan.Vulkan.CommandPool
-                      Graphics.Haskan.Vulkan.DescriptorSet
-                      Graphics.Haskan.Vulkan.DescriptorSetLayout
-                      Graphics.Haskan.Vulkan.DescriptorPool
-                      Graphics.Haskan.Vulkan.Device
-                      Graphics.Haskan.Vulkan.Fence
-                      Graphics.Haskan.Vulkan.Framebuffer
-                      Graphics.Haskan.Vulkan.GraphicsPipeline
-                      Graphics.Haskan.Vulkan.ImageView
-                      Graphics.Haskan.Vulkan.Instance
-                      Graphics.Haskan.Vulkan.Memory
-                      Graphics.Haskan.Vulkan.PipelineLayout
-                      Graphics.Haskan.Vulkan.PhysicalDevice
-                      Graphics.Haskan.Vulkan.RenderPass
-                      Graphics.Haskan.Vulkan.Render
-                      Graphics.Haskan.Vulkan.ShaderModule
-                      Graphics.Haskan.Vulkan.Shaders.Texture
-                      Graphics.Haskan.Vulkan.Semaphore
-                      Graphics.Haskan.Vulkan.Swapchain
-                      Graphics.Haskan.Vulkan.Texture
-                      Graphics.Haskan.Vulkan.Types
-                      Graphics.Haskan.Vulkan.VertexFormat
+                       Graphics.Haskan.Logger
+                       Graphics.Haskan.Camera
+                       Graphics.Haskan.Events
+                       Graphics.Haskan.Engine
+                       Graphics.Haskan.Resources
+                       Graphics.Haskan.Vertex
+                       Graphics.Haskan.Window
+                       Graphics.Haskan.Mesh
+                       Graphics.Haskan.Face
+                       Graphics.Haskan.Model
+                       Graphics.Haskan.Utils.ObjLoader
+                       Graphics.Haskan.Utils.PieLoader
+                       Graphics.Haskan.Vulkan.Buffer
+                       Graphics.Haskan.Vulkan.CommandBuffer
+                       Graphics.Haskan.Vulkan.CommandPool
+                       Graphics.Haskan.Vulkan.DescriptorSet
+                       Graphics.Haskan.Vulkan.DescriptorSetLayout
+                       Graphics.Haskan.Vulkan.DescriptorPool
+                       Graphics.Haskan.Vulkan.Device
+                       Graphics.Haskan.Vulkan.Fence
+                       Graphics.Haskan.Vulkan.Framebuffer
+                       Graphics.Haskan.Vulkan.GraphicsPipeline
+                       Graphics.Haskan.Vulkan.ImageView
+                       Graphics.Haskan.Vulkan.Instance
+                       Graphics.Haskan.Vulkan.Memory
+                       Graphics.Haskan.Vulkan.PipelineLayout
+                       Graphics.Haskan.Vulkan.PhysicalDevice
+                       Graphics.Haskan.Vulkan.RenderPass
+                       Graphics.Haskan.Vulkan.Render
+                       Graphics.Haskan.Vulkan.ShaderModule
+                       Graphics.Haskan.Vulkan.Shaders.Texture
+                       Graphics.Haskan.Vulkan.Semaphore
+                       Graphics.Haskan.Vulkan.Swapchain
+                       Graphics.Haskan.Vulkan.Texture
+                       Graphics.Haskan.Vulkan.Types
+                       Graphics.Haskan.Vulkan.VertexFormat
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:    base >=4.17 && <4.24
-                    , bytestring
-                    , clock
-                    , stm
-                    , text
-                    , fast-logger
-                   , vulkan-api
-                     , managed
-                    , sdl2
-                    , lens
-                    , linear
-                    , JuicyPixels
-                    , unordered-containers
-                    , vector
-                    -- for vulkan
-                    , contravariant
-                    , fir
-                    , megaparsec
-                    , scientific
-                    , hashable
+                     , bytestring >=0.11 && <0.13
+                     , clock >=0.7 && <0.9
+                     , stm >=2.5 && <2.6
+                     , text >=2.0 && <2.2
+                     , fast-logger >=3.0 && <3.4
+                     , vulkan-api >=1.4.0 && <1.4.1
+                     , managed >=1.0 && <1.1
+                     , sdl2 >=2.5 && <2.6
+                     , lens >=5.0 && <5.5
+                     , linear >=1.23 && <1.24
+                     , JuicyPixels >=3.3 && <3.4
+                     , unordered-containers >=0.2 && <0.3
+                     , vector >=0.13 && <0.14
+                      -- for vulkan
+                     , contravariant >=1.5 && <1.6
+                     , fir
+                     , megaparsec >=9.5 && <9.8
+                     , scientific >=0.3 && <0.4
+                     , hashable >=1.3 && <1.7
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
@@ -100,7 +100,7 @@ executable haskan2
     -- other-modules:
 
     -- LANGUAGE extensions used by modules in this package.
-   -- other-extensions:
+    -- other-extensions:
     build-depends:    base >=4.17 && <4.24
                      , haskan2
     hs-source-dirs:   app
@@ -113,7 +113,7 @@ test-suite haskan2-test
     main-is:            Tests.hs
     hs-source-dirs:     test
     build-depends:      base >=4.17 && <4.24
-                      , haskan2
-                      , tasty
-                      , tasty-hunit
+                     , haskan2
+                     , tasty
+                     , tasty-hunit
     default-language:  GHC2021
