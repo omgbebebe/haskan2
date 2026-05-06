@@ -6,7 +6,6 @@ import Data.HashMap.Strict qualified as HashMap
 import Data.List (concatMap, elemIndex, mapAccumL, sort, sortBy, sortOn)
 import Data.Maybe (fromJust, fromMaybe)
 import Data.Word (Word32)
-import Debug.Pretty.Simple
 import Debug.Trace
 import Foreign.C qualified
 import Graphics.Haskan.Face (Face (..), QuadFace (..))
@@ -126,7 +125,7 @@ fromPie PieLevel {..} = do
                in Vertex
                     { vPos = V3 (realToFrac x) (realToFrac y) (realToFrac z),
                       vTexUV = V2 0.0 0.0,
-                      vNorm = pTrace (show i <> " => " <> show norm) norm,
+                      vNorm = trace (show i <> " => " <> show norm) norm,
                       vCol = V4 155 155 0 255
                     }
           )

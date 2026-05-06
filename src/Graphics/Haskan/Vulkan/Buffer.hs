@@ -13,7 +13,6 @@ import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
-import Text.Pretty.Simple
 
 managedBuffer ::
   (MonadManaged m, Storable a) =>
@@ -46,9 +45,7 @@ createBuffer dev data' usage = do
               &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
           )
   buffer <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateBuffer dev ciPtr Vulkan.vkNullPtr))
-  pPrint buffer
   memoryRequirements <- allocaAndPeek_ (Vulkan.vkGetBufferMemoryRequirements dev buffer)
-  pPrint memoryRequirements
 
   pure (buffer, memoryRequirements)
 

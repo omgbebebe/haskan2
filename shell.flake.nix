@@ -1,19 +1,38 @@
-{ pkgs , compiler ? "ghc94" }:
+{ pkgs, compiler ? "ghc98" }:
+
 with pkgs;
+
 let
-  inherit (pkgs);
-  myghc = haskell.packages.${compiler}.ghcWithPackages (ps: with ps; [
-          cabal-install
-        ]);
-  libs = [ SDL2 glfw3 glm zlib pcre vulkan-loader vulkan-validation-layers vulkan-tools vulkan-tools-lunarg shaderc ];
-  hls = haskell-language-server.override { supportedGhcVersions = [ "924" "942" ]; };
+  ghc = haskell.packages.${compiler}.ghcWithPackages (ps: with ps; [
+    cabal-install
+    haskell-language-server
+    vector-sized
+    text-short
+    typelits-witnesses
+    finite-typelits
+    generic-monoid
+    ghc-typelits-knownnat
+    ghc-typelits-natnormalise
+    half
+    tree-view
+    variant
+    atomic-file-ops
+  ]);
+
+  nativeLibs = [
+    SDL2
+    vulkan-loader
+    vulkan-validation-layers
+    vulkan-tools
+    vulkan-tools-lunarg
+    shaderc
+  ];
 in
-pkgs.stdenv.mkDerivation {
-  name = "Haskan";
-  buildInputs = [ pkg-config myghc ] ++ libs;
+mkShell {
+  name = "haskan-dev";
+  buildInputs = [ pkg-config ghc ] ++ nativeLibs;
   shellHook = ''
-    eval $(egrep ^export ${ghc}/bin/ghc)
-    LD_LIBRARY_PATH="$LD_LIBRARY_PATH:${lib.makeLibraryPath libs}"
-    echo "Haskan nix dev environment"
+    export LD_LIBRARY_PATH="${lib.makeLibraryPath nativeLibs}:$LD_LIBRARY_PATH"
+    echo "Haskan dev shell — GHC $(ghc --numeric-version)"
   '';
 }

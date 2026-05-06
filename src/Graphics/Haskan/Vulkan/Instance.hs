@@ -8,6 +8,7 @@ import Data.Foldable (for_)
 import Data.List (partition)
 import Data.Text (Text)
 import Data.Text qualified as T
+import Data.Text.IO qualified as T
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, peekVkList)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -15,7 +16,7 @@ import Graphics.Vulkan.Ext qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setStrListRef, setVkRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
-import Say
+import System.IO (stderr)
 
 managedInstance :: MonadManaged m => [ByteString] -> m (Vulkan.VkInstance, [String])
 managedInstance extraExtensions =
@@ -33,10 +34,10 @@ createInstance extraExtensions = do
             tShow = T.pack . show
         for_
           optMissing
-          (\n -> sayErr ("Missing optional " <> type' <> ": " <> tShow n))
+          (\n -> liftIO $ T.hPutStrLn stderr ("Missing optional " <> type' <> ": " <> tShow n))
         for_
           reqMissing
-          (\n -> sayErr ("Missing required " <> type' <> ": " <> tShow n))
+          (\n -> liftIO $ T.hPutStrLn stderr ("Missing required " <> type' <> ": " <> tShow n))
         pure (reqHave <> optHave)
 
   availableExtensions <-

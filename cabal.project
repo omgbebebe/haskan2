@@ -1,38 +1,6 @@
-packages: ./
-          ./3rdparty/gltf/gltf-codec/
-          ./3rdparty/fir/
+packages:
+  ./
+  ./3rdparty/gltf/gltf-codec/
+  ./3rdparty/fir/
 
 write-ghc-environment-files: always
-
-allow-newer:
-    constraints-extras:base
-  , constraints-extras:template-haskell
-  , dependent-sum:some
-  , generic-monoid:base
-  , typelits-witnesses:base
-
-constraints:
-  dependent-sum >= 0.7.1.0
-
------------------------------
--- GHC 9.4 support patches --
------------------------------
-
-source-repository-package
-  type: git
-  location: https://github.com/clash-lang/ghc-typelits-natnormalise
-  tag: e0af5b3c69a7d8e1dd402eb727631801e7d9be3d
-
-source-repository-package
-  type: git
-  location: https://github.com/clash-lang/ghc-typelits-knownnat
-  tag: 1bc4ee33e005e96d1f7785c715588a289707cd48
-
------------------------------
--- GHC 9.2 support patches --
------------------------------
-
-source-repository-package
-  type: git
-  location: https://github.com/sheaf/typelits-witnesses
-  tag: 5db7b553a3bf2c5bb98da0abf3ab37115c078df9

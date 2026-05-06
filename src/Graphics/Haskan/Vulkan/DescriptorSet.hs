@@ -12,7 +12,6 @@ import Graphics.Vulkan.Ext.VK_KHR_surface qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setListRef, setStrListRef, setVkRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
-import Text.Pretty.Simple
 
 allocateDescriptorSet ::
   MonadIO m =>

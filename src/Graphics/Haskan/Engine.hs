@@ -4,7 +4,6 @@
 module Graphics.Haskan.Engine where
 
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.Async qualified as Async
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar)
 import Control.Concurrent.STM (STM)
 import Control.Concurrent.STM qualified as STM
@@ -183,8 +182,7 @@ mainLoop meshName EngineConfig {..} = do
   logI "sending Terminate message"
   liftIO $ STM.atomically $ TChan.writeTChan controlChannel Terminate
   logI "waiting for other threads finished"
-  liftIO $ Async.forConcurrently_ [renderLoopFinished, stateUpdateLoopFinished] $ \sem -> do
-    takeMVar sem
+  liftIO $ mapM_ takeMVar [renderLoopFinished, stateUpdateLoopFinished]
 
   logI "destroying SDL window"
   SDL.destroyWindow window
