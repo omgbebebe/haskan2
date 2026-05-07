@@ -38,6 +38,9 @@ import Graphics.Haskan.Logger (logDebug, logInfo, showT, LogCategory(..))
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
+import Graphics.Haskan.Render.Graph qualified as Graph
+import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), RenderPassNode (..))
+import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
 import Graphics.Haskan.Resources (throwVkResult)
@@ -332,31 +335,62 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
                 let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIdx
                     framebuffer = rcFramebuffers !! fromIntegral imageIdx
                     descriptorSet = rcDescriptorSets !! frameIdx
-                CommandBuffer.withCommandBuffer commandBuffer $ do
-                  RenderPass.withRenderPass commandBuffer rcRenderPass framebuffer rcSurfaceExtent $ do
-                    GraphicsPipeline.cmdBindPipeline commandBuffer rcGraphicsPipeline
-                    for_ (zip [0..] drawList) $ \(entityIdx, dc) -> do
-                      let mesh = dcMesh dc
-                          vertBuf = brVkBuffer (mrVertexBuffer mesh)
-                          idxBuf = brVkBuffer (mrIndexBuffer mesh)
-                          idxCnt = mrIndexCount mesh
-                          dynamicOffset = fromIntegral (entityIdx * entityUniformSize)
-                      Foreign.Marshal.Array.withArray [descriptorSet] $ \dsPtr ->
-                        Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
-                          DescriptorSet.cmdBindDescriptorSets
-                            commandBuffer
-                            Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                            rcPipelineLayout
-                            0
-                            1
-                            dsPtr
-                            1
-                            dynOffsetPtr
-                      Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-                        Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
-                          Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
-                      Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
-                      CommandBuffer.cmdDraw commandBuffer idxCnt
+                    passCtx = PassContext
+                      { pcCommandBuffer = commandBuffer
+                      , pcPipeline = rcGraphicsPipeline
+                      , pcPipelineLayout = rcPipelineLayout
+                      , pcDescriptorSet = descriptorSet
+                      , pcFramebuffer = framebuffer
+                      , pcRenderPass = rcRenderPass
+                      , pcExtent = rcSurfaceExtent
+                      }
+                -- Build forward render graph for this frame
+                let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
+                      buildForwardGraph ForwardPassData
+                        { fpdPassName = "forward"
+                        , fpdExtent = rcSurfaceExtent
+                        , fpdRenderPass = rcRenderPass
+                        , fpdFramebuffer = framebuffer
+                        , fpdPipeline = rcGraphicsPipeline
+                        , fpdPipelineLayout = rcPipelineLayout
+                        , fpdDescriptorSet = descriptorSet
+                        , fpdDrawList = drawList
+                        , fpdRecordFunc = \ctx -> do
+                            CommandBuffer.withCommandBuffer commandBuffer $ do
+                              RenderPass.withRenderPass commandBuffer rcRenderPass framebuffer rcSurfaceExtent $ do
+                                GraphicsPipeline.cmdBindPipeline commandBuffer rcGraphicsPipeline
+                                for_ (zip [0..] drawList) $ \(entityIdx, dc) -> do
+                                  let mesh = dcMesh dc
+                                      vertBuf = brVkBuffer (mrVertexBuffer mesh)
+                                      idxBuf = brVkBuffer (mrIndexBuffer mesh)
+                                      idxCnt = mrIndexCount mesh
+                                      dynamicOffset = fromIntegral (entityIdx * entityUniformSize)
+                                  Foreign.Marshal.Array.withArray [descriptorSet] $ \dsPtr ->
+                                    Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
+                                      DescriptorSet.cmdBindDescriptorSets
+                                        commandBuffer
+                                        Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+                                        rcPipelineLayout
+                                        0
+                                        1
+                                        dsPtr
+                                        1
+                                        dynOffsetPtr
+                                  Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
+                                    Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
+                                      Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
+                                  Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+                                  CommandBuffer.cmdDraw commandBuffer idxCnt
+                        }
+                -- Compile and execute graph
+                case Graph.compileGraph graphRes graphPasses of
+                  Left err -> logInfo LogRender $ "graph compilation failed: " <> Text.pack (show err)
+                  Right compiled -> do
+                    let passes = Graph.cgPasses compiled
+                    for_ passes $ \cp -> do
+                      let pass = Graph.cpPass cp
+                          recordFn = unPassRecordFunc (rpRecord pass)
+                      recordFn passCtx
 
           res <- liftIO $ drawFrame ctx imageAvailableSemaphore frameNumber recordAction
           case res of
