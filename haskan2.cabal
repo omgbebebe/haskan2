@@ -25,6 +25,7 @@ library
     exposed-modules:  Graphics.Haskan
                        Graphics.Haskan.Logger
                        Graphics.Haskan.Camera
+                       Graphics.Haskan.Debug.Server
                        Graphics.Haskan.Events
                        Graphics.Haskan.Engine
                        Graphics.Haskan.Input
@@ -63,13 +64,16 @@ library
                        Graphics.Haskan.Vulkan.VertexFormat
                        Graphics.Haskan.Debug.FrameInspector
                        Graphics.Haskan.Debug.Interface
-                       Graphics.Haskan.Debug.Server
+                       Graphics.Haskan.Scene.ECS
+                       Graphics.Haskan.Scene.Transform
+                       Graphics.Haskan.Render.RenderSystem
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:    base >=4.17 && <4.24
                      , bytestring >=0.11 && <0.13
-                     , clock >=0.7 && <0.9
+                      , clock >=0.7 && <0.9
+                      , containers >=0.6 && <0.8
                      , stm >=2.5 && <2.6
                      , text >=2.0 && <2.2
                      , fast-logger >=3.0 && <3.4

@@ -49,9 +49,6 @@ createRenderContext ::
   Vulkan.VkQueue ->
   [Vulkan.VkFence] ->
   [Vulkan.VkSemaphore] ->
-  [Vulkan.VkBuffer] ->
-  [Vulkan.VkBuffer] ->
-  Int ->
   m RenderContext
 createRenderContext
   pdev
@@ -65,10 +62,7 @@ createRenderContext
   graphicsQueueHandler
   presentQueueHandler
   renderFinishedFences
-  renderFinishedSemaphores
-  vertexBuffers
-  indexBuffers
-  indexCount = do
+  renderFinishedSemaphores = do
     let -- depthFormat = Vulkan.VK_FORMAT_D32_SFLOAT
         depthFormat = Vulkan.VK_FORMAT_D16_UNORM
         format = Vulkan.getField @"format" Swapchain.surfaceFormat
@@ -97,49 +91,33 @@ createRenderContext
 
     graphicsCommandBuffers <- for framebuffers (\_ -> CommandBuffer.createCommandBuffer device graphicsCommandPool)
 
-    for_
-      (zip3 framebuffers graphicsCommandBuffers descriptorSets)
-      ( \(fb, cb, ds) ->
-          CommandBuffer.withCommandBuffer
-            cb
-            ( RenderPass.withRenderPass cb renderPass fb surfaceExtent $ do
-                GraphicsPipeline.cmdBindPipeline cb graphicsPipeline
-                liftIO $ Foreign.Marshal.Array.withArray [ds] $ \dsPtr ->
-                  DescriptorSet.cmdBindDescriptorSets
-                    cb
-                    Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                    pipelineLayout
-                    0
-                    1
-                    dsPtr
-                    0
-                    Vulkan.vkNullPtr
+    pure
+      RenderContext
+        { device = device,
+          swapchain = swapchain,
+          graphicsCommandBuffers = graphicsCommandBuffers,
+          graphicsQueueHandler = graphicsQueueHandler,
+          presentQueueHandler = presentQueueHandler,
+          renderFinishedFences = renderFinishedFences,
+          renderFinishedSemaphores = renderFinishedSemaphores,
+          rcPipelineLayout = pipelineLayout,
+          rcGraphicsPipeline = graphicsPipeline,
+          rcRenderPass = renderPass,
+          rcFramebuffers = framebuffers,
+          rcDescriptorSets = descriptorSets,
+          rcSurfaceExtent = surfaceExtent,
+          rcGraphicsCommandPool = graphicsCommandPool
+        }
 
-                liftIO $ Foreign.Marshal.Array.withArray vertexBuffers $ \bufferPtr ->
-                  Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
-                    Vulkan.vkCmdBindVertexBuffers cb 0 1 bufferPtr offsetPtr
-
-                for_ indexBuffers $ \indexBuffer ->
-                  liftIO $
-                    Vulkan.vkCmdBindIndexBuffer cb indexBuffer 0 Vulkan.VK_INDEX_TYPE_UINT32
-
-                CommandBuffer.cmdDraw cb indexCount
-            )
-      )
-
-    pure RenderContext {..}
-
-drawFrame :: (MonadFail m, MonadIO m) => RenderContext -> Vulkan.VkSemaphore -> Int -> m RenderResult
-drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex = do
-  let
-
+drawFrame :: (MonadFail m, MonadIO m) => RenderContext -> Vulkan.VkSemaphore -> Int -> (Vulkan.Word32 -> Int -> IO ()) -> m RenderResult
+drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex recordAction = do
   (imageIndex, vkResult) <-
     liftIO $
       allocaAndPeekVkResult $
         Vulkan.vkAcquireNextImageKHR device swapchain maxBound imageAvailableSemaphore Vulkan.VK_NULL_HANDLE
 
   case vkResult of
-    Vulkan.VK_SUCCESS -> FrameOk <$> renderImage ctx imageAvailableSemaphore fenceIndex imageIndex
+    Vulkan.VK_SUCCESS -> FrameOk <$> renderImage ctx imageAvailableSemaphore fenceIndex imageIndex recordAction
     Vulkan.VK_SUBOPTIMAL_KHR -> pure $ FrameSuboptimal imageIndex
     Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure FrameOutOfDate
     _ -> pure $ FrameFailed (show vkResult)
@@ -150,28 +128,34 @@ renderImage ::
   Vulkan.VkSemaphore ->
   Int ->
   Vulkan.Word32 ->
+  (Vulkan.Word32 -> Int -> IO ()) ->
   m Vulkan.Word32
-renderImage RenderContext {..} imageAvailableSemaphore fenceIndex imageIndex = do
+renderImage RenderContext {..} imageAvailableSemaphore fenceIndex imageIndex recordAction = do
   let commandBuffer = graphicsCommandBuffers !! (fromIntegral imageIndex)
       renderFinishedSemaphore = renderFinishedSemaphores !! (fromIntegral imageIndex)
       renderFinishedFence = renderFinishedFences !! fenceIndex
-      submitInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SUBMIT_INFO
-              &* set @"pNext" Vulkan.vkNullPtr
-              &* set @"waitSemaphoreCount" 1
-              &* setListRef @"pWaitSemaphores" [imageAvailableSemaphore]
-              &* setListRef @"pWaitDstStageMask" [Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT]
-              &* set @"commandBufferCount" 1
-              &* setListRef @"pCommandBuffers" [commandBuffer]
-              &* set @"signalSemaphoreCount" 1
-              &* setListRef @"pSignalSemaphores" [renderFinishedSemaphore]
-          )
-  liftIO $ withPtr submitInfo $ \siPtr -> do
+
+  liftIO $ do
+    -- Record command buffer for this frame
+    recordAction imageIndex fenceIndex
+
+    let submitInfo =
+          Vulkan.createVk
+            ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SUBMIT_INFO
+                &* set @"pNext" Vulkan.vkNullPtr
+                &* set @"waitSemaphoreCount" 1
+                &* setListRef @"pWaitSemaphores" [imageAvailableSemaphore]
+                &* setListRef @"pWaitDstStageMask" [Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT]
+                &* set @"commandBufferCount" 1
+                &* setListRef @"pCommandBuffers" [commandBuffer]
+                &* set @"signalSemaphoreCount" 1
+                &* setListRef @"pSignalSemaphores" [renderFinishedSemaphore]
+            )
     Foreign.Marshal.Array.withArray [renderFinishedFence] $ \ptr -> do
       Vulkan.vkWaitForFences device 1 ptr Vulkan.VK_TRUE maxBound >>= throwVkResult
       Vulkan.vkResetFences device 1 ptr >>= throwVkResult
-    Vulkan.vkQueueSubmit graphicsQueueHandler 1 siPtr renderFinishedFence >>= throwVkResult
+    withPtr submitInfo $ \siPtr ->
+      Vulkan.vkQueueSubmit graphicsQueueHandler 1 siPtr renderFinishedFence >>= throwVkResult
   pure (imageIndex)
 
 presentFrame :: MonadIO m => RenderContext -> Vulkan.Word32 -> Vulkan.VkSemaphore -> m Vulkan.VkResult

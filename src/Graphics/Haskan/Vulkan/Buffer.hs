@@ -141,6 +141,15 @@ updateUniformBuffer dev memory uniformData = do
     Foreign.pokeArray (Foreign.castPtr memPtr) uniformData
     Vulkan.vkUnmapMemory dev memory
 
+updateUniformBufferRegion :: (MonadIO m, Storable a) => Vulkan.VkDevice -> Vulkan.VkDeviceMemory -> Int -> [a] -> m ()
+updateUniformBufferRegion dev memory offset uniformData = do
+  let size = fromIntegral (sum (map Foreign.sizeOf uniformData))
+  memPtr <-
+    allocaAndPeek (Vulkan.vkMapMemory dev memory (fromIntegral offset) size Vulkan.VK_ZERO_FLAGS)
+  liftIO $ do
+    Foreign.pokeArray (Foreign.castPtr memPtr) uniformData
+    Vulkan.vkUnmapMemory dev memory
+
 -- | Create a buffer resource with embedded cleanup (not registered in any manager).
 makeBufferResource ::
   (MonadFail m, MonadIO m, Storable a) =>

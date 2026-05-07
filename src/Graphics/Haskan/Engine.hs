@@ -24,6 +24,8 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import FIR qualified
 import Foreign.C qualified
+import Foreign.Marshal.Array qualified
+import Foreign.Storable (sizeOf)
 import GHC.Generics
 import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
@@ -34,6 +36,9 @@ import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (logI)
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
+import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
+import Graphics.Haskan.Scene.ECS qualified as ECS
+import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform)
 import Graphics.Haskan.Resources (throwVkResult)
 import Graphics.Haskan.Utils.ObjLoader qualified as ObjLoader
 import Graphics.Haskan.Vertex (Vertex (..))
@@ -50,6 +55,8 @@ import Graphics.Haskan.Vulkan.PhysicalDevice qualified as PhysicalDevice
 import Graphics.Haskan.Vulkan.PipelineLayout qualified as PipelineLayout
 import Graphics.Haskan.Vulkan.Render (drawFrame, presentFrame)
 import Graphics.Haskan.Vulkan.Render qualified as Render
+import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
+import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
@@ -63,6 +70,7 @@ import Graphics.Vulkan.Ext qualified as Vulkan
 import Linear (M44, V2 (..), V3 (..))
 import Linear.Matrix (identity, transpose, (!*!))
 import Linear.Projection qualified
+import Linear.Quaternion (Quaternion (..))
 import SDL qualified
 import System.Clock (Clock (..), getTime, toNanoSecs)
 
@@ -199,59 +207,92 @@ renderFrameLoop ::
   Integer ->
   [Vulkan.VkSemaphore] ->
   TChan ControlMessage ->
-  Vulkan.VkDeviceMemory ->
+  [Vulkan.VkDeviceMemory] ->
   TVar cam ->
   STM.TVar Bool ->
   STM.TVar (Maybe FrameInspector) ->
+  ECS.World ->
+  ResourceManager ->
+  Int ->
   Int ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemaphores control mvpMemory tvCamera tvInspect tvInsp indexCount = do
+renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp ecsWorld rm entityUniformSize indexCount = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
     Nothing -> do
       let imageAvailableSemaphore = imageAvailableSemaphores !! (frameNumber)
+          mvpMemory = frameMvpMemories !! frameNumber
       camera <- liftIO $ STM.readTVarIO tvCamera
-      let model = modelMatrix
-          view = Camera.unViewMatrix (Camera.toMatrix camera)
-          projection = projectionMatrix
-      Buffer.updateUniformBuffer device mvpMemory [model, view, projection]
-      res <- liftIO $ drawFrame ctx imageAvailableSemaphore frameNumber
-      case res of
-        Render.FrameOk imageIndex -> do
-          presentResult <- liftIO $ presentFrame ctx imageIndex (renderFinishedSemaphores !! (fromIntegral imageIndex))
-          case presentResult of
-            Vulkan.VK_SUCCESS -> do
-              shouldInspect <- liftIO $ STM.atomically $ do
-                b <- STM.readTVar tvInspect
-                when b $ STM.writeTVar tvInspect False
-                pure b
-              when shouldInspect $ do
-                mInsp <- liftIO $ STM.readTVarIO tvInsp
-                for_ mInsp $ \insp -> do
-                  startTime <- liftIO $ getTime Monotonic
-                  snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> projectionMatrix)
-                    [ RenderableSnapshot
-                        { rsName = "mesh"
-                        , rsWorldMatrix = (realToFrac <$>) <$> modelMatrix
-                        , rsScale = V3 1 1 1
-                        , rsVisible = True
-                        , rsMaterial = "default"
-                        , rsMesh = "unit_cube"
-                        , rsIndexCount = indexCount
-                        }
-                    ]
-                  liftIO $ insp snap
-              pure (False, False)
-            Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
-            Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
-            _ -> fail "presentFrame failed"
-        Render.FrameSuboptimal _ -> do
-          fail "suboptimal"
-        Render.FrameOutOfDate -> do
-          logI "resizing swapchain"
-          pure (True, False)
-        Render.FrameFailed err -> fail err
+      drawList <- extractDrawList ecsWorld rm
+      case drawList of
+        [] -> pure (False, False)
+        _ -> do
+          let view = Camera.unViewMatrix (Camera.toMatrix camera)
+              projection = projectionMatrix
+          -- Update uniform buffer regions for each entity
+          liftIO $ for_ (zip [0..] drawList) $ \(entityIdx, dc) -> do
+            let model = (realToFrac <$>) <$> dcWorldMatrix dc
+                offset = entityIdx * entityUniformSize
+            Buffer.updateUniformBufferRegion device mvpMemory offset [model, view, projection]
+
+          let recordAction imageIdx frameIdx = do
+                let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIdx
+                    framebuffer = rcFramebuffers !! fromIntegral imageIdx
+                    descriptorSet = rcDescriptorSets !! frameIdx
+                CommandBuffer.withCommandBuffer commandBuffer $ do
+                  RenderPass.withRenderPass commandBuffer rcRenderPass framebuffer rcSurfaceExtent $ do
+                    GraphicsPipeline.cmdBindPipeline commandBuffer rcGraphicsPipeline
+                    for_ (zip [0..] drawList) $ \(entityIdx, dc) -> do
+                      let mesh = dcMesh dc
+                          vertBuf = brVkBuffer (mrVertexBuffer mesh)
+                          idxBuf = brVkBuffer (mrIndexBuffer mesh)
+                          idxCnt = mrIndexCount mesh
+                          dynamicOffset = fromIntegral (entityIdx * entityUniformSize)
+                      Foreign.Marshal.Array.withArray [descriptorSet] $ \dsPtr ->
+                        Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
+                          DescriptorSet.cmdBindDescriptorSets
+                            commandBuffer
+                            Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+                            rcPipelineLayout
+                            0
+                            1
+                            dsPtr
+                            1
+                            dynOffsetPtr
+                      Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
+                        Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
+                          Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
+                      Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+                      CommandBuffer.cmdDraw commandBuffer idxCnt
+
+          res <- liftIO $ drawFrame ctx imageAvailableSemaphore frameNumber recordAction
+          case res of
+            Render.FrameOk imageIndex -> do
+              presentResult <- liftIO $ presentFrame ctx imageIndex (renderFinishedSemaphores !! (fromIntegral imageIndex))
+              case presentResult of
+                Vulkan.VK_SUCCESS -> do
+                  shouldInspect <- liftIO $ STM.atomically $ do
+                    b <- STM.readTVar tvInspect
+                    when b $ STM.writeTVar tvInspect False
+                    pure b
+                  when shouldInspect $ do
+                    mInsp <- liftIO $ STM.readTVarIO tvInsp
+                    for_ mInsp $ \insp -> do
+                      startTime <- liftIO $ getTime Monotonic
+                      let snapshots = map drawCallToSnapshot drawList
+                      snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> projectionMatrix) snapshots
+                      liftIO $ insp snap
+                  pure (False, False)
+                Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
+                Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
+                _ -> fail "presentFrame failed"
+            Render.FrameSuboptimal _ -> do
+              fail "suboptimal"
+            Render.FrameOutOfDate -> do
+              logI "resizing swapchain"
+              pure (True, False)
+            Render.FrameFailed err -> fail err
     Just Terminate -> do
       logI "terminating render loop by signal"
       pure (True, True)
@@ -273,10 +314,13 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
         targetFPS
         imageAvailableSemaphores
         control
-        mvpMemory
+        frameMvpMemories
         tvCamera
         tvInspect
         tvInsp
+        ecsWorld
+        rm
+        entityUniformSize
         indexCount
 
 -- | Main rendering loop.
@@ -323,10 +367,26 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   renderFinishedSemaphores <- replicateM 4 (Semaphore.managedSemaphore device)
   renderFinishedFences <- replicateM Render.maxFramesInFlight (Fence.managedFence device)
 
+  -- Create ECS World and spawn 3 entities
+  ecsWorld <- ECS.createWorld
+
   (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj ("data/models/obj/" <> meshName)
 
-  -- Create mesh resource via ResourceManager
+  -- Create mesh resource via ResourceManager (shared by all entities)
   meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
+
+  -- Spawn 3 entities at different positions
+  entity1 <- ECS.spawnEntity ecsWorld
+  ECS.setTransform ecsWorld entity1 (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+  ECS.setMesh ecsWorld entity1 meshHandle
+
+  entity2 <- ECS.spawnEntity ecsWorld
+  ECS.setTransform ecsWorld entity2 (Transform (V3 2 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+  ECS.setMesh ecsWorld entity2 meshHandle
+
+  entity3 <- ECS.spawnEntity ecsWorld
+  ECS.setTransform ecsWorld entity3 (Transform (V3 (-2) 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+  ECS.setMesh ecsWorld entity3 meshHandle
 
   -- Resolve mesh handle to raw Vulkan buffers
   (vertexBuffer, indexBuffer, indexCount) <- do
@@ -335,16 +395,25 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       Just (vb, ib, count) -> pure (vb, ib, count)
       Nothing -> fail "failed to resolve mesh buffers"
 
-  (mvpBuffer, mvpMemory) <-
-    Buffer.managedUniformBuffer
-      physicalDevice
-      device
-      [modelMatrix, identity, projectionMatrix]
+  -- Create per-frame uniform buffers for multi-entity rendering
+  -- Each entity gets 256 bytes (padded from 192 bytes for 3 M44 matrices)
+  let numEntities = 3
+      entityUniformSize = 256 :: Int
+      totalUniformSize = numEntities * entityUniformSize
+      padTo256 :: [M44 Foreign.C.CFloat] -> [M44 Foreign.C.CFloat]
+      padTo256 mats = mats ++ replicate ((entityUniformSize - length mats * sizeOf (undefined :: M44 Foreign.C.CFloat)) `div` sizeOf (undefined :: M44 Foreign.C.CFloat)) identity
+      initialMvpData = concatMap (\m -> padTo256 [m, identity, projectionMatrix]) (replicate numEntities modelMatrix)
+
+  frameMvpBuffers <- replicateM Render.maxFramesInFlight $
+    Buffer.managedUniformBuffer physicalDevice device initialMvpData
 
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
 
   -- Create texture resource via ResourceManager
   textureHandle <- Texture.createTextureResource rm physicalDevice device "data/texture/page-14-droid-hubs.png" graphicsQueueHandler textureCommandBuffer
+  ECS.setMaterial ecsWorld entity1 textureHandle
+  ECS.setMaterial ecsWorld entity2 textureHandle
+  ECS.setMaterial ecsWorld entity3 textureHandle
 
   textureImageView <- do
     mView <- Texture.textureImageView rm textureHandle
@@ -354,14 +423,19 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   textureSampler <- Texture.managedSampler device
 
-  for_ descriptorSets $
-    \descriptorSet ->
-      DescriptorSet.updateDescriptorSets
-        device
-        descriptorSet
-        mvpBuffer
-        textureImageView
-        textureSampler
+  -- Allocate descriptor sets: one per frame-in-flight
+  -- (we reuse the same descriptor pool, but need enough capacity)
+  frameDescriptorSets <- replicateM Render.maxFramesInFlight $
+    DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
+
+  for_ (zip frameMvpBuffers frameDescriptorSets) $ \((buf, _), ds) ->
+    DescriptorSet.updateDescriptorSetsRange
+      device
+      ds
+      buf
+      (fromIntegral entityUniformSize)
+      textureImageView
+      textureSampler
 
   let mkRenderContext =
         Render.createRenderContext
@@ -371,27 +445,25 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           pipelineLayout
           vertShader
           fragShader
-          descriptorSets
+          frameDescriptorSets
           graphicsCommandPool
           graphicsQueueHandler
           presentQueueHandler
           renderFinishedFences
           renderFinishedSemaphores
-          [vertexBuffer]
-          [indexBuffer]
-          indexCount
 
   worldState <- liftIO $ STM.readTVarIO (world gameState)
   let tvCamera = activeCamera worldState
       tvInspect = inspectFrame gameState
       tvInsp = inspector gameState
+      frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
         if exit
           then pure ()
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-              renderFrameLoop context 0 targetFPS imageAvailableSemaphores control mvpMemory tvCamera tvInspect tvInsp indexCount
+              renderFrameLoop context 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp ecsWorld rm entityUniformSize indexCount
             outerLoop renderFrameLoopFinished
 
   logI "Starting render loop"
@@ -416,6 +488,18 @@ projectionMatrix =
       (16 / 9) -- aspect ratio
       0.1 -- near plane
       10000.0 -- far plane
+
+drawCallToSnapshot :: DrawCall -> RenderableSnapshot
+drawCallToSnapshot DrawCall {..} =
+  RenderableSnapshot
+    { rsName = "entity"
+    , rsWorldMatrix = (realToFrac <$>) <$> dcWorldMatrix
+    , rsScale = V3 1 1 1
+    , rsVisible = True
+    , rsMaterial = maybe "default" (const "textured") dcMaterial
+    , rsMesh = "mesh"
+    , rsIndexCount = mrIndexCount dcMesh
+    }
 
 -- | stateUpdateLoop is the main game loop that updates the game state 
 -- based on input events and simulation ticks. It takes the target FPS, 

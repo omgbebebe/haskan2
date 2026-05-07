@@ -21,7 +21,7 @@ createDescriptorSetLayout dev = do
   let binding =
         Vulkan.createVk
           ( set @"binding" 0
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
               &* set @"descriptorCount" 1
               &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_VERTEX_BIT
               &* set @"pImmutableSamplers" Vulkan.VK_NULL
