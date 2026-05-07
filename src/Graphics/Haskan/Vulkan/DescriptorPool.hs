@@ -43,3 +43,33 @@ createDescriptorPool dev imageViewCount = do
           ( \ciPtr ->
               allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
           )
+
+managedLightingDescriptorPool :: MonadManaged m => Vulkan.VkDevice -> Int -> Int -> m Vulkan.VkDescriptorPool
+managedLightingDescriptorPool dev numSets texturesPerSet =
+  alloc
+    "LightingDescriptorPool"
+    (createLightingDescriptorPool dev numSets texturesPerSet)
+    (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
+
+createLightingDescriptorPool :: MonadIO m => Vulkan.VkDevice -> Int -> Int -> m Vulkan.VkDescriptorPool
+createLightingDescriptorPool dev numSets texturesPerSet = do
+  let samplerPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"descriptorCount" (fromIntegral (numSets * texturesPerSet))
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"poolSizeCount" 1
+              &* setListRef @"pPoolSizes" [samplerPoolSize]
+              &* set @"maxSets" (fromIntegral numSets)
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
+          )

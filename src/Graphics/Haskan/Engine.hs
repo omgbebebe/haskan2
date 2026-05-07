@@ -40,6 +40,7 @@ import Graphics.Haskan.Model qualified as Model
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), RenderPassNode (..))
+import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
 import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
@@ -49,6 +50,7 @@ import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.CommandPool qualified as CommandPool
+import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..), createDeferredResources)
 import Graphics.Haskan.Vulkan.DescriptorPool qualified as DescriptorPool
 import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.DescriptorSetLayout qualified as DescriptorSetLayout
@@ -64,6 +66,8 @@ import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
+import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShaders
+import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
@@ -263,6 +267,7 @@ mainLoop meshName EngineConfig {..} = do
 renderFrameLoop ::
   (MonadFail m, MonadIO m, Camera cam) =>
   RenderContext ->
+  DeferredResources ->
   Int ->
   Integer ->
   [Vulkan.VkSemaphore] ->
@@ -277,7 +282,7 @@ renderFrameLoop ::
   Int ->
   Int ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize indexCount = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize indexCount = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -333,64 +338,58 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
 
           let recordAction imageIdx frameIdx = do
                 let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIdx
-                    framebuffer = rcFramebuffers !! fromIntegral imageIdx
-                    descriptorSet = rcDescriptorSets !! frameIdx
-                    passCtx = PassContext
+                    gBufferFramebuffer = drGBufferFramebuffers !! fromIntegral imageIdx
+                    lightingFramebuffer = drLightingFramebuffers !! fromIntegral imageIdx
+                    gBufferDescriptorSet = rcDescriptorSets !! frameIdx
+                    lightingDescriptorSet = drLightingDescriptorSets !! fromIntegral imageIdx
+                    gBufferImagesForFrame = drGBufferImages !! fromIntegral imageIdx
+                    gBufferPassCtx = PassContext
                       { pcCommandBuffer = commandBuffer
-                      , pcPipeline = rcGraphicsPipeline
-                      , pcPipelineLayout = rcPipelineLayout
-                      , pcDescriptorSet = descriptorSet
-                      , pcFramebuffer = framebuffer
-                      , pcRenderPass = rcRenderPass
+                      , pcPipeline = drGBufferPipeline
+                      , pcPipelineLayout = drGBufferPipelineLayout
+                      , pcDescriptorSet = gBufferDescriptorSet
+                      , pcFramebuffer = gBufferFramebuffer
+                      , pcRenderPass = drGBufferRenderPass
                       , pcExtent = rcSurfaceExtent
                       }
-                -- Build forward render graph for this frame
+                    lightingPassCtx = PassContext
+                      { pcCommandBuffer = commandBuffer
+                      , pcPipeline = drLightingPipeline
+                      , pcPipelineLayout = drLightingPipelineLayout
+                      , pcDescriptorSet = lightingDescriptorSet
+                      , pcFramebuffer = lightingFramebuffer
+                      , pcRenderPass = drLightingRenderPass
+                      , pcExtent = rcSurfaceExtent
+                      }
+                -- Build deferred render graph for this frame
                 let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
-                      buildForwardGraph ForwardPassData
-                        { fpdPassName = "forward"
-                        , fpdExtent = rcSurfaceExtent
-                        , fpdRenderPass = rcRenderPass
-                        , fpdFramebuffer = framebuffer
-                        , fpdPipeline = rcGraphicsPipeline
-                        , fpdPipelineLayout = rcPipelineLayout
-                        , fpdDescriptorSet = descriptorSet
-                        , fpdDrawList = drawList
-                        , fpdRecordFunc = \ctx -> do
-                            CommandBuffer.withCommandBuffer commandBuffer $ do
-                              RenderPass.withRenderPass commandBuffer rcRenderPass framebuffer rcSurfaceExtent $ do
-                                GraphicsPipeline.cmdBindPipeline commandBuffer rcGraphicsPipeline
-                                for_ (zip [0..] drawList) $ \(entityIdx, dc) -> do
-                                  let mesh = dcMesh dc
-                                      vertBuf = brVkBuffer (mrVertexBuffer mesh)
-                                      idxBuf = brVkBuffer (mrIndexBuffer mesh)
-                                      idxCnt = mrIndexCount mesh
-                                      dynamicOffset = fromIntegral (entityIdx * entityUniformSize)
-                                  Foreign.Marshal.Array.withArray [descriptorSet] $ \dsPtr ->
-                                    Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
-                                      DescriptorSet.cmdBindDescriptorSets
-                                        commandBuffer
-                                        Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                                        rcPipelineLayout
-                                        0
-                                        1
-                                        dsPtr
-                                        1
-                                        dynOffsetPtr
-                                  Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-                                    Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
-                                      Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
-                                  Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
-                                  CommandBuffer.cmdDraw commandBuffer idxCnt
+                      buildDeferredGraph DeferredPassData
+                        { dpdExtent = rcSurfaceExtent
+                        , dpdGBufferRenderPass = drGBufferRenderPass
+                        , dpdGBufferFramebuffer = gBufferFramebuffer
+                        , dpdGBufferPipeline = drGBufferPipeline
+                        , dpdGBufferLayout = drGBufferPipelineLayout
+                        , dpdGBufferDescriptor = gBufferDescriptorSet
+                        , dpdDrawList = drawList
+                        , dpdEntityUniformSize = entityUniformSize
+                        , dpdLightingRenderPass = drLightingRenderPass
+                        , dpdLightingFramebuffer = lightingFramebuffer
+                        , dpdLightingPipeline = drLightingPipeline
+                        , dpdLightingLayout = drLightingPipelineLayout
+                        , dpdLightingDescriptor = lightingDescriptorSet
+                        , dpdGBufferImages = gBufferImagesForFrame
                         }
                 -- Compile and execute graph
                 case Graph.compileGraph graphRes graphPasses of
                   Left err -> logInfo LogRender $ "graph compilation failed: " <> Text.pack (show err)
                   Right compiled -> do
-                    let passes = Graph.cgPasses compiled
-                    for_ passes $ \cp -> do
-                      let pass = Graph.cpPass cp
-                          recordFn = unPassRecordFunc (rpRecord pass)
-                      recordFn passCtx
+                    CommandBuffer.withCommandBuffer commandBuffer $ do
+                      let passes = Graph.cgPasses compiled
+                      for_ passes $ \cp -> do
+                        let pass = Graph.cpPass cp
+                            recordFn = unPassRecordFunc (rpRecord pass)
+                            passCtx = if rpName pass == "gbuffer" then gBufferPassCtx else lightingPassCtx
+                        recordFn passCtx
 
           res <- liftIO $ drawFrame ctx imageAvailableSemaphore frameNumber recordAction
           case res of
@@ -436,6 +435,7 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
       liftIO $ threadDelay (fromIntegral delay)
       renderFrameLoop
         ctx
+        dr
         ((frameNumber + 1) `mod` Render.maxFramesInFlight)
         targetFPS
         imageAvailableSemaphores
@@ -479,8 +479,18 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   liftIO $ FIR.compileTo "data/shaders/fir/vert.spv" [FIR.SPIRV (FIR.Version 1 0)] Shaders.vertex
   liftIO $ FIR.compileTo "data/shaders/fir/frag.spv" [FIR.SPIRV (FIR.Version 1 0)] Shaders.fragment
 
+  liftIO $ FIR.compileTo "data/shaders/fir/gbuf_vert.spv" [FIR.SPIRV (FIR.Version 1 0)] GBufferShaders.vertex
+  liftIO $ FIR.compileTo "data/shaders/fir/gbuf_frag.spv" [FIR.SPIRV (FIR.Version 1 0)] GBufferShaders.fragment
+  liftIO $ FIR.compileTo "data/shaders/fir/light_vert.spv" [FIR.SPIRV (FIR.Version 1 0)] LightingShaders.vertex
+  liftIO $ FIR.compileTo "data/shaders/fir/light_frag.spv" [FIR.SPIRV (FIR.Version 1 0)] LightingShaders.fragment
+
   vertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/vert.spv"
   fragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/frag.spv"
+
+  gbufVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_vert.spv"
+  gbufFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_frag.spv"
+  lightVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/light_vert.spv"
+  lightFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/light_frag.spv"
 
   descriptorSetLayout <- DescriptorSetLayout.managedDescriptorSetLayout device
 
@@ -492,15 +502,19 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   renderFinishedSemaphores <- replicateM 4 (Semaphore.managedSemaphore device)
   renderFinishedFences <- replicateM Render.maxFramesInFlight (Fence.managedFence device)
 
-  -- Create ECS World and spawn 3 entities
+  -- Create ECS World and spawn entities
   ecsWorld <- ECS.createWorld
 
   (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj ("data/models/obj/" <> meshName)
 
-  -- Create mesh resource via ResourceManager (shared by all entities)
+  -- Create mesh resource via ResourceManager (shared by all cube entities)
   meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
 
-  -- Spawn 3 entities at different positions
+  -- Create ground plane mesh resource (subdivided checkerboard grid)
+  let groundMesh = Mesh.groundPlaneMeshGrid 50 50.0
+  groundMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
+
+  -- Spawn 3 cube entities at different positions
   entity1 <- ECS.spawnEntity ecsWorld
   ECS.setTransform ecsWorld entity1 (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
   ECS.setMesh ecsWorld entity1 meshHandle
@@ -513,6 +527,11 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   ECS.setTransform ecsWorld entity3 (Transform (V3 (-2) 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
   ECS.setMesh ecsWorld entity3 meshHandle
 
+  -- Spawn ground plane entity
+  groundEntity <- ECS.spawnEntity ecsWorld
+  ECS.setTransform ecsWorld groundEntity (Transform (V3 0 0 (-0.5)) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+  ECS.setMesh ecsWorld groundEntity groundMeshHandle
+
   -- Resolve mesh handle to raw Vulkan buffers
   (vertexBuffer, indexBuffer, indexCount) <- do
     mBuffers <- Buffer.meshBuffers rm meshHandle
@@ -522,7 +541,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   -- Create per-frame uniform buffers for multi-entity rendering
   -- Each entity gets 256 bytes (padded from 192 bytes for 3 M44 matrices)
-  let numEntities = 3
+  let numEntities = 4  -- 3 cubes + 1 ground plane
       entityUniformSize = 256 :: Int
       totalUniformSize = numEntities * entityUniformSize
       padTo256 :: [M44 Foreign.C.CFloat] -> [M44 Foreign.C.CFloat]
@@ -599,8 +618,10 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           then pure ()
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-              renderFrameLoop context 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize indexCount
+              with (createDeferredResources physicalDevice device context descriptorSetLayout gbufVertShader gbufFragShader lightVertShader lightFragShader) $ \dr ->
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize indexCount
             outerLoop renderFrameLoopFinished
+
 
   logInfo LogGeneral "Starting render loop"
   liftIO $ outerLoop False
@@ -731,10 +752,10 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
               pure (a, b, c, d, e)
 
             let camMove = camSpeed / frameDelay
-            when (fwd) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveY (camMove)]
-            when (bwd) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveY (-camMove)]
-            when (sl) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveX camMove]
-            when (sr) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveX (-camMove)]
+            when (fwd) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveForward camMove]
+            when (bwd) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveForward (-camMove)]
+            when (sl) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight (-camMove)]
+            when (sr) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight camMove]
             threadDelay (round frameDelay)
             when isRunning $ loop (tFPS) _gameState newTime
           Just Terminate -> do

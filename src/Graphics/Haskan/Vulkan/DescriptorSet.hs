@@ -138,6 +138,71 @@ updateDescriptorSetsRange dev descriptorSet buffer range textureImageView textur
     Foreign.Marshal.Array.withArray [writeUpdate, writeUpdateTexture] $ \writeUpdatePtr ->
       Vulkan.vkUpdateDescriptorSets dev 2 writeUpdatePtr 0 Vulkan.vkNullPtr
 
+updateLightingDescriptorSets ::
+  MonadIO m =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkSampler ->
+  [Vulkan.VkImageView] ->
+  m ()
+updateLightingDescriptorSets dev descriptorSet sampler imageViews = do
+  let mkTextureInfo imageView =
+        Vulkan.createVk
+          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+              &* set @"imageView" imageView
+              &* set @"sampler" sampler
+          )
+      mkWrite bindingIdx imageView =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" bindingIdx
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* setListRef @"pImageInfo" [mkTextureInfo imageView]
+              &* set @"pBufferInfo" Vulkan.VK_NULL
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+      writes = zipWith mkWrite [0..] imageViews
+  liftIO $
+    Foreign.Marshal.Array.withArray writes $ \writeUpdatePtr ->
+      Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length writes)) writeUpdatePtr 0 Vulkan.vkNullPtr
+
+-- | Update a single combined image sampler binding in a descriptor set.
+updateTextureBinding ::
+  MonadIO m =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkSampler ->
+  Vulkan.VkImageView ->
+  Vulkan.Word32 -> -- binding index
+  m ()
+updateTextureBinding dev descriptorSet sampler imageView bindingIdx = do
+  let textureInfo =
+        Vulkan.createVk
+          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+              &* set @"imageView" imageView
+              &* set @"sampler" sampler
+          )
+      write =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" bindingIdx
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* setListRef @"pImageInfo" [textureInfo]
+              &* set @"pBufferInfo" Vulkan.VK_NULL
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+  liftIO $
+    Foreign.Marshal.Array.withArray [write] $ \writePtr ->
+      Vulkan.vkUpdateDescriptorSets dev 1 writePtr 0 Vulkan.vkNullPtr
+
 cmdBindDescriptorSets ::
   MonadIO m =>
   Vulkan.VkCommandBuffer ->

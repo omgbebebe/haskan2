@@ -4,11 +4,12 @@ module Graphics.Haskan.Camera where
 
 import Control.Lens ((&), (.~))
 import Foreign.C qualified
-import Linear (V2 (..), V3 (..), V4 (..))
+import Linear (V2 (..), V3 (..), V4 (..), _x, _y)
 import Linear.Epsilon (Epsilon)
 import Linear.Matrix (M44 (..), (!*!))
 import Linear.Matrix qualified as Matrix
 import Linear.Metric (normalize)
+import Linear ((*^), (^*))
 import Linear.Projection qualified as Projection
 import Linear.Quaternion (Quaternion (..), axisAngle, rotate)
 import Linear.Quaternion qualified as Quat
@@ -18,6 +19,8 @@ newtype ViewMatrix = ViewMatrix {unViewMatrix :: M44 Foreign.C.CFloat}
 data Modifier a
   = MoveX a
   | MoveY a
+  | MoveForward a
+  | MoveRight a
   | Rotate (V3 a)
   | Zoom a
 
@@ -122,6 +125,19 @@ orbitalModify cam@OrbitalCamera {..} mod =
   case mod of
     (MoveX n) -> cam {target = target + (V3 n 0.0 0.0)}
     (MoveY n) -> cam {target = target + (V3 0.0 0.0 n)}
+    (MoveForward n) ->
+      let fwd = orbitalCameraForward cam
+          -- Project forward to world XY plane (Z is up), keep Z unchanged
+          V3 fx fy _ = fwd
+          fwdXY = normalize (V3 fx fy 0)
+      in cam {target = target + (fwdXY ^* n)}
+    (MoveRight n) ->
+      let fwd = orbitalCameraForward cam
+          V3 fx fy _ = fwd
+          fwdXY = normalize (V3 fx fy 0)
+          -- Right vector is forward rotated -90° around Z in XY plane
+          rightXY = V3 fy (-fx) 0
+      in cam {target = target + (rightXY ^* n)}
     (Rotate (V3 yaw pitch roll)) ->
       -- Apply rotation deltas as quaternion rotations (avoids gimbal lock)
       let yawQ = axisAngle (V3 0 1 0) yaw

@@ -2,6 +2,7 @@ module Graphics.Haskan.Vulkan.Swapchain where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
+import Data.Bits ((.|.))
 import Graphics.Haskan.Logger (logDebug, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, peekVkList, throwVkResult)
 import Graphics.Haskan.Vulkan.Memory (managedMemoryFor)
@@ -96,6 +97,57 @@ managedDepthImage pdev dev extent depthFormat = do
   memory <- managedMemoryFor pdev dev memoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
   liftIO $ Vulkan.vkBindImageMemory dev image memory 0 >>= throwVkResult
   pure image
+
+managedGBufferImage ::
+  MonadManaged m =>
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Vulkan.VkExtent2D ->
+  Vulkan.VkFormat ->
+  m Vulkan.VkImage
+managedGBufferImage pdev dev extent format = do
+  image <-
+    alloc
+      "GBuffer image"
+      (createGBufferImage dev extent format)
+      (\ptr -> Vulkan.vkDestroyImage dev ptr Vulkan.vkNullPtr)
+  memoryRequirements <- getImageMemoryRequirements dev image
+  memory <- managedMemoryFor pdev dev memoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+  liftIO $ Vulkan.vkBindImageMemory dev image memory 0 >>= throwVkResult
+  pure image
+
+createGBufferImage ::
+  MonadIO m =>
+  Vulkan.VkDevice ->
+  Vulkan.VkExtent2D ->
+  Vulkan.VkFormat ->
+  m Vulkan.VkImage
+createGBufferImage dev extent format = do
+  let imageExtent =
+        Vulkan.createVk
+          ( set @"width" (Vulkan.getField @"width" extent)
+              &* set @"height" (Vulkan.getField @"height" extent)
+              &* set @"depth" 1
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
+              &* set @"queueFamilyIndexCount" 0
+              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
+              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
+              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
+              &* set @"format" format
+              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+              &* set @"arrayLayers" 1
+              &* set @"mipLevels" 1
+              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
+              &* set @"extent" imageExtent
+          )
+  liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
 
 createDepthImage ::
   MonadIO m =>

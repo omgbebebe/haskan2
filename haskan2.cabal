@@ -40,6 +40,7 @@ library
                        Graphics.Haskan.Vulkan.Buffer
                        Graphics.Haskan.Vulkan.CommandBuffer
                        Graphics.Haskan.Vulkan.CommandPool
+                       Graphics.Haskan.Vulkan.DeferredResources
                        Graphics.Haskan.Vulkan.DescriptorSet
                        Graphics.Haskan.Vulkan.DescriptorSetLayout
                        Graphics.Haskan.Vulkan.DescriptorPool
@@ -56,6 +57,8 @@ library
                        Graphics.Haskan.Vulkan.Render
                        Graphics.Haskan.Vulkan.ShaderModule
                        Graphics.Haskan.Vulkan.Shaders.Texture
+                       Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer
+                       Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting
                        Graphics.Haskan.Vulkan.Semaphore
                        Graphics.Haskan.Vulkan.Swapchain
                        Graphics.Haskan.Vulkan.Texture
@@ -68,8 +71,9 @@ library
                        Graphics.Haskan.Scene.Transform
                        Graphics.Haskan.Render.RenderSystem
                        Graphics.Haskan.Render.Graph
+                       Graphics.Haskan.Render.Deferred
                        Graphics.Haskan.Render.Forward
-
+ 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:    base >=4.17 && <4.24

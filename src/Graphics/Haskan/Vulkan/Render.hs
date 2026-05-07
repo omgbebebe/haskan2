@@ -84,6 +84,7 @@ createRenderContext
         fragShader
         surfaceExtent
         Vertex.vertexFormat
+        1
 
     depthImage <- Swapchain.managedDepthImage pdev device surfaceExtent depthFormat
     depthImageView <- Swapchain.managedDepthView device depthImage depthFormat

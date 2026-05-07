@@ -23,6 +23,7 @@ mkShell {
     haskell-language-server
     pkg-config
     socat
+    mermaid-cli
   ] ++ nativeLibs;
   shellHook = ''
     export LD_LIBRARY_PATH="${lib.makeLibraryPath nativeLibs}:$LD_LIBRARY_PATH"

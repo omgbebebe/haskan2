@@ -48,3 +48,36 @@ createDescriptorSetLayout dev = do
           ( \ciPtr ->
               allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
           )
+
+managedLightingDescriptorSetLayout :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedLightingDescriptorSetLayout dev =
+  alloc
+    "LightingDescriptorSetLayout"
+    (createLightingDescriptorSetLayout dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+
+createLightingDescriptorSetLayout :: MonadIO m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createLightingDescriptorSetLayout dev = do
+  let mkSamplerBinding bindingIdx =
+        Vulkan.createVk
+          ( set @"binding" bindingIdx
+              &* set @"descriptorCount" 1
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+          )
+      bindings = map mkSamplerBinding [0, 1, 2]
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"bindingCount" (fromIntegral (length bindings))
+              &* setListRef @"pBindings" bindings
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+          )
