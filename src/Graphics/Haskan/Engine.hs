@@ -524,5 +524,3 @@ updateCamera ::
   [Camera.Modifier Foreign.C.CFloat] ->
   STM ()
 updateCamera tv mods = STM.modifyTVar' tv (Camera.update <*> pure mods)
-
-data Event

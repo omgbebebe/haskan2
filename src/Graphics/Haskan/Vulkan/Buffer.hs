@@ -34,7 +34,9 @@ createBuffer ::
   (Vulkan.VkBufferUsageBitmask Vulkan.FlagMask) ->
   m (Vulkan.VkBuffer, Vulkan.VkMemoryRequirements)
 createBuffer dev data' usage = do
-  let size = if null data' then 0 else fromIntegral ((length data') * (Foreign.sizeOf (head data')))
+  let size = case data' of
+               [] -> 0
+               (x:_) -> fromIntegral (length data' * Foreign.sizeOf x)
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
@@ -85,10 +87,8 @@ bindBufferMemory ::
   [a] ->
   m ()
 bindBufferMemory dev buffer memory data' = liftIO $ do
-  putStrLn "bind memory"
   Vulkan.vkBindBufferMemory dev buffer memory 0 {- offset-} >>= throwVkResult
   copyDataToDeviceMemory dev memory data'
-  putStrLn "end bind memory"
 
 copyDataToDeviceMemory ::
   (MonadIO m, Storable a) =>
@@ -97,7 +97,9 @@ copyDataToDeviceMemory ::
   [a] ->
   m ()
 copyDataToDeviceMemory dev memory data' = liftIO $ do
-  let size = if null data' then 0 else fromIntegral ((length data') * (Foreign.sizeOf (head data')))
+  let size = case data' of
+               [] -> 0
+               (x:_) -> fromIntegral (length data' * Foreign.sizeOf x)
 
   memPtr <-
     allocaAndPeek (Vulkan.vkMapMemory dev memory 0 size Vulkan.VK_ZERO_FLAGS)
@@ -152,7 +154,9 @@ makeBufferResource pdev dev data' usage = do
   memory <- createBufferMemory pdev dev memoryRequirements
   liftIO $ bindBufferMemory dev buffer memory data'
 
-  let bufSize = if null data' then 0 else fromIntegral (length data' * sizeOf (head data'))
+  let bufSize = case data' of
+                  [] -> 0
+                  (x:_) -> fromIntegral (length data' * sizeOf x)
       destroy = do
         Vulkan.vkDestroyBuffer dev buffer Vulkan.vkNullPtr
         Vulkan.vkFreeMemory dev memory Vulkan.vkNullPtr

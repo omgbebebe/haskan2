@@ -38,16 +38,16 @@ createRenderDevice pdev surface layers = do
           )
           queueFamilies
 
-      queueFamilyIndices =
-        if null graphicsQueueFamilies
-          then fail "Cannot find Graphics queue family"
-          else
-            if null presentQueueFamilies
-              then fail "Cannot find queue family with Presentation support"
-              else nub $ map fst [head graphicsQueueFamilies, head presentQueueFamilies] -- TODO: more clever selection needed
+      queueFamilyIndices = case (graphicsQueueFamilies, presentQueueFamilies) of
+        ([], _) -> fail "Cannot find Graphics queue family"
+        (_, []) -> fail "Cannot find queue family with Presentation support"
+        (g:_, p:_) -> nub [fst g, fst p]
   device <- createDevice pdev queueFamilyIndices layers
-  let graphicsQueueFamilyIndex = head queueFamilyIndices
-      presentQueueFamilyIndex = if length queueFamilyIndices > 1 then queueFamilyIndices !! 1 else graphicsQueueFamilyIndex
+  let (graphicsQueueFamilyIndex, presentQueueFamilyIndex) = case queueFamilyIndices of
+        [g] -> (g, g)
+        [g, p] -> (g, p)
+        (g:p:_) -> (g, p)
+        [] -> error "unreachable: queueFamilyIndices is non-empty"
   pure (device, (graphicsQueueFamilyIndex, presentQueueFamilyIndex))
 
 createDevice :: MonadIO m => Vulkan.VkPhysicalDevice -> [Int] -> [String] -> m Vulkan.VkDevice

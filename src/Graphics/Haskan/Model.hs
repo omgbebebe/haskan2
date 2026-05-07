@@ -6,7 +6,6 @@ import Data.HashMap.Strict qualified as HashMap
 import Data.List (concatMap, mapAccumL, sort, sortBy, sortOn)
 import Data.Maybe (fromMaybe)
 import Data.Word (Word32)
-import Debug.Trace
 import Foreign.C qualified
 import Graphics.Haskan.Face (Face (..), QuadFace (..))
 import Graphics.Haskan.Mesh (Mesh (..))
@@ -121,13 +120,13 @@ fromPie PieLevel {..} = do
       verts =
         map
           ( \(i, (V3 x y z)) ->
-              let norm = fromMaybe (V3 0.0 0.0 0.0) (lookup i firstNormals)
-               in Vertex
-                    { vPos = V3 (realToFrac x) (realToFrac y) (realToFrac z),
-                      vTexUV = V2 0.0 0.0,
-                      vNorm = trace (show i <> " => " <> show norm) norm,
-                      vCol = V4 155 155 0 255
-                    }
+               let norm = fromMaybe (V3 0.0 0.0 0.0) (lookup i firstNormals)
+                in Vertex
+                     { vPos = V3 (realToFrac x) (realToFrac y) (realToFrac z),
+                       vTexUV = V2 0.0 0.0,
+                       vNorm = norm,
+                       vCol = V4 155 155 0 255
+                     }
           )
           (zip [0 ..] vertices)
   Mesh verts indices
