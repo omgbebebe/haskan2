@@ -41,6 +41,9 @@ data DeferredPassData = DeferredPassData
   , dpdLightingDescriptor  :: !Vulkan.VkDescriptorSet
     -- G-buffer images for barrier
   , dpdGBufferImages      :: ![Vulkan.VkImage]
+    -- Wireframe overlay
+  , dpdWireframePipeline  :: !Vulkan.VkPipeline
+  , dpdWireframeLayout    :: !Vulkan.VkPipelineLayout
   }
 
 buildDeferredGraph :: DeferredPassData -> RenderGraphBuilder ()
@@ -53,6 +56,7 @@ buildDeferredGraph DeferredPassData {..} = do
     , rpRecord  = PassRecordFunc $ \ctx -> do
         let commandBuffer = pcCommandBuffer ctx
         RenderPass.withGBufferRenderPass commandBuffer dpdGBufferRenderPass dpdGBufferFramebuffer dpdExtent $ do
+          -- Solid geometry pass
           GraphicsPipeline.cmdBindPipeline commandBuffer dpdGBufferPipeline
           for_ (zip [0..] dpdDrawList) $ \(entityIdx, dc) -> do
             let mesh = dcMesh dc
@@ -67,6 +71,31 @@ buildDeferredGraph DeferredPassData {..} = do
                   commandBuffer
                   Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
                   dpdGBufferLayout
+                  0
+                  1
+                  dsPtr
+                  1
+                  dynOffsetPtr
+            Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
+              Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
+                Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
+            Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+            CommandBuffer.cmdDraw commandBuffer idxCnt
+          -- Wireframe overlay pass (same geometry, wireframe pipeline)
+          GraphicsPipeline.cmdBindPipeline commandBuffer dpdWireframePipeline
+          for_ (zip [0..] dpdDrawList) $ \(entityIdx, dc) -> do
+            let mesh = dcMesh dc
+                vertBuf = brVkBuffer (mrVertexBuffer mesh)
+                idxBuf  = brVkBuffer (mrIndexBuffer mesh)
+                idxCnt  = mrIndexCount mesh
+                dynamicOffset = fromIntegral (entityIdx * dpdEntityUniformSize)
+                entityDescriptorSet = dpdGBufferDescriptors !! entityIdx
+            Foreign.Marshal.Array.withArray [entityDescriptorSet] $ \dsPtr ->
+              Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
+                DescriptorSet.cmdBindDescriptorSets
+                  commandBuffer
+                  Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+                  dpdWireframeLayout
                   0
                   1
                   dsPtr

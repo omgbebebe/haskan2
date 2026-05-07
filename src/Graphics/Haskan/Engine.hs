@@ -70,6 +70,7 @@ import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
+import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
@@ -384,6 +385,8 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdLightingLayout = drLightingPipelineLayout
                         , dpdLightingDescriptor = lightingDescriptorSet
                         , dpdGBufferImages = gBufferImagesForFrame
+                        , dpdWireframePipeline = drWireframePipeline
+                        , dpdWireframeLayout = drWireframePipelineLayout
                         }
                 -- Compile and execute graph
                 case Graph.compileGraph graphRes graphPasses of
@@ -491,6 +494,10 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   liftIO $ FIR.compileTo "data/shaders/fir/light_vert.spv" [FIR.SPIRV (FIR.Version 1 0)] LightingShaders.vertex
   liftIO $ FIR.compileTo "data/shaders/fir/light_frag.spv" [FIR.SPIRV (FIR.Version 1 0)] LightingShaders.fragment
 
+  liftIO $ FIR.compileTo "data/shaders/fir/wire_vert.spv" [FIR.SPIRV (FIR.Version 1 0)] WireframeShaders.vertex
+  liftIO $ FIR.compileTo "data/shaders/fir/wire_geom.spv" [FIR.SPIRV (FIR.Version 1 0)] WireframeShaders.geometry
+  liftIO $ FIR.compileTo "data/shaders/fir/wire_frag.spv" [FIR.SPIRV (FIR.Version 1 0)] WireframeShaders.fragment
+
   vertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/vert.spv"
   fragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/frag.spv"
 
@@ -498,6 +505,10 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   gbufFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_frag.spv"
   lightVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/light_vert.spv"
   lightFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/light_frag.spv"
+
+  wireVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_vert.spv"
+  wireGeomShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_geom.spv"
+  wireFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_frag.spv"
 
   descriptorSetLayout <- DescriptorSetLayout.managedDescriptorSetLayout device
 
@@ -690,7 +701,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           then pure ()
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-              with (createDeferredResources physicalDevice device context descriptorSetLayout gbufVertShader gbufFragShader lightVertShader lightFragShader) $ \dr ->
+              with (createDeferredResources physicalDevice device context descriptorSetLayout gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
                 renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets
             outerLoop renderFrameLoopFinished
 

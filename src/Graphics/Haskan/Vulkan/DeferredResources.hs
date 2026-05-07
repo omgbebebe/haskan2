@@ -46,6 +46,8 @@ data DeferredResources = DeferredResources
   , drGBufferImages        :: ![[Vulkan.VkImage]]
   , drGBufferImageViews    :: ![[Vulkan.VkImageView]]
   , drSampler              :: !Vulkan.VkSampler
+  , drWireframePipeline    :: !Vulkan.VkPipeline
+  , drWireframePipelineLayout :: !Vulkan.VkPipelineLayout
   }
 
 createDeferredResources ::
@@ -58,8 +60,11 @@ createDeferredResources ::
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
+  Vulkan.VkShaderModule ->
+  Vulkan.VkShaderModule ->
+  Vulkan.VkShaderModule ->
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout gbufVertShader gbufFragShader litVertShader litFragShader = do
+createDeferredResources pdev device ctx descriptorSetLayout gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader = do
   let extent = rcSurfaceExtent ctx
       gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
       depthFormat = Vulkan.VK_FORMAT_D16_UNORM
@@ -155,6 +160,24 @@ createDeferredResources pdev device ctx descriptorSetLayout gbufVertShader gbufF
       extent
   logDebug LogRender "lighting pipeline created"
 
+  -- Wireframe pipeline (vertex + geometry + fragment)
+  wireframePipeline <-
+    GraphicsPipeline.managedGraphicsPipeline
+      device
+      gBufferPipelineLayout
+      gBufferRenderPass
+      ShaderProgram
+        { spVertex = wireVertShader
+        , spTessControl = Nothing
+        , spTessEvaluation = Nothing
+        , spGeometry = Just wireGeomShader
+        , spFragment = wireFragShader
+        }
+      extent
+      Vertex.vertexFormat
+      3
+  logDebug LogRender "wireframe pipeline created"
+
   -- Lighting framebuffers (one per swapchain image, using swapchain image views)
   swapchainImages <- Swapchain.getSwapchainImages device (swapchain ctx)
   let surfaceFormat' = Vulkan.getField @"format" surfaceFormat
@@ -191,6 +214,8 @@ createDeferredResources pdev device ctx descriptorSetLayout gbufVertShader gbufF
     , drGBufferImages = gBufferImages
     , drGBufferImageViews = gBufferImageViews
     , drSampler = sampler
+    , drWireframePipeline = wireframePipeline
+    , drWireframePipelineLayout = gBufferPipelineLayout
     }
 
 createSampler :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkSampler
