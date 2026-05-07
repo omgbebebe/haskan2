@@ -4,7 +4,6 @@ module Graphics.Haskan.Vertex where
 
 import Data.Functor.Contravariant
 import Data.Functor.Contravariant.Divisible
-import Data.Word (Word8)
 import Foreign qualified
 import Foreign.C qualified
 import Foreign.Storable (Storable (..), peekByteOff)
@@ -17,7 +16,7 @@ data Vertex = Vertex
   { vPos :: V3 Foreign.C.CFloat,
     vTexUV :: V2 Foreign.C.CFloat,
     vNorm :: V3 Foreign.C.CFloat,
-    vCol :: V4 Word8
+    vCol :: V3 Foreign.C.CFloat
   }
   deriving (Eq, Show)
 
@@ -49,7 +48,7 @@ vertexFormat =
     >$< v3_s32float
       >*< v2_s32float
       >*< v3_s32float
-      >*< v4_word8
+      >*< v3_s32float
   where
     vertex Vertex {..} =
       (vPos, (vTexUV, (vNorm, vCol)))

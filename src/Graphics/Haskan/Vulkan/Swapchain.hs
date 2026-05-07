@@ -5,6 +5,7 @@ import Control.Monad.Managed (MonadManaged)
 import Graphics.Haskan.Logger (logDebug, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, peekVkList, throwVkResult)
 import Graphics.Haskan.Vulkan.Memory (managedMemoryFor)
+import Graphics.Haskan.Vulkan.PhysicalDevice (selectPresentMode)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
@@ -15,29 +16,31 @@ import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 managedSwapchain ::
   MonadManaged m =>
   Vulkan.VkDevice ->
+  Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
   Vulkan.VkExtent2D ->
   m Vulkan.VkSwapchainKHR
-managedSwapchain dev surface extent =
+managedSwapchain dev pdev surface extent =
   alloc
     "Swapchain"
-    (createSwapchain dev surface extent)
+    (createSwapchain dev pdev surface extent)
     (\ptr -> Vulkan.vkDestroySwapchainKHR dev ptr Vulkan.vkNullPtr)
 
 createSwapchain ::
   MonadIO m =>
   Vulkan.VkDevice ->
+  Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
   Vulkan.VkExtent2D ->
   m Vulkan.VkSwapchainKHR
-createSwapchain dev surface extent = do
+createSwapchain dev pdev surface extent = do
   let imageFormat = Vulkan.VK_FORMAT_B8G8R8A8_SRGB
       imageColorSpace = Vulkan.VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
       imageCount :: Vulkan.Word32
       imageCount = 3 + 1
-      presentMode = Vulkan.VK_PRESENT_MODE_MAILBOX_KHR
       preTransform = Vulkan.VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
-      createInfo =
+  presentMode <- selectPresentMode pdev surface
+  let createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR
               &* set @"pNext" Vulkan.VK_NULL

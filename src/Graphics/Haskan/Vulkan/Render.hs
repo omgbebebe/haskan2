@@ -69,7 +69,7 @@ createRenderContext
         format = Vulkan.getField @"format" Swapchain.surfaceFormat
     surfaceExtent <- PhysicalDevice.surfaceExtent pdev surface
     logDebug LogRender $ "createRenderContext extent=" <> showT (Vulkan.getField @"width" surfaceExtent) <> "x" <> showT (Vulkan.getField @"height" surfaceExtent)
-    swapchain <- Swapchain.managedSwapchain device surface surfaceExtent
+    swapchain <- Swapchain.managedSwapchain device pdev surface surfaceExtent
     images <- Swapchain.getSwapchainImages device swapchain
     logDebug LogRender $ "createRenderContext swapchain images=" <> showT (length images)
     imageViews <- for images (Haskan.managedImageView device format)

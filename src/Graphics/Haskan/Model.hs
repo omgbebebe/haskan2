@@ -38,12 +38,12 @@ fromObj Obj.Obj {..} =
                         (v4, t4, n4)
                       )
                   ) ->
-                    let qf = QuadFace (v1, v2, v3, v4)
-                        mkVertex pos uv norm col = Vertex pos uv norm col
-                        colRed = V4 255 0 0 255
-                        vData vi ti ni = (vi, v3ToCFloat (v !! vi), v2ToCFloat (vt !! ti), v3ToCFloat (vn !! ni))
-                        vertexData = [vData v1 t1 n1, vData v2 t2 n2, vData v3 t3 n3, vData v4 t4 n4]
-                        vertices' = foldl (\vs (i, p, t, n) -> HashMap.insert i (mkVertex p t n colRed) vs) vertices vertexData
+                     let qf = QuadFace (v1, v2, v3, v4)
+                         mkVertex pos uv norm col = Vertex pos uv norm col
+                         colRed = V3 1.0 0.0 0.0
+                         vData vi ti ni = (vi, v3ToCFloat (v !! vi), v2ToCFloat (vt !! ti), v3ToCFloat (vn !! ni))
+                         vertexData = [vData v1 t1 n1, vData v2 t2 n2, vData v3 t3 n3, vData v4 t4 n4]
+                         vertices' = foldl (\vs (i, p, t, n) -> HashMap.insert i (mkVertex p t n colRed) vs) vertices vertexData
                      in (vertices', qf)
           )
           HashMap.empty
@@ -121,12 +121,12 @@ fromPie PieLevel {..} = do
         map
           ( \(i, (V3 x y z)) ->
                let norm = fromMaybe (V3 0.0 0.0 0.0) (lookup i firstNormals)
-                in Vertex
-                     { vPos = V3 (realToFrac x) (realToFrac y) (realToFrac z),
-                       vTexUV = V2 0.0 0.0,
-                       vNorm = norm,
-                       vCol = V4 155 155 0 255
-                     }
+                 in Vertex
+                      { vPos = V3 (realToFrac x) (realToFrac y) (realToFrac z),
+                        vTexUV = V2 0.0 0.0,
+                        vNorm = norm,
+                        vCol = V3 0.6 0.6 0.0
+                      }
           )
           (zip [0 ..] vertices)
   Mesh verts indices
