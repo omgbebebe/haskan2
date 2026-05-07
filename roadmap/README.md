@@ -41,7 +41,21 @@ Layer 1: GPU Commands (command buffers, queues, synchronization)
 
 ## Current State
 
-Single mesh, single texture, hardcoded forward rendering pipeline. Resources allocated via `MonadManaged` with scope-based lifetime.
+**Milestone 1 complete:** Resource manager with typed handles (`MeshHandle`, `TextureHandle`), STM registry, `createMeshResource`, `createTextureResource`.
+
+**Milestone 2 complete:** Sparse-set ECS (`IntMap`-based), `Transform`, `RenderSystem`, dynamic uniform buffer offsets. Renders 3 entities with shared mesh at different positions (`(-2,0,0)`, `(0,0,0)`, `(2,0,0)`). Front face culling works correctly (`VK_FRONT_FACE_CLOCKWISE`).
+
+**Critical lessons learned:**
+- `linear`'s `M44` is row-major; Vulkan/GLSL reads `mat4` as column-major — always `transpose` before uniform buffer upload
+- `Projection.lookAt` is correct for view matrix (manual quaternion math was broken)
+- OBJ loader produces clockwise-wound triangles
+- Fence wait/reset must precede `vkAcquireNextImageKHR`
+- Descriptor pool type must exactly match layout type (`UNIFORM_BUFFER_DYNAMIC`)
+- Command pool needs `RESET_COMMAND_BUFFER_BIT` for per-frame re-recording
+
+## Next Milestone
+
+**Milestone 3: Render Graph** — Declarative multi-pass rendering pipeline.
 
 ## Documentation
 

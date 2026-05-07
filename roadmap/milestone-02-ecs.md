@@ -139,63 +139,33 @@ extractDrawList world rm = do
 
 Create `EntityId`, `World`, component storage. Use `IntMap` for sparse sets.
 
-**Acceptance:** Can create world, spawn entity, add components.
+**Status:** ✅ Complete. `World` with `TVar (IntMap Transform)`, `TVar (IntMap MeshHandle)`, `TVar (IntMap TextureHandle)`, `TVar (IntMap EntityId)` for parents.
 
 ### Task 2.2: Implement Transform + Hierarchy
 **File:** `src/Graphics/Haskan/Scene/Transform.hs`
 
 Local/world matrix computation. Parent-child hierarchy via `wParents`.
 
-```haskell
-computeWorldMatrix :: World -> EntityId -> IO (M44 Float)
-computeWorldMatrix world eid = do
-  transforms <- readTVarIO (wTransforms world)
-  parents <- readTVarIO (wParents world)
-  let go eid' = case IntMap.lookup (fromIntegral eid') transforms of
-        Nothing -> identity
-        Just t  -> case IntMap.lookup (fromIntegral eid') parents of
-          Nothing -> toMatrix t
-          Just p  -> toMatrix t !*! go p
-  pure (go eid)
-```
-
-**Acceptance:** Child entity moves when parent moves.
+**Status:** ✅ Complete. `Transform` with position/rotation/scale. `toMatrix` computes SRT matrix. `computeWorldMatrices` handles parent hierarchy recursively.
 
 ### Task 2.3: Create RenderSystem
 **File:** `src/Graphics/Haskan/Render/RenderSystem.hs`
 
 Extract visible entities from `World`, resolve handles via `ResourceManager`, produce draw list.
 
-**Acceptance:** Produces `[(MeshResource, Transform, Material)]` for all entities with mesh + transform.
+**Status:** ✅ Complete. `extractDrawList` produces `[DrawCall]` with resolved `MeshResource` and world matrices.
 
 ### Task 2.4: Update Engine.hs
 **File:** `src/Graphics/Haskan/Engine.hs`
 
-Replace hardcoded mesh loading:
-```haskell
--- OLD:
-(mesh, _) <- Model.fromObj <$> ObjLoader.parseObj ("data/models/obj/" <> meshName)
-vertexBuffer <- managedVertexBuffer pdev dev (Mesh.vertices mesh)
+Replace hardcoded mesh loading with ECS world creation.
 
--- NEW:
-world <- createWorld
-entityId <- spawnEntity world
-setTransform world entityId defaultTransform
-setMesh world entityId =<< loadMesh rm meshName
-
--- In render loop:
-drawList <- extractDrawList world rm
-for_ drawList \(mesh, transform, material) -> do
-  -- update uniform buffer with transform.toMatrix
-  -- draw mesh
-```
-
-**Acceptance:** Renders single cube via ECS. Same visual output.
+**Status:** ✅ Complete. Engine spawns 3 entities, uses `extractDrawList`, updates per-entity uniform buffer regions dynamically.
 
 ### Task 2.5: Multiple Entities
 Load 3 cubes at different positions. Verify all render.
 
-**Acceptance:** 3 cubes visible, can move independently.
+**Status:** ✅ Complete. 3 cubes at `(-2,0,0)`, `(0,0,0)`, `(2,0,0)`. Shared mesh, individual transforms.
 
 ## Testing
 
@@ -223,8 +193,22 @@ length drawList == 2
 
 ## Success Criteria
 
-- [ ] Can spawn multiple entities with mesh + transform
-- [ ] Entities render with correct world transforms
-- [ ] Parent-child hierarchy updates correctly
-- [ ] Render system extracts draw list from World
-- [ ] No hardcoded mesh references in `Engine.hs`
+- [x] Can spawn multiple entities with mesh + transform
+- [x] Entities render with correct world transforms
+- [x] Parent-child hierarchy updates correctly
+- [x] Render system extracts draw list from World
+- [x] No hardcoded mesh references in `Engine.hs`
+
+## Implementation Notes
+
+**Completed 2026-05-07.** See commits:
+- `bab4176` — milestone-02: ECS Foundation with multi-entity rendering
+- `ea25c67` — add structured tracing logger and fix validation errors for ECS rendering
+- `37259d2` — fix rendering: correct view matrix, front face winding, projection convention
+- `cbd4bda` — fix matrix upload: transpose row-major for column-major Vulkan/GLSL
+
+### Architecture Decisions
+- **Sparse sets (`IntMap`)** chosen for component storage — simplest for Haskell, no module cycles
+- **Dynamic UBO offsets** — one uniform buffer per frame-in-flight, per-entity data at `entityIdx * 256` byte offsets
+- **Per-frame command buffer recording** — command buffers re-recorded each frame inside `renderImage`
+- **Resource sharing** — all 3 entities share a single `MeshHandle`, different transforms
