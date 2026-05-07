@@ -65,8 +65,7 @@ instance Hashable TextureHandle
 
 -- | GPU buffer with embedded cleanup action.
 data BufferResource = BufferResource
-  { brHandle :: !BufferHandle
-  , brVkBuffer :: !Vulkan.VkBuffer
+  { brVkBuffer :: !Vulkan.VkBuffer
   , brMemory :: !Vulkan.VkDeviceMemory
   , brSize :: !Word64
   , brDestroy :: !(IO ())
@@ -114,7 +113,7 @@ allocHandle ref = liftIO $ STM.atomically $ do
 -- | Register a buffer resource and return its handle.
 registerBuffer :: MonadIO m => ResourceManager -> BufferResource -> m BufferHandle
 registerBuffer rm resource = do
-  let handle = brHandle resource
+  handle <- BufferHandle <$> allocHandle (rmNextId rm)
   liftIO $ STM.atomically $ STM.modifyTVar' (rmBuffers rm) (HashMap.insert handle resource)
   pure handle
 

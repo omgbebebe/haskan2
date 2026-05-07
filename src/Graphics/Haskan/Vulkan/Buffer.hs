@@ -159,11 +159,10 @@ makeBufferResource pdev dev data' usage = do
 
   pure
     BufferResource
-      { brHandle = BufferHandle 0,
-        brVkBuffer = buffer,
-        brMemory = memory,
-        brSize = bufSize,
-        brDestroy = destroy
+      { brVkBuffer = buffer
+      , brMemory = memory
+      , brSize = bufSize
+      , brDestroy = destroy
       }
 
 -- | Create and register a mesh resource (vertex + index buffers).
@@ -183,10 +182,10 @@ createMeshResource rm pdev dev vertices indices = do
 
   let mesh =
         MeshResource
-          { mrHandle = meshH,
-            mrVertexBuffer = vertBuf {brHandle = BufferHandle 0},
-            mrIndexBuffer = idxBuf {brHandle = BufferHandle 0},
-            mrIndexCount = length indices
+          { mrHandle = meshH
+          , mrVertexBuffer = vertBuf
+          , mrIndexBuffer = idxBuf
+          , mrIndexCount = length indices
           }
 
   registerMesh rm mesh
