@@ -283,12 +283,13 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
           mvpMemory = frameMvpMemories !! frameNumber
       camera <- liftIO $ STM.readTVarIO tvCamera
       drawList <- extractDrawList ecsWorld rm
-      -- Compute debug NDC positions
+      -- Compute debug NDC positions (using transposed matrices to match GPU)
       liftIO $ do
         let camPos = realToFrac <$> Camera.cameraPosition camera
             camTarget = realToFrac <$> Camera.cameraTarget camera
-            projMat = (realToFrac <$>) <$> projectionMatrix :: M44 Float
-            viewMat = (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
+            -- GPU reads matrices as column-major, so we transpose row-major Haskell matrices
+            projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> projectionMatrix :: M44 Float
+            viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
             sampleLocalVerts :: [V3 Float]
             sampleLocalVerts = [V3 (-0.5) (-0.5) (-0.5), V3 0.5 (-0.5) (-0.5), V3 0.5 0.5 (-0.5), V3 (-0.5) 0.5 (-0.5),
                                 V3 (-0.5) (-0.5) 0.5, V3 0.5 (-0.5) 0.5, V3 0.5 0.5 0.5, V3 (-0.5) 0.5 0.5]
@@ -299,7 +300,7 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
                   V4 cx cy cz cw = (mvp !* V4 x' y' z' 1.0) :: V4 Float
               in if abs cw > 0.001 then V3 (cx / cw) (cy / cw) (cz / cw) else V3 cx cy cz
             entityDebugInfos = zipWith (\idx dc ->
-              let modelMat = (realToFrac <$>) <$> dcWorldMatrix dc :: M44 Float
+              let modelMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> dcWorldMatrix dc :: M44 Float
                   mvp = projMat !*! viewMat !*! modelMat
                   ndcVerts = map (toNDC mvp) sampleLocalVerts
               in EntityDebugInfo
@@ -319,11 +320,11 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
       case drawList of
         [] -> pure (False, False)
         _ -> do
-          let view = Camera.unViewMatrix (Camera.toMatrix camera)
-              projection = projectionMatrix
+          let view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
+              projection = Linear.Matrix.transpose projectionMatrix
           -- Update uniform buffer regions for each entity
           liftIO $ for_ (zip [0..] drawList) $ \(entityIdx, dc) -> do
-            let model = (realToFrac <$>) <$> dcWorldMatrix dc
+            let model = Linear.Matrix.transpose $ (realToFrac <$>) <$> dcWorldMatrix dc
                 offset = entityIdx * entityUniformSize
             Buffer.updateUniformBufferRegion device mvpMemory offset [model, view, projection]
 

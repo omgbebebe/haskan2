@@ -1,24 +1,58 @@
 module Main where
 
-import Data.List (isPrefixOf)
 import Graphics.Haskan qualified as Haskan
-import System.Environment (getArgs)
+import Options.Applicative
 import System.Exit (die)
+import Data.Text (Text)
+import Data.Text qualified as Text
+
+data CliOpts = CliOpts
+  { optModelName :: !String
+  , optTimeout :: !(Maybe Integer)
+  , optTitle :: !Text
+  , optDebugSocket :: !(Maybe FilePath)
+  }
+
+cliParser :: Parser CliOpts
+cliParser =
+  CliOpts
+    <$> argument str
+      ( metavar "MODEL"
+     <> help "Model file name (e.g. unit_cube.obj)"
+      )
+    <*> optional (option auto
+      ( long "timeout"
+     <> short 't'
+     <> metavar "SECONDS"
+     <> help "Exit after N seconds"
+      ))
+    <*> (Text.pack <$> strOption
+      ( long "title"
+     <> short 'T'
+     <> metavar "TITLE"
+     <> value "Haskan Demo"
+     <> showDefault
+     <> help "Window title"
+      ))
+    <*> optional (strOption
+      ( long "debug-socket"
+     <> metavar "PATH"
+     <> help "Unix socket path for debug server"
+      ))
+
+opts :: ParserInfo CliOpts
+opts = info (cliParser <**> helper)
+  ( fullDesc
+ <> progDesc "Haskan2 Vulkan rendering engine"
+ <> header "haskan2 - a Haskell Vulkan engine"
+  )
 
 main :: IO ()
 main = do
-  args <- getArgs
-  case args of
-    [] -> die "Usage: haskan2 [<options>] <model-name>\nOptions:\n  --timeout=N    Exit after N seconds"
-    (modelName : extraArgs) | not (isOption modelName) -> do
-      putStrLn ("Loading model: " ++ modelName)
-      Haskan.runHaskan "Haskan Demo" modelName extraArgs
-    args' -> do
-      -- Try to find model name among args
-      case dropWhile isOption args' of
-        [] -> die "Usage: haskan2 [<options>] <model-name>\nOptions:\n  --timeout=N    Exit after N seconds"
-        (modelName : extraArgs) -> do
-          putStrLn ("Loading model: " ++ modelName)
-          Haskan.runHaskan "Haskan Demo" modelName (filter (/= modelName) args')
-  where
-    isOption s = "--" `isPrefixOf` s
+  cli <- execParser opts
+  putStrLn ("Loading model: " ++ optModelName cli)
+  Haskan.runHaskan
+    (optTitle cli)
+    (optModelName cli)
+    (optTimeout cli)
+    (optDebugSocket cli)
