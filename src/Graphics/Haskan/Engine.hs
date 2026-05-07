@@ -43,6 +43,7 @@ import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), Rend
 import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
 import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Scene.ECS qualified as ECS
+import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
 import Graphics.Haskan.Resources (throwVkResult)
 import Graphics.Haskan.Utils.ObjLoader qualified as ObjLoader
@@ -280,9 +281,8 @@ renderFrameLoop ::
   ECS.World ->
   ResourceManager ->
   Int ->
-  Int ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize indexCount = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -448,7 +448,6 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         ecsWorld
         rm
         entityUniformSize
-        indexCount
 
 -- | Main rendering loop.
 --
@@ -502,47 +501,55 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   renderFinishedSemaphores <- replicateM 4 (Semaphore.managedSemaphore device)
   renderFinishedFences <- replicateM Render.maxFramesInFlight (Fence.managedFence device)
 
-  -- Create ECS World and spawn entities
-  ecsWorld <- ECS.createWorld
+  let isGLTF = ".gltf" `Text.isSuffixOf` Text.pack meshName || ".glb" `Text.isSuffixOf` Text.pack meshName
 
-  (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj ("data/models/obj/" <> meshName)
+  -- Create ECS World and load scene
+  (ecsWorld, numEntities) <- if isGLTF
+    then do
+      -- Load glTF scene
+      result <- importGLTF rm physicalDevice device meshName
+      let world = girWorld result
+          meshes = girMeshes result
+      
+      -- Add ground plane
+      let groundMesh = Mesh.groundPlaneMeshGrid 50 50.0
+      groundMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
+      groundEntity <- ECS.spawnEntity world
+      ECS.setTransform world groundEntity (Transform (V3 0 0 (-0.5)) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setMesh world groundEntity groundMeshHandle
+      
+      pure (world, length meshes + 1)  -- glTF meshes + ground plane
+    else do
+      -- Load OBJ model (original behavior)
+      world <- ECS.createWorld
+      (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj ("data/models/obj/" <> meshName)
+      meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
 
-  -- Create mesh resource via ResourceManager (shared by all cube entities)
-  meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
+      -- Spawn 3 cube entities at different positions
+      entity1 <- ECS.spawnEntity world
+      ECS.setTransform world entity1 (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setMesh world entity1 meshHandle
 
-  -- Create ground plane mesh resource (subdivided checkerboard grid)
-  let groundMesh = Mesh.groundPlaneMeshGrid 50 50.0
-  groundMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
+      entity2 <- ECS.spawnEntity world
+      ECS.setTransform world entity2 (Transform (V3 2 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setMesh world entity2 meshHandle
 
-  -- Spawn 3 cube entities at different positions
-  entity1 <- ECS.spawnEntity ecsWorld
-  ECS.setTransform ecsWorld entity1 (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-  ECS.setMesh ecsWorld entity1 meshHandle
+      entity3 <- ECS.spawnEntity world
+      ECS.setTransform world entity3 (Transform (V3 (-2) 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setMesh world entity3 meshHandle
 
-  entity2 <- ECS.spawnEntity ecsWorld
-  ECS.setTransform ecsWorld entity2 (Transform (V3 2 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-  ECS.setMesh ecsWorld entity2 meshHandle
+      -- Add ground plane
+      let groundMesh = Mesh.groundPlaneMeshGrid 50 50.0
+      groundMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
+      groundEntity <- ECS.spawnEntity world
+      ECS.setTransform world groundEntity (Transform (V3 0 0 (-0.5)) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setMesh world groundEntity groundMeshHandle
 
-  entity3 <- ECS.spawnEntity ecsWorld
-  ECS.setTransform ecsWorld entity3 (Transform (V3 (-2) 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-  ECS.setMesh ecsWorld entity3 meshHandle
-
-  -- Spawn ground plane entity
-  groundEntity <- ECS.spawnEntity ecsWorld
-  ECS.setTransform ecsWorld groundEntity (Transform (V3 0 0 (-0.5)) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-  ECS.setMesh ecsWorld groundEntity groundMeshHandle
-
-  -- Resolve mesh handle to raw Vulkan buffers
-  (vertexBuffer, indexBuffer, indexCount) <- do
-    mBuffers <- Buffer.meshBuffers rm meshHandle
-    case mBuffers of
-      Just (vb, ib, count) -> pure (vb, ib, count)
-      Nothing -> fail "failed to resolve mesh buffers"
+      pure (world, 4)  -- 3 cubes + ground plane
 
   -- Create per-frame uniform buffers for multi-entity rendering
   -- Each entity gets 256 bytes (padded from 192 bytes for 3 M44 matrices)
-  let numEntities = 4  -- 3 cubes + 1 ground plane
-      entityUniformSize = 256 :: Int
+  let entityUniformSize = 256 :: Int
       totalUniformSize = numEntities * entityUniformSize
       padTo256 :: [M44 Foreign.C.CFloat] -> [M44 Foreign.C.CFloat]
       padTo256 mats = mats ++ replicate ((entityUniformSize - length mats * sizeOf (undefined :: M44 Foreign.C.CFloat)) `div` sizeOf (undefined :: M44 Foreign.C.CFloat)) identity
@@ -561,18 +568,29 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
   logDebug LogTexture "textureCommandBuffer created"
 
-  -- Create texture resource via ResourceManager
-  logDebug LogTexture "about to create texture resource"
-  textureHandle <- Texture.createTextureResource rm physicalDevice device "data/texture/page-14-droid-hubs.png" graphicsQueueHandler textureCommandBuffer
-  logInfo LogTexture "texture resource created successfully"
-
-  textureImageView <- do
-    mView <- Texture.textureImageView rm textureHandle
-    case mView of
-      Just view -> do
-        logInfo LogTexture "texture image view resolved"
-        pure view
-      Nothing -> fail "failed to resolve texture image view"
+  -- Create texture resource via ResourceManager (only for OBJ path)
+  textureImageView <- if isGLTF
+    then do
+      -- For glTF, textures are loaded with the scene
+      -- Use a placeholder/white texture for now
+      logDebug LogTexture "skipping texture load for glTF (textures embedded in scene)"
+      -- Create a minimal white texture
+      let whiteTexData = Texture.generateGridTexture 2 2 1
+      whiteTextureHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
+      mView <- Texture.textureImageView rm whiteTextureHandle
+      case mView of
+        Just view -> pure view
+        Nothing -> fail "failed to create white texture"
+    else do
+      logDebug LogTexture "about to create texture resource"
+      textureHandle <- Texture.createTextureResource rm physicalDevice device "data/texture/page-14-droid-hubs.png" graphicsQueueHandler textureCommandBuffer
+      logInfo LogTexture "texture resource created successfully"
+      mView <- Texture.textureImageView rm textureHandle
+      case mView of
+        Just view -> do
+          logInfo LogTexture "texture image view resolved"
+          pure view
+        Nothing -> fail "failed to resolve texture image view"
 
   logInfo LogTexture "creating sampler"
   textureSampler <- Texture.managedSampler device
@@ -619,7 +637,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
               with (createDeferredResources physicalDevice device context descriptorSetLayout gbufVertShader gbufFragShader lightVertShader lightFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize indexCount
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize
             outerLoop renderFrameLoopFinished
 
 

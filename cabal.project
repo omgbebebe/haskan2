@@ -11,3 +11,5 @@ allow-newer:
   , *:template-haskell
   , *:containers
   , *:ghc-bignum
+  , gltf-codec:aeson
+  , gltf-loader:aeson
