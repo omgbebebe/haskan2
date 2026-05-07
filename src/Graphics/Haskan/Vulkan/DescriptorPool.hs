@@ -1,10 +1,19 @@
-module Graphics.Haskan.Vulkan.DescriptorPool where
+module Graphics.Haskan.Vulkan.DescriptorPool
+  ( managedDescriptorPool,
+    createDescriptorPool,
+    managedLightingDescriptorPool,
+    createLightingDescriptorPool,
+    managedBindlessDescriptorPool,
+    createBindlessDescriptorPool,
+  )
+where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Graphics.Vulkan.Core_1_2 qualified as Vulkan12
 import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
@@ -66,6 +75,36 @@ createLightingDescriptorPool dev numSets texturesPerSet = do
               &* set @"poolSizeCount" 1
               &* setListRef @"pPoolSizes" [samplerPoolSize]
               &* set @"maxSets" (fromIntegral numSets)
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
+          )
+
+managedBindlessDescriptorPool :: MonadManaged m => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+managedBindlessDescriptorPool dev maxTextures =
+  alloc
+    "BindlessDescriptorPool"
+    (createBindlessDescriptorPool dev maxTextures)
+    (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
+
+createBindlessDescriptorPool :: MonadIO m => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+createBindlessDescriptorPool dev maxTextures = do
+  let samplerPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"descriptorCount" (fromIntegral maxTextures)
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan12.VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
+              &* set @"poolSizeCount" 1
+              &* setListRef @"pPoolSizes" [samplerPoolSize]
+              &* set @"maxSets" 1
           )
    in liftIO $
         withPtr
