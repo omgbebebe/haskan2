@@ -90,7 +90,7 @@ createInstance extraExtensions = do
               &* set @"pEngineName" (Vulkan.VK_NULL)
               &* set @"applicationVersion" (Vulkan._VK_MAKE_VERSION 1 0 0)
               &* set @"engineVersion" (Vulkan._VK_MAKE_VERSION 1 0 0)
-              &* set @"apiVersion" (Vulkan._VK_MAKE_VERSION 1 0 68)
+              &* set @"apiVersion" (Vulkan._VK_MAKE_VERSION 1 2 0)
           )
 
       instanceInfo =

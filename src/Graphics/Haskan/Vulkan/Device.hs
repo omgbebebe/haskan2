@@ -1,17 +1,25 @@
 module Graphics.Haskan.Vulkan.Device where
 
-import Control.Monad (filterM)
+import Control.Monad (filterM, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
-import Data.Bits ((.&.))
+import Data.Bits (shiftR, (.&.))
 import Data.List (nub)
+import Data.Text (Text)
+import Data.Text qualified as Text
+import Data.Word (Word32)
+import Foreign (castPtr, nullPtr)
+import Graphics.Haskan.Logger (logInfo, showT, LogCategory(..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, peekVkList_)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Graphics.Vulkan.Core_1_1 qualified as Vulkan11
+import Graphics.Vulkan.Core_1_2 qualified as Vulkan12
 import Graphics.Vulkan.Ext qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setListRef, setStrListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Numeric (showHex)
 
 managedRenderDevice :: MonadManaged m => Vulkan.VkPhysicalDevice -> Vulkan.VkSurfaceKHR -> [String] -> m (Vulkan.VkDevice, (Int, Int))
 managedRenderDevice pdev surface layers =
@@ -52,12 +60,53 @@ createRenderDevice pdev surface layers = do
 
 createDevice :: MonadIO m => Vulkan.VkPhysicalDevice -> [Int] -> [String] -> m Vulkan.VkDevice
 createDevice dev queueFamilyIndices enabledLayers = do
+  -- Query physical device properties to check Vulkan version
+  props <- liftIO $ allocaAndPeek_ (Vulkan.vkGetPhysicalDeviceProperties dev)
+  let apiVersion = Vulkan.getField @"apiVersion" props
+      apiVersionWord = fromIntegral apiVersion :: Word32
+      majorVersion = fromIntegral ((apiVersionWord `shiftR` 22) .&. (0x7F :: Word32)) :: Int
+      minorVersion = fromIntegral ((apiVersionWord `shiftR` 12) .&. (0x3FF :: Word32)) :: Int
+      patchVersion = fromIntegral (apiVersionWord .&. (0xFFF :: Word32)) :: Int
+  logInfo LogVulkan $ "Vulkan API version raw: " <> showT apiVersion <> " hex: 0x" <> Text.pack (showHex apiVersionWord "")
+  logInfo LogVulkan $ "Vulkan API version: " <> showT majorVersion <> "." <> showT minorVersion <> "." <> showT patchVersion
+
+  -- Query basic features
   availableFeatures <- liftIO $ allocaAndPeek_ (Vulkan.vkGetPhysicalDeviceFeatures dev)
   let geometrySupported = Vulkan.getField @"geometryShader" availableFeatures == Vulkan.VK_TRUE
-      deviceFlags = Vulkan.VK_ZERO_FLAGS
+
+  -- Check descriptor indexing support (requires Vulkan 1.2+)
+  descriptorIndexingSupported <- if majorVersion >= 1 && minorVersion >= 2
+    then liftIO $ do
+      let diFeaturesQuery :: Vulkan12.VkPhysicalDeviceDescriptorIndexingFeatures
+          diFeaturesQuery = Vulkan.createVk
+            ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES
+                &* set @"pNext" Vulkan.VK_NULL
+            )
+          features2Query :: Vulkan11.VkPhysicalDeviceFeatures2
+          features2Query = Vulkan.createVk
+            ( set @"sType" Vulkan11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
+                &* set @"pNext" (castPtr $ Vulkan.unsafePtr diFeaturesQuery)
+                &* set @"features" availableFeatures
+            )
+      withPtr features2Query $ \f2Ptr -> Vulkan11.vkGetPhysicalDeviceFeatures2 dev f2Ptr
+      let nonUniform = Vulkan.getField @"shaderSampledImageArrayNonUniformIndexing" diFeaturesQuery == Vulkan.VK_TRUE
+          updateAfterBind = Vulkan.getField @"descriptorBindingSampledImageUpdateAfterBind" diFeaturesQuery == Vulkan.VK_TRUE
+          partiallyBound = Vulkan.getField @"descriptorBindingPartiallyBound" diFeaturesQuery == Vulkan.VK_TRUE
+          runtimeArray = Vulkan.getField @"runtimeDescriptorArray" diFeaturesQuery == Vulkan.VK_TRUE
+      logInfo LogVulkan $ "Descriptor indexing capabilities: nonUniform=" <> showT nonUniform
+        <> " updateAfterBind=" <> showT updateAfterBind
+        <> " partiallyBound=" <> showT partiallyBound
+        <> " runtimeArray=" <> showT runtimeArray
+      pure (nonUniform && updateAfterBind && partiallyBound && runtimeArray)
+    else do
+      logInfo LogVulkan "Descriptor indexing requires Vulkan 1.2+, skipping"
+      pure False
+
+  let deviceFlags = Vulkan.VK_ZERO_FLAGS
       queueFlags = Vulkan.VK_ZERO_FLAGS
       enabledExtensions = [Vulkan.VK_KHR_SWAPCHAIN_EXTENSION_NAME]
-      enabledFeatures = Vulkan.createVk (set @"geometryShader" (if geometrySupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE))
+      enabledBasicFeatures = Vulkan.createVk
+        (set @"geometryShader" (if geometrySupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE))
       queueCreateInfos :: [Vulkan.VkDeviceQueueCreateInfo]
       queueCreateInfos =
         map
@@ -72,22 +121,62 @@ createDevice dev queueFamilyIndices enabledLayers = do
                 )
           )
           queueFamilyIndices
-      createInfo featuresPtr =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" deviceFlags
-              &* set @"queueCreateInfoCount" (fromIntegral (length queueCreateInfos))
-              &* setListRef @"pQueueCreateInfos" queueCreateInfos
-              &* set @"enabledLayerCount" (fromIntegral (length enabledLayers))
-              &* setStrListRef @"ppEnabledLayerNames" enabledLayers
-              &* set @"enabledExtensionCount" (fromIntegral (length enabledExtensions))
-              &* setListRef @"ppEnabledExtensionNames" enabledExtensions
-              &* set @"pEnabledFeatures" featuresPtr
-          )
-  liftIO $ withPtr enabledFeatures $ \featPtr ->
-    withPtr (createInfo featPtr) $ \ciPtr ->
-      allocaAndPeek (Vulkan.vkCreateDevice dev ciPtr Vulkan.vkNullPtr)
+
+  -- Build device create info with feature chain
+  liftIO $ do
+    case descriptorIndexingSupported of
+      False -> do
+        -- No descriptor indexing: use legacy pEnabledFeatures path
+        withPtr enabledBasicFeatures $ \featPtr -> do
+          let createInfo =
+                Vulkan.createVk
+                  ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
+                      &* set @"pNext" Vulkan.VK_NULL
+                      &* set @"flags" deviceFlags
+                      &* set @"queueCreateInfoCount" (fromIntegral (length queueCreateInfos))
+                      &* setListRef @"pQueueCreateInfos" queueCreateInfos
+                      &* set @"enabledLayerCount" (fromIntegral (length enabledLayers))
+                      &* setStrListRef @"ppEnabledLayerNames" enabledLayers
+                      &* set @"enabledExtensionCount" (fromIntegral (length enabledExtensions))
+                      &* setListRef @"ppEnabledExtensionNames" enabledExtensions
+                      &* set @"pEnabledFeatures" featPtr
+                  )
+          withPtr createInfo $ \ciPtr ->
+            allocaAndPeek (Vulkan.vkCreateDevice dev ciPtr Vulkan.vkNullPtr)
+      True -> do
+        -- Descriptor indexing: chain VkPhysicalDeviceFeatures2 into VkDeviceCreateInfo
+        let diFeatures :: Vulkan12.VkPhysicalDeviceDescriptorIndexingFeatures
+            diFeatures = Vulkan.createVk
+              ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES
+                  &* set @"pNext" Vulkan.VK_NULL
+                  &* set @"shaderSampledImageArrayNonUniformIndexing" Vulkan.VK_TRUE
+                  &* set @"descriptorBindingSampledImageUpdateAfterBind" Vulkan.VK_TRUE
+                  &* set @"descriptorBindingPartiallyBound" Vulkan.VK_TRUE
+                  &* set @"runtimeDescriptorArray" Vulkan.VK_TRUE
+              )
+        withPtr diFeatures $ \diPtr -> do
+          let features2 :: Vulkan11.VkPhysicalDeviceFeatures2
+              features2 = Vulkan.createVk
+                ( set @"sType" Vulkan11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
+                    &* set @"pNext" (castPtr diPtr)
+                    &* set @"features" enabledBasicFeatures
+                )
+          withPtr features2 $ \f2Ptr -> do
+            let createInfo =
+                  Vulkan.createVk
+                    ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
+                        &* set @"pNext" (castPtr f2Ptr)
+                        &* set @"flags" deviceFlags
+                        &* set @"queueCreateInfoCount" (fromIntegral (length queueCreateInfos))
+                        &* setListRef @"pQueueCreateInfos" queueCreateInfos
+                        &* set @"enabledLayerCount" (fromIntegral (length enabledLayers))
+                        &* setStrListRef @"ppEnabledLayerNames" enabledLayers
+                        &* set @"enabledExtensionCount" (fromIntegral (length enabledExtensions))
+                        &* setListRef @"ppEnabledExtensionNames" enabledExtensions
+                        &* set @"pEnabledFeatures" Vulkan.VK_NULL
+                    )
+            withPtr createInfo $ \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDevice dev ciPtr Vulkan.vkNullPtr)
 
 getDeviceQueueHandler ::
   MonadIO m =>
