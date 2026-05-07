@@ -50,6 +50,7 @@ data DebugCommand
   | TriggerFrameInspect
   | SetTimeScale Float
   | GetState
+  | GetRenderState
   deriving (Eq, Show, Generic)
 
 -- | Events that map to the existing ActionEvent system.
@@ -115,6 +116,7 @@ debugMessageToActionEvent (Command cmd) =
 -- | Response sent back to debug clients.
 data DebugResponse
   = StateResponse GameStateSnapshot
+  | RenderStateResponse Value
   | AckResponse Text
   | ErrorResponse Text
   deriving (Eq, Show, Generic)

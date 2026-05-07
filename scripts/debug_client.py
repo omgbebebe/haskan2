@@ -5,6 +5,7 @@ Connects to the haskan2 Unix socket and sends debug commands.
 
 Usage:
     python3 debug_client.py get-state
+    python3 debug_client.py get-render-state
     python3 debug_client.py set-distance 50.0
     python3 debug_client.py set-target 0.0 5.0 0.0
     python3 debug_client.py set-angles 0.5 0.2
@@ -67,6 +68,32 @@ def main():
             print(json.dumps(data, indent=2))
         except:
             pass
+    
+    elif cmd == "get-render-state":
+        msg = {"command": {"get_render_state": []}}
+        print(f"Request: {json.dumps(msg)}")
+        resp = send_message(msg)
+        print(f"Response: {resp}")
+        try:
+            data = json.loads(resp)
+            print(json.dumps(data, indent=2))
+            if "render_state" in data:
+                render_data = data["render_state"]
+                print("\n=== Render Debug State ===")
+                print(f"Frame: {render_data.get('frame_number', 'N/A')}")
+                print(f"Camera Pos: {render_data.get('camera_pos', 'N/A')}")
+                print(f"Camera Target: {render_data.get('camera_target', 'N/A')}")
+                print("\nEntities:")
+                for entity in render_data.get('entities', []):
+                    print(f"\n  Entity {entity.get('entity_id')}:")
+                    print(f"    Position: {entity.get('position', 'N/A')}")
+                    print(f"    Sample Vertices (NDC):")
+                    for i, vert in enumerate(entity.get('sample_vertices_ndc', [])):
+                        print(f"      v{i}: {vert}")
+            else:
+                print("No render_state in response")
+        except Exception as e:
+            print(f"Error parsing response: {e}")
     
     elif cmd == "set-distance":
         if len(sys.argv) < 3:

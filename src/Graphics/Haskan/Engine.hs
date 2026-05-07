@@ -15,6 +15,7 @@ import Control.Concurrent.STM.TVar (TVar)
 import Control.Monad (replicateM, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged, runManaged, with)
+import Data.Aeson (ToJSON (..), object, (.=))
 import Data.Foldable (for_)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
@@ -38,7 +39,7 @@ import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
 import Graphics.Haskan.Scene.ECS qualified as ECS
-import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform)
+import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
 import Graphics.Haskan.Resources (throwVkResult)
 import Graphics.Haskan.Utils.ObjLoader qualified as ObjLoader
 import Graphics.Haskan.Vertex (Vertex (..))
@@ -67,12 +68,17 @@ import Graphics.Haskan.Window qualified as Window
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
-import Linear (M44, V2 (..), V3 (..))
-import Linear.Matrix (identity, transpose, (!*!))
+import Linear (M44, V2 (..), V3 (..), V4 (..))
+import Linear.Matrix (identity, transpose, (!*), (!*!))
 import Linear.Projection qualified
 import Linear.Quaternion (Quaternion (..))
 import SDL qualified
 import System.Clock (Clock (..), getTime, toNanoSecs)
+
+toListOfV4 :: V4 (V4 a) -> [[a]]
+toListOfV4 (V4 r1 r2 r3 r4) = [toList r1, toList r2, toList r3, toList r4]
+  where
+    toList (V4 a b c d) = [a, b, c, d]
 
 data EngineConfig = EngineConfig
   { targetRenderFPS :: !Integer,
@@ -80,7 +86,8 @@ data EngineConfig = EngineConfig
     targetNetworkFPS :: !Integer,
     targetInputFPS :: !Integer,
     title :: !Text,
-    debugSocketPath :: !(Maybe FilePath)
+    debugSocketPath :: !(Maybe FilePath),
+    timeoutSeconds :: !(Maybe Integer)
   }
   deriving (Show)
 
@@ -107,8 +114,45 @@ data GameState cam = GameState
     strafeLeft :: TVar Bool,
     strafeRight :: TVar Bool,
     inspectFrame :: TVar Bool,
-    inspector :: TVar (Maybe FrameInspector)
+    inspector :: TVar (Maybe FrameInspector),
+    renderDebugState :: TVar (Maybe RenderDebugInfo)
   }
+
+data RenderDebugInfo = RenderDebugInfo
+  { rdiFrameNumber :: Int,
+    rdiCameraPos :: V3 Float,
+    rdiCameraTarget :: V3 Float,
+    rdiProjectionMatrix :: [[Float]],
+    rdiEntities :: [EntityDebugInfo]
+  }
+  deriving (Show)
+
+data EntityDebugInfo = EntityDebugInfo
+  { ediEntityId :: Int,
+    ediWorldMatrix :: [[Float]],
+    ediPosition :: V3 Float,
+    ediSampleVerticesNDC :: [V3 Float]
+  }
+  deriving (Show)
+
+instance ToJSON RenderDebugInfo where
+  toJSON r =
+    object
+      [ "frame_number" .= rdiFrameNumber r,
+        "camera_pos" .= rdiCameraPos r,
+        "camera_target" .= rdiCameraTarget r,
+        "projection_matrix" .= rdiProjectionMatrix r,
+        "entities" .= rdiEntities r
+      ]
+
+instance ToJSON EntityDebugInfo where
+  toJSON e =
+    object
+      [ "entity_id" .= ediEntityId e,
+        "world_matrix" .= ediWorldMatrix e,
+        "position" .= ediPosition e,
+        "sample_vertices_ndc" .= ediSampleVerticesNDC e
+      ]
 
 data ControlMessage
   = Terminate
@@ -136,6 +180,7 @@ mainLoop meshName EngineConfig {..} = do
 
   tvInspectFrame <- liftIO $ STM.newTVarIO False
   tvInspector <- liftIO $ STM.newTVarIO (Just (defaultInspector "snapshots"))
+  tvRenderDebugState <- liftIO $ STM.newTVarIO Nothing
 
   let gameState =
         GameState
@@ -147,6 +192,7 @@ mainLoop meshName EngineConfig {..} = do
           tvStrafeRight
           tvInspectFrame
           tvInspector
+          tvRenderDebugState
 
   -- Start debug server if configured
   mDebugServer <- liftIO $ case debugSocketPath of
@@ -155,6 +201,17 @@ mainLoop meshName EngineConfig {..} = do
       logInfo LogGeneral $ "debug server listening on " <> Text.pack path
       pure (Just h)
     Nothing -> pure Nothing
+
+  -- Start timeout timer if configured
+  case timeoutSeconds of
+    Just seconds | seconds > 0 -> do
+      logInfo LogGeneral $ "timeout set to " <> showT seconds <> " seconds"
+      _ <- liftIO $ forkIO $ do
+        threadDelay (fromIntegral seconds * 1000000)
+        logInfo LogGeneral "timeout reached, sending Terminate"
+        STM.atomically $ TChan.writeTChan controlChannel Terminate
+      pure ()
+    _ -> pure ()
 
   SDL.initialize @[] [SDL.InitEvents]
 
@@ -211,12 +268,13 @@ renderFrameLoop ::
   TVar cam ->
   STM.TVar Bool ->
   STM.TVar (Maybe FrameInspector) ->
+  STM.TVar (Maybe RenderDebugInfo) ->
   ECS.World ->
   ResourceManager ->
   Int ->
   Int ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp ecsWorld rm entityUniformSize indexCount = do
+renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize indexCount = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -225,6 +283,39 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
           mvpMemory = frameMvpMemories !! frameNumber
       camera <- liftIO $ STM.readTVarIO tvCamera
       drawList <- extractDrawList ecsWorld rm
+      -- Compute debug NDC positions
+      liftIO $ do
+        let camPos = realToFrac <$> Camera.cameraPosition camera
+            camTarget = realToFrac <$> Camera.cameraTarget camera
+            projMat = (realToFrac <$>) <$> projectionMatrix :: M44 Float
+            viewMat = (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
+            sampleLocalVerts :: [V3 Float]
+            sampleLocalVerts = [V3 (-0.5) (-0.5) (-0.5), V3 0.5 (-0.5) (-0.5), V3 0.5 0.5 (-0.5), V3 (-0.5) 0.5 (-0.5),
+                                V3 (-0.5) (-0.5) 0.5, V3 0.5 (-0.5) 0.5, V3 0.5 0.5 0.5, V3 (-0.5) 0.5 0.5]
+            toNDC :: M44 Float -> V3 Float -> V3 Float
+            toNDC mvp (V3 x y z) =
+              let x', y', z' :: Float
+                  x' = x; y' = y; z' = z
+                  V4 cx cy cz cw = (mvp !* V4 x' y' z' 1.0) :: V4 Float
+              in if abs cw > 0.001 then V3 (cx / cw) (cy / cw) (cz / cw) else V3 cx cy cz
+            entityDebugInfos = zipWith (\idx dc ->
+              let modelMat = (realToFrac <$>) <$> dcWorldMatrix dc :: M44 Float
+                  mvp = projMat !*! viewMat !*! modelMat
+                  ndcVerts = map (toNDC mvp) sampleLocalVerts
+              in EntityDebugInfo
+                  { ediEntityId = idx,
+                    ediWorldMatrix = map (map realToFrac) (toListOfV4 (fmap (fmap realToFrac) modelMat)),
+                    ediPosition = realToFrac <$> tPosition (dcTransform dc),
+                    ediSampleVerticesNDC = ndcVerts
+                  }
+              ) [0..] drawList
+        STM.atomically $ STM.writeTVar tvRenderDebug $ Just RenderDebugInfo
+          { rdiFrameNumber = frameNumber,
+            rdiCameraPos = camPos,
+            rdiCameraTarget = camTarget,
+            rdiProjectionMatrix = map (map realToFrac) (toListOfV4 (fmap (fmap realToFrac) projMat)),
+            rdiEntities = entityDebugInfos
+          }
       case drawList of
         [] -> pure (False, False)
         _ -> do
@@ -318,6 +409,7 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
         tvCamera
         tvInspect
         tvInsp
+        tvRenderDebug
         ecsWorld
         rm
         entityUniformSize
@@ -464,6 +556,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   let tvCamera = activeCamera worldState
       tvInspect = inspectFrame gameState
       tvInsp = inspector gameState
+      tvRenderDebug = renderDebugState gameState
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
@@ -471,7 +564,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           then pure ()
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-              renderFrameLoop context 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp ecsWorld rm entityUniformSize indexCount
+              renderFrameLoop context 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize indexCount
             outerLoop renderFrameLoopFinished
 
   logInfo LogGeneral "Starting render loop"
@@ -490,12 +583,11 @@ modelMatrix =
 
 projectionMatrix :: M44 Foreign.C.CFloat
 projectionMatrix =
-  Linear.Matrix.transpose $
-    Linear.Projection.perspective
-      (pi / 12) -- FOV
-      (16 / 9) -- aspect ratio
-      0.1 -- near plane
-      10000.0 -- far plane
+  Linear.Projection.perspective
+    (pi / 12) -- FOV
+    (16 / 9) -- aspect ratio
+    0.1 -- near plane
+    10000.0 -- far plane
 
 drawCallToSnapshot :: DrawCall -> RenderableSnapshot
 drawCallToSnapshot DrawCall {..} =
@@ -585,6 +677,14 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
                         , gssFrameInspectorEnabled = inspecting
                         }
                   STM.atomically $ STM.putTMVar respVar (StateResponse snapshot)
+                GetRenderState -> do
+                  mDebugInfo <- STM.readTVarIO (renderDebugState gameState)
+                  case mDebugInfo of
+                    Just debugInfo -> do
+                      let val = toJSON debugInfo
+                      STM.atomically $ STM.putTMVar respVar (RenderStateResponse val)
+                    Nothing -> do
+                      STM.atomically $ STM.putTMVar respVar (ErrorResponse "no render debug info available yet")
             let dt = newTime - prevTime
 
             (fwd, bwd, sl, sr, isRunning) <- STM.atomically $ do

@@ -92,17 +92,9 @@ orbitalCameraForward OrbitalCamera{..} =
   in normalize $ rotate combined dir
 
 orbitalToMatrix :: OrbitalCamera -> ViewMatrix
-orbitalToMatrix OrbitalCamera {..} =
-  let xAxis = V3 1.0 0.0 0.0
-      yAxis = V3 0.0 1.0 0.0
-      zAxis = V3 0.0 0.0 1.0
-      translation = target - (V3 0.0 0.0 distance)
-      azimuthRotation = Quat.axisAngle yAxis azimuthAngle
-      elevationRotation = Quat.axisAngle xAxis elevationAngle
-      quat = elevationRotation * azimuthRotation
-      rotate = Matrix.mkTransformation quat translation
-      viewMatrix = Matrix.transpose $ rotate
-   in ViewMatrix viewMatrix
+orbitalToMatrix cam =
+  let pos = orbitalCameraPosition cam
+  in ViewMatrix $ Projection.lookAt pos (target cam) (V3 0 1 0)
 
 instance Camera OrbitalCamera where
   update = updateOrbital
