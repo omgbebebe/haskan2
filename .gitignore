@@ -8,3 +8,6 @@ cabal.project.local*
 .ghc.environment*
 .direnv/
 snapshots/
+
+# Local library sources downloaded with `cabal get <pkg>` for reference
+linear-*/

@@ -96,3 +96,6 @@ python3 scripts/debug_client.py key escape true   # inject key press
 - GHC 9.14.1 via `haskell.compiler.ghc9141` from nixpkgs-unstable
 - Cabal-only for Haskell deps, system libs (Vulkan, SDL2) from nixpkgs
 - Validation layers available system-wide: `VK_LAYER_KHRONOS_validation`
+
+## Debugging Tips
+- **Get library sources for reference:** `cabal get <package_name>` (e.g. `cabal get linear`) downloads source to `./linear-1.23.3/` — useful for checking type signatures and implementation details without leaving the project directory.
