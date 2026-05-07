@@ -6,6 +6,7 @@ import Data.Bits ((.|.))
 import Foreign qualified
 import Foreign.C qualified
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
+import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..), toPipelineStages, stageCount)
 import Graphics.Haskan.Vertex (Vertex)
 import Graphics.Haskan.Vulkan.VertexFormat (VertexFormat)
 import Graphics.Haskan.Vulkan.VertexFormat qualified as VertexFormat
@@ -21,16 +22,15 @@ managedGraphicsPipeline ::
   Vulkan.VkDevice ->
   Vulkan.VkPipelineLayout ->
   Vulkan.VkRenderPass ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
+  ShaderProgram ->
   Vulkan.VkExtent2D ->
   VertexFormat v ->
   Int ->
   m Vulkan.VkPipeline
-managedGraphicsPipeline dev layout renderPass vertShader fragShader swapchainExtent vertexFormat colorAttachmentCount =
+managedGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent vertexFormat colorAttachmentCount =
   alloc
     "GraphicsPipeline"
-    (createGraphicsPipeline dev layout renderPass vertShader fragShader swapchainExtent vertexFormat colorAttachmentCount)
+    (createGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent vertexFormat colorAttachmentCount)
     (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
 
 createGraphicsPipeline ::
@@ -38,30 +38,14 @@ createGraphicsPipeline ::
   Vulkan.VkDevice ->
   Vulkan.VkPipelineLayout ->
   Vulkan.VkRenderPass ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
+  ShaderProgram ->
   Vulkan.VkExtent2D ->
   VertexFormat v ->
   Int ->
   m Vulkan.VkPipeline
-createGraphicsPipeline dev layout renderPass vertShader fragShader swapchainExtent vertexFormat colorAttachmentCount = do
-  let vertStage =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"stage" Vulkan.VK_SHADER_STAGE_VERTEX_BIT
-              &* set @"module" vertShader
-              &* setStrRef @"pName" "main"
-          )
-      fragStage =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"stage" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
-              &* set @"module" fragShader
-              &* setStrRef @"pName" "main"
-          )
-      -- stages =
+createGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent vertexFormat colorAttachmentCount = do
+  let stages = toPipelineStages shaderProgram
+      numStages = stageCount shaderProgram
       positionBindingDescription =
         Vulkan.createVk
           ( set @"binding" 0
@@ -223,8 +207,8 @@ createGraphicsPipeline dev layout renderPass vertShader fragShader swapchainExte
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"stageCount" 2
-              &* setListRef @"pStages" [vertStage, fragStage]
+              &* set @"stageCount" (fromIntegral numStages)
+              &* setListRef @"pStages" stages
               &* setVkRef @"pVertexInputState" vertexInputStateCI
               &* setVkRef @"pInputAssemblyState" assemblyInputStateCI
               &* set @"pTessellationState" tessellationState
@@ -256,14 +240,13 @@ managedFullscreenPipeline ::
   Vulkan.VkDevice ->
   Vulkan.VkPipelineLayout ->
   Vulkan.VkRenderPass ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
+  ShaderProgram ->
   Vulkan.VkExtent2D ->
   m Vulkan.VkPipeline
-managedFullscreenPipeline dev layout renderPass vertShader fragShader swapchainExtent =
+managedFullscreenPipeline dev layout renderPass shaderProgram swapchainExtent =
   alloc
     "FullscreenPipeline"
-    (createFullscreenPipeline dev layout renderPass vertShader fragShader swapchainExtent)
+    (createFullscreenPipeline dev layout renderPass shaderProgram swapchainExtent)
     (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
 
 createFullscreenPipeline ::
@@ -271,27 +254,12 @@ createFullscreenPipeline ::
   Vulkan.VkDevice ->
   Vulkan.VkPipelineLayout ->
   Vulkan.VkRenderPass ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
+  ShaderProgram ->
   Vulkan.VkExtent2D ->
   m Vulkan.VkPipeline
-createFullscreenPipeline dev layout renderPass vertShader fragShader swapchainExtent = do
-  let vertStage =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"stage" Vulkan.VK_SHADER_STAGE_VERTEX_BIT
-              &* set @"module" vertShader
-              &* setStrRef @"pName" "main"
-          )
-      fragStage =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"stage" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
-              &* set @"module" fragShader
-              &* setStrRef @"pName" "main"
-          )
+createFullscreenPipeline dev layout renderPass shaderProgram swapchainExtent = do
+  let stages = toPipelineStages shaderProgram
+      numStages = stageCount shaderProgram
       vertexInputStateCI =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO
@@ -434,8 +402,8 @@ createFullscreenPipeline dev layout renderPass vertShader fragShader swapchainEx
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"stageCount" 2
-              &* setListRef @"pStages" [vertStage, fragStage]
+              &* set @"stageCount" (fromIntegral numStages)
+              &* setListRef @"pStages" stages
               &* setVkRef @"pVertexInputState" vertexInputStateCI
               &* setVkRef @"pInputAssemblyState" assemblyInputStateCI
               &* set @"pTessellationState" tessellationState

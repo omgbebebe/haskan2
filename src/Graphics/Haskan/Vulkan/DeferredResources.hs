@@ -12,6 +12,7 @@ import Data.Traversable (for)
 import Foreign.Marshal.Array qualified
 import Graphics.Haskan.Logger (logDebug, logInfo, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
+import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..))
 import Graphics.Haskan.Vertex (Vertex)
 import Graphics.Haskan.Vertex qualified as Vertex
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
@@ -121,8 +122,13 @@ createDeferredResources pdev device ctx descriptorSetLayout gbufVertShader gbufF
       device
       gBufferPipelineLayout
       gBufferRenderPass
-      gbufVertShader
-      gbufFragShader
+      ShaderProgram
+        { spVertex = gbufVertShader
+        , spTessControl = Nothing
+        , spTessEvaluation = Nothing
+        , spGeometry = Nothing
+        , spFragment = gbufFragShader
+        }
       extent
       Vertex.vertexFormat
       3
@@ -139,8 +145,13 @@ createDeferredResources pdev device ctx descriptorSetLayout gbufVertShader gbufF
       device
       lightingPipelineLayout
       lightingRenderPass
-      litVertShader
-      litFragShader
+      ShaderProgram
+        { spVertex = litVertShader
+        , spTessControl = Nothing
+        , spTessEvaluation = Nothing
+        , spGeometry = Nothing
+        , spFragment = litFragShader
+        }
       extent
   logDebug LogRender "lighting pipeline created"
 

@@ -46,6 +46,7 @@ library
                        Graphics.Haskan.Vulkan.DescriptorSetLayout
                        Graphics.Haskan.Vulkan.DescriptorPool
                        Graphics.Haskan.Vulkan.Device
+                       Graphics.Haskan.Vulkan.DeviceCapabilities
                        Graphics.Haskan.Vulkan.Fence
                        Graphics.Haskan.Vulkan.Framebuffer
                        Graphics.Haskan.Vulkan.GraphicsPipeline
@@ -75,6 +76,7 @@ library
                        Graphics.Haskan.Render.Graph
                        Graphics.Haskan.Render.Deferred
                        Graphics.Haskan.Render.Forward
+                       Graphics.Haskan.Render.ShaderProgram
  
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

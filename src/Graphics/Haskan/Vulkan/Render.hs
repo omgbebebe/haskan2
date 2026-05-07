@@ -15,6 +15,7 @@ import Data.Foldable (for_)
 import Data.Traversable (for)
 import Foreign.Marshal.Array qualified
 import Graphics.Haskan.Logger (logDebug, logInfo, showT, LogCategory (..))
+import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..))
 import Graphics.Haskan.Resources (allocaAndPeekVkResult, throwVkResult)
 import Graphics.Haskan.Vertex qualified as Vertex
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
@@ -80,8 +81,13 @@ createRenderContext
         device
         pipelineLayout
         renderPass
-        vertShader
-        fragShader
+        ShaderProgram
+          { spVertex = vertShader
+          , spTessControl = Nothing
+          , spTessEvaluation = Nothing
+          , spGeometry = Nothing
+          , spFragment = fragShader
+          }
         surfaceExtent
         Vertex.vertexFormat
         1
