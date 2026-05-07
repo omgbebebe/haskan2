@@ -2,6 +2,7 @@ module Graphics.Haskan.Vulkan.Swapchain where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
+import Graphics.Haskan.Logger (logDebug, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, peekVkList, throwVkResult)
 import Graphics.Haskan.Vulkan.Memory (managedMemoryFor)
 import Graphics.Vulkan qualified as Vulkan
@@ -88,6 +89,7 @@ managedDepthImage pdev dev extent depthFormat = do
       (createDepthImage dev extent depthFormat)
       (\ptr -> Vulkan.vkDestroyImage dev ptr Vulkan.vkNullPtr)
   memoryRequirements <- getImageMemoryRequirements dev image
+  logDebug LogVulkan $ "depth image memory requirements size=" <> showT (Vulkan.getField @"size" memoryRequirements) <> " extent=" <> showT (Vulkan.getField @"width" extent) <> "x" <> showT (Vulkan.getField @"height" extent)
   memory <- managedMemoryFor pdev dev memoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
   liftIO $ Vulkan.vkBindImageMemory dev image memory 0 >>= throwVkResult
   pure image

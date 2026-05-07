@@ -3,7 +3,7 @@ module Graphics.Haskan (runHaskan) where
 import Data.Text (Text)
 import Graphics.Haskan.Engine (EngineConfig (..))
 import Graphics.Haskan.Engine qualified as Engine
-import Graphics.Haskan.Logger (logI)
+import Graphics.Haskan.Logger (logInfo, LogCategory(..))
 
 data QueueFamily
   = Graphics
@@ -13,8 +13,8 @@ data QueueFamily
 
 runHaskan :: Text -> String -> IO ()
 runHaskan title meshName = do
-  logI "Initializing Haskan Engine"
-  logI "Starting Engine main loop"
+  logInfo LogGeneral "Initializing Haskan Engine"
+  logInfo LogGeneral "Starting Engine main loop"
   Engine.mainLoop
     meshName
     EngineConfig
@@ -25,4 +25,4 @@ runHaskan title meshName = do
         title = title,
         debugSocketPath = Just "/tmp/haskan2.sock"
       }
-  logI "Shutting down Haskan"
+  logInfo LogGeneral "Shutting down Haskan"

@@ -6,7 +6,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Coerce
 import Data.Text (Text)
-import Graphics.Haskan.Logger (logI, showT)
+import Graphics.Haskan.Logger (logInfo, LogCategory(..), showT)
 import Graphics.Haskan.Resources (alloc, alloc_)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
@@ -35,7 +35,7 @@ managedWindow title (width, height) = do
 
   windowExtensions <- windowExtensions window
 
-  logI ("Window extensions: " <> showT windowExtensions)
+  logInfo LogGeneral ("Window extensions: " <> showT windowExtensions)
   pure (windowExtensions, window)
 
 loadVulkanLibrary :: MonadIO m => m ()

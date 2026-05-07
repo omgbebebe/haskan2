@@ -14,6 +14,7 @@ import Control.Monad.Managed (MonadManaged)
 import Data.Foldable (for_)
 import Data.Traversable (for)
 import Foreign.Marshal.Array qualified
+import Graphics.Haskan.Logger (logDebug, logInfo, showT, LogCategory (..))
 import Graphics.Haskan.Resources (allocaAndPeekVkResult, throwVkResult)
 import Graphics.Haskan.Vertex qualified as Vertex
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
@@ -67,9 +68,10 @@ createRenderContext
         depthFormat = Vulkan.VK_FORMAT_D16_UNORM
         format = Vulkan.getField @"format" Swapchain.surfaceFormat
     surfaceExtent <- PhysicalDevice.surfaceExtent pdev surface
+    logDebug LogRender $ "createRenderContext extent=" <> showT (Vulkan.getField @"width" surfaceExtent) <> "x" <> showT (Vulkan.getField @"height" surfaceExtent)
     swapchain <- Swapchain.managedSwapchain device surface surfaceExtent
-    -- TODO: embed imageViews somewhere
     images <- Swapchain.getSwapchainImages device swapchain
+    logDebug LogRender $ "createRenderContext swapchain images=" <> showT (length images)
     imageViews <- for images (Haskan.managedImageView device format)
 
     renderPass <- RenderPass.managedRenderPass device Swapchain.surfaceFormat depthFormat
@@ -85,11 +87,14 @@ createRenderContext
 
     depthImage <- Swapchain.managedDepthImage pdev device surfaceExtent depthFormat
     depthImageView <- Swapchain.managedDepthView device depthImage depthFormat
+    logDebug LogRender "createRenderContext depth image created"
 
     framebuffers <- for imageViews $ \imageView ->
       Framebuffer.managedFramebuffer device renderPass surfaceExtent imageView depthImageView
+    logDebug LogRender $ "createRenderContext framebuffers=" <> showT (length framebuffers)
 
     graphicsCommandBuffers <- for framebuffers (\_ -> CommandBuffer.createCommandBuffer device graphicsCommandPool)
+    logDebug LogRender $ "createRenderContext commandBuffers=" <> showT (length graphicsCommandBuffers)
 
     pure
       RenderContext
@@ -111,6 +116,13 @@ createRenderContext
 
 drawFrame :: (MonadFail m, MonadIO m) => RenderContext -> Vulkan.VkSemaphore -> Int -> (Vulkan.Word32 -> Int -> IO ()) -> m RenderResult
 drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex recordAction = do
+  -- Wait for previous frame using this fence to complete before acquiring image
+  liftIO $ do
+    let renderFinishedFence = renderFinishedFences !! fenceIndex
+    Foreign.Marshal.Array.withArray [renderFinishedFence] $ \ptr -> do
+      Vulkan.vkWaitForFences device 1 ptr Vulkan.VK_TRUE maxBound >>= throwVkResult
+      Vulkan.vkResetFences device 1 ptr >>= throwVkResult
+
   (imageIndex, vkResult) <-
     liftIO $
       allocaAndPeekVkResult $
@@ -136,7 +148,7 @@ renderImage RenderContext {..} imageAvailableSemaphore fenceIndex imageIndex rec
       renderFinishedFence = renderFinishedFences !! fenceIndex
 
   liftIO $ do
-    -- Record command buffer for this frame
+    -- Now safe to record command buffer
     recordAction imageIndex fenceIndex
 
     let submitInfo =
@@ -151,9 +163,6 @@ renderImage RenderContext {..} imageAvailableSemaphore fenceIndex imageIndex rec
                 &* set @"signalSemaphoreCount" 1
                 &* setListRef @"pSignalSemaphores" [renderFinishedSemaphore]
             )
-    Foreign.Marshal.Array.withArray [renderFinishedFence] $ \ptr -> do
-      Vulkan.vkWaitForFences device 1 ptr Vulkan.VK_TRUE maxBound >>= throwVkResult
-      Vulkan.vkResetFences device 1 ptr >>= throwVkResult
     withPtr submitInfo $ \siPtr ->
       Vulkan.vkQueueSubmit graphicsQueueHandler 1 siPtr renderFinishedFence >>= throwVkResult
   pure (imageIndex)

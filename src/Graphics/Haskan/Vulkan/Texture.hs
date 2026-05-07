@@ -8,6 +8,7 @@ import Data.Bits
 import Data.Vector.Storable qualified
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word8)
+import Graphics.Haskan.Logger (logDebug, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
 import Graphics.Haskan.Vulkan.Buffer qualified as Haskan
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as Haskan
@@ -227,9 +228,10 @@ createTextureResource rm pdev dev filePath queue commandBuffer = do
   imageMemoryRequirements <-
     allocaAndPeek_
       (Vulkan.vkGetImageMemoryRequirements dev image)
+  logDebug LogTexture $ "texture image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " width=" <> showT width <> " height=" <> showT height
 
   imageMemory <-
-    Haskan.managedMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   liftIO $ bindImageMemory dev image imageMemory 0
 
@@ -254,12 +256,10 @@ createTextureResource rm pdev dev filePath queue commandBuffer = do
       Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
 
   liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
-  imageView <- Haskan.managedImageView dev format image
+  imageView <- Haskan.createImageView dev format image
 
-  -- Destroy staging resources immediately
-  liftIO $ do
-    Vulkan.vkDestroyBuffer dev stagingBuffer Vulkan.vkNullPtr
-    Vulkan.vkFreeMemory dev stagingMemory Vulkan.vkNullPtr
+  -- Staging buffer/memory are MonadManaged; they will be cleaned up when the
+  -- renderLoop's MonadManaged scope exits.  Do NOT destroy them here.
 
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 

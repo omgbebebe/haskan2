@@ -20,7 +20,7 @@ import Data.Text (Text)
 import Foreign.Marshal.Alloc qualified
 import Foreign.Marshal.Array qualified
 import Foreign.Storable (Storable, peek)
-import Graphics.Haskan.Logger (logI, showT)
+import Graphics.Haskan.Logger (logInfo, showT, LogCategory (..))
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 
 alloc :: MonadManaged m => Text -> IO a -> (a -> IO b) -> m a
@@ -28,8 +28,8 @@ alloc resName create destroy =
   using
     ( managed
         ( bracket
-            (logI ("allocate " <> resName) *> create)
-            (\r -> logI ("deallocate " <> resName) *> (destroy r))
+            (logInfo LogGeneral ("allocate " <> resName) *> create)
+            (\r -> logInfo LogGeneral ("deallocate " <> resName) *> (destroy r))
         )
     )
 

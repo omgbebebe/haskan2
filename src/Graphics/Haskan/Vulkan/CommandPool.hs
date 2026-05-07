@@ -31,7 +31,7 @@ createCommandPool dev queueFamilyIndex = do
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"queueFamilyIndex" (fromIntegral queueFamilyIndex)
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+               &* set @"flags" Vulkan.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
           )
   liftIO $
     withPtr

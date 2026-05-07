@@ -23,7 +23,7 @@ import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text
 import Graphics.Haskan.Debug.Interface
 import Graphics.Haskan.Input (ActionEvent)
-import Graphics.Haskan.Logger (logI)
+import Graphics.Haskan.Logger (logInfo, LogCategory(..))
 import Network.Socket
 import System.Directory (removeFile)
 import System.IO (Handle, hClose, hFlush, hPutStrLn, IOMode (..))
@@ -37,7 +37,7 @@ type CommandQueue = TQueue (DebugCommand, TMVar DebugResponse)
 
 startDebugServer :: MonadIO m => FilePath -> TQueue ActionEvent -> CommandQueue -> m DebugServerHandle
 startDebugServer socketPath actionQueue cmdQueue = liftIO $ do
-  logI $ "starting debug server on " <> Text.pack socketPath
+  logInfo LogGeneral $ "starting debug server on " <> Text.pack socketPath
   -- Remove old socket if exists
   handle (\(_ :: SomeException) -> pure ()) $ removeFile socketPath
 
@@ -53,7 +53,7 @@ startDebugServer socketPath actionQueue cmdQueue = liftIO $ do
 
 stopDebugServer :: MonadIO m => DebugServerHandle -> m ()
 stopDebugServer (DebugServerHandle tid path) = liftIO $ do
-  logI "stopping debug server"
+  logInfo LogGeneral "stopping debug server"
   killThread tid
   handle (\(_ :: SomeException) -> pure ()) $ removeFile path
 
@@ -69,7 +69,7 @@ handleConnection sock actionQueue cmdQueue = handle (\(_ :: SomeException) -> pu
     unless (BS.null line) $ do
       case parseDebugMessage (Text.decodeUtf8 line) of
         Left err -> do
-          logI $ "debug parse error: " <> Text.pack err
+          logInfo LogGeneral $ "debug parse error: " <> Text.pack err
           hPutStrLn hdl $ "{ \"error\": \"" ++ err ++ "\" }"
           hFlush hdl
           loop hdl

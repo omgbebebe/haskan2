@@ -5,6 +5,7 @@ import Control.Monad.Managed (MonadManaged)
 import Foreign qualified
 import Foreign.Marshal qualified
 import Foreign.Storable (Storable, sizeOf)
+import Graphics.Haskan.Logger (logDebug, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
 import Graphics.Haskan.Vertex (Vertex, VertexIndex)
 import Graphics.Haskan.Vulkan.Memory qualified as Memory
@@ -49,7 +50,7 @@ createBuffer dev data' usage = do
           )
   buffer <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateBuffer dev ciPtr Vulkan.vkNullPtr))
   memoryRequirements <- allocaAndPeek_ (Vulkan.vkGetBufferMemoryRequirements dev buffer)
-
+  logDebug LogBuffer $ "createBuffer size=" <> showT size <> " memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
   pure (buffer, memoryRequirements)
 
 createBufferMemory ::
@@ -58,7 +59,8 @@ createBufferMemory ::
   Vulkan.VkDevice ->
   Vulkan.VkMemoryRequirements ->
   m Vulkan.VkDeviceMemory
-createBufferMemory pdev dev memoryRequirements =
+createBufferMemory pdev dev memoryRequirements = do
+  logDebug LogBuffer $ "createBufferMemory memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
   Memory.allocateMemoryFor
     pdev
     dev
@@ -67,13 +69,8 @@ createBufferMemory pdev dev memoryRequirements =
       Vulkan.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
     ]
 
-managedBufferMemory ::
-  MonadManaged m =>
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
-  Vulkan.VkMemoryRequirements ->
-  m Vulkan.VkDeviceMemory
-managedBufferMemory pdev dev memoryRequirements =
+managedBufferMemory pdev dev memoryRequirements = do
+  logDebug LogBuffer $ "managedBufferMemory memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
   alloc
     "Buffer memory"
     (createBufferMemory pdev dev memoryRequirements)
@@ -87,24 +84,22 @@ bindBufferMemory ::
   [a] ->
   m ()
 bindBufferMemory dev buffer memory data' = liftIO $ do
+  logDebug LogBuffer $ "bindBufferMemory binding buffer, data size=" <> showT (length data')
   Vulkan.vkBindBufferMemory dev buffer memory 0 {- offset-} >>= throwVkResult
+  logDebug LogBuffer "bindBufferMemory buffer bound, copying data"
   copyDataToDeviceMemory dev memory data'
+  logDebug LogBuffer "bindBufferMemory data copied"
 
-copyDataToDeviceMemory ::
-  (MonadIO m, Storable a) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkDeviceMemory ->
-  [a] ->
-  m ()
 copyDataToDeviceMemory dev memory data' = liftIO $ do
   let size = case data' of
                [] -> 0
                (x:_) -> fromIntegral (length data' * Foreign.sizeOf x)
-
+  logDebug LogBuffer $ "copyDataToDeviceMemory size=" <> showT size
   memPtr <-
     allocaAndPeek (Vulkan.vkMapMemory dev memory 0 size Vulkan.VK_ZERO_FLAGS)
   Foreign.Marshal.pokeArray (Foreign.castPtr memPtr) data'
   Vulkan.vkUnmapMemory dev memory
+  logDebug LogBuffer "copyDataToDeviceMemory done"
 
 managedVertexBuffer :: (MonadManaged m) => Vulkan.VkPhysicalDevice -> Vulkan.VkDevice -> [Vertex] -> m Vulkan.VkBuffer
 managedVertexBuffer pdev dev vertices = do

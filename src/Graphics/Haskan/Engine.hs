@@ -33,7 +33,7 @@ import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot 
 import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), DebugCameraSnapshot (..), debugMessageToActionEvent, parseDebugMessage, encodeDebugResponse)
 import Graphics.Haskan.Debug.Server (DebugServerHandle, CommandQueue, startDebugServer, stopDebugServer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
-import Graphics.Haskan.Logger (logI)
+import Graphics.Haskan.Logger (logDebug, logInfo, showT, LogCategory(..))
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
@@ -120,7 +120,7 @@ data ControlMessage
 -- as arguments. It sets up the initial game state with default values.
 mainLoop :: MonadIO m => String -> EngineConfig -> m ()
 mainLoop meshName EngineConfig {..} = do
-  logI "starting mainLoop"
+  logInfo LogGeneral "starting mainLoop"
   camera <- liftIO $ STM.newTVarIO (Camera.defaultOrbitalCamera)
   isRunning <- liftIO $ STM.newTVarIO True
 
@@ -152,13 +152,13 @@ mainLoop meshName EngineConfig {..} = do
   mDebugServer <- liftIO $ case debugSocketPath of
     Just path -> do
       h <- startDebugServer path actionQueue debugCmdQueue
-      logI $ "debug server listening on " <> Text.pack path
+      logInfo LogGeneral $ "debug server listening on " <> Text.pack path
       pure (Just h)
     Nothing -> pure Nothing
 
   SDL.initialize @[] [SDL.InitEvents]
 
-  logI "Initialize base Render context"
+  logInfo LogGeneral "Initialize base Render context"
   let initWidth = 1920
       initHeight = 1080
   window <- Window.createWindow title (initWidth, initHeight)
@@ -184,18 +184,18 @@ mainLoop meshName EngineConfig {..} = do
         unless (quitting) inputLoop
 
   inputLoop
-  logI "sending Terminate message"
+  logInfo LogGeneral "sending Terminate message"
   liftIO $ STM.atomically $ TChan.writeTChan controlChannel Terminate
-  logI "waiting for other threads finished"
+  logInfo LogGeneral "waiting for other threads finished"
   liftIO $ mapM_ takeMVar [renderLoopFinished, stateUpdateLoopFinished]
 
   -- Stop debug server
   liftIO $ for_ mDebugServer stopDebugServer
 
-  logI "destroying SDL window"
+  logInfo LogGeneral "destroying SDL window"
   SDL.destroyWindow window
   SDL.quit
-  logI "mainLoop finished"
+  logInfo LogGeneral "mainLoop finished"
 
 -- | Render a frame in the render loop. Checks for control messages, gets the 
 -- current camera state, updates the uniform buffer, draws the frame, presents 
@@ -290,19 +290,19 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
             Render.FrameSuboptimal _ -> do
               fail "suboptimal"
             Render.FrameOutOfDate -> do
-              logI "resizing swapchain"
+              logInfo LogGeneral "resizing swapchain"
               pure (True, False)
             Render.FrameFailed err -> fail err
     Just Terminate -> do
-      logI "terminating render loop by signal"
+      logInfo LogGeneral "terminating render loop by signal"
       pure (True, True)
 
   frameEndTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   if needRestart
     then liftIO $ do
-      logI "waiting IDLE state for device"
+      logInfo LogGeneral "waiting IDLE state for device"
       Vulkan.vkDeviceWaitIdle device >>= throwVkResult
-      logI "terminating renderFrameLoop"
+      logInfo LogGeneral "terminating renderFrameLoop"
       pure terminating
     else do
       let renderTime = frameEndTime - frameStartTime
@@ -357,9 +357,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   descriptorSetLayout <- DescriptorSetLayout.managedDescriptorSetLayout device
 
-  descriptorPool <- DescriptorPool.managedDescriptorPool device 4 -- imageViewCount here
-  descriptorSets <- replicateM 4 (DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout])
-
+  descriptorPool <- DescriptorPool.managedDescriptorPool device Render.maxFramesInFlight
   pipelineLayout <- PipelineLayout.managedPipelineLayout device [descriptorSetLayout]
   graphicsCommandPool <- CommandPool.managedCommandPool device graphicsQueueFamilyIndex
 
@@ -404,30 +402,37 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       padTo256 mats = mats ++ replicate ((entityUniformSize - length mats * sizeOf (undefined :: M44 Foreign.C.CFloat)) `div` sizeOf (undefined :: M44 Foreign.C.CFloat)) identity
       initialMvpData = concatMap (\m -> padTo256 [m, identity, projectionMatrix]) (replicate numEntities modelMatrix)
 
+  logDebug LogRender $ "about to allocate frameDescriptorSets, maxFramesInFlight=" <> showT Render.maxFramesInFlight
+  frameDescriptorSets <- replicateM Render.maxFramesInFlight $
+    DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
+  logDebug LogRender $ "frameDescriptorSets allocated, count=" <> showT (length frameDescriptorSets)
+
+  logDebug LogBuffer $ "initialMvpData length=" <> showT (length initialMvpData) <> " size=" <> showT (length initialMvpData * sizeOf (undefined :: M44 Foreign.C.CFloat))
   frameMvpBuffers <- replicateM Render.maxFramesInFlight $
     Buffer.managedUniformBuffer physicalDevice device initialMvpData
+  logDebug LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
 
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
+  logDebug LogTexture "textureCommandBuffer created"
 
   -- Create texture resource via ResourceManager
+  logDebug LogTexture "about to create texture resource"
   textureHandle <- Texture.createTextureResource rm physicalDevice device "data/texture/page-14-droid-hubs.png" graphicsQueueHandler textureCommandBuffer
-  ECS.setMaterial ecsWorld entity1 textureHandle
-  ECS.setMaterial ecsWorld entity2 textureHandle
-  ECS.setMaterial ecsWorld entity3 textureHandle
+  logInfo LogTexture "texture resource created successfully"
 
   textureImageView <- do
     mView <- Texture.textureImageView rm textureHandle
     case mView of
-      Just view -> pure view
+      Just view -> do
+        logInfo LogTexture "texture image view resolved"
+        pure view
       Nothing -> fail "failed to resolve texture image view"
 
+  logInfo LogTexture "creating sampler"
   textureSampler <- Texture.managedSampler device
+  logInfo LogTexture "sampler created"
 
-  -- Allocate descriptor sets: one per frame-in-flight
-  -- (we reuse the same descriptor pool, but need enough capacity)
-  frameDescriptorSets <- replicateM Render.maxFramesInFlight $
-    DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
-
+  logInfo LogVulkan "updating descriptor sets"
   for_ (zip frameMvpBuffers frameDescriptorSets) $ \((buf, _), ds) ->
     DescriptorSet.updateDescriptorSetsRange
       device
@@ -436,6 +441,9 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       (fromIntegral entityUniformSize)
       textureImageView
       textureSampler
+  logInfo LogVulkan "descriptor sets updated"
+
+  logInfo LogRender "all resources created, entering render loop"
 
   let mkRenderContext =
         Render.createRenderContext
@@ -466,10 +474,10 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
               renderFrameLoop context 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp ecsWorld rm entityUniformSize indexCount
             outerLoop renderFrameLoopFinished
 
-  logI "Starting render loop"
+  logInfo LogGeneral "Starting render loop"
   liftIO $ outerLoop False
 
-  logI "renderLoop finished"
+  logInfo LogGeneral "renderLoop finished"
   -- Destroy resource-manager resources before managed scope exits
   destroyAllResources rm
   liftIO $ putMVar finishedSemaphore ()
@@ -595,11 +603,11 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
             threadDelay (round frameDelay)
             when isRunning $ loop (tFPS) _gameState newTime
           Just Terminate -> do
-            logI "terminating stateUpdate loop by signal"
+            logInfo LogGeneral "terminating stateUpdate loop by signal"
 
   currentTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   loop targetFPS gameState currentTime
-  logI "stateUpdateLoop finished"
+  logInfo LogGeneral "stateUpdateLoop finished"
   putMVar finishedSemaphore ()
 
 updateCamera ::

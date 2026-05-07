@@ -1,5 +1,6 @@
 module Graphics.Haskan.Vulkan.Instance where
 
+import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.ByteString (ByteString)
@@ -9,6 +10,7 @@ import Data.List (partition)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
+import Graphics.Haskan.Logger (logInfo, logWarn, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, peekVkList)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -16,7 +18,6 @@ import Graphics.Vulkan.Ext qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setStrListRef, setVkRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
-import System.IO (stderr)
 
 managedInstance :: MonadManaged m => [ByteString] -> m (Vulkan.VkInstance, [String])
 managedInstance extraExtensions =
@@ -34,10 +35,10 @@ createInstance extraExtensions = do
             tShow = T.pack . show
         for_
           optMissing
-          (\n -> liftIO $ T.hPutStrLn stderr ("Missing optional " <> type' <> ": " <> tShow n))
+          (\n -> logWarn LogVulkan ("Missing optional " <> type' <> ": " <> tShow n))
         for_
           reqMissing
-          (\n -> liftIO $ T.hPutStrLn stderr ("Missing required " <> type' <> ": " <> tShow n))
+          (\n -> logWarn LogVulkan ("Missing required " <> type' <> ": " <> tShow n))
         pure (reqHave <> optHave)
 
   availableExtensions <-
@@ -47,14 +48,30 @@ createInstance extraExtensions = do
     fmap (BC.pack . Vulkan.getStringField @"layerName")
       <$> peekVkList (Vulkan.vkEnumerateInstanceLayerProperties)
 
+  let validationLayerNames =
+        [ "VK_LAYER_KHRONOS_validation"
+        , "VK_LAYER_LUNARG_standard_validation"
+        ]
+      validationLayersAvailable =
+        filter (`elem` availableLayers) validationLayerNames
+      anyValidationAvailable = not (null validationLayersAvailable)
+
+  when (not anyValidationAvailable) $
+    logWarn LogVulkan "No Vulkan validation layers found (install vulkan-validation-layers for debug builds)"
+
   reqExtensions <- liftIO $ BC.packCString Vulkan.VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+
+  let optExtensions =
+        if anyValidationAvailable
+          then ["VK_EXT_validation_features"]
+          else []
 
   extensions <-
     fmap BC.unpack
       <$> partitionOptReq
         "extension"
         availableExtensions
-        ["VK_EXT_validation_features"]
+        optExtensions
         (reqExtensions : extraExtensions)
 
   layers <-
@@ -62,7 +79,7 @@ createInstance extraExtensions = do
       <$> partitionOptReq
         "layer"
         availableLayers
-        ["VK_LAYER_KHRONOS_validation"]
+        validationLayerNames
         []
 
   let appInfo =

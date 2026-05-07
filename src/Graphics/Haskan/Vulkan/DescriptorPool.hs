@@ -20,7 +20,7 @@ createDescriptorPool :: MonadIO m => Vulkan.VkDevice -> Int -> m Vulkan.VkDescri
 createDescriptorPool dev imageViewCount = do
   let poolSize =
         Vulkan.createVk
-          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
               &* set @"descriptorCount" (fromIntegral imageViewCount)
           )
       samplerPoolSize =

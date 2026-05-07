@@ -7,6 +7,7 @@ import Data.Bits
 import Data.Foldable (for_)
 import Foreign qualified
 import Foreign.Marshal qualified
+import Graphics.Haskan.Logger (logDebug, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -35,6 +36,8 @@ allocateMemoryFor ::
   [Vulkan.VkMemoryPropertyFlags] ->
   m Vulkan.VkDeviceMemory
 allocateMemoryFor pdev dev memoryRequirements memoryRequiredFlags = do
+  let allocSize = Vulkan.getField @"size" memoryRequirements
+  logDebug LogVulkan $ "allocateMemoryFor size=" <> showT allocSize <> " memTypeBits=" <> showT (Vulkan.getField @"memoryTypeBits" memoryRequirements)
   memoryProperties <-
     allocaAndPeek_ (Vulkan.vkGetPhysicalDeviceMemoryProperties pdev)
   let memoryTypeCount =
