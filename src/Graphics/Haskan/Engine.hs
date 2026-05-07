@@ -45,6 +45,7 @@ import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
+import Graphics.Haskan.BoundingBox (BBox (..), bboxDiagonal, emptyBBox, fromPoints, mergeBBox, mergePoint)
 import Graphics.Haskan.Resources (throwVkResult)
 import Graphics.Haskan.Utils.ObjLoader qualified as ObjLoader
 import Graphics.Haskan.Vertex (Vertex (..))
@@ -81,6 +82,7 @@ import Linear.Matrix (identity, transpose, (!*), (!*!))
 import Linear.Projection qualified
 import Linear.Quaternion (Quaternion (..))
 import SDL qualified
+import System.IO.Unsafe (unsafePerformIO)
 import System.Clock (Clock (..), getTime, toNanoSecs)
 
 toListOfV4 :: V4 (V4 a) -> [[a]]
@@ -282,8 +284,9 @@ renderFrameLoop ::
   ResourceManager ->
   Int ->
   Vulkan.VkSampler ->
+  [[Vulkan.VkDescriptorSet]] ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -341,14 +344,14 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                 let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIdx
                     gBufferFramebuffer = drGBufferFramebuffers !! fromIntegral imageIdx
                     lightingFramebuffer = drLightingFramebuffers !! fromIntegral imageIdx
-                    gBufferDescriptorSet = rcDescriptorSets !! frameIdx
+                    frameEntityDescriptorSets = map (!! frameIdx) entityDescriptorSets
                     lightingDescriptorSet = drLightingDescriptorSets !! fromIntegral imageIdx
                     gBufferImagesForFrame = drGBufferImages !! fromIntegral imageIdx
                     gBufferPassCtx = PassContext
                       { pcCommandBuffer = commandBuffer
                       , pcPipeline = drGBufferPipeline
                       , pcPipelineLayout = drGBufferPipelineLayout
-                      , pcDescriptorSet = gBufferDescriptorSet
+                      , pcDescriptorSet = Vulkan.vkNullPtr  -- not used with per-entity sets
                       , pcFramebuffer = gBufferFramebuffer
                       , pcRenderPass = drGBufferRenderPass
                       , pcExtent = rcSurfaceExtent
@@ -370,7 +373,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdGBufferFramebuffer = gBufferFramebuffer
                         , dpdGBufferPipeline = drGBufferPipeline
                         , dpdGBufferLayout = drGBufferPipelineLayout
-                        , dpdGBufferDescriptor = gBufferDescriptorSet
+                        , dpdGBufferDescriptors = frameEntityDescriptorSets
                         , dpdGBufferSampler = textureSampler
                         , dpdDrawList = drawList
                         , dpdEntityUniformSize = entityUniformSize
@@ -452,6 +455,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         rm
         entityUniformSize
         textureSampler
+        entityDescriptorSets
 
 -- | Main rendering loop.
 --
@@ -497,7 +501,6 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   descriptorSetLayout <- DescriptorSetLayout.managedDescriptorSetLayout device
 
-  descriptorPool <- DescriptorPool.managedDescriptorPool device Render.maxFramesInFlight
   pipelineLayout <- PipelineLayout.managedPipelineLayout device [descriptorSetLayout]
   graphicsCommandPool <- CommandPool.managedCommandPool device graphicsQueueFamilyIndex
 
@@ -512,26 +515,38 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   let isGLTF = ".gltf" `Text.isSuffixOf` Text.pack meshName || ".glb" `Text.isSuffixOf` Text.pack meshName
 
   -- Create ECS World and load scene
-  (ecsWorld, numEntities) <- if isGLTF
+  (ecsWorld, numEntities, sceneBounds) <- if isGLTF
     then do
       -- Load glTF scene
       result <- importGLTF rm physicalDevice device graphicsQueueHandler textureCommandBuffer meshName
       let world = girWorld result
           meshes = girMeshes result
+          textures = girTextures result
 
-      -- Add ground plane
-      let groundMesh = Mesh.groundPlaneMeshGrid 50 50.0
+      -- Compute scene bounding box from all mesh vertices
+      let sceneBbox = computeSceneBounds meshes rm
+      logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
+
+      -- Add ground plane with checkerboard texture
+      let groundMesh = Mesh.groundPlaneMesh 50.0
       groundMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
+      let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
+      checkerTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
       groundEntity <- ECS.spawnEntity world
       ECS.setTransform world groundEntity (Transform (V3 0 0 (-0.5)) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
       ECS.setMesh world groundEntity groundMeshHandle
+      ECS.setMaterial world groundEntity checkerTexHandle
 
-      pure (world, length meshes + 1)  -- glTF meshes + ground plane
+      pure (world, length meshes + 1, sceneBbox)
     else do
       -- Load OBJ model (original behavior)
       world <- ECS.createWorld
       (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj ("data/models/obj/" <> meshName)
       meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
+
+      -- Compute bounds from OBJ mesh
+      let objBounds = computeMeshBounds mesh
+      logInfo LogGeneral $ "OBJ mesh bounds: " <> showT objBounds
 
       -- Spawn 3 cube entities at different positions
       entity1 <- ECS.spawnEntity world
@@ -546,14 +561,25 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       ECS.setTransform world entity3 (Transform (V3 (-2) 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
       ECS.setMesh world entity3 meshHandle
 
-      -- Add ground plane
-      let groundMesh = Mesh.groundPlaneMeshGrid 50 50.0
+      -- Add ground plane with checkerboard texture
+      let groundMesh = Mesh.groundPlaneMesh 50.0
       groundMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
+      let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
+      checkerTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
       groundEntity <- ECS.spawnEntity world
       ECS.setTransform world groundEntity (Transform (V3 0 0 (-0.5)) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
       ECS.setMesh world groundEntity groundMeshHandle
+      ECS.setMaterial world groundEntity checkerTexHandle
 
-      pure (world, 4)  -- 3 cubes + ground plane
+      pure (world, 4, objBounds)  -- 3 cubes + ground plane
+
+  -- Adjust camera based on scene bounds
+  worldState <- liftIO $ STM.readTVarIO (world gameState)
+  let tvCamera = activeCamera worldState
+  currentCam <- liftIO $ STM.readTVarIO tvCamera
+  let adjustedCam = adjustCameraForScene sceneBounds currentCam
+  liftIO $ STM.atomically $ STM.writeTVar tvCamera adjustedCam
+  logInfo LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance adjustedCam)
 
   -- Create per-frame uniform buffers for multi-entity rendering
   -- Each entity gets 256 bytes (padded from 192 bytes for 3 M44 matrices)
@@ -562,11 +588,6 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       padTo256 :: [M44 Foreign.C.CFloat] -> [M44 Foreign.C.CFloat]
       padTo256 mats = mats ++ replicate ((entityUniformSize - length mats * sizeOf (undefined :: M44 Foreign.C.CFloat)) `div` sizeOf (undefined :: M44 Foreign.C.CFloat)) identity
       initialMvpData = concatMap (\m -> padTo256 [m, identity, projectionMatrix]) (replicate numEntities modelMatrix)
-
-  logDebug LogRender $ "about to allocate frameDescriptorSets, maxFramesInFlight=" <> showT Render.maxFramesInFlight
-  frameDescriptorSets <- replicateM Render.maxFramesInFlight $
-    DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
-  logDebug LogRender $ "frameDescriptorSets allocated, count=" <> showT (length frameDescriptorSets)
 
   logDebug LogBuffer $ "initialMvpData length=" <> showT (length initialMvpData) <> " size=" <> showT (length initialMvpData * sizeOf (undefined :: M44 Foreign.C.CFloat))
   frameMvpBuffers <- replicateM Render.maxFramesInFlight $
@@ -601,16 +622,44 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   textureSampler <- Texture.managedSampler device
   logInfo LogTexture "sampler created"
 
-  logInfo LogVulkan "updating descriptor sets"
-  for_ (zip frameMvpBuffers frameDescriptorSets) $ \((buf, _), ds) ->
-    DescriptorSet.updateDescriptorSetsRange
-      device
-      ds
-      buf
-      (fromIntegral entityUniformSize)
-      textureImageView
-      textureSampler
-  logInfo LogVulkan "descriptor sets updated"
+  -- Extract initial draw list to get entity materials for descriptor set setup
+  initialDrawList <- extractDrawList ecsWorld rm
+  logInfo LogRender $ "initial draw list has " <> showT (length initialDrawList) <> " entities"
+
+  -- Create descriptor pool sized for per-entity descriptor sets
+  let totalDescriptorSets = numEntities * Render.maxFramesInFlight
+  descriptorPool <- DescriptorPool.managedDescriptorPool device totalDescriptorSets
+  logDebug LogRender $ "descriptor pool created for " <> showT totalDescriptorSets <> " sets"
+
+  -- Allocate per-entity, per-frame descriptor sets
+  allDescriptorSets <- replicateM totalDescriptorSets $
+    DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
+  logDebug LogRender $ "allocated " <> showT (length allDescriptorSets) <> " descriptor sets"
+
+  -- Organize descriptor sets: entityDescriptorSets !! entityIdx !! frameIdx
+  let entityDescriptorSets =
+        [ [ allDescriptorSets !! (e * Render.maxFramesInFlight + f)
+          | f <- [0 .. Render.maxFramesInFlight - 1]
+          ]
+        | e <- [0 .. numEntities - 1]
+        ]
+
+  -- Update each descriptor set with frame buffer and entity texture
+  logInfo LogVulkan "updating per-entity descriptor sets"
+  for_ (zip [0..] initialDrawList) $ \(entityIdx, dc) -> do
+    let entityTexView = case dcMaterial dc of
+          Just mat -> trImageView mat
+          Nothing  -> textureImageView
+    for_ (zip [0..] frameMvpBuffers) $ \(frameIdx, (buf, _)) -> do
+      let ds = entityDescriptorSets !! entityIdx !! frameIdx
+      DescriptorSet.updateDescriptorSetsRange
+        device
+        ds
+        buf
+        (fromIntegral entityUniformSize)
+        entityTexView
+        textureSampler
+  logInfo LogVulkan "per-entity descriptor sets updated"
 
   logInfo LogRender "all resources created, entering render loop"
 
@@ -622,7 +671,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           pipelineLayout
           vertShader
           fragShader
-          frameDescriptorSets
+          []  -- frameDescriptorSets no longer used for g-buffer
           graphicsCommandPool
           graphicsQueueHandler
           presentQueueHandler
@@ -642,7 +691,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
               with (createDeferredResources physicalDevice device context descriptorSetLayout gbufVertShader gbufFragShader lightVertShader lightFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets
             outerLoop renderFrameLoopFinished
 
 
@@ -718,6 +767,12 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
                             ( V3 ((fromIntegral x) / frameDelay) ((fromIntegral y) / frameDelay) 0.0
                             )
                         ]
+                    )
+                (Zoom amount, _) ->
+                  STM.atomically
+                    ( updateCamera
+                        (activeCamera worldState)
+                        [Camera.Zoom (realToFrac amount)]
                     )
                 (Escape, _) -> STM.atomically $ STM.writeTVar (isRunning gameState) False
                 (FrameInspect, True) -> STM.atomically $ STM.writeTVar (inspectFrame gameState) True
@@ -795,3 +850,28 @@ updateCamera ::
   [Camera.Modifier Foreign.C.CFloat] ->
   STM ()
 updateCamera tv mods = STM.modifyTVar' tv (Camera.update <*> pure mods)
+
+-- | Compute bounding box from Mesh vertices.
+computeMeshBounds :: Mesh.Mesh -> BBox
+computeMeshBounds mesh =
+  fromPoints (map (fmap realToFrac . vPos) (Mesh.vertices mesh))
+
+-- | Compute bounding box from all mesh resources in the scene.
+computeSceneBounds :: [MeshHandle] -> ResourceManager -> BBox
+computeSceneBounds meshes rm = unsafePerformIO $ do
+  boundsList <- mapM (\mh -> do
+    mMesh <- lookupMesh rm mh
+    case mMesh of
+      Just meshRes -> pure $ mrBounds meshRes
+      Nothing -> pure emptyBBox
+    ) meshes
+  pure $ foldl mergeBBox emptyBBox boundsList
+
+-- | Set camera distance based on scene bounding box.
+adjustCameraForScene :: Camera a => BBox -> a -> a
+adjustCameraForScene bbox cam =
+  let diag = bboxDiagonal bbox
+      targetDist = diag * 1.8
+      -- Clamp to reasonable range
+      dist = max 3.0 (min 100.0 targetDist)
+  in setMaxDistance (setDistance cam (realToFrac dist)) (realToFrac (dist * 3.0))

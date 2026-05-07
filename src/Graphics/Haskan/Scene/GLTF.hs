@@ -15,6 +15,7 @@ import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
 import Data.Char qualified as Char
 import Data.Foldable (for_)
+import Data.List (foldl')
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -233,8 +234,14 @@ loadMesh ::
 loadMesh rm pdev dev gltfMesh = do
   -- For simplicity, merge all primitives into one mesh
   let primitives = meshPrimitives gltfMesh
-      allVertices = concatMap primitiveToVertices (Vector.toList primitives)
-      allIndices = concatMap primitiveToIndices (Vector.toList primitives)
+      accumulatePrimitives = foldl' accumulatePrimitive ([], [])
+      accumulatePrimitive (verts, idxs) prim =
+        let primVerts = primitiveToVertices prim
+            primIdxs = primitiveToIndices prim
+            offset = length verts
+            offsetIdxs = map (+ fromIntegral offset) primIdxs
+        in (verts ++ primVerts, idxs ++ offsetIdxs)
+      (allVertices, allIndices) = accumulatePrimitives (Vector.toList primitives)
   Buffer.createMeshResource rm pdev dev allVertices allIndices
 
 -- | Convert a glTF primitive to engine vertices.
@@ -250,12 +257,14 @@ primitiveToVertices prim =
       -- Zip them together
       nCount = length normals
       uvCount = length texCoords
+      -- Flip V coordinate to match Vulkan convention (glTF V=0 is bottom-left, Vulkan V=0 is top-left)
+      flipV (V2 u v) = V2 u v
    in zipWith3
         (\pos norm uv ->
           Vertex
             { vPos = v3ToCFloat pos
             , vNorm = if nCount > 0 then v3ToCFloat norm else v3ToCFloat defaultNormal
-            , vTexUV = if uvCount > 0 then v2ToCFloat uv else v2ToCFloat defaultUV
+            , vTexUV = if uvCount > 0 then v2ToCFloat (flipV uv) else v2ToCFloat defaultUV
             , vCol = v3ToCFloat defaultColor
             }
         )

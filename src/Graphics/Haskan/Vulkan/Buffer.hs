@@ -7,7 +7,8 @@ import Foreign.Marshal qualified
 import Foreign.Storable (Storable, sizeOf)
 import Graphics.Haskan.Logger (logDebug, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
-import Graphics.Haskan.Vertex (Vertex, VertexIndex)
+import Graphics.Haskan.BoundingBox (BBox, fromPoints)
+import Graphics.Haskan.Vertex (Vertex (..), VertexIndex)
 import Graphics.Haskan.Vulkan.Memory qualified as Memory
 import Graphics.Haskan.Vulkan.Resources
 import Graphics.Vulkan qualified as Vulkan
@@ -188,12 +189,14 @@ createMeshResource rm pdev dev vertices indices = do
 
   meshH <- MeshHandle <$> allocHandle (rmNextId rm)
 
-  let mesh =
+  let bounds = fromPoints (map (fmap realToFrac . vPos) vertices)
+      mesh =
         MeshResource
           { mrHandle = meshH
           , mrVertexBuffer = vertBuf
           , mrIndexBuffer = idxBuf
           , mrIndexCount = length indices
+          , mrBounds = bounds
           }
 
   registerMesh rm mesh

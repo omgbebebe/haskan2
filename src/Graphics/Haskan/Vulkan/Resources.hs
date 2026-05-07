@@ -43,6 +43,7 @@ import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable)
 import Data.Word (Word64)
 import GHC.Generics (Generic)
+import Graphics.Haskan.BoundingBox (BBox)
 import Graphics.Vulkan qualified as Vulkan
 
 -- | Opaque handle for buffer resources.
@@ -77,6 +78,7 @@ data MeshResource = MeshResource
   , mrVertexBuffer :: !BufferResource
   , mrIndexBuffer :: !BufferResource
   , mrIndexCount :: !Int
+  , mrBounds :: !BBox
   }
 
 -- | Texture with image, view, memory, and cleanup action.

@@ -191,9 +191,9 @@ createSampler dev =
               &* set @"magFilter" Vulkan.VK_FILTER_LINEAR
               &* set @"minFilter" Vulkan.VK_FILTER_LINEAR
               &* set @"mipmapMode" Vulkan.VK_SAMPLER_MIPMAP_MODE_LINEAR
-              &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-              &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-              &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+              &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+              &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
               &* set @"mipLodBias" 0.0
               &* set @"anisotropyEnable" Vulkan.VK_FALSE
               &* set @"maxAnisotropy" 1.0

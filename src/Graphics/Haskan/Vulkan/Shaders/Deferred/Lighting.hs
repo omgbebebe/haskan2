@@ -23,16 +23,18 @@ vertex :: ShaderModule "main" VertexShader VertexDefs _
 vertex = shader do
   -- Fullscreen triangle: vertex index 0,1,2
   -- Map to clip-space positions:
-  --   0: (-1, -1) -> UV (0, 0)
-  --   1: ( 3, -1) -> UV (2, 0)
-  --   2: (-1,  3) -> UV (0, 2)
-  -- This covers the entire screen with a single large triangle
+  --   0: (-1, -1) -> UV (0, 1)
+  --   1: ( 3, -1) -> UV (2, 1)
+  --   2: (-1,  3) -> UV (0,-1)
+  -- This covers the entire screen with a single large triangle.
+  -- V is flipped so screen Y aligns with Vulkan texture V
+  -- (screen top -> UV v=0 -> texture top).
   vertIdx <- get @"gl_VertexIndex"
   let fi = fromIntegral vertIdx :: Code Float
       x = if fi == 0 then (-1) else if fi == 1 then 3 else (-1)
       y = if fi == 0 then (-1) else if fi == 1 then (-1) else 3
       u = if fi == 0 then 0 else if fi == 1 then 2 else 0
-      v = if fi == 0 then 0 else if fi == 1 then 0 else 2
+      v = if fi == 0 then 1 else if fi == 1 then 1 else (-1)
   put @"out_uv" (Vec2 u v)
   put @"gl_Position" (Vec4 x y 0 1)
 

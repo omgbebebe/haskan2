@@ -28,7 +28,7 @@ data DeferredPassData = DeferredPassData
   , dpdGBufferFramebuffer :: !Vulkan.VkFramebuffer
   , dpdGBufferPipeline    :: !Vulkan.VkPipeline
   , dpdGBufferLayout      :: !Vulkan.VkPipelineLayout
-  , dpdGBufferDescriptor  :: !Vulkan.VkDescriptorSet
+  , dpdGBufferDescriptors :: ![Vulkan.VkDescriptorSet]
   , dpdGBufferSampler     :: !Vulkan.VkSampler
   , dpdDrawList           :: ![DrawCall]
   , dpdEntityUniformSize  :: !Int
@@ -60,13 +60,8 @@ buildDeferredGraph DeferredPassData {..} = do
                 idxBuf  = brVkBuffer (mrIndexBuffer mesh)
                 idxCnt  = mrIndexCount mesh
                 dynamicOffset = fromIntegral (entityIdx * dpdEntityUniformSize)
-            -- Update descriptor set with entity's texture if available
-            case dcMaterial dc of
-              Just mat -> do
-                let texView = trImageView mat
-                DescriptorSet.updateTextureBinding dpdDevice dpdGBufferDescriptor dpdGBufferSampler texView 1
-              Nothing -> pure ()
-            Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
+                entityDescriptorSet = dpdGBufferDescriptors !! entityIdx
+            Foreign.Marshal.Array.withArray [entityDescriptorSet] $ \dsPtr ->
               Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
                 DescriptorSet.cmdBindDescriptorSets
                   commandBuffer

@@ -31,21 +31,25 @@ class Camera a where
   cameraForward :: a -> V3 Foreign.C.CFloat
   cameraTarget :: a -> V3 Foreign.C.CFloat
   cameraDistance :: a -> Foreign.C.CFloat
+  cameraMaxDistance :: a -> Foreign.C.CFloat
   cameraAzimuth :: a -> Foreign.C.CFloat
   cameraElevation :: a -> Foreign.C.CFloat
   setTarget :: a -> V3 Foreign.C.CFloat -> a
   setAngles :: a -> Foreign.C.CFloat -> Foreign.C.CFloat -> a
   setDistance :: a -> Foreign.C.CFloat -> a
+  setMaxDistance :: a -> Foreign.C.CFloat -> a
 
   cameraPosition _ = V3 0 0 0
   cameraForward _ = V3 0 0 (-1)
   cameraTarget _ = V3 0 0 0
   cameraDistance _ = 0
+  cameraMaxDistance _ = 1e9
   cameraAzimuth _ = 0
   cameraElevation _ = 0
   setTarget a _ = a
   setAngles a _ _ = a
   setDistance a _ = a
+  setMaxDistance a _ = a
 
 data OrbitalCamera = OrbitalCamera
   { target :: V3 Foreign.C.CFloat,
@@ -66,7 +70,7 @@ defaultOrbitalCamera =
   OrbitalCamera
     { target = V3 0.0 0.0 0.0,
       distance = 20.0,
-      minDistance = 1.0,
+      minDistance = 0.1,
       maxDistance = 20.0,
       orientation = Quaternion 1 (V3 0 0 0),
       azimuthBounds = Nothing,
@@ -108,6 +112,7 @@ instance Camera OrbitalCamera where
   cameraForward = orbitalCameraForward
   cameraTarget = target
   cameraDistance = distance
+  cameraMaxDistance = maxDistance
   cameraAzimuth = quatToAzimuth . orientation
   cameraElevation = quatToElevation . orientation
   setTarget cam t = cam { target = t }
@@ -116,6 +121,7 @@ instance Camera OrbitalCamera where
         elQ = axisAngle (V3 1 0 0) el
     in cam { orientation = elQ * azQ }
   setDistance cam d = cam { distance = max (minDistance cam) (min (maxDistance cam) d) }
+  setMaxDistance cam d = cam { maxDistance = d }
 
 updateOrbital :: OrbitalCamera -> [Modifier Foreign.C.CFloat] -> OrbitalCamera
 updateOrbital cam = foldl orbitalModify cam
@@ -145,7 +151,10 @@ orbitalModify cam@OrbitalCamera {..} mod =
           deltaQ = pitchQ * yawQ
           newOrientation = deltaQ * orientation
       in cam {orientation = newOrientation}
-    _ -> cam
+    (Zoom n) ->
+      -- Zoom changes the camera distance (negative = zoom out, positive = zoom in)
+      let newDist = max minDistance (min maxDistance (distance + n))
+      in cam {distance = newDist}
 
 updateCamera :: Camera c => c -> [Modifier Foreign.C.CFloat] -> c
 updateCamera cam mods = update cam mods

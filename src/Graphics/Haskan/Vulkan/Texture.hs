@@ -8,6 +8,7 @@ module Graphics.Haskan.Vulkan.Texture
   , createTextureResource
   , textureImageView
   , generateGridTexture
+  , generateCheckerboardTexture
   , createTextureFromData
   ) where
 import Codec.Picture
@@ -308,6 +309,23 @@ textureImageView :: MonadIO m => ResourceManager -> TextureHandle -> m (Maybe Vu
 textureImageView rm handle = do
   mTex <- lookupTexture rm handle
   pure $ fmap trImageView mTex
+
+-- | Generate a procedural checkerboard texture as RGBA8 pixel data.
+-- Checker pattern with given square size in pixels.
+generateCheckerboardTexture :: Int -> Int -> Int -> Data.Vector.Storable.Vector Word8
+generateCheckerboardTexture width height squareSize =
+  Data.Vector.Storable.generate (width * height * 4) $ \idx ->
+    let pixel = idx `div` 4
+        x = pixel `mod` width
+        y = pixel `div` width
+        sqX = x `div` squareSize
+        sqY = y `div` squareSize
+        isWhite = (sqX + sqY) `mod` 2 == 0
+     in case idx `mod` 4 of
+          0 -> if isWhite then 220 else 40   -- R
+          1 -> if isWhite then 220 else 40   -- G
+          2 -> if isWhite then 220 else 40   -- B
+          _ -> 255                        -- A
 
 -- | Generate a procedural grid texture as RGBA8 pixel data.
 -- Dark gray background with lighter gray grid lines every `spacing` pixels.

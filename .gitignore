@@ -11,6 +11,8 @@ snapshots/
 
 # Local library sources downloaded with `cabal get <pkg>` for reference
 linear-*/
+gltf-codec-*/
+gltf-loader-*/
 
 # Test assets (glTF sample models)
 glTF-Sample-Assets/

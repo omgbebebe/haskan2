@@ -127,7 +127,7 @@ createGraphicsPipeline dev layout renderPass vertShader fragShader swapchainExte
               &* set @"rasterizerDiscardEnable" Vulkan.VK_FALSE
               &* set @"polygonMode" Vulkan.VK_POLYGON_MODE_FILL
               &* set @"lineWidth" 1.0
-              &* set @"cullMode" Vulkan.VK_CULL_MODE_BACK_BIT
+              &* set @"cullMode" Vulkan.VK_CULL_MODE_NONE
               &* set @"frontFace" Vulkan.VK_FRONT_FACE_CLOCKWISE
               &* set @"depthBiasEnable" Vulkan.VK_FALSE
               &* set @"depthBiasConstantFactor" 0.0
