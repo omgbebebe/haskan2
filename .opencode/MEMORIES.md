@@ -47,6 +47,12 @@
 - Per-frame command buffer re-recording requires `VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`
 - Without this flag: `vkBeginCommandBuffer` fails with implicit reset validation error
 
+### Device Feature Enablement
+- **Always enable required features in `VkPhysicalDeviceFeatures` passed to `vkCreateDevice`**
+- Wireframe geometry shader SPIR-V declares `Geometry` capability → requires `geometryShader = VK_TRUE`
+- Bug: geometry shader used but feature not enabled → validation errors `VUID-VkShaderModuleCreateInfo-pCode-08740` and `VUID-VkPipelineShaderStageCreateInfo-stage-00704`, followed by driver UB and app hang after 3-4 seconds
+- Fix: query `vkGetPhysicalDeviceFeatures`, create `VkPhysicalDeviceFeatures` with `geometryShader = VK_TRUE` if supported, pass pointer via `withPtr`
+
 ## CLI Options (optparse-applicative)
 ```
 Usage: haskan2 MODEL [-t|--timeout SECONDS] [-T|--title TITLE] [--debug-socket PATH]

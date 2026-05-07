@@ -52,10 +52,12 @@ createRenderDevice pdev surface layers = do
 
 createDevice :: MonadIO m => Vulkan.VkPhysicalDevice -> [Int] -> [String] -> m Vulkan.VkDevice
 createDevice dev queueFamilyIndices enabledLayers = do
-  let deviceFlags = Vulkan.VK_ZERO_FLAGS
+  availableFeatures <- liftIO $ allocaAndPeek_ (Vulkan.vkGetPhysicalDeviceFeatures dev)
+  let geometrySupported = Vulkan.getField @"geometryShader" availableFeatures == Vulkan.VK_TRUE
+      deviceFlags = Vulkan.VK_ZERO_FLAGS
       queueFlags = Vulkan.VK_ZERO_FLAGS
       enabledExtensions = [Vulkan.VK_KHR_SWAPCHAIN_EXTENSION_NAME]
-      enabledFeatures = Vulkan.VK_NULL
+      enabledFeatures = Vulkan.createVk (set @"geometryShader" (if geometrySupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE))
       queueCreateInfos :: [Vulkan.VkDeviceQueueCreateInfo]
       queueCreateInfos =
         map
@@ -70,7 +72,7 @@ createDevice dev queueFamilyIndices enabledLayers = do
                 )
           )
           queueFamilyIndices
-      createInfo =
+      createInfo featuresPtr =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
               &* set @"pNext" Vulkan.VK_NULL
@@ -81,9 +83,11 @@ createDevice dev queueFamilyIndices enabledLayers = do
               &* setStrListRef @"ppEnabledLayerNames" enabledLayers
               &* set @"enabledExtensionCount" (fromIntegral (length enabledExtensions))
               &* setListRef @"ppEnabledExtensionNames" enabledExtensions
-              &* set @"pEnabledFeatures" enabledFeatures
+              &* set @"pEnabledFeatures" featuresPtr
           )
-   in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateDevice dev ciPtr Vulkan.vkNullPtr))
+  liftIO $ withPtr enabledFeatures $ \featPtr ->
+    withPtr (createInfo featPtr) $ \ciPtr ->
+      allocaAndPeek (Vulkan.vkCreateDevice dev ciPtr Vulkan.vkNullPtr)
 
 getDeviceQueueHandler ::
   MonadIO m =>

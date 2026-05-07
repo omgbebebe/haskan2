@@ -242,6 +242,12 @@ loadMesh rm pdev dev gltfMesh = do
             offsetIdxs = map (+ fromIntegral offset) primIdxs
         in (verts ++ primVerts, idxs ++ offsetIdxs)
       (allVertices, allIndices) = accumulatePrimitives (Vector.toList primitives)
+  logInfo LogGeneral $ "glTF mesh: " <> showT (length allVertices) <> " vertices, " <> showT (length allIndices) <> " indices"
+  let uvs = map vTexUV allVertices
+      (uvals, vvals) = unzip [(realToFrac u, realToFrac v) | V2 u v <- uvs]
+      umin = minimum uvals; umax = maximum uvals
+      vmin = minimum vvals; vmax = maximum vvals
+  logInfo LogGeneral $ "UV range: U[" <> showT umin <> ", " <> showT umax <> "], V[" <> showT vmin <> ", " <> showT vmax <> "]"
   Buffer.createMeshResource rm pdev dev allVertices allIndices
 
 -- | Convert a glTF primitive to engine vertices.
@@ -276,7 +282,8 @@ primitiveToVertices prim =
 primitiveToIndices :: GLTFTypes.MeshPrimitive -> [Word32]
 primitiveToIndices prim =
   let idxs = meshPrimitiveIndices prim
-   in map fromIntegral (Vector.toList idxs)
+      result = map fromIntegral (Vector.toList idxs)
+   in result
 
 -- | Build ECS scene graph from glTF nodes.
 buildSceneGraph ::
@@ -343,9 +350,13 @@ processNode world gltf meshes materialTextures nodeIdx parentEntity = do
                 Just matIdx -> do
                   when (matIdx >= 0 && matIdx < length materialTextures) $ do
                     case materialTextures !! matIdx of
-                      Just texHandle -> ECS.setMaterial world entity texHandle
-                      Nothing -> pure ()
-                Nothing -> pure ()
+                      Just texHandle -> do
+                        logInfo LogGeneral $ "entity " <> showT entity <> " material " <> showT matIdx <> " -> texture assigned"
+                        ECS.setMaterial world entity texHandle
+                      Nothing -> do
+                        logInfo LogGeneral $ "entity " <> showT entity <> " material " <> showT matIdx <> " -> NO texture (using fallback)"
+                Nothing -> do
+                  logInfo LogGeneral $ "entity " <> showT entity <> " -> no material"
             [] -> pure ()
     Nothing -> pure ()
 

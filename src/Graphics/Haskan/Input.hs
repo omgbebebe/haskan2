@@ -30,6 +30,7 @@ data Action
   | Zoom Float
   | Escape
   | FrameInspect
+  | ToggleWireframe
   deriving (Eq, Show, Generic)
 
 type ActionEvent = (Action, Bool)
@@ -62,6 +63,7 @@ defaultBindings =
       (([], SDL.KeycodeA), StrafeLeft),
       (([], SDL.KeycodeD), StrafeRight),
       (([], SDL.KeycodeF12), FrameInspect),
+      (([], SDL.KeycodeF3), ToggleWireframe),
       (([LShift], SDL.KeycodeQ), Escape)
     ]
 

@@ -24,6 +24,9 @@ mkShell {
     pkg-config
     socat
     mermaid-cli
+    imagemagick
+    feh
+    (python3.withPackages (p :[ p.requests ]))
   ] ++ nativeLibs;
   shellHook = ''
     export LD_LIBRARY_PATH="${lib.makeLibraryPath nativeLibs}:$LD_LIBRARY_PATH"

@@ -57,6 +57,7 @@ import Graphics.Haskan.Vulkan.DescriptorPool qualified as DescriptorPool
 import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.DescriptorSetLayout qualified as DescriptorSetLayout
 import Graphics.Haskan.Vulkan.Device qualified as Device
+import Graphics.Haskan.Vulkan.DeviceCapabilities (DeviceCapabilities (..), queryDeviceCapabilities)
 import Graphics.Haskan.Vulkan.Fence qualified as Fence
 import Graphics.Haskan.Vulkan.Instance qualified as Instance
 import Graphics.Haskan.Vulkan.PhysicalDevice qualified as PhysicalDevice
@@ -126,7 +127,8 @@ data GameState cam = GameState
     strafeRight :: TVar Bool,
     inspectFrame :: TVar Bool,
     inspector :: TVar (Maybe FrameInspector),
-    renderDebugState :: TVar (Maybe RenderDebugInfo)
+    renderDebugState :: TVar (Maybe RenderDebugInfo),
+    wireframeEnabled :: TVar Bool
   }
 
 data RenderDebugInfo = RenderDebugInfo
@@ -192,6 +194,7 @@ mainLoop meshName EngineConfig {..} = do
   tvInspectFrame <- liftIO $ STM.newTVarIO False
   tvInspector <- liftIO $ STM.newTVarIO (Just (defaultInspector "snapshots"))
   tvRenderDebugState <- liftIO $ STM.newTVarIO Nothing
+  tvWireframeEnabled <- liftIO $ STM.newTVarIO True
 
   let gameState =
         GameState
@@ -204,6 +207,7 @@ mainLoop meshName EngineConfig {..} = do
           tvInspectFrame
           tvInspector
           tvRenderDebugState
+          tvWireframeEnabled
 
   -- Start debug server if configured
   mDebugServer <- liftIO $ case debugSocketPath of
@@ -286,8 +290,9 @@ renderFrameLoop ::
   Int ->
   Vulkan.VkSampler ->
   [[Vulkan.VkDescriptorSet]] ->
+  STM.TVar Bool ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets tvWireframe = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -366,6 +371,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                       , pcRenderPass = drLightingRenderPass
                       , pcExtent = rcSurfaceExtent
                       }
+                wireframeEnabled' <- liftIO $ STM.readTVarIO tvWireframe
                 -- Build deferred render graph for this frame
                 let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
                       buildDeferredGraph DeferredPassData
@@ -387,6 +393,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdGBufferImages = gBufferImagesForFrame
                         , dpdWireframePipeline = drWireframePipeline
                         , dpdWireframeLayout = drWireframePipelineLayout
+                        , dpdWireframeEnabled = wireframeEnabled'
                         }
                 -- Compile and execute graph
                 case Graph.compileGraph graphRes graphPasses of
@@ -459,6 +466,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         entityUniformSize
         textureSampler
         entityDescriptorSets
+        tvWireframe
 
 -- | Main rendering loop.
 --
@@ -694,6 +702,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       tvInspect = inspectFrame gameState
       tvInsp = inspector gameState
       tvRenderDebug = renderDebugState gameState
+      tvWireframe = wireframeEnabled gameState
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
@@ -702,7 +711,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
               with (createDeferredResources physicalDevice device context descriptorSetLayout gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets tvWireframe
             outerLoop renderFrameLoopFinished
 
 
@@ -788,6 +797,11 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
                 (Escape, _) -> STM.atomically $ STM.writeTVar (isRunning gameState) False
                 (FrameInspect, True) -> STM.atomically $ STM.writeTVar (inspectFrame gameState) True
                 (FrameInspect, False) -> pure ()
+                (ToggleWireframe, True) -> do
+                  current <- STM.readTVarIO (wireframeEnabled gameState)
+                  STM.atomically $ STM.writeTVar (wireframeEnabled gameState) (not current)
+                  logInfo LogGeneral $ "wireframe toggled: " <> showT (not current)
+                (ToggleWireframe, False) -> pure ()
             -- Handle debug commands with responses
             for_ debugCmds $ \(cmd, respVar) -> do
               case cmd of

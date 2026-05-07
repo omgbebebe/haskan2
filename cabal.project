@@ -1,6 +1,7 @@
 packages:
   ./
   ./3rdparty/fir/
+  ./gltf-loader-0.3.0.0/
 
 write-ghc-environment-files: always
 

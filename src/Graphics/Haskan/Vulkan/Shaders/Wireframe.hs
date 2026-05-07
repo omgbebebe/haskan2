@@ -14,20 +14,30 @@ module Graphics.Haskan.Vulkan.Shaders.Wireframe
 import FIR
 import Math.Linear
 
--- Vertex: pass through position and UV
+-- Vertex: transform by MVP (same UBO as g-buffer)
 type VertexDefs =
   '[ "in_position" ':-> Input '[Location 0] (V 3 Float)
    , "in_uv"       ':-> Input '[Location 1] (V 2 Float)
-   , "out_uv"      ':-> Output '[Location 0] (V 2 Float)
+   , "ubo"
+       ':-> Uniform
+              '[Binding 0, DescriptorSet 0]
+              ( Struct
+                  '[ "model" ':-> M 4 4 Float
+                   , "view" ':-> M 4 4 Float
+                   , "projection" ':-> M 4 4 Float
+                   ]
+              )
    , "main"        ':-> EntryPoint '[] Vertex
    ]
 
 vertex :: ShaderModule "main" VertexShader VertexDefs _
 vertex = shader do
-  pos <- get @"in_position"
-  uv  <- get @"in_uv"
-  put @"out_uv" uv
-  put @"gl_Position" (Vec4 (view @(Index 0) pos) (view @(Index 1) pos) (view @(Index 2) pos) 1)
+  ~(Vec3 x y z) <- get @"in_position"
+  projection <- use @(Name "ubo" :.: Name "projection")
+  model      <- use @(Name "ubo" :.: Name "model")
+  view       <- use @(Name "ubo" :.: Name "view")
+  let mvp = (projection !*! view) !*! model
+  put @"gl_Position" (mvp !*^ Vec4 x y z 1)
 
 -- Geometry: triangles -> line strip, emit 3 edges per triangle
 type GeometryDefs =
@@ -72,12 +82,12 @@ geometry = shader do
 
   pure (Lit ())
 
--- Fragment: bright green wireframe
+-- Fragment: bright green wireframe on albedo (Location 2)
 type FragmentDefs =
-  '[ "out_colour" ':-> Output '[Location 0] (V 4 Float)
+  '[ "out_albedo" ':-> Output '[Location 2] (V 4 Float)
    , "main"       ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
 
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do
-  put @"out_colour" (Vec4 0 1 0 1)
+  put @"out_albedo" (Vec4 0 1 0 1)
