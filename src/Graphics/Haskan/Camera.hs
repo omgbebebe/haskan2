@@ -10,7 +10,7 @@ import Linear.Matrix (M44 (..), (!*!))
 import Linear.Matrix qualified as Matrix
 import Linear.Metric (normalize)
 import Linear.Projection qualified as Projection
-import Linear.Quaternion (Quaternion, axisAngle, rotate)
+import Linear.Quaternion (Quaternion (..), axisAngle, rotate)
 import Linear.Quaternion qualified as Quat
 
 newtype ViewMatrix = ViewMatrix {unViewMatrix :: M44 Foreign.C.CFloat}
@@ -49,8 +49,7 @@ data OrbitalCamera = OrbitalCamera
     distance :: Foreign.C.CFloat,
     minDistance :: Foreign.C.CFloat,
     maxDistance :: Foreign.C.CFloat,
-    azimuthAngle :: Foreign.C.CFloat,
-    elevationAngle :: Foreign.C.CFloat,
+    orientation :: !(Quaternion Foreign.C.CFloat),
     azimuthBounds :: Maybe (V2 Foreign.C.CFloat),
     elevationBounds :: Maybe (V2 Foreign.C.CFloat),
     azimuthDumping :: Maybe Foreign.C.CFloat,
@@ -66,8 +65,7 @@ defaultOrbitalCamera =
       distance = 20.0,
       minDistance = 1.0,
       maxDistance = 20.0,
-      azimuthAngle = 0.0,
-      elevationAngle = 0.0,
+      orientation = Quaternion 1 (V3 0 0 0),
       azimuthBounds = Nothing,
       elevationBounds = Nothing,
       azimuthDumping = Nothing,
@@ -77,24 +75,28 @@ defaultOrbitalCamera =
 
 orbitalCameraPosition :: OrbitalCamera -> V3 Foreign.C.CFloat
 orbitalCameraPosition OrbitalCamera{..} =
-  let azQ = axisAngle (V3 0 1 0) azimuthAngle
-      elQ = axisAngle (V3 1 0 0) elevationAngle
-      combined = elQ * azQ
-      offset = V3 0 0 distance
-  in target + rotate combined offset
+  let offset = V3 0 0 distance
+  in target + rotate orientation offset
 
 orbitalCameraForward :: OrbitalCamera -> V3 Foreign.C.CFloat
 orbitalCameraForward OrbitalCamera{..} =
-  let azQ = axisAngle (V3 0 1 0) azimuthAngle
-      elQ = axisAngle (V3 1 0 0) elevationAngle
-      combined = elQ * azQ
-      dir = V3 0 0 (-1)
-  in normalize $ rotate combined dir
+  let dir = V3 0 0 (-1)
+  in normalize $ rotate orientation dir
 
 orbitalToMatrix :: OrbitalCamera -> ViewMatrix
 orbitalToMatrix cam =
   let pos = orbitalCameraPosition cam
   in ViewMatrix $ Projection.lookAt pos (target cam) (V3 0 1 0)
+
+-- | Extract azimuth (yaw around Y) from quaternion
+quatToAzimuth :: Quaternion Foreign.C.CFloat -> Foreign.C.CFloat
+quatToAzimuth (Quaternion qw (V3 qx qy qz)) =
+  atan2 (2 * (qw * qy + qx * qz)) (1 - 2 * (qy * qy + qx * qx))
+
+-- | Extract elevation (pitch around X) from quaternion
+quatToElevation :: Quaternion Foreign.C.CFloat -> Foreign.C.CFloat
+quatToElevation (Quaternion qw (V3 qx qy qz)) =
+  asin (2 * (qw * qx - qy * qz))
 
 instance Camera OrbitalCamera where
   update = updateOrbital
@@ -103,10 +105,13 @@ instance Camera OrbitalCamera where
   cameraForward = orbitalCameraForward
   cameraTarget = target
   cameraDistance = distance
-  cameraAzimuth = azimuthAngle
-  cameraElevation = elevationAngle
+  cameraAzimuth = quatToAzimuth . orientation
+  cameraElevation = quatToElevation . orientation
   setTarget cam t = cam { target = t }
-  setAngles cam az el = cam { azimuthAngle = az, elevationAngle = el }
+  setAngles cam az el =
+    let azQ = axisAngle (V3 0 1 0) az
+        elQ = axisAngle (V3 1 0 0) el
+    in cam { orientation = elQ * azQ }
   setDistance cam d = cam { distance = max (minDistance cam) (min (maxDistance cam) d) }
 
 updateOrbital :: OrbitalCamera -> [Modifier Foreign.C.CFloat] -> OrbitalCamera
@@ -118,9 +123,12 @@ orbitalModify cam@OrbitalCamera {..} mod =
     (MoveX n) -> cam {target = target + (V3 n 0.0 0.0)}
     (MoveY n) -> cam {target = target + (V3 0.0 0.0 n)}
     (Rotate (V3 yaw pitch roll)) ->
-      let yaw' = yaw + azimuthAngle
-          pitch' = pitch + elevationAngle
-       in cam {azimuthAngle = yaw', elevationAngle = pitch'}
+      -- Apply rotation deltas as quaternion rotations (avoids gimbal lock)
+      let yawQ = axisAngle (V3 0 1 0) yaw
+          pitchQ = axisAngle (V3 1 0 0) pitch
+          deltaQ = pitchQ * yawQ
+          newOrientation = deltaQ * orientation
+      in cam {orientation = newOrientation}
     _ -> cam
 
 updateCamera :: Camera c => c -> [Modifier Foreign.C.CFloat] -> c

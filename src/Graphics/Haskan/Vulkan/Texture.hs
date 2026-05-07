@@ -58,7 +58,7 @@ managedTexture pdev dev filePath queue commandBuffer = do
     Haskan.bindBufferMemory dev stagingBuffer stagingMemory dataList
     Haskan.copyDataToDeviceMemory dev stagingMemory dataList
 
-  let format = Vulkan.VK_FORMAT_R8G8B8A8_SRGB
+  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
       imageExtent =
         Vulkan.createVk
           ( set @"width" (fromIntegral width)
@@ -197,7 +197,7 @@ createTextureResource rm pdev dev filePath queue commandBuffer = do
     Haskan.bindBufferMemory dev stagingBuffer stagingMemory dataList
     Haskan.copyDataToDeviceMemory dev stagingMemory dataList
 
-  let format = Vulkan.VK_FORMAT_R8G8B8A8_SRGB
+  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
       imageExtent =
         Vulkan.createVk
           ( set @"width" (fromIntegral width)
