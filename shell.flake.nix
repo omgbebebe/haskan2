@@ -22,6 +22,7 @@ mkShell {
     cabal-install
     haskell-language-server
     pkg-config
+    socat
   ] ++ nativeLibs;
   shellHook = ''
     export LD_LIBRARY_PATH="${lib.makeLibraryPath nativeLibs}:$LD_LIBRARY_PATH"

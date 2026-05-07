@@ -59,6 +59,7 @@ library
                        Graphics.Haskan.Vulkan.Swapchain
                        Graphics.Haskan.Vulkan.Texture
                        Graphics.Haskan.Vulkan.Types
+                       Graphics.Haskan.Vulkan.Resources
                        Graphics.Haskan.Vulkan.VertexFormat
                        Graphics.Haskan.Debug.FrameInspector
                        Graphics.Haskan.Debug.Interface

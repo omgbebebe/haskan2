@@ -27,6 +27,9 @@ import Foreign.C qualified
 import GHC.Generics
 import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
+import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot (..), defaultInspector, buildFrameSnapshot)
+import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), DebugCameraSnapshot (..), debugMessageToActionEvent, parseDebugMessage, encodeDebugResponse)
+import Graphics.Haskan.Debug.Server (DebugServerHandle, CommandQueue, startDebugServer, stopDebugServer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (logI)
 import Graphics.Haskan.Mesh qualified as Mesh
@@ -47,13 +50,11 @@ import Graphics.Haskan.Vulkan.PhysicalDevice qualified as PhysicalDevice
 import Graphics.Haskan.Vulkan.PipelineLayout qualified as PipelineLayout
 import Graphics.Haskan.Vulkan.Render (drawFrame, presentFrame)
 import Graphics.Haskan.Vulkan.Render qualified as Render
+import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
-import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot (..), defaultInspector, buildFrameSnapshot)
-import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), CameraSnapshot (..), debugMessageToActionEvent, parseDebugMessage, encodeDebugResponse)
-import Graphics.Haskan.Debug.Server (DebugServerHandle, CommandQueue, startDebugServer, stopDebugServer)
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Haskan.Window qualified as Window
 import Graphics.Vulkan qualified as Vulkan
@@ -278,12 +279,12 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
         tvInsp
         indexCount
 
--- | Main rendering loop. 
+-- | Main rendering loop.
 --
 -- Sets up Vulkan resources like device, pipeline, buffers etc. and enters the main
 -- loop which renders frames continuously.
 renderLoop ::
-  (Camera cam, MonadFail m, MonadManaged m) =>
+  (Camera cam, MonadFail m, MonadManaged m, MonadIO m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
   [String] ->
@@ -295,6 +296,9 @@ renderLoop ::
   m ()
 renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore controlChannel meshName = do
   control <- liftIO $ STM.atomically $ TChan.dupTChan controlChannel
+
+  -- Create resource manager for mesh and texture
+  rm <- newResourceManager
 
   (device, (graphicsQueueFamilyIndex, presentQueueFamilyIndex)) <- Device.managedRenderDevice physicalDevice surface layers
 
@@ -321,17 +325,15 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj ("data/models/obj/" <> meshName)
 
-  vertexBuffer <-
-    Buffer.managedVertexBuffer
-      physicalDevice
-      device
-      (Mesh.vertices mesh)
+  -- Create mesh resource via ResourceManager
+  meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
 
-  indexBuffer <-
-    Buffer.managedIndexBuffer
-      physicalDevice
-      device
-      (Mesh.indices mesh)
+  -- Resolve mesh handle to raw Vulkan buffers
+  (vertexBuffer, indexBuffer, indexCount) <- do
+    mBuffers <- Buffer.meshBuffers rm meshHandle
+    case mBuffers of
+      Just (vb, ib, count) -> pure (vb, ib, count)
+      Nothing -> fail "failed to resolve mesh buffers"
 
   (mvpBuffer, mvpMemory) <-
     Buffer.managedUniformBuffer
@@ -340,13 +342,15 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       [modelMatrix, identity, projectionMatrix]
 
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
-  textureImageView <-
-    Texture.managedTexture
-      physicalDevice
-      device
-      "data/texture/page-14-droid-hubs.png"
-      graphicsQueueHandler
-      textureCommandBuffer
+
+  -- Create texture resource via ResourceManager
+  textureHandle <- Texture.createTextureResource rm physicalDevice device "data/texture/page-14-droid-hubs.png" graphicsQueueHandler textureCommandBuffer
+
+  textureImageView <- do
+    mView <- Texture.textureImageView rm textureHandle
+    case mView of
+      Just view -> pure view
+      Nothing -> fail "failed to resolve texture image view"
 
   textureSampler <- Texture.managedSampler device
 
@@ -375,13 +379,12 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           renderFinishedSemaphores
           [vertexBuffer]
           [indexBuffer]
-          (length (Mesh.indices mesh))
+          indexCount
 
   worldState <- liftIO $ STM.readTVarIO (world gameState)
   let tvCamera = activeCamera worldState
       tvInspect = inspectFrame gameState
       tvInsp = inspector gameState
-      indexCount = length (Mesh.indices mesh)
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
         if exit
@@ -395,6 +398,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   liftIO $ outerLoop False
 
   logI "renderLoop finished"
+  -- Destroy resource-manager resources before managed scope exits
+  destroyAllResources rm
   liftIO $ putMVar finishedSemaphore ()
 
 modelMatrix :: M44 Foreign.C.CFloat
@@ -483,7 +488,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
                       az = realToFrac $ cameraAzimuth cam
                       el = realToFrac $ cameraElevation cam
                       snapshot = GameStateSnapshot
-                        { gssCamera = CameraSnapshot pos tgt dist az el
+                        { gssCamera = DebugCameraSnapshot pos tgt dist az el
                         , gssRunning = running
                         , gssFrameInspectorEnabled = inspecting
                         }

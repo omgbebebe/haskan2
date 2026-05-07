@@ -8,7 +8,7 @@ module Graphics.Haskan.Debug.Interface
   , DebugEvent (..)
   , DebugResponse (..)
   , GameStateSnapshot (..)
-  , CameraSnapshot (..)
+  , DebugCameraSnapshot (..)
   , parseDebugMessage
   , debugMessageToActionEvent
   , encodeDebugResponse
@@ -120,13 +120,13 @@ data DebugResponse
   deriving (Eq, Show, Generic)
 
 data GameStateSnapshot = GameStateSnapshot
-  { gssCamera :: CameraSnapshot
+  { gssCamera :: DebugCameraSnapshot
   , gssRunning :: Bool
   , gssFrameInspectorEnabled :: Bool
   }
   deriving (Eq, Show, Generic)
 
-data CameraSnapshot = CameraSnapshot
+data DebugCameraSnapshot = DebugCameraSnapshot
   { csPosition :: V3 Float
   , csTarget :: V3 Float
   , csDistance :: Float
@@ -141,7 +141,7 @@ instance ToJSON DebugResponse where
 instance ToJSON GameStateSnapshot where
   toJSON = genericToJSON aesonOptions
 
-instance ToJSON CameraSnapshot where
+instance ToJSON DebugCameraSnapshot where
   toJSON = genericToJSON aesonOptions
 
 encodeDebugResponse :: DebugResponse -> Text

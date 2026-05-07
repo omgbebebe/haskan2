@@ -4,10 +4,11 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Foreign qualified
 import Foreign.Marshal qualified
-import Foreign.Storable (Storable)
+import Foreign.Storable (Storable, sizeOf)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
 import Graphics.Haskan.Vertex (Vertex, VertexIndex)
 import Graphics.Haskan.Vulkan.Memory qualified as Memory
+import Graphics.Haskan.Vulkan.Resources
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
@@ -137,3 +138,66 @@ updateUniformBuffer dev memory uniformData = do
   liftIO $ do
     Foreign.pokeArray (Foreign.castPtr memPtr) uniformData
     Vulkan.vkUnmapMemory dev memory
+
+-- | Create a buffer resource with embedded cleanup (not registered in any manager).
+makeBufferResource ::
+  (MonadFail m, MonadIO m, Storable a) =>
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  [a] ->
+  Vulkan.VkBufferUsageBitmask Vulkan.FlagMask ->
+  m BufferResource
+makeBufferResource pdev dev data' usage = do
+  (buffer, memoryRequirements) <- createBuffer dev data' usage
+  memory <- createBufferMemory pdev dev memoryRequirements
+  liftIO $ bindBufferMemory dev buffer memory data'
+
+  let bufSize = if null data' then 0 else fromIntegral (length data' * sizeOf (head data'))
+      destroy = do
+        Vulkan.vkDestroyBuffer dev buffer Vulkan.vkNullPtr
+        Vulkan.vkFreeMemory dev memory Vulkan.vkNullPtr
+
+  pure
+    BufferResource
+      { brHandle = BufferHandle 0,
+        brVkBuffer = buffer,
+        brMemory = memory,
+        brSize = bufSize,
+        brDestroy = destroy
+      }
+
+-- | Create and register a mesh resource (vertex + index buffers).
+createMeshResource ::
+  (MonadFail m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  [Vertex] ->
+  [VertexIndex] ->
+  m MeshHandle
+createMeshResource rm pdev dev vertices indices = do
+  vertBuf <- makeBufferResource pdev dev vertices Vulkan.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+  idxBuf <- makeBufferResource pdev dev indices Vulkan.VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+
+  meshH <- MeshHandle <$> allocHandle (rmNextId rm)
+
+  let mesh =
+        MeshResource
+          { mrHandle = meshH,
+            mrVertexBuffer = vertBuf {brHandle = BufferHandle 0},
+            mrIndexBuffer = idxBuf {brHandle = BufferHandle 0},
+            mrIndexCount = length indices
+          }
+
+  registerMesh rm mesh
+  pure meshH
+
+-- | Resolve a mesh handle to its raw Vulkan buffers and index count.
+meshBuffers ::
+  MonadIO m =>
+  ResourceManager ->
+  MeshHandle ->
+  m (Maybe (Vulkan.VkBuffer, Vulkan.VkBuffer, Int))
+meshBuffers rm handle = do
+  mMesh <- lookupMesh rm handle
+  pure $ fmap (\mesh -> (brVkBuffer (mrVertexBuffer mesh), brVkBuffer (mrIndexBuffer mesh), mrIndexCount mesh)) mMesh
