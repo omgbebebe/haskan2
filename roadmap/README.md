@@ -41,21 +41,22 @@ Layer 1: GPU Commands (command buffers, queues, synchronization)
 
 ## Current State
 
-**Milestone 1 complete:** Resource manager with typed handles (`MeshHandle`, `TextureHandle`), STM registry, `createMeshResource`, `createTextureResource`.
+**Milestone 1 complete:** Resource manager with typed handles.
 
-**Milestone 2 complete:** Sparse-set ECS (`IntMap`-based), `Transform`, `RenderSystem`, dynamic uniform buffer offsets. Renders 3 entities with shared mesh at different positions (`(-2,0,0)`, `(0,0,0)`, `(2,0,0)`). Front face culling works correctly (`VK_FRONT_FACE_CLOCKWISE`).
+**Milestone 2 complete:** Sparse-set ECS, 3 entities rendering with correct transforms, view matrix, front face culling.
+
+**Milestone 3 complete:** Render graph infrastructure — builder monad, topological sort compiler, forward pass integration. Single-pass graph produces identical output to previous hardcoded path. Multi-pass support and automatic barriers deferred to Milestone 4.
 
 **Critical lessons learned:**
 - `linear`'s `M44` is row-major; Vulkan/GLSL reads `mat4` as column-major — always `transpose` before uniform buffer upload
-- `Projection.lookAt` is correct for view matrix (manual quaternion math was broken)
+- `Projection.lookAt` is correct for view matrix
 - OBJ loader produces clockwise-wound triangles
 - Fence wait/reset must precede `vkAcquireNextImageKHR`
-- Descriptor pool type must exactly match layout type (`UNIFORM_BUFFER_DYNAMIC`)
-- Command pool needs `RESET_COMMAND_BUFFER_BIT` for per-frame re-recording
+- Descriptor pool type must exactly match layout type
 
 ## Next Milestone
 
-**Milestone 3: Render Graph** — Declarative multi-pass rendering pipeline.
+**Milestone 4: Deferred Rendering** — G-buffer + lighting passes using the render graph infrastructure.
 
 ## Documentation
 

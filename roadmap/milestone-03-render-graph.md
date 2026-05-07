@@ -146,69 +146,49 @@ buildForwardGraph devCtx swapCtx renderables = do
 
 Create `RenderGraph`, `RenderPassNode`, `GraphResource`, `CompiledGraph`.
 
-**Acceptance:** Types compile, no Vulkan calls yet.
+**Status:** ✅ Complete. Types defined with `ResourceId`, `GraphResource` (image/buffer/persistent), `RenderPassNode` (name/inputs/outputs/record func), `CompiledGraph`.
 
 ### Task 3.2: Graph Builder Monad
 **File:** `src/Graphics/Haskan/Render/Graph.hs`
 
 Implement `RenderGraphBuilder` with `addResource`, `addPass`, `transientImage`.
 
-**Acceptance:** Can build a graph with 2 passes and 3 resources.
+**Status:** ✅ Complete. `RenderGraphBuilder` is a `State` monad over `GraphBuildState`. Supports `addResource`, `addPass`, `transientImage`, `transientBuffer`.
 
 ### Task 3.3: Graph Compiler — Topological Sort
 **File:** `src/Graphics/Haskan/Render/Graph.hs`
 
 Sort passes by dependency: if Pass B reads resource written by Pass A, A comes before B.
 
-Detect cycles and report error.
-
-**Acceptance:** `compileGraph` produces ordered pass list.
+**Status:** ✅ Complete. Kahn's algorithm implementation. Detects cycles and returns `Left` error.
 
 ### Task 3.4: Graph Compiler — Barriers
 **File:** `src/Graphics/Haskan/Render/Graph.hs`
 
 Track image layout per resource. Between passes, compute required layout transitions.
 
-Insert `vkCmdPipelineBarrier` with:
-- `srcStageMask` = previous pass's stage
-- `dstStageMask` = next pass's stage
-- `imageMemoryBarrier` = layout transition
-
-**Acceptance:** Validation layers report zero synchronization errors.
+**Status:** 🔄 Deferred. For single-pass forward graph, no inter-pass barriers needed. Will implement when adding multi-pass support (Milestone 4: Deferred Rendering).
 
 ### Task 3.5: Command Buffer Recording
 **File:** `src/Graphics/Haskan/Render/Graph.hs`
 
 Allocate secondary command buffers (one per pass). Record each pass into its CB.
 
-Primary CB: `vkCmdBeginRenderPass` → `vkCmdExecuteCommands` (secondaries) → `vkCmdEndRenderPass`
-
-**Acceptance:** Graph renders single pass correctly (same visual as before).
+**Status:** 🔄 Partial. Compilation produces ordered `CompiledPass` list. `Engine.hs` iterates passes and calls their record functions. Secondary CBs not yet used (primary CB recording).
 
 ### Task 3.6: Split Swapchain-Dependent Resources
 **File:** `src/Graphics/Haskan/Vulkan/Types.hs`, `Render.hs`
 
-Separate `DeviceContext` (static) from `SwapchainContext` (recreated on resize):
+Separate `DeviceContext` (static) from `SwapchainContext` (recreated on resize).
 
-```haskell
-data DeviceContext = DeviceContext
-  { devDevice     :: !VkDevice
-  , devPhysical   :: !VkPhysicalDevice
-  , devQueue      :: !VkQueue
-  , devCommandPool:: !VkCommandPool
-  }
+**Status:** 🔄 Deferred. Current code recreates full `RenderContext` on resize. Split will be done when resize handling needs optimization.
 
-data SwapchainContext = SwapchainContext
-  { scSwapchain   :: !VkSwapchainKHR
-  , scExtent      :: !VkExtent2D
-  , scFramebuffers:: ![VkFramebuffer]
-  , scRenderPass  :: !VkRenderPass
-  }
-```
+### Task 3.7: Forward Rendering Pass
+**File:** `src/Graphics/Haskan/Render/Forward.hs`
 
-On resize: recreate `SwapchainContext`, rebuild graph, keep `DeviceContext`.
+Wrap current rendering into a graph pass.
 
-**Acceptance:** Resize works without reloading meshes/textures.
+**Status:** ✅ Complete. `buildForwardGraph` creates a single forward pass. `Engine.hs` builds and compiles the graph per frame, producing identical visual output.
 
 ## Testing
 
@@ -244,8 +224,38 @@ compiled <- compileGraph devCtx swapCtx graph
 
 ## Success Criteria
 
-- [ ] Can define multi-pass graph with builder
-- [ ] Graph compiler orders passes correctly
-- [ ] Barriers inserted automatically, validation clean
-- [ ] Swapchain resize recreates only swapchain-dependent resources
-- [ ] Forward rendering produces same output as before
+- [x] Can define multi-pass graph with builder
+- [x] Graph compiler orders passes correctly
+- [ ] Barriers inserted automatically, validation clean — deferred to M4
+- [ ] Swapchain resize recreates only swapchain-dependent resources — deferred
+- [x] Forward rendering produces same output as before
+
+## Implementation Notes
+
+**Completed 2026-05-07.** See commit `0ea067d`.
+
+### Architecture
+
+The render graph is a **declarative abstraction** over Vulkan command buffer recording:
+
+1. **Build phase** (per frame): Create `RenderPassNode`s with inputs/outputs/record functions
+2. **Compile phase**: Topological sort by resource dependencies, detect cycles
+3. **Execute phase**: Iterate compiled passes in order, call their record functions
+
+For the current single-pass forward renderer, the graph is trivial (one node). The value is in the infrastructure:
+- Adding a G-buffer pass = add one node, declare it writes to transient textures
+- Adding a lighting pass = add one node, declare it reads G-buffer textures
+- The compiler will automatically order them correctly
+
+### Files
+
+- `src/Graphics/Haskan/Render/Graph.hs` — core types, builder, compiler
+- `src/Graphics/Haskan/Render/Forward.hs` — forward pass definition
+- `src/Graphics/Haskan/Engine.hs` — builds graph per frame, compiles, executes
+
+### Future Work
+
+- **Barrier insertion** (Task 3.4): Track `VkImageLayout` per resource, insert `vkCmdPipelineBarrier` between passes
+- **Secondary command buffers** (Task 3.5): One per pass for parallel recording
+- **Device/Swapchain split** (Task 3.6): `DeviceContext` vs `SwapchainContext` for efficient resize
+- **Transient resource allocation**: Actually create/destroy transient images based on graph compilation
