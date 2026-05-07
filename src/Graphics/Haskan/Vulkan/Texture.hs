@@ -2,6 +2,7 @@
 
 module Graphics.Haskan.Vulkan.Texture
   ( readImageFromFile
+  , decodeImageBytes
   , managedTexture
   , managedSampler
   , createTextureResource
@@ -13,6 +14,7 @@ import Codec.Picture
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits
+import Data.ByteString (ByteString)
 import Data.Vector.Storable qualified
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word8)
@@ -40,6 +42,19 @@ readImageFromFile filePath = do
         >>= \case
           Right (dynamicImage, imageMetadata) -> pure (convertRGBA8 dynamicImage)
           Left e -> fail e
+
+  let (Image width height imageData) = image
+  pure (imageData, width, height)
+
+-- | Decode image bytes (PNG/JPEG) to RGBA8 pixel data.
+decodeImageBytes ::
+  (MonadFail m, MonadIO m) =>
+  ByteString ->
+  m ((Data.Vector.Storable.Vector Word8), Int, Int)
+decodeImageBytes bs = do
+  image <- case decodeImage bs of
+    Right dynamicImage -> pure (convertRGBA8 dynamicImage)
+    Left e -> fail e
 
   let (Image width height imageData) = image
   pure (imageData, width, height)

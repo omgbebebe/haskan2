@@ -6,6 +6,7 @@ module Graphics.Haskan.Render.Deferred
   ) where
 
 import Data.Foldable (for_)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Foreign.Marshal.Array qualified
@@ -15,7 +16,7 @@ import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
-import Graphics.Haskan.Vulkan.Resources (BufferResource (..), MeshResource (..))
+import Graphics.Haskan.Vulkan.Resources (BufferResource (..), MeshResource (..), TextureResource (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 
@@ -28,8 +29,10 @@ data DeferredPassData = DeferredPassData
   , dpdGBufferPipeline    :: !Vulkan.VkPipeline
   , dpdGBufferLayout      :: !Vulkan.VkPipelineLayout
   , dpdGBufferDescriptor  :: !Vulkan.VkDescriptorSet
+  , dpdGBufferSampler     :: !Vulkan.VkSampler
   , dpdDrawList           :: ![DrawCall]
   , dpdEntityUniformSize  :: !Int
+  , dpdDevice             :: !Vulkan.VkDevice
     -- Lighting pass
   , dpdLightingRenderPass  :: !Vulkan.VkRenderPass
   , dpdLightingFramebuffer :: !Vulkan.VkFramebuffer
@@ -57,6 +60,12 @@ buildDeferredGraph DeferredPassData {..} = do
                 idxBuf  = brVkBuffer (mrIndexBuffer mesh)
                 idxCnt  = mrIndexCount mesh
                 dynamicOffset = fromIntegral (entityIdx * dpdEntityUniformSize)
+            -- Update descriptor set with entity's texture if available
+            case dcMaterial dc of
+              Just mat -> do
+                let texView = trImageView mat
+                DescriptorSet.updateTextureBinding dpdDevice dpdGBufferDescriptor dpdGBufferSampler texView 1
+              Nothing -> pure ()
             Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
               Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
                 DescriptorSet.cmdBindDescriptorSets

@@ -281,8 +281,9 @@ renderFrameLoop ::
   ECS.World ->
   ResourceManager ->
   Int ->
+  Vulkan.VkSampler ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -370,8 +371,10 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdGBufferPipeline = drGBufferPipeline
                         , dpdGBufferLayout = drGBufferPipelineLayout
                         , dpdGBufferDescriptor = gBufferDescriptorSet
+                        , dpdGBufferSampler = textureSampler
                         , dpdDrawList = drawList
                         , dpdEntityUniformSize = entityUniformSize
+                        , dpdDevice = device
                         , dpdLightingRenderPass = drLightingRenderPass
                         , dpdLightingFramebuffer = lightingFramebuffer
                         , dpdLightingPipeline = drLightingPipeline
@@ -448,6 +451,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         ecsWorld
         rm
         entityUniformSize
+        textureSampler
 
 -- | Main rendering loop.
 --
@@ -501,23 +505,27 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   renderFinishedSemaphores <- replicateM 4 (Semaphore.managedSemaphore device)
   renderFinishedFences <- replicateM Render.maxFramesInFlight (Fence.managedFence device)
 
+  -- Create texture command buffer early (needed for both glTF and OBJ paths)
+  textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
+  logDebug LogTexture "textureCommandBuffer created"
+
   let isGLTF = ".gltf" `Text.isSuffixOf` Text.pack meshName || ".glb" `Text.isSuffixOf` Text.pack meshName
 
   -- Create ECS World and load scene
   (ecsWorld, numEntities) <- if isGLTF
     then do
       -- Load glTF scene
-      result <- importGLTF rm physicalDevice device meshName
+      result <- importGLTF rm physicalDevice device graphicsQueueHandler textureCommandBuffer meshName
       let world = girWorld result
           meshes = girMeshes result
-      
+
       -- Add ground plane
       let groundMesh = Mesh.groundPlaneMeshGrid 50 50.0
       groundMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
       groundEntity <- ECS.spawnEntity world
       ECS.setTransform world groundEntity (Transform (V3 0 0 (-0.5)) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
       ECS.setMesh world groundEntity groundMeshHandle
-      
+
       pure (world, length meshes + 1)  -- glTF meshes + ground plane
     else do
       -- Load OBJ model (original behavior)
@@ -565,14 +573,11 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
     Buffer.managedUniformBuffer physicalDevice device initialMvpData
   logDebug LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
 
-  textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
-  logDebug LogTexture "textureCommandBuffer created"
-
   -- Create texture resource via ResourceManager (only for OBJ path)
   textureImageView <- if isGLTF
     then do
       -- For glTF, textures are loaded with the scene
-      -- Use a placeholder/white texture for now
+      -- Use a placeholder white texture for now
       logDebug LogTexture "skipping texture load for glTF (textures embedded in scene)"
       -- Create a minimal white texture
       let whiteTexData = Texture.generateGridTexture 2 2 1
@@ -637,7 +642,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
               with (createDeferredResources physicalDevice device context descriptorSetLayout gbufVertShader gbufFragShader lightVertShader lightFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler
             outerLoop renderFrameLoopFinished
 
 

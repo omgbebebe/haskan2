@@ -75,6 +75,10 @@ type FragmentDefs =
       "out_position" ':-> Output '[Location 0] (V 4 Float),
       "out_normal"   ':-> Output '[Location 1] (V 4 Float),
       "out_albedo"   ':-> Output '[Location 2] (V 4 Float),
+      "tex"
+        ':-> Texture2D
+               '[Binding 1, DescriptorSet 0]
+               (RGBA8 UNorm),
       "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
     ]
 
@@ -82,7 +86,8 @@ fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do
   pos <- get @"in_position"
   norm <- get @"in_normal"
-  alb <- get @"in_albedo"
+  uv <- get @"in_uv"
+  texColor <- use @(ImageTexel "tex") NilOps uv
   put @"out_position" pos
   put @"out_normal" norm
-  put @"out_albedo" alb
+  put @"out_albedo" texColor
