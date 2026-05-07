@@ -8,11 +8,12 @@ import Linear (V2 (..), V3 (..), V4 (..))
 import Linear.Epsilon (Epsilon)
 import Linear.Matrix (M44 (..), (!*!))
 import Linear.Matrix qualified as Matrix
+import Linear.Metric (normalize)
 import Linear.Projection qualified as Projection
-import Linear.Quaternion (Quaternion)
+import Linear.Quaternion (Quaternion, axisAngle, rotate)
 import Linear.Quaternion qualified as Quat
 
-newtype ViewMatrix = ViewMatrix {unViewMatrix :: M44 Foreign.C.CFloat} -- Camera { unCamera :: M44 a } deriving Show
+newtype ViewMatrix = ViewMatrix {unViewMatrix :: M44 Foreign.C.CFloat}
 
 data Modifier a
   = MoveX a
@@ -23,6 +24,25 @@ data Modifier a
 class Camera a where
   update :: a -> [Modifier Foreign.C.CFloat] -> a
   toMatrix :: a -> ViewMatrix
+  cameraPosition :: a -> V3 Foreign.C.CFloat
+  cameraForward :: a -> V3 Foreign.C.CFloat
+  cameraTarget :: a -> V3 Foreign.C.CFloat
+  cameraDistance :: a -> Foreign.C.CFloat
+  cameraAzimuth :: a -> Foreign.C.CFloat
+  cameraElevation :: a -> Foreign.C.CFloat
+  setTarget :: a -> V3 Foreign.C.CFloat -> a
+  setAngles :: a -> Foreign.C.CFloat -> Foreign.C.CFloat -> a
+  setDistance :: a -> Foreign.C.CFloat -> a
+
+  cameraPosition _ = V3 0 0 0
+  cameraForward _ = V3 0 0 (-1)
+  cameraTarget _ = V3 0 0 0
+  cameraDistance _ = 0
+  cameraAzimuth _ = 0
+  cameraElevation _ = 0
+  setTarget a _ = a
+  setAngles a _ _ = a
+  setDistance a _ = a
 
 data OrbitalCamera = OrbitalCamera
   { target :: V3 Foreign.C.CFloat,
@@ -54,8 +74,22 @@ defaultOrbitalCamera =
       distanceDumping = Nothing,
       elevationDumping = Nothing
     }
-  where
-    xAxis = V3 1.0 0.0 0.0
+
+orbitalCameraPosition :: OrbitalCamera -> V3 Foreign.C.CFloat
+orbitalCameraPosition OrbitalCamera{..} =
+  let azQ = axisAngle (V3 0 1 0) azimuthAngle
+      elQ = axisAngle (V3 1 0 0) elevationAngle
+      combined = elQ * azQ
+      offset = V3 0 0 distance
+  in target + rotate combined offset
+
+orbitalCameraForward :: OrbitalCamera -> V3 Foreign.C.CFloat
+orbitalCameraForward OrbitalCamera{..} =
+  let azQ = axisAngle (V3 0 1 0) azimuthAngle
+      elQ = axisAngle (V3 1 0 0) elevationAngle
+      combined = elQ * azQ
+      dir = V3 0 0 (-1)
+  in normalize $ rotate combined dir
 
 orbitalToMatrix :: OrbitalCamera -> ViewMatrix
 orbitalToMatrix OrbitalCamera {..} =
@@ -73,6 +107,15 @@ orbitalToMatrix OrbitalCamera {..} =
 instance Camera OrbitalCamera where
   update = updateOrbital
   toMatrix = orbitalToMatrix
+  cameraPosition = orbitalCameraPosition
+  cameraForward = orbitalCameraForward
+  cameraTarget = target
+  cameraDistance = distance
+  cameraAzimuth = azimuthAngle
+  cameraElevation = elevationAngle
+  setTarget cam t = cam { target = t }
+  setAngles cam az el = cam { azimuthAngle = az, elevationAngle = el }
+  setDistance cam d = cam { distance = max (minDistance cam) (min (maxDistance cam) d) }
 
 updateOrbital :: OrbitalCamera -> [Modifier Foreign.C.CFloat] -> OrbitalCamera
 updateOrbital cam = foldl orbitalModify cam

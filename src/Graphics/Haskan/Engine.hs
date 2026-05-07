@@ -21,11 +21,13 @@ import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable (..))
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
+import Data.Text qualified as Text
 import FIR qualified
 import Foreign.C qualified
 import GHC.Generics
 import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
+import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (logI)
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
@@ -49,6 +51,9 @@ import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
+import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot (..), defaultInspector, buildFrameSnapshot)
+import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), CameraSnapshot (..), debugMessageToActionEvent, parseDebugMessage, encodeDebugResponse)
+import Graphics.Haskan.Debug.Server (DebugServerHandle, CommandQueue, startDebugServer, stopDebugServer)
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Haskan.Window qualified as Window
 import Graphics.Vulkan qualified as Vulkan
@@ -60,23 +65,13 @@ import Linear.Projection qualified
 import SDL qualified
 import System.Clock (Clock (..), getTime, toNanoSecs)
 
-data Action
-  = MoveForward
-  | MoveBackward
-  | StrafeLeft
-  | StrafeRight
-  | MouseMove (V2 Int)
-  | Escape
-  deriving (Eq, Show)
-
-type ActionEvent = (Action, Bool)
-
 data EngineConfig = EngineConfig
   { targetRenderFPS :: !Integer,
     targetPhysicsFPS :: !Integer,
     targetNetworkFPS :: !Integer,
     targetInputFPS :: !Integer,
-    title :: !Text
+    title :: !Text,
+    debugSocketPath :: !(Maybe FilePath)
   }
   deriving (Show)
 
@@ -101,7 +96,9 @@ data GameState cam = GameState
     moveForward :: TVar Bool,
     moveBackward :: TVar Bool,
     strafeLeft :: TVar Bool,
-    strafeRight :: TVar Bool
+    strafeRight :: TVar Bool,
+    inspectFrame :: TVar Bool,
+    inspector :: TVar (Maybe FrameInspector)
   }
 
 data ControlMessage
@@ -121,11 +118,15 @@ mainLoop meshName EngineConfig {..} = do
   controlChannel <- liftIO $ TChan.newBroadcastTChanIO
   worldState <- liftIO $ STM.newTVarIO (WorldState camera)
   actionQueue <- liftIO $ STM.newTQueueIO
+  debugCmdQueue <- liftIO $ STM.newTQueueIO
   -- movement state
   tvMoveForward <- liftIO $ STM.newTVarIO (False)
   tvMoveBackward <- liftIO $ STM.newTVarIO (False)
   tvStrafeLeft <- liftIO $ STM.newTVarIO (False)
   tvStrafeRight <- liftIO $ STM.newTVarIO (False)
+
+  tvInspectFrame <- liftIO $ STM.newTVarIO False
+  tvInspector <- liftIO $ STM.newTVarIO (Just (defaultInspector "snapshots"))
 
   let gameState =
         GameState
@@ -135,6 +136,16 @@ mainLoop meshName EngineConfig {..} = do
           tvMoveBackward
           tvStrafeLeft
           tvStrafeRight
+          tvInspectFrame
+          tvInspector
+
+  -- Start debug server if configured
+  mDebugServer <- liftIO $ case debugSocketPath of
+    Just path -> do
+      h <- startDebugServer path actionQueue debugCmdQueue
+      logI $ "debug server listening on " <> Text.pack path
+      pure (Just h)
+    Nothing -> pure Nothing
 
   SDL.initialize @[] [SDL.InitEvents]
 
@@ -152,7 +163,7 @@ mainLoop meshName EngineConfig {..} = do
   _ <- liftIO $ forkIO (runManaged (renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished controlChannel meshName))
 
   stateUpdateLoopFinished <- liftIO $ newEmptyMVar
-  _ <- liftIO $ forkIO (stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished actionQueue controlChannel)
+  _ <- liftIO $ forkIO (stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished actionQueue debugCmdQueue controlChannel)
 
   let inputLoop :: MonadIO m => m ()
       inputLoop = do
@@ -168,6 +179,9 @@ mainLoop meshName EngineConfig {..} = do
   liftIO $ STM.atomically $ TChan.writeTChan controlChannel Terminate
   logI "waiting for other threads finished"
   liftIO $ mapM_ takeMVar [renderLoopFinished, stateUpdateLoopFinished]
+
+  -- Stop debug server
+  liftIO $ for_ mDebugServer stopDebugServer
 
   logI "destroying SDL window"
   SDL.destroyWindow window
@@ -186,8 +200,11 @@ renderFrameLoop ::
   TChan ControlMessage ->
   Vulkan.VkDeviceMemory ->
   TVar cam ->
+  STM.TVar Bool ->
+  STM.TVar (Maybe FrameInspector) ->
+  Int ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemaphores control mvpMemory tvCamera = do
+renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemaphores control mvpMemory tvCamera tvInspect tvInsp indexCount = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -195,7 +212,7 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
       let imageAvailableSemaphore = imageAvailableSemaphores !! (frameNumber)
       camera <- liftIO $ STM.readTVarIO tvCamera
       let model = modelMatrix
-          view = Camera.unViewMatrix (Camera.toMatrix camera) -- viewMatrix (coerce (camPos camera)) (coerce (camLookAt camera))
+          view = Camera.unViewMatrix (Camera.toMatrix camera)
           projection = projectionMatrix
       Buffer.updateUniformBuffer device mvpMemory [model, view, projection]
       res <- liftIO $ drawFrame ctx imageAvailableSemaphore frameNumber
@@ -203,7 +220,28 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
         Render.FrameOk imageIndex -> do
           presentResult <- liftIO $ presentFrame ctx imageIndex (renderFinishedSemaphores !! (fromIntegral imageIndex))
           case presentResult of
-            Vulkan.VK_SUCCESS -> pure (False, False)
+            Vulkan.VK_SUCCESS -> do
+              shouldInspect <- liftIO $ STM.atomically $ do
+                b <- STM.readTVar tvInspect
+                when b $ STM.writeTVar tvInspect False
+                pure b
+              when shouldInspect $ do
+                mInsp <- liftIO $ STM.readTVarIO tvInsp
+                for_ mInsp $ \insp -> do
+                  startTime <- liftIO $ getTime Monotonic
+                  snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> projectionMatrix)
+                    [ RenderableSnapshot
+                        { rsName = "mesh"
+                        , rsWorldMatrix = (realToFrac <$>) <$> modelMatrix
+                        , rsScale = V3 1 1 1
+                        , rsVisible = True
+                        , rsMaterial = "default"
+                        , rsMesh = "unit_cube"
+                        , rsIndexCount = indexCount
+                        }
+                    ]
+                  liftIO $ insp snap
+              pure (False, False)
             Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
             Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
             _ -> fail "presentFrame failed"
@@ -236,6 +274,9 @@ renderFrameLoop ctx@RenderContext {..} frameNumber targetFPS imageAvailableSemap
         control
         mvpMemory
         tvCamera
+        tvInspect
+        tvInsp
+        indexCount
 
 -- | Main rendering loop. 
 --
@@ -338,13 +379,16 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   worldState <- liftIO $ STM.readTVarIO (world gameState)
   let tvCamera = activeCamera worldState
+      tvInspect = inspectFrame gameState
+      tvInsp = inspector gameState
+      indexCount = length (Mesh.indices mesh)
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
         if exit
           then pure ()
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-              renderFrameLoop context 0 targetFPS imageAvailableSemaphores control mvpMemory tvCamera
+              renderFrameLoop context 0 targetFPS imageAvailableSemaphores control mvpMemory tvCamera tvInspect tvInsp indexCount
             outerLoop renderFrameLoopFinished
 
   logI "Starting render loop"
@@ -374,8 +418,8 @@ projectionMatrix =
 -- channel. Inside the loop it reads input events, updates the camera and 
 -- player state, runs physics simulation ticks, and loops again until 
 -- terminated by a control signal.
-stateUpdateLoop :: (Camera cam, MonadIO m) => Integer -> GameState cam -> MVar () -> TQueue ActionEvent -> TChan ControlMessage -> m ()
-stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue controlChannel = liftIO $ do
+stateUpdateLoop :: (Camera cam, MonadIO m) => Integer -> GameState cam -> MVar () -> TQueue ActionEvent -> CommandQueue -> TChan ControlMessage -> m ()
+stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue controlChannel = liftIO $ do
   control <- STM.atomically $ TChan.dupTChan controlChannel
 
   let physicsStep = 1 / 120
@@ -389,6 +433,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue controlChannel
           Nothing -> do
             newTime <- liftIO $ toNanoSecs <$> getTime Monotonic
             actions <- STM.atomically $ TQueue.flushTQueue actionQueue
+            debugCmds <- STM.atomically $ TQueue.flushTQueue debugCmdQueue
             worldState <- STM.readTVarIO (world gameState)
             let camera = activeCamera worldState
             for_ actions $ \action ->
@@ -407,6 +452,42 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue controlChannel
                         ]
                     )
                 (Escape, _) -> STM.atomically $ STM.writeTVar (isRunning gameState) False
+                (FrameInspect, True) -> STM.atomically $ STM.writeTVar (inspectFrame gameState) True
+                (FrameInspect, False) -> pure ()
+            -- Handle debug commands with responses
+            for_ debugCmds $ \(cmd, respVar) -> do
+              case cmd of
+                SetCameraDistance d -> do
+                  STM.atomically $ STM.modifyTVar' (activeCamera worldState) (\cam -> setDistance cam (realToFrac d))
+                  STM.atomically $ STM.putTMVar respVar (AckResponse "camera_distance_set")
+                SetCameraTarget (V3 tx ty tz) -> do
+                  STM.atomically $ STM.modifyTVar' (activeCamera worldState) (\cam ->
+                    setTarget cam (V3 (realToFrac tx) (realToFrac ty) (realToFrac tz)))
+                  STM.atomically $ STM.putTMVar respVar (AckResponse "camera_target_set")
+                SetCameraAngles az el -> do
+                  STM.atomically $ STM.modifyTVar' (activeCamera worldState) (\cam ->
+                    setAngles cam (realToFrac az) (realToFrac el))
+                  STM.atomically $ STM.putTMVar respVar (AckResponse "camera_angles_set")
+                TriggerFrameInspect -> do
+                  STM.atomically $ STM.writeTVar (inspectFrame gameState) True
+                  STM.atomically $ STM.putTMVar respVar (AckResponse "frame_inspect_triggered")
+                SetTimeScale _ -> do
+                  STM.atomically $ STM.putTMVar respVar (AckResponse "time_scale_not_implemented")
+                GetState -> do
+                  cam <- STM.readTVarIO (activeCamera worldState)
+                  running <- STM.readTVarIO (isRunning gameState)
+                  inspecting <- STM.readTVarIO (inspectFrame gameState)
+                  let pos = realToFrac <$> cameraPosition cam
+                      tgt = realToFrac <$> cameraTarget cam
+                      dist = realToFrac $ cameraDistance cam
+                      az = realToFrac $ cameraAzimuth cam
+                      el = realToFrac $ cameraElevation cam
+                      snapshot = GameStateSnapshot
+                        { gssCamera = CameraSnapshot pos tgt dist az el
+                        , gssRunning = running
+                        , gssFrameInspectorEnabled = inspecting
+                        }
+                  STM.atomically $ STM.putTMVar respVar (StateResponse snapshot)
             let dt = newTime - prevTime
 
             (fwd, bwd, sl, sr, isRunning) <- STM.atomically $ do
@@ -439,66 +520,4 @@ updateCamera ::
   STM ()
 updateCamera tv mods = STM.modifyTVar' tv (Camera.update <*> pure mods)
 
-data Event    
-
-data KeyModifier
-  = LShift
-  | RShift
-  | LCtrl
-  | RCtrl
-  | LAlt
-  | RAlt
-  | LGUI
-  | RGUI
-  | NumLock
-  | CapsLock
-  | AltGr
-  deriving (Eq, Enum, Generic, Show)
-
-type KeyBindings = HashMap ([KeyModifier], SDL.Keycode) (Action)
-
-instance Hashable KeyModifier
-
-instance Hashable SDL.Keycode
-
-defaultBindings :: KeyBindings
-defaultBindings =
-  HashMap.fromList
-    [ (([], SDL.KeycodeW), MoveForward),
-      (([], SDL.KeycodeS), MoveBackward),
-      (([], SDL.KeycodeA), StrafeLeft),
-      (([], SDL.KeycodeD), StrafeRight),
-      -- quit
-      (([LShift], SDL.KeycodeQ), Escape)
-    ]
-
-modifiersToList :: SDL.KeyModifier -> [KeyModifier]
-modifiersToList SDL.KeyModifier {..} = map fst . filter snd $
-  [ (LShift,   keyModifierLeftShift)
-  , (RShift,   keyModifierRightShift)
-  , (LCtrl,    keyModifierLeftCtrl)
-  , (RCtrl,    keyModifierRightCtrl)
-  , (LAlt,     keyModifierLeftAlt)
-  , (RAlt,     keyModifierRightAlt)
-  ]
-
-payloadToActionEvent :: SDL.EventPayload -> Maybe ActionEvent
-payloadToActionEvent SDL.QuitEvent = Just (Escape, True)
-payloadToActionEvent (SDL.KeyboardEvent keyboardEvent) = keyToAction keyboardEvent
-payloadToActionEvent (SDL.MouseMotionEvent mouseMotionEvent) = mouseMotionToAction mouseMotionEvent
-payloadToActionEvent _ = Nothing
-
-mouseMotionToAction :: SDL.MouseMotionEventData -> Maybe ActionEvent
-mouseMotionToAction (SDL.MouseMotionEventData _window _mouseDevice _mouseButtons _absolutePosition relativePosition) =
-  let (SDL.V2 relX relY) = relativePosition
-   in Just ((MouseMove (V2 (fromIntegral (relX * 10)) (fromIntegral (relY * 10)))), True)
-
-keyToAction :: SDL.KeyboardEventData -> Maybe ActionEvent
-keyToAction (SDL.KeyboardEventData _window motion isRepeated keysym)
-  | isRepeated = Nothing
-  | otherwise =
-      let modifiers = modifiersToList (SDL.keysymModifier keysym)
-          key = SDL.keysymKeycode keysym
-       in case HashMap.lookup (modifiers, key) defaultBindings of
-            Just action -> Just (action, motion == SDL.Pressed)
-            Nothing -> Nothing
+data Event

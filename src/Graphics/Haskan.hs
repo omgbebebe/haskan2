@@ -22,6 +22,7 @@ runHaskan title meshName = do
         targetPhysicsFPS = 10,
         targetNetworkFPS = 10,
         targetInputFPS = 60,
-        title = title
+        title = title,
+        debugSocketPath = Just "/tmp/haskan2.sock"
       }
   logI "Shutting down Haskan"
