@@ -201,6 +201,40 @@ updateTextureBinding dev descriptorSet sampler imageView bindingIdx = do
           )
   liftIO $
     Foreign.Marshal.Array.withArray [write] $ \writePtr ->
+       Vulkan.vkUpdateDescriptorSets dev 1 writePtr 0 Vulkan.vkNullPtr
+
+-- | Update a single texture in a bindless descriptor array.
+-- dstArrayElement is the index in the texture array.
+updateBindlessTexture ::
+  MonadIO m =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkSampler ->
+  Vulkan.VkImageView ->
+  Vulkan.Word32 -> -- array index
+  m ()
+updateBindlessTexture dev descriptorSet sampler imageView arrayIndex = do
+  let textureInfo =
+        Vulkan.createVk
+          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+              &* set @"imageView" imageView
+              &* set @"sampler" sampler
+          )
+      write =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 0
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* setListRef @"pImageInfo" [textureInfo]
+              &* set @"pBufferInfo" Vulkan.VK_NULL
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" arrayIndex
+          )
+  liftIO $
+    Foreign.Marshal.Array.withArray [write] $ \writePtr ->
       Vulkan.vkUpdateDescriptorSets dev 1 writePtr 0 Vulkan.vkNullPtr
 
 cmdBindDescriptorSets ::
