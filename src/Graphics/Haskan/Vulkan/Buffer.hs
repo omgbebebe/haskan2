@@ -5,7 +5,7 @@ import Control.Monad.Managed (MonadManaged)
 import Foreign qualified
 import Foreign.Marshal qualified
 import Foreign.Storable (Storable, sizeOf)
-import Graphics.Haskan.Logger (logDebug, showT, LogCategory (..))
+import Graphics.Haskan.Logger (logDebugIO, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
 import Graphics.Haskan.BoundingBox (BBox, fromPoints)
 import Graphics.Haskan.Vertex (Vertex (..), VertexIndex)
@@ -30,7 +30,7 @@ managedBuffer dev data' usage =
     (\(ptr, _) -> Vulkan.vkDestroyBuffer dev ptr Vulkan.vkNullPtr)
 
 createBuffer ::
-  (MonadFail m, MonadIO m, Storable a) =>
+  (MonadIO m, Storable a) =>
   Vulkan.VkDevice ->
   [a] ->
   (Vulkan.VkBufferUsageBitmask Vulkan.FlagMask) ->
@@ -51,17 +51,17 @@ createBuffer dev data' usage = do
           )
   buffer <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateBuffer dev ciPtr Vulkan.vkNullPtr))
   memoryRequirements <- allocaAndPeek_ (Vulkan.vkGetBufferMemoryRequirements dev buffer)
-  logDebug LogBuffer $ "createBuffer size=" <> showT size <> " memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
+  logDebugIO LogBuffer $ "createBuffer size=" <> showT size <> " memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
   pure (buffer, memoryRequirements)
 
 createBufferMemory ::
-  (MonadFail m, MonadIO m) =>
+  (MonadIO m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
   Vulkan.VkMemoryRequirements ->
   m Vulkan.VkDeviceMemory
 createBufferMemory pdev dev memoryRequirements = do
-  logDebug LogBuffer $ "createBufferMemory memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
+  logDebugIO LogBuffer $ "createBufferMemory memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
   Memory.allocateMemoryFor
     pdev
     dev
@@ -71,7 +71,7 @@ createBufferMemory pdev dev memoryRequirements = do
     ]
 
 managedBufferMemory pdev dev memoryRequirements = do
-  logDebug LogBuffer $ "managedBufferMemory memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
+  logDebugIO LogBuffer $ "managedBufferMemory memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
   alloc
     "Buffer memory"
     (createBufferMemory pdev dev memoryRequirements)
@@ -85,22 +85,22 @@ bindBufferMemory ::
   [a] ->
   m ()
 bindBufferMemory dev buffer memory data' = liftIO $ do
-  logDebug LogBuffer $ "bindBufferMemory binding buffer, data size=" <> showT (length data')
+  logDebugIO LogBuffer $ "bindBufferMemory binding buffer, data size=" <> showT (length data')
   Vulkan.vkBindBufferMemory dev buffer memory 0 {- offset-} >>= throwVkResult
-  logDebug LogBuffer "bindBufferMemory buffer bound, copying data"
+  logDebugIO LogBuffer "bindBufferMemory buffer bound, copying data"
   copyDataToDeviceMemory dev memory data'
-  logDebug LogBuffer "bindBufferMemory data copied"
+  logDebugIO LogBuffer "bindBufferMemory data copied"
 
 copyDataToDeviceMemory dev memory data' = liftIO $ do
   let size = case data' of
                [] -> 0
                (x:_) -> fromIntegral (length data' * Foreign.sizeOf x)
-  logDebug LogBuffer $ "copyDataToDeviceMemory size=" <> showT size
+  logDebugIO LogBuffer $ "copyDataToDeviceMemory size=" <> showT size
   memPtr <-
     allocaAndPeek (Vulkan.vkMapMemory dev memory 0 size Vulkan.VK_ZERO_FLAGS)
   Foreign.Marshal.pokeArray (Foreign.castPtr memPtr) data'
   Vulkan.vkUnmapMemory dev memory
-  logDebug LogBuffer "copyDataToDeviceMemory done"
+  logDebugIO LogBuffer "copyDataToDeviceMemory done"
 
 managedVertexBuffer :: (MonadManaged m) => Vulkan.VkPhysicalDevice -> Vulkan.VkDevice -> [Vertex] -> m Vulkan.VkBuffer
 managedVertexBuffer pdev dev vertices = do
@@ -148,7 +148,7 @@ updateUniformBufferRegion dev memory offset uniformData = do
 
 -- | Create a buffer resource with embedded cleanup (not registered in any manager).
 makeBufferResource ::
-  (MonadFail m, MonadIO m, Storable a) =>
+  (MonadIO m, Storable a) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
   [a] ->
@@ -176,7 +176,7 @@ makeBufferResource pdev dev data' usage = do
 
 -- | Create and register a mesh resource (vertex + index buffers).
 createMeshResource ::
-  (MonadFail m, MonadIO m) =>
+  (MonadIO m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->

@@ -9,7 +9,7 @@ module Graphics.Haskan.Render.Bindless
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
-import Graphics.Haskan.Logger (logInfo, showT, LogCategory(..))
+import Graphics.Haskan.Logger (logInfoIO, showT, LogCategory(..))
 import Graphics.Haskan.Vulkan.DescriptorPool qualified as DescriptorPool
 import Graphics.Haskan.Vulkan.DescriptorSet (updateBindlessTexture)
 import Graphics.Haskan.Vulkan.DescriptorSetLayout qualified as DescriptorSetLayout
@@ -33,7 +33,7 @@ createBindlessSet dev sampler = do
   pool   <- DescriptorPool.managedBindlessDescriptorPool dev DescriptorSetLayout.maxBindlessTextures
   ds     <- allocateDescriptorSet dev pool [layout]
   idxRef <- liftIO $ newIORef 0
-  logInfo LogRender $ "Bindless set created with " <> showT DescriptorSetLayout.maxBindlessTextures <> " slots"
+  logInfoIO LogRender $ "Bindless set created with " <> showT DescriptorSetLayout.maxBindlessTextures <> " slots"
   pure BindlessSet
     { bsDescriptorSet = ds
     , bsSampler       = sampler
@@ -51,7 +51,7 @@ registerTexture dev bindlessSet textureView = do
   nextIdx <- liftIO $ readIORef (bsNextIndex bindlessSet)
   if nextIdx >= bsMaxTextures bindlessSet
     then do
-      logInfo LogRender "Bindless texture array full, cannot register more textures"
+      logInfoIO LogRender "Bindless texture array full, cannot register more textures"
       pure Nothing
     else do
       updateBindlessTexture
@@ -61,7 +61,7 @@ registerTexture dev bindlessSet textureView = do
         textureView
         nextIdx
       liftIO $ modifyIORef' (bsNextIndex bindlessSet) (+1)
-      logInfo LogRender $ "Registered texture at bindless index " <> showT nextIdx
+      logInfoIO LogRender $ "Registered texture at bindless index " <> showT nextIdx
       pure (Just nextIdx)
 
 -- Internal: allocate a descriptor set from pool + layout

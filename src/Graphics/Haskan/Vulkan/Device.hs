@@ -9,7 +9,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Word (Word32)
 import Foreign (castPtr, nullPtr)
-import Graphics.Haskan.Logger (logInfo, showT, LogCategory(..))
+import Graphics.Haskan.Logger (logInfoIO, showT, LogCategory(..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, peekVkList_)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -67,8 +67,8 @@ createDevice dev queueFamilyIndices enabledLayers = do
       majorVersion = fromIntegral ((apiVersionWord `shiftR` 22) .&. (0x7F :: Word32)) :: Int
       minorVersion = fromIntegral ((apiVersionWord `shiftR` 12) .&. (0x3FF :: Word32)) :: Int
       patchVersion = fromIntegral (apiVersionWord .&. (0xFFF :: Word32)) :: Int
-  logInfo LogVulkan $ "Vulkan API version raw: " <> showT apiVersion <> " hex: 0x" <> Text.pack (showHex apiVersionWord "")
-  logInfo LogVulkan $ "Vulkan API version: " <> showT majorVersion <> "." <> showT minorVersion <> "." <> showT patchVersion
+  logInfoIO LogVulkan $ "Vulkan API version raw: " <> showT apiVersion <> " hex: 0x" <> Text.pack (showHex apiVersionWord "")
+  logInfoIO LogVulkan $ "Vulkan API version: " <> showT majorVersion <> "." <> showT minorVersion <> "." <> showT patchVersion
 
   -- Query basic features
   availableFeatures <- liftIO $ allocaAndPeek_ (Vulkan.vkGetPhysicalDeviceFeatures dev)
@@ -93,13 +93,13 @@ createDevice dev queueFamilyIndices enabledLayers = do
           updateAfterBind = Vulkan.getField @"descriptorBindingSampledImageUpdateAfterBind" diFeaturesQuery == Vulkan.VK_TRUE
           partiallyBound = Vulkan.getField @"descriptorBindingPartiallyBound" diFeaturesQuery == Vulkan.VK_TRUE
           runtimeArray = Vulkan.getField @"runtimeDescriptorArray" diFeaturesQuery == Vulkan.VK_TRUE
-      logInfo LogVulkan $ "Descriptor indexing capabilities: nonUniform=" <> showT nonUniform
+      logInfoIO LogVulkan $ "Descriptor indexing capabilities: nonUniform=" <> showT nonUniform
         <> " updateAfterBind=" <> showT updateAfterBind
         <> " partiallyBound=" <> showT partiallyBound
         <> " runtimeArray=" <> showT runtimeArray
       pure (nonUniform && updateAfterBind && partiallyBound && runtimeArray)
     else do
-      logInfo LogVulkan "Descriptor indexing requires Vulkan 1.2+, skipping"
+      logInfoIO LogVulkan "Descriptor indexing requires Vulkan 1.2+, skipping"
       pure False
 
   let deviceFlags = Vulkan.VK_ZERO_FLAGS

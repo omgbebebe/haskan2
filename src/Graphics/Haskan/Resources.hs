@@ -20,7 +20,6 @@ import Data.Text (Text)
 import Foreign.Marshal.Alloc qualified
 import Foreign.Marshal.Array qualified
 import Foreign.Storable (Storable, peek)
-import Graphics.Haskan.Logger (logInfo, showT, LogCategory (..))
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 
 alloc :: MonadManaged m => Text -> IO a -> (a -> IO b) -> m a
@@ -28,8 +27,8 @@ alloc resName create destroy =
   using
     ( managed
         ( bracket
-            (logInfo LogGeneral ("allocate " <> resName) *> create)
-            (\r -> logInfo LogGeneral ("deallocate " <> resName) *> (destroy r))
+            create
+            destroy
         )
     )
 
@@ -72,8 +71,8 @@ peekVkList_ vkGetList = liftIO $ do
       vkGetList pCount ptr
       Foreign.Marshal.Array.peekArray (fromIntegral count) ptr
 
-throwVkResult :: (MonadFail m, MonadIO m) => Vulkan.VkResult -> m ()
+throwVkResult :: (MonadIO m) => Vulkan.VkResult -> m ()
 throwVkResult Vulkan.VK_SUCCESS =
   return ()
 throwVkResult res =
-  fail (show res)
+  error (show res)

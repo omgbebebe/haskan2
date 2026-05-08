@@ -10,7 +10,7 @@ import Control.Monad.Managed (MonadManaged)
 import Data.Foldable (for_)
 import Data.Traversable (for)
 import Foreign.Marshal.Array qualified
-import Graphics.Haskan.Logger (logDebug, logInfo, showT, LogCategory (..))
+import Graphics.Haskan.Logger (logDebugIO, logInfoIO, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
 import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..))
 import Graphics.Haskan.Vertex (Vertex)
@@ -71,16 +71,16 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       depthFormat = Vulkan.VK_FORMAT_D16_UNORM
       numSwapchainImages = length (rcFramebuffers ctx)
 
-  logInfo LogRender $ "creating deferred resources for " <> showT numSwapchainImages <> " swapchain images"
+  logInfoIO LogRender $ "creating deferred resources for " <> showT numSwapchainImages <> " swapchain images"
 
   -- G-buffer render pass
   gBufferRenderPass <- RenderPass.managedGBufferRenderPass device gbufColorFormat depthFormat
-  logDebug LogRender "g-buffer render pass created"
+  logDebugIO LogRender "g-buffer render pass created"
 
   -- Lighting render pass
   let surfaceFormat = Swapchain.surfaceFormat
   lightingRenderPass <- RenderPass.managedLightingRenderPass device surfaceFormat
-  logDebug LogRender "lighting render pass created"
+  logDebugIO LogRender "lighting render pass created"
 
   -- Create g-buffer images and views (3 per swapchain image)
   gBufferImagesAndViews <- for [0..numSwapchainImages-1] $ \_ -> do
@@ -94,7 +94,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
 
   let gBufferImages = map fst gBufferImagesAndViews
       gBufferImageViews = map snd gBufferImagesAndViews
-  logDebug LogRender $ "g-buffer images created: " <> showT (length gBufferImages) <> " sets"
+  logDebugIO LogRender $ "g-buffer images created: " <> showT (length gBufferImages) <> " sets"
 
   -- Initial layout transition: UNDEFINED → SHADER_READ_ONLY_OPTIMAL
   -- so that initialLayout in g-buffer render pass matches actual layout.
@@ -106,21 +106,21 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       CommandBuffer.layerTransition tempCmdBuf img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
   liftIO $ Foreign.Marshal.Array.withArray [tempCmdBuf] $ \ptr ->
     Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1 ptr
-  logDebug LogRender "g-buffer images transitioned to SHADER_READ_ONLY_OPTIMAL"
+  logDebugIO LogRender "g-buffer images transitioned to SHADER_READ_ONLY_OPTIMAL"
 
   -- Shared depth image for g-buffer
   depthImage <- Swapchain.managedDepthImage pdev device extent depthFormat
   depthView <- Swapchain.managedDepthView device depthImage depthFormat
-  logDebug LogRender "g-buffer depth image created"
+  logDebugIO LogRender "g-buffer depth image created"
 
   -- G-buffer framebuffers
   gBufferFramebuffers <- for gBufferImageViews $ \views ->
     Framebuffer.managedGBufferFramebuffer device gBufferRenderPass extent views depthView
-  logDebug LogRender $ "g-buffer framebuffers created: " <> showT (length gBufferFramebuffers)
+  logDebugIO LogRender $ "g-buffer framebuffers created: " <> showT (length gBufferFramebuffers)
 
   -- G-buffer pipeline layout (reuse existing descriptor set layout, with push constants)
   gBufferPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [descriptorSetLayout] pushConstantRanges
-  logDebug LogRender "g-buffer pipeline layout created"
+  logDebugIO LogRender "g-buffer pipeline layout created"
 
   -- G-buffer pipeline
   gBufferPipeline <-
@@ -138,12 +138,12 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       extent
       Vertex.vertexFormat
       3
-  logDebug LogRender "g-buffer pipeline created"
+  logDebugIO LogRender "g-buffer pipeline created"
 
   -- Lighting pipeline layout (3 texture bindings)
   lightingDescriptorSetLayout <- DescriptorSetLayout.managedLightingDescriptorSetLayout device
   lightingPipelineLayout <- PipelineLayout.managedPipelineLayout device [lightingDescriptorSetLayout]
-  logDebug LogRender "lighting pipeline layout created"
+  logDebugIO LogRender "lighting pipeline layout created"
 
   -- Lighting pipeline (fullscreen triangle, no vertex input)
   lightingPipeline <-
@@ -159,7 +159,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         , spFragment = litFragShader
         }
       extent
-  logDebug LogRender "lighting pipeline created"
+  logDebugIO LogRender "lighting pipeline created"
 
   -- Wireframe pipeline (vertex + geometry + fragment)
   wireframePipeline <-
@@ -177,7 +177,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       extent
       Vertex.vertexFormat
       3
-  logDebug LogRender "wireframe pipeline created"
+  logDebugIO LogRender "wireframe pipeline created"
 
   -- Lighting framebuffers (one per swapchain image, using swapchain image views)
   swapchainImages <- Swapchain.getSwapchainImages device (swapchain ctx)
@@ -185,22 +185,22 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   swapchainImageViews <- for swapchainImages (ImageView.managedImageView device surfaceFormat')
   lightingFramebuffers <- for swapchainImageViews $ \view ->
     Framebuffer.managedLightingFramebuffer device lightingRenderPass extent view
-  logDebug LogRender $ "lighting framebuffers created: " <> showT (length lightingFramebuffers)
+  logDebugIO LogRender $ "lighting framebuffers created: " <> showT (length lightingFramebuffers)
 
   -- Lighting descriptor pool and sets
   lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages 3
   lightingDescriptorSets <- for [0..numSwapchainImages-1] $ \_ ->
     DescriptorSet.allocateDescriptorSet device lightingDescriptorPool [lightingDescriptorSetLayout]
-  logDebug LogRender $ "lighting descriptor sets allocated: " <> showT (length lightingDescriptorSets)
+  logDebugIO LogRender $ "lighting descriptor sets allocated: " <> showT (length lightingDescriptorSets)
 
   -- Sampler for lighting pass
   sampler <- createSampler device
-  logDebug LogRender "lighting sampler created"
+  logDebugIO LogRender "lighting sampler created"
 
   -- Update lighting descriptor sets with g-buffer views
   liftIO $ for_ (zip lightingDescriptorSets gBufferImageViews) $ \(ds, views) -> do
     DescriptorSet.updateLightingDescriptorSets device ds sampler views
-  logDebug LogRender "lighting descriptor sets updated"
+  logDebugIO LogRender "lighting descriptor sets updated"
 
   pure DeferredResources
     { drGBufferRenderPass = gBufferRenderPass

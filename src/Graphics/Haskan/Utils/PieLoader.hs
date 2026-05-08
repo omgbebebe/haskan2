@@ -54,11 +54,11 @@ data Pie = Pie
 
 type Parser = Parsec Void Text
 
-parsePie :: (MonadFail m, MonadIO m) => FilePath -> m Pie
+parsePie :: (MonadIO m) => FilePath -> m Pie
 parsePie path = do
   fileData <- liftIO (T.readFile path)
   case runParser pieP path fileData of
-    Left e -> fail ("failed to parse '" <> show e <> "'")
+    Left e -> error ("failed to parse '" <> show e <> "'")
     Right p -> pure p
 
 pieP :: Parser Pie

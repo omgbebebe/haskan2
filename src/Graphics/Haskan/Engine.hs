@@ -28,6 +28,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word32)
+
 import FIR qualified
 import Foreign.C qualified
 import Foreign.Marshal.Array qualified
@@ -39,7 +40,7 @@ import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot 
 import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), DebugCameraSnapshot (..), debugMessageToActionEvent, parseDebugMessage, encodeDebugResponse)
 import Graphics.Haskan.Debug.Server (DebugServerHandle, CommandQueue, startDebugServer, stopDebugServer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
-import Graphics.Haskan.Logger (logDebug, logInfo, showT, LogCategory(..))
+import Graphics.Haskan.Logger (logInfoIO, logDebugIO, showT, LogCategory(..))
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
@@ -184,7 +185,7 @@ data ControlMessage
 -- as arguments. It sets up the initial game state with default values.
 mainLoop :: MonadIO m => String -> EngineConfig -> m ()
 mainLoop meshName EngineConfig {..} = do
-  logInfo LogGeneral "starting mainLoop"
+  logInfoIO LogGeneral "starting mainLoop"
   camera <- liftIO $ STM.newTVarIO (Camera.defaultOrbitalCamera)
   isRunning <- liftIO $ STM.newTVarIO True
 
@@ -217,27 +218,27 @@ mainLoop meshName EngineConfig {..} = do
           tvWireframeEnabled
 
   -- Start debug server if configured
-  mDebugServer <- liftIO $ case debugSocketPath of
+  mDebugServer <- case debugSocketPath of
     Just path -> do
       h <- startDebugServer path actionQueue debugCmdQueue
-      logInfo LogGeneral $ "debug server listening on " <> Text.pack path
+      logInfoIO LogGeneral $ "debug server listening on " <> Text.pack path
       pure (Just h)
     Nothing -> pure Nothing
 
   -- Start timeout timer if configured
   case timeoutSeconds of
     Just seconds | seconds > 0 -> do
-      logInfo LogGeneral $ "timeout set to " <> showT seconds <> " seconds"
+      logInfoIO LogGeneral $ "timeout set to " <> showT seconds <> " seconds"
       _ <- liftIO $ forkIO $ do
         threadDelay (fromIntegral seconds * 1000000)
-        logInfo LogGeneral "timeout reached, sending Terminate"
+        logInfoIO LogGeneral "timeout reached, sending Terminate"
         STM.atomically $ TChan.writeTChan controlChannel Terminate
       pure ()
     _ -> pure ()
 
   SDL.initialize @[] [SDL.InitEvents]
 
-  logInfo LogGeneral "Initialize base Render context"
+  logInfoIO LogGeneral "Initialize base Render context"
   let initWidth = 1920
       initHeight = 1080
   window <- Window.createWindow title (initWidth, initHeight)
@@ -248,10 +249,10 @@ mainLoop meshName EngineConfig {..} = do
   Window.showWindow window
 
   renderLoopFinished <- liftIO $ newEmptyMVar
-  _ <- liftIO $ forkIO (runManaged (renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished controlChannel meshName))
+  _ <- liftIO $ forkIO $ runManaged $ renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished controlChannel meshName
 
   stateUpdateLoopFinished <- liftIO $ newEmptyMVar
-  _ <- liftIO $ forkIO (stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished actionQueue debugCmdQueue controlChannel)
+  _ <- liftIO $ forkIO $ stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished actionQueue debugCmdQueue controlChannel
 
   let inputLoop :: MonadIO m => m ()
       inputLoop = do
@@ -263,18 +264,18 @@ mainLoop meshName EngineConfig {..} = do
         unless (quitting) inputLoop
 
   inputLoop
-  logInfo LogGeneral "sending Terminate message"
+  logInfoIO LogGeneral "sending Terminate message"
   liftIO $ STM.atomically $ TChan.writeTChan controlChannel Terminate
-  logInfo LogGeneral "waiting for other threads finished"
+  logInfoIO LogGeneral "waiting for other threads finished"
   liftIO $ mapM_ takeMVar [renderLoopFinished, stateUpdateLoopFinished]
 
   -- Stop debug server
   liftIO $ for_ mDebugServer stopDebugServer
 
-  logInfo LogGeneral "destroying SDL window"
+  logInfoIO LogGeneral "destroying SDL window"
   SDL.destroyWindow window
   SDL.quit
-  logInfo LogGeneral "mainLoop finished"
+  logInfoIO LogGeneral "mainLoop finished"
 
 -- | Render a frame in the render loop. Checks for control messages, gets the 
 -- current camera state, updates the uniform buffer, draws the frame, presents 
@@ -405,7 +406,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         }
                 -- Compile and execute graph
                 case Graph.compileGraph graphRes graphPasses of
-                  Left err -> logInfo LogRender $ "graph compilation failed: " <> Text.pack (show err)
+                  Left err -> liftIO $ logInfoIO LogRender $ "graph compilation failed: " <> Text.pack (show err)
                   Right compiled -> do
                     CommandBuffer.withCommandBuffer commandBuffer $ do
                       let passes = Graph.cgPasses compiled
@@ -413,7 +414,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         let pass = Graph.cpPass cp
                             recordFn = unPassRecordFunc (rpRecord pass)
                             passCtx = if rpName pass == "gbuffer" then gBufferPassCtx else lightingPassCtx
-                        recordFn passCtx
+                        liftIO $ recordFn passCtx
 
           res <- liftIO $ drawFrame ctx imageAvailableSemaphore frameNumber recordAction
           case res of
@@ -435,23 +436,23 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                   pure (False, False)
                 Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
                 Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
-                _ -> fail "presentFrame failed"
+                _ -> liftIO $ fail "presentFrame failed"
             Render.FrameSuboptimal _ -> do
-              fail "suboptimal"
+              liftIO $ fail "suboptimal"
             Render.FrameOutOfDate -> do
-              logInfo LogGeneral "resizing swapchain"
+              liftIO $ logInfoIO LogGeneral "resizing swapchain"
               pure (True, False)
-            Render.FrameFailed err -> fail err
+            Render.FrameFailed err -> liftIO $ fail err
     Just Terminate -> do
-      logInfo LogGeneral "terminating render loop by signal"
+      liftIO $ logInfoIO LogGeneral "terminating render loop by signal"
       pure (True, True)
 
   frameEndTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   if needRestart
     then liftIO $ do
-      logInfo LogGeneral "waiting IDLE state for device"
+      logInfoIO LogGeneral "waiting IDLE state for device"
       Vulkan.vkDeviceWaitIdle device >>= throwVkResult
-      logInfo LogGeneral "terminating renderFrameLoop"
+      logInfoIO LogGeneral "terminating renderFrameLoop"
       pure terminating
     else do
       let renderTime = frameEndTime - frameStartTime
@@ -538,7 +539,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   -- Create texture command buffer early (needed for both glTF and OBJ paths)
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
-  logDebug LogTexture "textureCommandBuffer created"
+  logDebugIO LogTexture "textureCommandBuffer created"
 
   -- Initialize asset cache for texture preprocessing
   assetCache <- initCache ".haskan2-cache"
@@ -556,7 +557,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
       -- Compute scene bounding box from all mesh vertices
       let sceneBbox = computeSceneBounds meshes rm
-      logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
+      logInfoIO LogGeneral $ "scene bounds: " <> showT sceneBbox
 
       -- Add ground plane with checkerboard texture
       let groundMesh = Mesh.groundPlaneMesh 50.0
@@ -577,7 +578,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
       -- Compute bounds from OBJ mesh
       let objBounds = computeMeshBounds mesh
-      logInfo LogGeneral $ "OBJ mesh bounds: " <> showT objBounds
+      logInfoIO LogGeneral $ "OBJ mesh bounds: " <> showT objBounds
 
       -- Spawn 3 cube entities at different positions
       entity1 <- ECS.spawnEntity world
@@ -610,7 +611,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   currentCam <- liftIO $ STM.readTVarIO tvCamera
   let adjustedCam = adjustCameraForScene sceneBounds currentCam
   liftIO $ STM.atomically $ STM.writeTVar tvCamera adjustedCam
-  logInfo LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance adjustedCam)
+  logInfoIO LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance adjustedCam)
 
   -- Create per-frame uniform buffers for multi-entity rendering
   -- Each entity gets 256 bytes (padded from 192 bytes for 3 M44 matrices)
@@ -620,18 +621,18 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       padTo256 mats = mats ++ replicate ((entityUniformSize - length mats * sizeOf (undefined :: M44 Foreign.C.CFloat)) `div` sizeOf (undefined :: M44 Foreign.C.CFloat)) identity
       initialMvpData = concatMap (\m -> padTo256 [m, identity, projectionMatrix]) (replicate numEntities modelMatrix)
 
-  logDebug LogBuffer $ "initialMvpData length=" <> showT (length initialMvpData) <> " size=" <> showT (length initialMvpData * sizeOf (undefined :: M44 Foreign.C.CFloat))
+  logDebugIO LogBuffer $ "initialMvpData length=" <> showT (length initialMvpData) <> " size=" <> showT (length initialMvpData * sizeOf (undefined :: M44 Foreign.C.CFloat))
   frameMvpBuffers <- replicateM Render.maxFramesInFlight $
     Buffer.managedUniformBuffer physicalDevice device initialMvpData
-  logDebug LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
+  logDebugIO LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
 
-  logInfo LogTexture "creating sampler"
+  logInfoIO LogTexture "creating sampler"
   textureSampler <- Texture.managedSampler device
-  logInfo LogTexture "sampler created"
+  logInfoIO LogTexture "sampler created"
 
   -- Collect all unique textures used by entities and build texture array
   initialDrawList <- extractDrawList ecsWorld rm IntMap.empty
-  logInfo LogRender $ "initial draw list has " <> showT (length initialDrawList) <> " entities"
+  logInfoIO LogRender $ "initial draw list has " <> showT (length initialDrawList) <> " entities"
 
   -- Helper: bilinear resize of RGBA8 image data
   let resizeImageBilinear src sw sh dw dh =
@@ -669,7 +670,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         Nothing -> acc
       numUniqueTextures = length uniqueTextures
 
-  logInfo LogTexture $ "unique textures: " <> showT numUniqueTextures
+  logInfoIO LogTexture $ "unique textures: " <> showT numUniqueTextures
 
   -- Build texture handle -> layer index map
   let textureIndexMap = IntMap.fromList $ zip (map (fromIntegral . unTextureHandle) uniqueTextures) [0..]
@@ -684,7 +685,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       mView <- Texture.textureImageView rm whiteHandle
       case mView of
         Just view -> pure view
-        Nothing -> fail "failed to create white texture"
+        Nothing -> liftIO $ fail "failed to create white texture"
     else do
       -- Collect pixel data from all unique textures, resize to 256x256
       arrayLayers <- forM uniqueTextures $ \texHandle -> do
@@ -704,19 +705,19 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       mView <- Texture.textureImageView rm texArrayHandle
       case mView of
         Just view -> pure view
-        Nothing -> fail "failed to create texture array"
+        Nothing -> liftIO $ fail "failed to create texture array"
 
-  logInfo LogTexture "texture array created"
+  logInfoIO LogTexture "texture array created"
 
   -- Create descriptor pool sized for per-entity descriptor sets
   let totalDescriptorSets = numEntities * Render.maxFramesInFlight
   descriptorPool <- DescriptorPool.managedDescriptorPool device totalDescriptorSets
-  logDebug LogRender $ "descriptor pool created for " <> showT totalDescriptorSets <> " sets"
+  logDebugIO LogRender $ "descriptor pool created for " <> showT totalDescriptorSets <> " sets"
 
   -- Allocate per-entity, per-frame descriptor sets
   allDescriptorSets <- replicateM totalDescriptorSets $
     DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
-  logDebug LogRender $ "allocated " <> showT (length allDescriptorSets) <> " descriptor sets"
+  logDebugIO LogRender $ "allocated " <> showT (length allDescriptorSets) <> " descriptor sets"
 
   -- Organize descriptor sets: entityDescriptorSets !! entityIdx !! frameIdx
   let entityDescriptorSets =
@@ -727,7 +728,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         ]
 
   -- Update each descriptor set with frame buffer and shared texture array
-  logInfo LogVulkan "updating per-entity descriptor sets"
+  logInfoIO LogVulkan "updating per-entity descriptor sets"
   for_ (zip [0..] initialDrawList) $ \(entityIdx, _dc) -> do
     for_ (zip [0..] frameMvpBuffers) $ \(frameIdx, (buf, _)) -> do
       let ds = entityDescriptorSets !! entityIdx !! frameIdx
@@ -738,7 +739,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         (fromIntegral entityUniformSize)
         textureArrayView
         textureSampler
-  logInfo LogVulkan "per-entity descriptor sets updated"
+  logInfoIO LogVulkan "per-entity descriptor sets updated"
 
   -- Create push constant range for material index (fragment shader, 4 bytes)
   let pushConstantRange =
@@ -748,7 +749,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
               Vulkan.&* Vulkan.set @"size" 4
           )
 
-  logInfo LogRender "all resources created, entering render loop"
+  logInfoIO LogRender "all resources created, entering render loop"
 
   let mkRenderContext =
         Render.createRenderContext
@@ -783,10 +784,10 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
             outerLoop renderFrameLoopFinished
 
 
-  logInfo LogGeneral "Starting render loop"
-  liftIO $ outerLoop False
+  logInfoIO LogGeneral "Starting render loop"
+  outerLoop False
 
-  logInfo LogGeneral "renderLoop finished"
+  logInfoIO LogGeneral "renderLoop finished"
   -- Destroy resource-manager resources before managed scope exits
   destroyAllResources rm
   liftIO $ putMVar finishedSemaphore ()
@@ -868,7 +869,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
                 (ToggleWireframe, True) -> do
                   current <- STM.readTVarIO (wireframeEnabled gameState)
                   STM.atomically $ STM.writeTVar (wireframeEnabled gameState) (not current)
-                  logInfo LogGeneral $ "wireframe toggled: " <> showT (not current)
+                  logInfoIO LogGeneral $ "wireframe toggled: " <> showT (not current)
                 (ToggleWireframe, False) -> pure ()
             -- Handle debug commands with responses
             for_ debugCmds $ \(cmd, respVar) -> do
@@ -928,13 +929,13 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
             when (sl) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight (-camMove)]
             when (sr) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight camMove]
             threadDelay (round frameDelay)
-            when isRunning $ loop (tFPS) _gameState newTime
+            when isRunning $ loop tFPS _gameState newTime
           Just Terminate -> do
-            logInfo LogGeneral "terminating stateUpdate loop by signal"
+            logInfoIO LogGeneral "terminating stateUpdate loop by signal"
 
   currentTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   loop targetFPS gameState currentTime
-  logInfo LogGeneral "stateUpdateLoop finished"
+  logInfoIO LogGeneral "stateUpdateLoop finished"
   putMVar finishedSemaphore ()
 
 updateCamera ::

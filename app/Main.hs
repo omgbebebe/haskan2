@@ -1,7 +1,13 @@
 module Main where
 
 import Graphics.Haskan qualified as Haskan
-import Graphics.Haskan.Logger (setLogFile)
+import Graphics.Haskan.Logger
+  ( LogBackend
+  , LogLevel (..)
+  , stdoutBackend
+  , fileBackend
+  , setGlobalBackends
+  )
 import Options.Applicative
 import System.Exit (die)
 import Data.Text (Text)
@@ -44,7 +50,7 @@ cliParser =
     <*> optional (strOption
       ( long "log-file"
      <> metavar "PATH"
-     <> help "Write logs to file instead of stdout"
+     <> help "Write logs to file in addition to stdout"
       ))
 
 opts :: ParserInfo CliOpts
@@ -57,9 +63,12 @@ opts = info (cliParser <**> helper)
 main :: IO ()
 main = do
   cli <- execParser opts
-  case optLogFile cli of
-    Just path -> setLogFile path
-    Nothing   -> pure ()
+  fileBackendMb <- case optLogFile cli of
+    Just path -> Just <$> fileBackend Info path
+    Nothing   -> pure Nothing
+  let backends :: [LogBackend]
+      backends = stdoutBackend Info : maybe [] pure fileBackendMb
+  setGlobalBackends backends
   putStrLn ("Loading model: " ++ optModelName cli)
   Haskan.runHaskan
     (optTitle cli)

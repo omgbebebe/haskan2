@@ -57,6 +57,8 @@ Layer 1: GPU Commands (command buffers, queues, synchronization)
 
 **Milestone 8 not started.**
 
+**Logging subsystem complete:** `Logger` effect defined with multi-backend support (stdout, stderr, file), per-backend log levels and formatters. `runLogger` handler for `Eff` code. Bridge functions `logInfoIO`/`logDebugIO` for `MonadIO` code. Engine loop and Vulkan wrappers remain `MonadIO`/`Managed` — `Eff` migration deferred because `Managed` (CPS-based resource brackets) is incompatible with `Eff`'s evaluation model without restructuring the entire Vulkan layer.
+
 **Asset preprocessor skeleton complete:** `AssetCache` with djb2-based file cache under `.haskan2-cache/`. `TexturePreprocessor` with bilinear resize, PoT rounding, serialize/deserialize. Wired into glTF texture loading path.
 
 **Critical lessons learned:**
@@ -76,6 +78,8 @@ Layer 1: GPU Commands (command buffers, queues, synchronization)
 - Vulkan API version raw value `4211000` = Vulkan 1.4.312
 - Texture array dimensions: all layers must be identical size; resize to common size at load time
 - `nextPowerOfTwo` must use `finiteBitSize` bound to avoid infinite loop on Int overflow
+- **effectful + Managed incompatibility:** `Managed` is CPS-based (`∀r. (a → IO r) → IO r`). `Eff` cannot host a proper `MonadManaged` instance because `using` would need to extend the CPS callback scope, which is impossible without restructuring the call chain. `Engine.hs` and Vulkan wrappers stay `MonadIO`/`Managed`; `effectful` used only for Logger effect definition.
+- **effectful dependency resolution:** `transformers-compat 0.8` conflicts with `monad-control`; add `allow-newer: monad-control:transformers-compat` to `cabal.project`
 
 ## Next Milestone
 
@@ -89,3 +93,4 @@ Layer 1: GPU Commands (command buffers, queues, synchronization)
 - [Subsystem Diagram](subsystem-diagram.md) — Module dependencies and responsibilities
 - [Data Flow Diagram](dataflow-diagram.md) — Frame lifecycle, resource flow, synchronization
 - [Frame Inspector](frame-inspector.md) — Capture, serialize, analyze pipeline
+- [Logging Subsystem](logging.md) — effectful-based multi-backend logging

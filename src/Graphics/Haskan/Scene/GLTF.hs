@@ -22,7 +22,7 @@ import Data.Text qualified as Text
 import Data.Vector qualified as Vector
 import Data.Word (Word32)
 import Foreign.C qualified
-import Graphics.Haskan.Logger (logDebug, logInfo, showT, LogCategory (..))
+import Graphics.Haskan.Logger (logDebugIO, logInfoIO, showT, LogCategory (..))
 import Graphics.Haskan.Mesh (Mesh (..))
 import Graphics.Haskan.Scene.ECS (World, EntityId)
 import Graphics.Haskan.Scene.ECS qualified as ECS
@@ -112,7 +112,7 @@ data GLTFImportResult = GLTFImportResult
 
 -- | Import a glTF file into the engine's ECS + ResourceManager.
 importGLTF ::
-  (MonadFail m, MonadIO m, MonadManaged m) =>
+  (MonadIO m, MonadManaged m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
@@ -122,7 +122,7 @@ importGLTF ::
   FilePath ->
   m GLTFImportResult
 importGLTF rm pdev dev queue cmdBuf cache path = do
-  logInfo LogGeneral $ "loading glTF: " <> Text.pack path
+  logInfoIO LogGeneral $ "loading glTF: " <> Text.pack path
 
   -- Load glTF file using gltf-loader
   -- Pre-process JSON to fix missing image mime types, then load from the file's directory
@@ -131,10 +131,10 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
   gltfResult <- liftIO $ withCurrentDirectory (takeDirectory path) $
     GLTF.fromJsonByteString fixedBytes
   gltf <- case gltfResult of
-    Left err -> fail $ "failed to load glTF: " <> show err
+    Left err -> error $ "failed to load glTF: " <> show err
     Right g -> pure g
 
-  logInfo LogGeneral $ "glTF loaded: " <> showT (Vector.length (gltfMeshes gltf)) <> " meshes, "
+  logInfoIO LogGeneral $ "glTF loaded: " <> showT (Vector.length (gltfMeshes gltf)) <> " meshes, "
     <> showT (Vector.length (gltfNodes gltf)) <> " nodes, "
     <> showT (Vector.length (gltfImages gltf)) <> " images"
 
@@ -143,7 +143,7 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
 
   -- Load textures from images
   textures <- loadTextures rm pdev dev queue cmdBuf cache gltf
-  logInfo LogGeneral $ "loaded " <> showT (length textures) <> " textures"
+  logInfoIO LogGeneral $ "loaded " <> showT (length textures) <> " textures"
 
   -- Build material -> texture mapping
   let materialTextures = buildMaterialTextures gltf textures
@@ -163,7 +163,7 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
 
 -- | Load all images from glTF as Vulkan textures.
 loadTextures ::
-  (MonadFail m, MonadIO m, MonadManaged m) =>
+  (MonadIO m, MonadManaged m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
@@ -178,7 +178,7 @@ loadTextures rm pdev dev queue cmdBuf cache gltf = do
 
 -- | Load a single glTF image as a Vulkan texture.
 loadImage ::
-  (MonadFail m, MonadIO m, MonadManaged m) =>
+  (MonadIO m, MonadManaged m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
@@ -218,7 +218,7 @@ buildMaterialTextures gltf textures =
 
 -- | Load all meshes from glTF into engine Mesh resources.
 loadMeshes ::
-  (MonadFail m, MonadIO m) =>
+  (MonadIO m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
@@ -230,7 +230,7 @@ loadMeshes rm pdev dev gltf = do
 
 -- | Load a single glTF mesh (all primitives merged into one engine Mesh).
 loadMesh ::
-  (MonadFail m, MonadIO m) =>
+  (MonadIO m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
@@ -247,12 +247,12 @@ loadMesh rm pdev dev gltfMesh = do
             offsetIdxs = map (+ fromIntegral offset) primIdxs
         in (verts ++ primVerts, idxs ++ offsetIdxs)
       (allVertices, allIndices) = accumulatePrimitives (Vector.toList primitives)
-  logInfo LogGeneral $ "glTF mesh: " <> showT (length allVertices) <> " vertices, " <> showT (length allIndices) <> " indices"
+  logInfoIO LogGeneral $ "glTF mesh: " <> showT (length allVertices) <> " vertices, " <> showT (length allIndices) <> " indices"
   let uvs = map vTexUV allVertices
       (uvals, vvals) = unzip [(realToFrac u, realToFrac v) | V2 u v <- uvs]
       umin = minimum uvals; umax = maximum uvals
       vmin = minimum vvals; vmax = maximum vvals
-  logInfo LogGeneral $ "UV range: U[" <> showT umin <> ", " <> showT umax <> "], V[" <> showT vmin <> ", " <> showT vmax <> "]"
+  logInfoIO LogGeneral $ "UV range: U[" <> showT umin <> ", " <> showT umax <> "], V[" <> showT vmin <> ", " <> showT vmax <> "]"
   Buffer.createMeshResource rm pdev dev allVertices allIndices
 
 -- | Convert a glTF primitive to engine vertices.
@@ -292,7 +292,7 @@ primitiveToIndices prim =
 
 -- | Build ECS scene graph from glTF nodes.
 buildSceneGraph ::
-  (MonadIO m, MonadFail m) =>
+  (MonadIO m) =>
   World ->
   GLTFTypes.Gltf ->
   [MeshHandle] ->
@@ -317,7 +317,7 @@ buildSceneGraph world gltf meshes materialTextures = do
 
 -- | Recursively process a glTF node and its children.
 processNode ::
-  (MonadIO m, MonadFail m) =>
+  (MonadIO m) =>
   World ->
   GLTFTypes.Gltf ->
   [MeshHandle] ->
@@ -356,12 +356,12 @@ processNode world gltf meshes materialTextures nodeIdx parentEntity = do
                   when (matIdx >= 0 && matIdx < length materialTextures) $ do
                     case materialTextures !! matIdx of
                       Just texHandle -> do
-                        logInfo LogGeneral $ "entity " <> showT entity <> " material " <> showT matIdx <> " -> texture assigned"
+                        logInfoIO LogGeneral $ "entity " <> showT entity <> " material " <> showT matIdx <> " -> texture assigned"
                         ECS.setMaterial world entity texHandle
                       Nothing -> do
-                        logInfo LogGeneral $ "entity " <> showT entity <> " material " <> showT matIdx <> " -> NO texture (using fallback)"
+                        logInfoIO LogGeneral $ "entity " <> showT entity <> " material " <> showT matIdx <> " -> NO texture (using fallback)"
                 Nothing -> do
-                  logInfo LogGeneral $ "entity " <> showT entity <> " -> no material"
+                  logInfoIO LogGeneral $ "entity " <> showT entity <> " -> no material"
             [] -> pure ()
     Nothing -> pure ()
 

@@ -44,6 +44,7 @@ cabal run haskan2 -- data/models/unit_cube.obj
 - **Asset cache** — Preprocessed textures cached under `.haskan2-cache/`
 - **Frame inspector** — F12 captures camera, entity NDC vertices, matrices to markdown
 - **Debug server** — Unix socket for remote camera/scene inspection (`--debug-socket PATH`)
+- **Structured logging** — Multi-backend logging (stdout, stderr, file) via `effectful` effects library with per-backend levels and formatters. Engine uses bridge functions; `Eff` integration deferred for Vulkan layer due to `Managed` incompatibility.
 
 ## Architecture
 
@@ -81,6 +82,7 @@ See [`roadmap/`](roadmap/) for full milestone documentation.
 - **SDL2** — Window, input, event loop
 - **linear** — Row-major matrices (transposed for Vulkan column-major)
 - **gltf-loader** — Patched fork for glTF JSON/binary parsing
+- **effectful** — Extensible effects library used for logging subsystem. Engine core remains `MonadIO`/`Managed` due to CPS-based resource bracket incompatibility.
 
 ## Project Structure
 
@@ -89,6 +91,7 @@ src/Graphics/Haskan/
 ├── Engine.hs              -- Main loop, threading, state management
 ├── Camera.hs              -- Orbital camera with quaternion rotation
 ├── Input.hs               -- SDL → Action mapping
+├── Logger.hs              -- effectful-based multi-backend logging
 ├── Scene/
 │   ├── ECS.hs             -- Entity-component system
 │   ├── Transform.hs       -- Local/world matrices
@@ -132,6 +135,7 @@ All direct and transitive dependencies use permissive licenses compatible with M
 | `network` | BSD-3-Clause | Yes |
 | `clock` | BSD-3-Clause | Yes |
 | `managed` | BSD-3-Clause | Yes |
+| `effectful` | BSD-3-Clause | Yes |
 | `tasty`, `tasty-hunit` | MIT | Yes |
 | `fir` (submodule) | BSD-3-Clause | Yes |
 | `gltf-loader` (patched fork) | MIT | Yes |

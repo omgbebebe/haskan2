@@ -10,7 +10,7 @@ import Data.List (partition)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
-import Graphics.Haskan.Logger (logInfo, logWarn, LogCategory (..))
+import Graphics.Haskan.Logger (logInfoIO, logWarnIO, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, peekVkList)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -35,10 +35,10 @@ createInstance extraExtensions = do
             tShow = T.pack . show
         for_
           optMissing
-          (\n -> logWarn LogVulkan ("Missing optional " <> type' <> ": " <> tShow n))
+          (\n -> logWarnIO LogVulkan ("Missing optional " <> type' <> ": " <> tShow n))
         for_
           reqMissing
-          (\n -> logWarn LogVulkan ("Missing required " <> type' <> ": " <> tShow n))
+          (\n -> logWarnIO LogVulkan ("Missing required " <> type' <> ": " <> tShow n))
         pure (reqHave <> optHave)
 
   availableExtensions <-
@@ -57,7 +57,7 @@ createInstance extraExtensions = do
       anyValidationAvailable = not (null validationLayersAvailable)
 
   when (not anyValidationAvailable) $
-    logWarn LogVulkan "No Vulkan validation layers found (install vulkan-validation-layers for debug builds)"
+    logWarnIO LogVulkan "No Vulkan validation layers found (install vulkan-validation-layers for debug builds)"
 
   reqExtensions <- liftIO $ BC.packCString Vulkan.VK_EXT_DEBUG_UTILS_EXTENSION_NAME
 

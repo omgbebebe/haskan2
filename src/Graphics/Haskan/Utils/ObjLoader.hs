@@ -43,11 +43,11 @@ data Obj = Obj
 
 type Parser = Parsec Void Text
 
-parseObj :: (MonadFail m, MonadIO m) => FilePath -> m Obj
+parseObj :: (MonadIO m) => FilePath -> m Obj
 parseObj path = do
   fileData <- liftIO (T.readFile path)
   case runParser objP path fileData of
-    Left e -> fail ("failed to parse '" <> show e <> "'")
+    Left e -> error ("failed to parse '" <> show e <> "'")
     Right p -> pure p
 
 objP :: Parser Obj

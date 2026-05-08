@@ -10,7 +10,7 @@ import Data.List (maximumBy, sortOn)
 import Data.Ord (comparing)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Graphics.Haskan.Logger (logInfo, showT, LogCategory (..))
+import Graphics.Haskan.Logger (logInfoIO, showT, LogCategory (..))
 import Graphics.Haskan.Resources (allocaAndPeek, allocaAndPeek_, peekVkList)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -23,7 +23,7 @@ selectPhysicalDevice inst = do
   case physicalDevices of
     [] -> error "No Vulkan physical devices found"
     [single] -> do
-      logInfo LogVulkan "Only one physical device available, using it"
+      logInfoIO LogVulkan "Only one physical device available, using it"
       pure single
     multiple -> selectBestPhysicalDevice multiple
 
@@ -32,8 +32,8 @@ selectBestPhysicalDevice devices = do
   scored <- mapM scoreDevice devices
   let best@(bestDev, bestScore, bestName) = maximumBy (comparing (\(_, s, _) -> s)) scored
       scoreStr = concatMap (\(_, score, name) -> "\n  " ++ name ++ " (score=" ++ show score ++ ")") scored
-  logInfo LogVulkan $ "Selecting physical device:" <> Text.pack scoreStr
-  logInfo LogVulkan $ "Selected: " <> showT (Text.pack bestName) <> " with score " <> showT bestScore
+  logInfoIO LogVulkan $ "Selecting physical device:" <> Text.pack scoreStr
+  logInfoIO LogVulkan $ "Selected: " <> showT (Text.pack bestName) <> " with score " <> showT bestScore
   pure bestDev
   where
     scoreDevice :: MonadIO m => Vulkan.VkPhysicalDevice -> m (Vulkan.VkPhysicalDevice, Int, String)
@@ -70,5 +70,5 @@ selectPresentMode pdev surface = do
       chosen = case filter (`elem` modes) preferred of
         (mode : _) -> mode
         [] -> Vulkan.VK_PRESENT_MODE_FIFO_KHR -- FIFO is guaranteed to be supported
-  logInfo LogVulkan $ "selected present mode: " <> showT chosen <> " (available: " <> showT modes <> ")"
+  logInfoIO LogVulkan $ "selected present mode: " <> showT chosen <> " (available: " <> showT modes <> ")"
   pure chosen

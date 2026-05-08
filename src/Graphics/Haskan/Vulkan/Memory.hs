@@ -7,7 +7,7 @@ import Data.Bits
 import Data.Foldable (for_)
 import Foreign qualified
 import Foreign.Marshal qualified
-import Graphics.Haskan.Logger (logDebug, showT, LogCategory (..))
+import Graphics.Haskan.Logger (logDebugIO, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -29,7 +29,7 @@ managedMemoryFor pdev dev memoryRequirements memoryRequiredFlags =
     (\ptr -> Vulkan.vkFreeMemory dev ptr Vulkan.vkNullPtr)
 
 allocateMemoryFor ::
-  (MonadFail m, MonadIO m) =>
+  (MonadIO m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
   Vulkan.VkMemoryRequirements ->
@@ -37,7 +37,7 @@ allocateMemoryFor ::
   m Vulkan.VkDeviceMemory
 allocateMemoryFor pdev dev memoryRequirements memoryRequiredFlags = do
   let allocSize = Vulkan.getField @"size" memoryRequirements
-  logDebug LogVulkan $ "allocateMemoryFor size=" <> showT allocSize <> " memTypeBits=" <> showT (Vulkan.getField @"memoryTypeBits" memoryRequirements)
+  logDebugIO LogVulkan $ "allocateMemoryFor size=" <> showT allocSize <> " memTypeBits=" <> showT (Vulkan.getField @"memoryTypeBits" memoryRequirements)
   memoryProperties <-
     allocaAndPeek_ (Vulkan.vkGetPhysicalDeviceMemoryProperties pdev)
   let memoryTypeCount =
@@ -76,7 +76,7 @@ allocateMemoryFor pdev dev memoryRequirements memoryRequiredFlags = do
 
   memoryTypeIndex <-
     case possibleMemoryTypeIndices of
-      [] -> fail "required memory type not found"
+      [] -> error "required memory type not found"
       (i : _) -> pure i
 
   let allocateInfo =

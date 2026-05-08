@@ -29,7 +29,7 @@ import System.FilePath (takeFileName)
 
 import Graphics.Haskan.Assets.Cache
 import Graphics.Haskan.Assets.InternalFormat
-import Graphics.Haskan.Logger (logDebug, showT, LogCategory(..))
+import Graphics.Haskan.Logger (logDebugIO, showT, LogCategory(..))
 
 -- | Configuration for texture preprocessing.
 data TextureConfig = TextureConfig
@@ -208,16 +208,16 @@ loadTextureCached cache filePath config = liftIO $ do
   cached <- cacheLookup cache key subdir
   if cached
     then do
-      logDebug LogTexture $ "Cache hit for " <> showT filePath
+      logDebugIO LogTexture $ "Cache hit for " <> showT filePath
       let path = cachePath cache key subdir
       blob <- BS.readFile path
       case deserializeInternalTexture blob of
         Just tex -> pure (Right tex)
         Nothing  -> do
-          logDebug LogTexture $ "Cache corrupted for " <> showT filePath <> ", reprocessing"
+          logDebugIO LogTexture $ "Cache corrupted for " <> showT filePath <> ", reprocessing"
           reprocess rawBytes config cache key subdir
     else do
-      logDebug LogTexture $ "Cache miss for " <> showT filePath
+      logDebugIO LogTexture $ "Cache miss for " <> showT filePath
       reprocess rawBytes config cache key subdir
 
 -- | Load a texture from raw bytes, using the cache if available.
@@ -229,16 +229,16 @@ loadTextureBytesCached cache rawBytes config = liftIO $ do
   cached <- cacheLookup cache key subdir
   if cached
     then do
-      logDebug LogTexture "Cache hit (bytes)"
+      logDebugIO LogTexture "Cache hit (bytes)"
       let path = cachePath cache key subdir
       blob <- BS.readFile path
       case deserializeInternalTexture blob of
         Just tex -> pure (Right tex)
         Nothing  -> do
-          logDebug LogTexture "Cache corrupted (bytes), reprocessing"
+          logDebugIO LogTexture "Cache corrupted (bytes), reprocessing"
           reprocess rawBytes config cache key subdir
     else do
-      logDebug LogTexture "Cache miss (bytes)"
+      logDebugIO LogTexture "Cache miss (bytes)"
       reprocess rawBytes config cache key subdir
 
 reprocess rawBytes config cache key subdir = do

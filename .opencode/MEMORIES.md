@@ -4,6 +4,7 @@
 - **Build:** `nix develop --command cabal build all`
 - **Run:** `nix develop --command cabal run haskan2 -- [options] <model>`
 - **Run with timeout:** `nix develop --command cabal run haskan2 -- -t 5 unit_cube.obj`
+- **Run with log file:** `nix develop --command cabal run haskan2 -- --log-file /tmp/haskan.log -t 5 MODEL`
 - **Help:** `nix develop --command cabal run haskan2 -- --help`
 
 ## Critical Vulkan Conventions
@@ -55,12 +56,13 @@
 
 ## CLI Options (optparse-applicative)
 ```
-Usage: haskan2 MODEL [-t|--timeout SECONDS] [-T|--title TITLE] [--debug-socket PATH]
+Usage: haskan2 MODEL [-t|--timeout SECONDS] [-T|--title TITLE] [--debug-socket PATH] [--log-file PATH]
 ```
 - `MODEL` — positional, required (e.g. `unit_cube.obj`)
 - `-t, --timeout SECONDS` — auto-exit after N seconds
 - `-T, --title TITLE` — window title (default: "Haskan Demo")
 - `--debug-socket PATH` — custom unix socket path for debug server
+- `--log-file PATH` — write logs to file in addition to stdout
 
 ## Debug Commands
 ```bash
@@ -102,6 +104,38 @@ python3 scripts/debug_client.py key escape true   # inject key press
 - GHC 9.14.1 via `haskell.compiler.ghc9141` from nixpkgs-unstable
 - Cabal-only for Haskell deps, system libs (Vulkan, SDL2) from nixpkgs
 - Validation layers available system-wide: `VK_LAYER_KHRONOS_validation`
+
+## Logging Subsystem (effectful)
+
+Partial migration from IORef-based global logger to `effectful` effects library.
+
+### Design
+- `Logger` effect with dynamic dispatch — `logMessage level cat msg` via `send`
+- `runLogger :: IOE :> es => [LogBackend] -> Eff (Logger : es) a -> Eff es a`
+- `LogBackend` — per-backend name, min level, formatter, write function
+- Backends: `stdoutBackend`, `stderrBackend`, `fileBackend`
+- `defaultFormatter` — human-readable with timestamp; `jsonFormatter` — structured JSON
+
+### Bridge for Mixed Codebase
+- `logInfoIO`, `logDebugIO`, etc. — `MonadIO m =>` variants that write to global `IORef [LogBackend]`
+- `setGlobalBackends` / `getGlobalBackends` — runtime backend configuration
+- Used by `Engine.hs`, Vulkan wrappers, glTF loader, asset preprocessor (all remain `MonadIO`)
+
+### Why Engine.hs stayed MonadIO
+- `Managed` is CPS-based: `Managed a = ∀r. (a -> IO r) -> IO r`
+- Any `MonadManaged` instance for `Eff` would need to extend the CPS callback scope, which is impossible
+- Attempted orphan instance `using m = liftIO $ with m pure` destroyed resources immediately (create → return → destroy)
+- Fixing this requires either replacing all `Managed` code with `resourcet-effectful` or restructuring the entire Vulkan layer
+- Decision: keep `Engine.hs`/`renderLoop` in `Managed`/`MonadIO`; use `logInfoIO` bridge for logging
+
+### MonadFail Removal
+- Removed `MonadFail` constraints across codebase
+- Replaced `fail` with `error` in: `Resources.hs`, `Texture.hs`, `Memory.hs`, `Buffer.hs`, `ObjLoader.hs`, `PieLoader.hs`, `GLTF.hs`
+- `Fail :> es` effect available via `Effectful.Fail` for new code that needs structured failure
+
+### Build Note
+- Added `allow-newer: monad-control:transformers-compat` to `cabal.project` to resolve `effectful` diamond dependency with `vector-sized`/`adjunctions` chain
+- `effectful` in library `build-depends` only (not executable — `Main.hs` runs in plain `IO`)
 
 ## Debugging Tips
 - **Get library sources for reference:** `cabal get <package_name>` (e.g. `cabal get linear`) downloads source to `./linear-1.23.3/` — useful for checking type signatures and implementation details without leaving the project directory.

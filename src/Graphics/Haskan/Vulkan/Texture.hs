@@ -22,7 +22,7 @@ import Data.Foldable (for_)
 import Data.Vector.Storable qualified
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word8)
-import Graphics.Haskan.Logger (logDebug, showT, LogCategory (..))
+import Graphics.Haskan.Logger (logDebugIO, showT, LogCategory (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
 import Graphics.Haskan.Vulkan.Buffer qualified as Haskan
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as Haskan
@@ -45,7 +45,7 @@ import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 readImageFromFile ::
-  (MonadFail m, MonadIO m) =>
+  (MonadIO m) =>
   FilePath ->
   m ((Data.Vector.Storable.Vector Word8), Int, Int)
 readImageFromFile filePath = do
@@ -54,26 +54,26 @@ readImageFromFile filePath = do
       readImageWithMetadata filePath
         >>= \case
           Right (dynamicImage, imageMetadata) -> pure (convertRGBA8 dynamicImage)
-          Left e -> fail e
+          Left e -> error e
 
   let (Image width height imageData) = image
   pure (imageData, width, height)
 
 -- | Decode image bytes (PNG/JPEG) to RGBA8 pixel data.
 decodeImageBytes ::
-  (MonadFail m, MonadIO m) =>
+  (MonadIO m) =>
   ByteString ->
   m ((Data.Vector.Storable.Vector Word8), Int, Int)
 decodeImageBytes bs = do
   image <- case decodeImage bs of
     Right dynamicImage -> pure (convertRGBA8 dynamicImage)
-    Left e -> fail e
+    Left e -> error e
 
   let (Image width height imageData) = image
   pure (imageData, width, height)
 
 managedTexture ::
-  (MonadFail m, MonadManaged m) =>
+  (MonadManaged m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
   FilePath -> -- Data.Vector.Storable.Vector Word8
@@ -160,7 +160,7 @@ managedTexture pdev dev filePath queue commandBuffer = do
   pure imageView
 
 bindImageMemory ::
-  (MonadFail m, MonadIO m) =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkImage ->
   Vulkan.VkDeviceMemory ->
@@ -210,7 +210,7 @@ createSampler dev =
 
 -- | Shared texture upload logic: staging buffer -> image -> imageView -> register.
 uploadTexture ::
-  (MonadFail m, MonadManaged m, MonadIO m) =>
+  (MonadManaged m, MonadIO m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
@@ -263,7 +263,7 @@ uploadTexture rm pdev dev width height imgData queue commandBuffer = do
   imageMemoryRequirements <-
     allocaAndPeek_
       (Vulkan.vkGetImageMemoryRequirements dev image)
-  logDebug LogTexture $ "texture image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " width=" <> showT width <> " height=" <> showT height
+  logDebugIO LogTexture $ "texture image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " width=" <> showT width <> " height=" <> showT height
 
   imageMemory <-
     Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
@@ -317,7 +317,7 @@ uploadTexture rm pdev dev width height imgData queue commandBuffer = do
 
 -- | Create and register a texture resource from file, using asset cache.
 createTextureResource ::
-  (MonadFail m, MonadManaged m, MonadIO m) =>
+  (MonadManaged m, MonadIO m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
@@ -329,13 +329,13 @@ createTextureResource ::
 createTextureResource rm pdev dev cache filePath queue commandBuffer = do
   result <- loadTextureCached cache filePath defaultTextureConfig
   case result of
-    Left err -> fail $ "createTextureResource: " <> err
+    Left err -> error $ "createTextureResource: " <> err
     Right (InternalTexture meta imgData) ->
       uploadTexture rm pdev dev (itmWidth meta) (itmHeight meta) imgData queue commandBuffer
 
 -- | Create and register a texture from raw RGBA8 pixel data.
 createTextureFromData ::
-  (MonadFail m, MonadManaged m, MonadIO m) =>
+  (MonadManaged m, MonadIO m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
@@ -350,7 +350,7 @@ createTextureFromData rm pdev dev width height imgData queue commandBuffer =
 
 -- | Create and register a texture from raw bytes, using asset cache.
 createTextureFromBytesCached ::
-  (MonadFail m, MonadManaged m, MonadIO m) =>
+  (MonadManaged m, MonadIO m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
@@ -362,7 +362,7 @@ createTextureFromBytesCached ::
 createTextureFromBytesCached rm pdev dev cache rawBytes queue commandBuffer = do
   result <- loadTextureBytesCached cache rawBytes defaultTextureConfig
   case result of
-    Left err -> fail $ "createTextureFromBytesCached: " <> err
+    Left err -> error $ "createTextureFromBytesCached: " <> err
     Right (InternalTexture meta imgData) ->
       uploadTexture rm pdev dev (itmWidth meta) (itmHeight meta) imgData queue commandBuffer
 
@@ -409,7 +409,7 @@ generateGridTexture width height spacing =
 -- | Create a 2D texture array from multiple RGBA8 textures.
 -- All textures must have the same width and height.
 createTexture2DArray ::
-  (MonadFail m, MonadManaged m, MonadIO m) =>
+  (MonadManaged m, MonadIO m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
@@ -466,7 +466,7 @@ createTexture2DArray rm pdev dev width height layers queue commandBuffer = do
   imageMemoryRequirements <-
     allocaAndPeek_
       (Vulkan.vkGetImageMemoryRequirements dev image)
-  logDebug LogTexture $ "texture2DArray image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " layers=" <> showT numLayers <> " width=" <> showT width <> " height=" <> showT height
+  logDebugIO LogTexture $ "texture2DArray image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " layers=" <> showT numLayers <> " width=" <> showT width <> " height=" <> showT height
 
   imageMemory <-
     Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]

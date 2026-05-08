@@ -14,7 +14,7 @@ import Control.Monad.Managed (MonadManaged)
 import Data.Foldable (for_)
 import Data.Traversable (for)
 import Foreign.Marshal.Array qualified
-import Graphics.Haskan.Logger (logDebug, logInfo, showT, LogCategory (..))
+import Graphics.Haskan.Logger (logDebugIO, logInfoIO, showT, LogCategory (..))
 import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..))
 import Graphics.Haskan.Resources (allocaAndPeekVkResult, throwVkResult)
 import Graphics.Haskan.Vertex qualified as Vertex
@@ -69,10 +69,10 @@ createRenderContext
         depthFormat = Vulkan.VK_FORMAT_D16_UNORM
         format = Vulkan.getField @"format" Swapchain.surfaceFormat
     surfaceExtent <- PhysicalDevice.surfaceExtent pdev surface
-    logDebug LogRender $ "createRenderContext extent=" <> showT (Vulkan.getField @"width" surfaceExtent) <> "x" <> showT (Vulkan.getField @"height" surfaceExtent)
+    logDebugIO LogRender $ "createRenderContext extent=" <> showT (Vulkan.getField @"width" surfaceExtent) <> "x" <> showT (Vulkan.getField @"height" surfaceExtent)
     swapchain <- Swapchain.managedSwapchain device pdev surface surfaceExtent
     images <- Swapchain.getSwapchainImages device swapchain
-    logDebug LogRender $ "createRenderContext swapchain images=" <> showT (length images)
+    logDebugIO LogRender $ "createRenderContext swapchain images=" <> showT (length images)
     imageViews <- for images (Haskan.managedImageView device format)
 
     renderPass <- RenderPass.managedRenderPass device Swapchain.surfaceFormat depthFormat
@@ -94,14 +94,14 @@ createRenderContext
 
     depthImage <- Swapchain.managedDepthImage pdev device surfaceExtent depthFormat
     depthImageView <- Swapchain.managedDepthView device depthImage depthFormat
-    logDebug LogRender "createRenderContext depth image created"
+    logDebugIO LogRender "createRenderContext depth image created"
 
     framebuffers <- for imageViews $ \imageView ->
       Framebuffer.managedFramebuffer device renderPass surfaceExtent imageView depthImageView
-    logDebug LogRender $ "createRenderContext framebuffers=" <> showT (length framebuffers)
+    logDebugIO LogRender $ "createRenderContext framebuffers=" <> showT (length framebuffers)
 
     graphicsCommandBuffers <- for framebuffers (\_ -> CommandBuffer.createCommandBuffer device graphicsCommandPool)
-    logDebug LogRender $ "createRenderContext commandBuffers=" <> showT (length graphicsCommandBuffers)
+    logDebugIO LogRender $ "createRenderContext commandBuffers=" <> showT (length graphicsCommandBuffers)
 
     pure
       RenderContext
@@ -121,7 +121,7 @@ createRenderContext
           rcGraphicsCommandPool = graphicsCommandPool
         }
 
-drawFrame :: (MonadFail m, MonadIO m) => RenderContext -> Vulkan.VkSemaphore -> Int -> (Vulkan.Word32 -> Int -> IO ()) -> m RenderResult
+drawFrame :: (MonadIO m) => RenderContext -> Vulkan.VkSemaphore -> Int -> (Vulkan.Word32 -> Int -> IO ()) -> m RenderResult
 drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex recordAction = do
   -- Wait for previous frame using this fence to complete before acquiring image
   liftIO $ do

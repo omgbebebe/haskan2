@@ -14,3 +14,4 @@ allow-newer:
   , *:ghc-bignum
   , gltf-codec:aeson
   , gltf-loader:aeson
+  , monad-control:transformers-compat
