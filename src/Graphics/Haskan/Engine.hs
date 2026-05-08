@@ -482,22 +482,6 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                       }
                 wireframeEnabled' <- liftIO $ STM.readTVarIO tvWireframe
 
-                -- Compute culling dispatch
-                let numWorkgroups = ((length drawList + 63) `div` 64)
-                when (numWorkgroups > 0) $ do
-                  liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE ccrPipeline
-                  liftIO $ Foreign.Marshal.Array.withArray [ccrDescriptorSet] $ \dsPtr ->
-                    Vulkan.vkCmdBindDescriptorSets
-                      commandBuffer
-                      Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
-                      ccrPipelineLayout
-                      0
-                      1
-                      dsPtr
-                      0
-                      Vulkan.vkNullPtr
-                  liftIO $ CommandBuffer.cmdDispatch commandBuffer (fromIntegral numWorkgroups) 1 1
-
                 -- Build deferred render graph for this frame
                 let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
                       buildDeferredGraph DeferredPassData
@@ -526,6 +510,22 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                   Left err -> liftIO $ logInfoIO LogRender $ "graph compilation failed: " <> Text.pack (show err)
                   Right compiled -> do
                     CommandBuffer.withCommandBuffer commandBuffer $ do
+                      -- Compute culling dispatch
+                      let numWorkgroups = ((length drawList + 63) `div` 64)
+                      when (numWorkgroups > 0) $ do
+                        liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE ccrPipeline
+                        liftIO $ Foreign.Marshal.Array.withArray [ccrDescriptorSet] $ \dsPtr ->
+                          Vulkan.vkCmdBindDescriptorSets
+                            commandBuffer
+                            Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
+                            ccrPipelineLayout
+                            0
+                            1
+                            dsPtr
+                            0
+                            Vulkan.vkNullPtr
+                        liftIO $ CommandBuffer.cmdDispatch commandBuffer (fromIntegral numWorkgroups) 1 1
+
                       let passes = Graph.cgPasses compiled
                       for_ passes $ \cp -> do
                         let pass = Graph.cpPass cp

@@ -9,7 +9,7 @@ import Graphics.Haskan.Resources (alloc, allocaAndPeek)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, (&*))
+import Graphics.Vulkan.Marshal.Create (set, setStrRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 managedComputePipeline ::
@@ -38,7 +38,7 @@ createComputePipeline dev layout shaderModule = do
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
               &* set @"stage" Vulkan.VK_SHADER_STAGE_COMPUTE_BIT
               &* set @"module" shaderModule
-              &* set @"pName" Vulkan.VK_NULL  -- main
+              &* setStrRef @"pName" "main"
               &* set @"pSpecializationInfo" Vulkan.VK_NULL
           )
       createInfo =

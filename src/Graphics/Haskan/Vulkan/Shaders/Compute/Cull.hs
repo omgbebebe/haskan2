@@ -32,12 +32,17 @@ type VisibleFlagsData = Struct
   '[ "flags" ':-> Array MaxEntities Word32
    ]
 
+-- | Entities SSBO wrapper.
+type EntitiesData = Struct
+  '[ "data" ':-> Array MaxEntities EntityData
+   ]
+
 -- Maximum number of entities supported by the cull shader.
 -- Must match CPU allocation.
 type MaxEntities = 4096
 
 type Defs
-  =  '[ "entities"     ':-> StorageBuffer '[ DescriptorSet 0, Binding 0 ] (Array MaxEntities EntityData)
+  =  '[ "entities"     ':-> StorageBuffer '[ DescriptorSet 0, Binding 0 ] EntitiesData
       , "visibleFlags" ':-> StorageBuffer '[ DescriptorSet 0, Binding 1 ] VisibleFlagsData
       , "cullData"     ':-> Uniform       '[ DescriptorSet 0, Binding 2 ] CullData
       , "main"         ':-> EntryPoint    '[ LocalSize 64 1 1 ] Compute
@@ -55,7 +60,7 @@ program = Module $ entryPoint @"main" @Compute do
     then pure (Lit ())
     else do
       -- Load entity data
-      entity    <- use @(Name "entities" :.: AnIndex Word32) idx
+      entity    <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32) idx
       let aabbMin = view @(Name "aabbMin") entity
           aabbMax = view @(Name "aabbMax") entity
 
