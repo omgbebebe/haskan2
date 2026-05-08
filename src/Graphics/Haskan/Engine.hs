@@ -655,13 +655,18 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   liftIO $ STM.atomically $ STM.writeTVar tvCamera adjustedCam
   logInfoIO LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance adjustedCam)
 
+  -- Determine actual entity count for buffer/descriptor allocation
+  initialDrawList <- extractDrawList ecsWorld rm IntMap.empty
+  let numDrawEntities = length initialDrawList
+  logInfoIO LogRender $ "initial draw list has " <> showT numDrawEntities <> " entities"
+
   -- Create per-frame uniform buffers for multi-entity rendering
   -- Each entity gets 256 bytes (padded from 192 bytes for 3 M44 matrices)
   let entityUniformSize = 256 :: Int
-      totalUniformSize = numEntities * entityUniformSize
+      totalUniformSize = numDrawEntities * entityUniformSize
       padTo256 :: [M44 Foreign.C.CFloat] -> [M44 Foreign.C.CFloat]
       padTo256 mats = mats ++ replicate ((entityUniformSize - length mats * sizeOf (undefined :: M44 Foreign.C.CFloat)) `div` sizeOf (undefined :: M44 Foreign.C.CFloat)) identity
-      initialMvpData = concatMap (\m -> padTo256 [m, identity, projectionMatrix]) (replicate numEntities modelMatrix)
+      initialMvpData = concatMap (\m -> padTo256 [m, identity, projectionMatrix]) (replicate numDrawEntities modelMatrix)
 
   logDebugIO LogBuffer $ "initialMvpData length=" <> showT (length initialMvpData) <> " size=" <> showT (length initialMvpData * sizeOf (undefined :: M44 Foreign.C.CFloat))
   frameMvpBuffers <- replicateM Render.maxFramesInFlight $
@@ -671,10 +676,6 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   logInfoIO LogTexture "creating sampler"
   textureSampler <- Texture.managedSampler device
   logInfoIO LogTexture "sampler created"
-
-  -- Collect all unique textures used by entities and build texture array
-  initialDrawList <- extractDrawList ecsWorld rm IntMap.empty
-  logInfoIO LogRender $ "initial draw list has " <> showT (length initialDrawList) <> " entities"
 
   -- Helper: bilinear resize of RGBA8 image data
   let resizeImageBilinear src sw sh dw dh =
@@ -752,7 +753,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   logInfoIO LogTexture "texture array created"
 
   -- Create descriptor pool sized for per-entity descriptor sets
-  let totalDescriptorSets = numEntities * Render.maxFramesInFlight
+  let totalDescriptorSets = numDrawEntities * Render.maxFramesInFlight
   descriptorPool <- DescriptorPool.managedDescriptorPool device totalDescriptorSets
   logDebugIO LogRender $ "descriptor pool created for " <> showT totalDescriptorSets <> " sets"
 
@@ -766,7 +767,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         [ [ allDescriptorSets !! (e * Render.maxFramesInFlight + f)
           | f <- [0 .. Render.maxFramesInFlight - 1]
           ]
-        | e <- [0 .. numEntities - 1]
+        | e <- [0 .. numDrawEntities - 1]
         ]
 
   -- Update each descriptor set with frame buffer and shared texture array
