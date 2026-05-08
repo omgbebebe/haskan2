@@ -589,13 +589,17 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   let isGLTF = ".gltf" `Text.isSuffixOf` Text.pack meshName || ".glb" `Text.isSuffixOf` Text.pack meshName
 
   -- Create ECS World and load scene
-  (ecsWorld, numEntities, sceneBounds) <- if isGLTF
+  (ecsWorld, numEntities, sceneBounds, texturePixelMap) <- if isGLTF
     then do
       -- Load glTF scene
       result <- importGLTF rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName
       let world = girWorld result
           meshes = girMeshes result
           textures = girTextures result
+          textureData = girTextureData result
+          -- Build a map from TextureHandle ID to (width, height, pixels)
+          pixelMap = IntMap.fromList $
+            zip (map (fromIntegral . unTextureHandle) textures) textureData
 
       -- Compute scene bounding box from all mesh vertices
       let sceneBbox = computeSceneBounds meshes rm
@@ -611,7 +615,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       ECS.setMesh world groundEntity groundMeshHandle
       ECS.setMaterial world groundEntity checkerTexHandle
 
-      pure (world, length meshes + 1, sceneBbox)
+      pure (world, length meshes + 1, sceneBbox, pixelMap)
     else do
       -- Load OBJ model (original behavior)
       world <- ECS.createWorld
@@ -645,7 +649,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       ECS.setMesh world groundEntity groundMeshHandle
       ECS.setMaterial world groundEntity checkerTexHandle
 
-      pure (world, 4, objBounds)  -- 3 cubes + ground plane
+      pure (world, 4, objBounds, IntMap.empty)  -- 3 cubes + ground plane
 
   -- Adjust camera based on scene bounds
   worldState <- liftIO $ STM.readTVarIO (world gameState)
@@ -730,20 +734,30 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         Just view -> pure view
         Nothing -> liftIO $ fail "failed to create white texture"
     else do
-      -- Collect pixel data from all unique textures, resize to 256x256
+      -- Collect pixel data from all unique textures
+      -- For glTF: use decoded pixel data map (no individual GPU textures created)
+      -- For OBJ: read pixel data from individual GPU texture resources
       arrayLayers <- forM uniqueTextures $ \texHandle -> do
-        mTexRes <- lookupTexture rm texHandle
-        case mTexRes of
-          Nothing -> pure $ Texture.generateCheckerboardTexture 256 256 32
-          Just texRes -> case trPixelData texRes of
-            Nothing -> pure $ Texture.generateCheckerboardTexture 256 256 32
-            Just pixelData -> do
-              let tw = trWidth texRes
-                  th = trHeight texRes
-              -- Resize to 256x256 if needed
-              if tw == 256 && th == 256
-                then pure pixelData
-                else pure $ resizeImageBilinear pixelData tw th 256 256
+        let hId = fromIntegral (unTextureHandle texHandle)
+        case IntMap.lookup hId texturePixelMap of
+          -- glTF path: decoded pixel data available
+          Just (tw, th, pixelData) ->
+            if tw == 256 && th == 256
+              then pure pixelData
+              else pure $ resizeImageBilinear pixelData tw th 256 256
+          -- OBJ path: read from GPU texture resource
+          Nothing -> do
+            mTexRes <- lookupTexture rm texHandle
+            case mTexRes of
+              Nothing -> pure $ Texture.generateCheckerboardTexture 256 256 32
+              Just texRes -> case trPixelData texRes of
+                Nothing -> pure $ Texture.generateCheckerboardTexture 256 256 32
+                Just pixelData -> do
+                  let tw = trWidth texRes
+                      th = trHeight texRes
+                  if tw == 256 && th == 256
+                    then pure pixelData
+                    else pure $ resizeImageBilinear pixelData tw th 256 256
       texArrayHandle <- Texture.createTexture2DArray rm physicalDevice device 256 256 arrayLayers graphicsQueueHandler textureCommandBuffer
       mView <- Texture.textureImageView rm texArrayHandle
       case mView of

@@ -11,6 +11,8 @@ module Graphics.Haskan.Vulkan.Texture
   , generateCheckerboardTexture
   , createTextureFromData
   , createTextureFromBytesCached
+  , decodeTextureCached
+  , uploadTexture
   , createTexture2DArray
   ) where
 import Codec.Picture
@@ -365,6 +367,19 @@ createTextureFromBytesCached rm pdev dev cache rawBytes queue commandBuffer = do
     Left err -> error $ "createTextureFromBytesCached: " <> err
     Right (InternalTexture meta imgData) ->
       uploadTexture rm pdev dev (itmWidth meta) (itmHeight meta) imgData queue commandBuffer
+
+-- | Decode texture bytes using asset cache, returning dimensions and pixel data.
+-- Does NOT upload to GPU.
+decodeTextureCached ::
+  MonadIO m =>
+  AssetCache ->
+  ByteString ->
+  m (Either String (Int, Int, Data.Vector.Storable.Vector Word8))
+decodeTextureCached cache rawBytes = liftIO $ do
+  result <- loadTextureBytesCached cache rawBytes defaultTextureConfig
+  case result of
+    Left err -> pure (Left err)
+    Right (InternalTexture meta imgData) -> pure (Right (itmWidth meta, itmHeight meta, imgData))
 
 
 -- | Resolve a texture handle to its VkImageView.

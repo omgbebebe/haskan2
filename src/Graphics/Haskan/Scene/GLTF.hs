@@ -5,7 +5,9 @@ module Graphics.Haskan.Scene.GLTF
   , GLTFImportResult (..)
   ) where
 
-import Control.Monad (when)
+import Control.Concurrent (forkIO)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar)
+import Control.Monad (forM, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Aeson.KeyMap qualified as KeyMap
@@ -20,7 +22,8 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Vector qualified as Vector
-import Data.Word (Word32)
+import Data.Vector.Storable qualified as VectorStorable
+import Data.Word (Word32, Word8)
 import Foreign.C qualified
 import Graphics.Haskan.Logger (logDebugIO, logInfoIO, showT, LogCategory (..))
 import Graphics.Haskan.Mesh (Mesh (..))
@@ -32,7 +35,7 @@ import Graphics.Haskan.Assets.TexturePreprocessor (TextureConfig, defaultTexture
 import Graphics.Haskan.Vertex (Vertex (..))
 
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
-import Graphics.Haskan.Vulkan.Resources (ResourceManager, MeshHandle, TextureHandle)
+import Graphics.Haskan.Vulkan.Resources (ResourceManager, MeshHandle, TextureHandle (..), allocHandle, rmNextId)
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Linear (V2 (..), V3 (..), V4 (..), Quaternion (..))
 import Linear qualified
@@ -107,8 +110,9 @@ data GLTFImportResult = GLTFImportResult
   { girWorld :: !World
   , girMeshes :: ![MeshHandle]
   , girTextures :: ![TextureHandle]
-   , girRootEntity :: !EntityId
-   }
+  , girTextureData :: ![(Int, Int, VectorStorable.Vector Word8)]  -- ^ parallel to girTextures: (width, height, pixels)
+  , girRootEntity :: !EntityId
+  }
 
 -- | Import a glTF file into the engine's ECS + ResourceManager.
 importGLTF ::
@@ -141,8 +145,8 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
   -- Create ECS world
   world <- ECS.createWorld
 
-  -- Load textures from images
-  textures <- loadTextures rm pdev dev queue cmdBuf cache gltf
+  -- Load textures from images (decode only, no GPU upload)
+  (textures, textureData) <- loadTextures rm pdev dev queue cmdBuf cache gltf
   logInfoIO LogGeneral $ "loaded " <> showT (length textures) <> " textures"
 
   -- Build material -> texture mapping
@@ -158,10 +162,12 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
     { girWorld = world
     , girMeshes = meshes
     , girTextures = textures
+    , girTextureData = textureData
     , girRootEntity = rootEntity
     }
 
--- | Load all images from glTF as Vulkan textures.
+-- | Load all images from glTF as placeholder texture handles.
+-- Decodes all images concurrently. No GPU upload — pixel data is returned for batch array creation.
 loadTextures ::
   (MonadIO m, MonadManaged m) =>
   ResourceManager ->
@@ -171,30 +177,49 @@ loadTextures ::
   Vulkan.VkCommandBuffer ->
   AssetCache ->
   GLTFTypes.Gltf ->
-  m [TextureHandle]
-loadTextures rm pdev dev queue cmdBuf cache gltf = do
-  let images = gltfImages gltf
-  mapM (loadImage rm pdev dev queue cmdBuf cache) (Vector.toList images)
+  m ([TextureHandle], [(Int, Int, VectorStorable.Vector Word8)])
+loadTextures rm _pdev _dev _queue _cmdBuf cache gltf = do
+  let images = Vector.toList (gltfImages gltf)
+      numImages = length images
 
--- | Load a single glTF image as a Vulkan texture.
-loadImage ::
-  (MonadIO m, MonadManaged m) =>
-  ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
+  logInfoIO LogGeneral $ "decoding " <> showT numImages <> " textures concurrently"
+
+  -- Phase 1: Decode all images concurrently (CPU-bound)
+  decoded <- liftIO $ do
+    mvars <- mapM (\_ -> newEmptyMVar) images
+    for_ (zip images mvars) $ \(img, mvar) -> forkIO $ do
+      result <- decodeImage cache img
+      putMVar mvar result
+    mapM takeMVar mvars
+
+  logInfoIO LogGeneral $ "all " <> showT numImages <> " textures decoded"
+
+  -- Phase 2: Create placeholder handles (no GPU upload)
+  handlesAndData <- forM decoded $ \result ->
+    case result of
+      Left err -> error $ "loadTextures: " <> err
+      Right (w, h, pixels) -> do
+        texH <- TextureHandle <$> allocHandle (rmNextId rm)
+        pure (texH, (w, h, pixels))
+
+  let handles = map fst handlesAndData
+      pixelData = map snd handlesAndData
+
+  pure (handles, pixelData)
+
+-- | Decode a single glTF image to raw pixel data (CPU only).
+decodeImage ::
   AssetCache ->
   GLTFTypes.Image ->
-  m TextureHandle
-loadImage rm pdev dev queue cmdBuf cache img = do
+  IO (Either String (Int, Int, VectorStorable.Vector Word8))
+decodeImage cache img =
   case GLTFTypes.imageData img of
-    Just bs -> do
-      Texture.createTextureFromBytesCached rm pdev dev cache bs queue cmdBuf
+    Just bs ->
+      Texture.decodeTextureCached cache bs
     Nothing -> do
-      -- No image data - create a white fallback texture
+      -- No image data - return a white fallback
       let whitePixels = Texture.generateGridTexture 2 2 1
-      Texture.createTextureFromData rm pdev dev 2 2 whitePixels queue cmdBuf
+      pure (Right (2, 2, whitePixels))
 
 -- | Build a mapping from material index to its base color texture handle.
 -- Returns a list where index = material index, value = Maybe TextureHandle.
