@@ -486,11 +486,13 @@ mainLoop meshName EngineConfig {..} = do
         let actionEvents = catMaybes $ map (payloadToActionEvent . SDL.eventPayload) events
             quitting = any (\(a, p, _) -> a == Escape && p) actionEvents
         liftIO $ STM.atomically $ for_ actionEvents $ writeInputBuffer inputBuffer
+        when (not (null actionEvents)) $ logInfoIO LogGeneral $ "input: " <> showT (length actionEvents) <> " events, first=" <> showT (head actionEvents)
         running <- liftIO $ STM.readTVarIO isRunning
         let inputDelayMicros = max 1 (1000000 `div` fromIntegral targetInputFPS)
-        SDL.delay (fromIntegral inputDelayMicros)
+        liftIO $ threadDelay (fromIntegral inputDelayMicros)
         unless (quitting || not running) inputLoop
 
+  logInfoIO LogGeneral "inputLoop starting"
   inputLoop
   logInfoIO LogGeneral "sending Terminate message"
   liftIO $ STM.atomically $ TChan.writeTChan controlChannel Terminate
@@ -682,6 +684,15 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                             0
                             Vulkan.vkNullPtr
                         liftIO $ CommandBuffer.cmdDispatch commandBuffer (fromIntegral numWorkgroups) 1 1
+                        -- Barrier: compute writes to drawCommands buffer before graphics reads it for indirect draw
+                        liftIO $ CommandBuffer.cmdBufferBarrier
+                          commandBuffer
+                          ccrDrawCommandsBuffer
+                          (fromIntegral (ccrMaxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)))
+                          Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                          Vulkan.VK_ACCESS_SHADER_WRITE_BIT
+                          Vulkan.VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT
+                          Vulkan.VK_ACCESS_INDIRECT_COMMAND_READ_BIT
 
                       let passes = Graph.cgPasses compiled
                       for_ passes $ \cp -> do
@@ -950,7 +961,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
             { mrVertexBuffer = sharedVertBuf
             , mrIndexBuffer = sharedIdxBuf
             , mrFirstIndex = fi
-            , mrVertexOffset = vo
+            , mrVertexOffset = 0  -- indices already remapped in mergeMeshes, no additional offset
             }
       logInfoIO LogRender $ "merged " <> showT (length meshHandles) <> " meshes into single buffers"
 
@@ -1196,6 +1207,7 @@ drawCallToSnapshot DrawCall {..} =
 -- terminated by a control signal.
 stateUpdateLoop :: (Camera cam, MonadIO m) => Integer -> GameState cam -> MVar () -> InputBuffer -> CommandQueue -> TChan ControlMessage -> m ()
 stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue controlChannel = liftIO $ do
+  logInfoIO LogGeneral "stateUpdateLoop starting"
   control <- STM.atomically $ TChan.dupTChan controlChannel
 
   let camSpeed = 10.0 :: Foreign.C.CFloat
@@ -1209,6 +1221,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
             let dtSeconds = min 0.1 (realToFrac (newTime - prevTime) / 1e9) :: Foreign.C.CFloat
             (actions, overflowCount) <- STM.atomically $ flushInputBuffer inputBuffer
             when (overflowCount > 0) $ logInfoIO LogGeneral $ "input buffer overflow: " <> showT overflowCount <> " events dropped"
+            when (not (null actions)) $ logInfoIO LogGeneral $ "stateUpdate: processing " <> showT (length actions) <> " actions, first=" <> showT (head actions)
             debugCmds <- STM.atomically $ TQueue.flushTQueue debugCmdQueue
             worldState <- STM.readTVarIO (world gameState)
             let camera = activeCamera worldState
@@ -1223,8 +1236,8 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                     ( updateCamera
                         (activeCamera worldState)
                         [ Camera.Rotate
-                            ( V3 (fromIntegral x * dtSeconds) (fromIntegral y * dtSeconds) 0.0
-                            )
+                             ( V3 (fromIntegral x * 0.1 * dtSeconds) (fromIntegral y * 0.1 * dtSeconds) 0.0
+                             )
                         ]
                     )
                 (Zoom amount, _, _) ->

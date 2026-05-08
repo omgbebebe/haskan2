@@ -14,7 +14,7 @@ runHaskan title meshName mTimeout mDebugSocket = do
     meshName
     EngineConfig
       { targetRenderFPS = 120,
-        targetPhysicsFPS = 10,
+        targetPhysicsFPS = 60,
         targetNetworkFPS = 10,
         targetInputFPS = 60,
         title = title,

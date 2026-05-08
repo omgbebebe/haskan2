@@ -94,8 +94,8 @@ mouseWheelToAction (SDL.MouseWheelEventData _window _mouseDevice scroll _directi
 mouseMotionToAction :: SDL.MouseMotionEventData -> Maybe ActionEvent
 mouseMotionToAction (SDL.MouseMotionEventData _window _mouseDevice _mouseButtons _absolutePosition relativePosition) =
   let (SDL.V2 relX relY) = relativePosition
-      x = fromIntegral (relX * 10)
-      y = fromIntegral (relY * 10)
+      x = fromIntegral relX
+      y = fromIntegral relY
    in Just (MouseMove (V2 x y), True, False)
 
 keyToAction :: SDL.KeyboardEventData -> Maybe ActionEvent

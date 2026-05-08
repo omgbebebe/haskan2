@@ -83,9 +83,9 @@ withCommandBuffer' commandBuffer flags action =
       end = liftIO $ Vulkan.vkEndCommandBuffer commandBuffer >>= throwVkResult
    in (begin *> action <* end)
 
-cmdDraw :: MonadIO m => Vulkan.VkCommandBuffer -> Word32 -> Int32 -> Word32 -> m ()
-cmdDraw commandBuffer indexCount vertexOffset firstInstance =
-  liftIO $ Vulkan.vkCmdDrawIndexed commandBuffer indexCount 1 0 vertexOffset firstInstance
+cmdDraw :: MonadIO m => Vulkan.VkCommandBuffer -> Word32 -> Word32 -> Int32 -> Word32 -> m ()
+cmdDraw commandBuffer indexCount firstIndex vertexOffset firstInstance =
+  liftIO $ Vulkan.vkCmdDrawIndexed commandBuffer indexCount 1 firstIndex vertexOffset firstInstance
 
 cmdDrawIndexedIndirect :: MonadIO m => Vulkan.VkCommandBuffer -> Vulkan.VkBuffer -> Word32 -> Word32 -> m ()
 cmdDrawIndexedIndirect commandBuffer buffer drawCount stride =
@@ -93,6 +93,46 @@ cmdDrawIndexedIndirect commandBuffer buffer drawCount stride =
 
 cmdDispatch :: MonadIO m => Vulkan.VkCommandBuffer -> Word32 -> Word32 -> Word32 -> m ()
 cmdDispatch commandBuffer gx gy gz = liftIO $ Vulkan.vkCmdDispatch commandBuffer gx gy gz
+
+cmdBufferBarrier ::
+  MonadIO m =>
+  Vulkan.VkCommandBuffer ->
+  Vulkan.VkBuffer ->
+  Vulkan.VkDeviceSize ->
+  Vulkan.VkPipelineStageFlags ->
+  Vulkan.VkAccessFlags ->
+  Vulkan.VkPipelineStageFlags ->
+  Vulkan.VkAccessFlags ->
+  m ()
+cmdBufferBarrier commandBuffer buffer size srcStage srcAccess dstStage dstAccess = do
+  let barrier =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"srcAccessMask" srcAccess
+              &* set @"dstAccessMask" dstAccess
+              &* set @"srcQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+              &* set @"dstQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+              &* set @"buffer" buffer
+              &* set @"offset" 0
+              &* set @"size" size
+          )
+  liftIO $
+    withPtr
+      barrier
+      ( \bPtr ->
+          Vulkan.vkCmdPipelineBarrier
+            commandBuffer
+            srcStage
+            dstStage
+            Vulkan.VK_ZERO_FLAGS
+            0
+            Vulkan.vkNullPtr
+            1
+            bPtr
+            0
+            Vulkan.vkNullPtr
+      )
 
 copyBufferToImageLayer ::
   MonadIO m =>
