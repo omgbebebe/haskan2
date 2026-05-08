@@ -13,12 +13,13 @@ import Control.Concurrent.STM.TChan qualified as TChan
 import Control.Concurrent.STM.TQueue (TQueue)
 import Control.Concurrent.STM.TQueue qualified as TQueue
 import Control.Concurrent.STM.TVar (TVar)
+import Control.Exception (SomeException, try)
 import Control.Lens ((^.))
 import Control.Monad (forM, forM_, replicateM, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged, runManaged, with)
 import Data.Aeson (ToJSON (..), object, (.=))
-import Data.Foldable (for_)
+import Data.Foldable (for_, toList)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable (..))
@@ -27,10 +28,12 @@ import Data.IntMap.Strict qualified as IntMap
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (nub, sort)
 import Data.Maybe (catMaybes)
+import Data.Sequence (Seq(..))
+import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Vector.Storable qualified as Vector
-import Data.Word (Word32)
+import Data.Word (Word32, Word64)
 import Data.Int (Int32)
 
 import FIR qualified
@@ -109,6 +112,48 @@ toListOfV4 :: V4 (V4 a) -> [[a]]
 toListOfV4 (V4 r1 r2 r3 r4) = [toList r1, toList r2, toList r3, toList r4]
   where
     toList (V4 a b c d) = [a, b, c, d]
+
+-- | Fork an IO action with exception handling. Always puts the MVar on completion.
+forkIOWithHandler :: String -> MVar () -> IO () -> IO ()
+forkIOWithHandler name finishedSemaphore action = do
+  _ <- forkIO $ do
+    result <- try @SomeException action
+    case result of
+      Left err -> do
+        logInfoIO LogGeneral $ Text.pack name <> " thread crashed: " <> Text.pack (show err)
+        putMVar finishedSemaphore ()
+      Right () -> putMVar finishedSemaphore ()
+  pure ()
+
+-- | Bounded input buffer with overflow tracking.
+data InputBuffer = InputBuffer
+  { ibEvents :: !(TVar (Seq ActionEvent))
+  , ibOverflow :: !(TVar Word64)
+  }
+
+newInputBuffer :: IO InputBuffer
+newInputBuffer = do
+  events <- STM.newTVarIO Seq.empty
+  overflow <- STM.newTVarIO 0
+  pure (InputBuffer events overflow)
+
+writeInputBuffer :: InputBuffer -> ActionEvent -> STM ()
+writeInputBuffer (InputBuffer eventsVar overflowVar) event = do
+  events <- STM.readTVar eventsVar
+  let events' = events Seq.|> event
+  if Seq.length events' > 256
+    then do
+      STM.writeTVar eventsVar (Seq.drop 1 events')
+      STM.modifyTVar' overflowVar (+ 1)
+    else STM.writeTVar eventsVar events'
+
+flushInputBuffer :: InputBuffer -> STM ([ActionEvent], Word64)
+flushInputBuffer (InputBuffer eventsVar overflowVar) = do
+  events <- STM.readTVar eventsVar
+  overflow <- STM.readTVar overflowVar
+  STM.writeTVar eventsVar Seq.empty
+  STM.writeTVar overflowVar 0
+  pure (toList events, overflow)
 
 -- | Compute culling entity data (matches shader EntityData, Base/std430 layout).
 -- Array stride is 128 bytes (124-byte struct + 4 bytes padding).
@@ -372,7 +417,7 @@ mainLoop meshName EngineConfig {..} = do
 
   controlChannel <- liftIO $ TChan.newBroadcastTChanIO
   worldState <- liftIO $ STM.newTVarIO (WorldState camera)
-  actionQueue <- liftIO $ STM.newTQueueIO
+  inputBuffer <- liftIO newInputBuffer
   debugCmdQueue <- liftIO $ STM.newTQueueIO
   -- movement state
   tvMoveForward <- liftIO $ STM.newTVarIO (False)
@@ -401,7 +446,7 @@ mainLoop meshName EngineConfig {..} = do
   -- Start debug server if configured
   mDebugServer <- case debugSocketPath of
     Just path -> do
-      h <- startDebugServer path actionQueue debugCmdQueue
+      h <- startDebugServer path (\ev -> STM.atomically $ writeInputBuffer inputBuffer ev) debugCmdQueue
       logInfoIO LogGeneral $ "debug server listening on " <> Text.pack path
       pure (Just h)
     Nothing -> pure Nothing
@@ -430,19 +475,20 @@ mainLoop meshName EngineConfig {..} = do
   Window.showWindow window
 
   renderLoopFinished <- liftIO $ newEmptyMVar
-  _ <- liftIO $ forkIO $ runManaged $ renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished controlChannel meshName
+  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished controlChannel meshName
 
   stateUpdateLoopFinished <- liftIO $ newEmptyMVar
-  _ <- liftIO $ forkIO $ stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished actionQueue debugCmdQueue controlChannel
+  liftIO $ forkIOWithHandler "stateUpdateLoop" stateUpdateLoopFinished $ stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished inputBuffer debugCmdQueue controlChannel
 
   let inputLoop :: MonadIO m => m ()
       inputLoop = do
         events <- SDL.pollEvents
         let actionEvents = catMaybes $ map (payloadToActionEvent . SDL.eventPayload) events
-            quitting = (Escape, True) `elem` actionEvents
-        liftIO $ STM.atomically $ for_ actionEvents $ TQueue.writeTQueue actionQueue
+            quitting = any (\(a, p, _) -> a == Escape && p) actionEvents
+        liftIO $ STM.atomically $ for_ actionEvents $ writeInputBuffer inputBuffer
         running <- liftIO $ STM.readTVarIO isRunning
-        SDL.delay 20
+        let inputDelayMicros = max 1 (1000000 `div` fromIntegral targetInputFPS)
+        SDL.delay (fromIntegral inputDelayMicros)
         unless (quitting || not running) inputLoop
 
   inputLoop
@@ -1148,13 +1194,11 @@ drawCallToSnapshot DrawCall {..} =
 -- channel. Inside the loop it reads input events, updates the camera and 
 -- player state, runs physics simulation ticks, and loops again until 
 -- terminated by a control signal.
-stateUpdateLoop :: (Camera cam, MonadIO m) => Integer -> GameState cam -> MVar () -> TQueue ActionEvent -> CommandQueue -> TChan ControlMessage -> m ()
-stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue controlChannel = liftIO $ do
+stateUpdateLoop :: (Camera cam, MonadIO m) => Integer -> GameState cam -> MVar () -> InputBuffer -> CommandQueue -> TChan ControlMessage -> m ()
+stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue controlChannel = liftIO $ do
   control <- STM.atomically $ TChan.dupTChan controlChannel
 
-  let physicsStep = 1 / 120
-      frameDelay = physicsStep * 100000
-      camSpeed = 10
+  let camSpeed = 10.0 :: Foreign.C.CFloat
 
   let loop :: (Camera cam, MonadIO m) => Integer -> GameState cam -> Integer -> m ()
       loop tFPS _gameState prevTime = liftIO $ do
@@ -1162,39 +1206,41 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
         case maybeControlMessage of
           Nothing -> do
             newTime <- liftIO $ toNanoSecs <$> getTime Monotonic
-            actions <- STM.atomically $ TQueue.flushTQueue actionQueue
+            let dtSeconds = min 0.1 (realToFrac (newTime - prevTime) / 1e9) :: Foreign.C.CFloat
+            (actions, overflowCount) <- STM.atomically $ flushInputBuffer inputBuffer
+            when (overflowCount > 0) $ logInfoIO LogGeneral $ "input buffer overflow: " <> showT overflowCount <> " events dropped"
             debugCmds <- STM.atomically $ TQueue.flushTQueue debugCmdQueue
             worldState <- STM.readTVarIO (world gameState)
             let camera = activeCamera worldState
             for_ actions $ \action ->
               case action of
-                (MoveForward, b) -> STM.atomically $ STM.writeTVar (moveForward gameState) b
-                (MoveBackward, b) -> STM.atomically $ STM.writeTVar (moveBackward gameState) b
-                (StrafeLeft, b) -> STM.atomically $ STM.writeTVar (strafeLeft gameState) b
-                (StrafeRight, b) -> STM.atomically $ STM.writeTVar (strafeRight gameState) b
-                (MouseMove (V2 x y), _) ->
-                  STM.atomically
+                (MoveForward, b, _) -> STM.atomically $ STM.writeTVar (moveForward gameState) b
+                (MoveBackward, b, _) -> STM.atomically $ STM.writeTVar (moveBackward gameState) b
+                (StrafeLeft, b, _) -> STM.atomically $ STM.writeTVar (strafeLeft gameState) b
+                (StrafeRight, b, _) -> STM.atomically $ STM.writeTVar (strafeRight gameState) b
+                (MouseMove (V2 x y), _, isRepeated) ->
+                  unless isRepeated $ STM.atomically
                     ( updateCamera
                         (activeCamera worldState)
                         [ Camera.Rotate
-                            ( V3 ((fromIntegral x) / frameDelay) ((fromIntegral y) / frameDelay) 0.0
+                            ( V3 (fromIntegral x * dtSeconds) (fromIntegral y * dtSeconds) 0.0
                             )
                         ]
                     )
-                (Zoom amount, _) ->
+                (Zoom amount, _, _) ->
                   STM.atomically
                     ( updateCamera
                         (activeCamera worldState)
                         [Camera.Zoom (realToFrac amount)]
                     )
-                (Escape, _) -> STM.atomically $ STM.writeTVar (isRunning gameState) False
-                (FrameInspect, True) -> STM.atomically $ STM.writeTVar (inspectFrame gameState) True
-                (FrameInspect, False) -> pure ()
-                (ToggleWireframe, True) -> do
+                (Escape, _, _) -> STM.atomically $ STM.writeTVar (isRunning gameState) False
+                (FrameInspect, True, _) -> STM.atomically $ STM.writeTVar (inspectFrame gameState) True
+                (FrameInspect, False, _) -> pure ()
+                (ToggleWireframe, True, _) -> do
                   current <- STM.readTVarIO (wireframeEnabled gameState)
                   STM.atomically $ STM.writeTVar (wireframeEnabled gameState) (not current)
                   logInfoIO LogGeneral $ "wireframe toggled: " <> showT (not current)
-                (ToggleWireframe, False) -> pure ()
+                (ToggleWireframe, False, _) -> pure ()
             -- Handle debug commands with responses
             for_ debugCmds $ \(cmd, respVar) -> do
               case cmd of
@@ -1237,7 +1283,6 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
                       STM.atomically $ STM.putTMVar respVar (RenderStateResponse val)
                     Nothing -> do
                       STM.atomically $ STM.putTMVar respVar (ErrorResponse "no render debug info available yet")
-            let dt = newTime - prevTime
 
             (fwd, bwd, sl, sr, isRunning) <- STM.atomically $ do
               a <- STM.readTVar (moveForward gameState)
@@ -1247,12 +1292,13 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
               e <- STM.readTVar (isRunning gameState)
               pure (a, b, c, d, e)
 
-            let camMove = camSpeed / frameDelay
+            let camMove = camSpeed * dtSeconds
             when (fwd) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveForward camMove]
             when (bwd) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveForward (-camMove)]
             when (sl) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight (-camMove)]
             when (sr) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight camMove]
-            threadDelay (round frameDelay)
+            let targetDelayMicros = 1000000 `div` fromIntegral tFPS
+            threadDelay (fromIntegral targetDelayMicros)
             when isRunning $ loop tFPS _gameState newTime
           Just Terminate -> do
             logInfoIO LogGeneral "terminating stateUpdate loop by signal"

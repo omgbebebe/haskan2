@@ -97,15 +97,15 @@ parseDebugMessage = Aeson.eitherDecodeStrict . Text.encodeUtf8
 debugEventToAction :: DebugEvent -> Maybe ActionEvent
 debugEventToAction (KeyPress keyName pressed) =
   case Text.toLower keyName of
-    "w" -> Just (MoveForward, pressed)
-    "s" -> Just (MoveBackward, pressed)
-    "a" -> Just (StrafeLeft, pressed)
-    "d" -> Just (StrafeRight, pressed)
-    "f12" -> Just (FrameInspect, pressed)
-    "escape" -> Just (Escape, pressed)
+    "w" -> Just (MoveForward, pressed, False)
+    "s" -> Just (MoveBackward, pressed, False)
+    "a" -> Just (StrafeLeft, pressed, False)
+    "d" -> Just (StrafeRight, pressed, False)
+    "f12" -> Just (FrameInspect, pressed, False)
+    "escape" -> Just (Escape, pressed, False)
     _ -> Nothing
 debugEventToAction (MouseMoveEvent x y) =
-  Just (MouseMove (V2 x y), True)
+  Just (MouseMove (V2 x y), True, False)
 
 debugMessageToActionEvent :: DebugMessage -> Either DebugCommand (Maybe ActionEvent)
 debugMessageToActionEvent (InjectEvent ev) =

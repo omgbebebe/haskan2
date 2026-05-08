@@ -33,7 +33,7 @@ data Action
   | ToggleWireframe
   deriving (Eq, Show, Generic)
 
-type ActionEvent = (Action, Bool)
+type ActionEvent = (Action, Bool, Bool)  -- (action, pressed, isRepeated)
 
 data KeyModifier
   = LShift
@@ -78,7 +78,7 @@ modifiersToList SDL.KeyModifier {..} = map fst . filter snd $
   ]
 
 payloadToActionEvent :: SDL.EventPayload -> Maybe ActionEvent
-payloadToActionEvent SDL.QuitEvent = Just (Escape, True)
+payloadToActionEvent SDL.QuitEvent = Just (Escape, True, False)
 payloadToActionEvent (SDL.KeyboardEvent keyboardEvent) = keyToAction keyboardEvent
 payloadToActionEvent (SDL.MouseMotionEvent mouseMotionEvent) = mouseMotionToAction mouseMotionEvent
 payloadToActionEvent (SDL.MouseWheelEvent mouseWheelEvent) = mouseWheelToAction mouseWheelEvent
@@ -89,21 +89,19 @@ mouseWheelToAction (SDL.MouseWheelEventData _window _mouseDevice scroll _directi
   let (SDL.V2 _scrollX scrollY) = scroll
       -- Negative scrollY means scroll down (zoom out), positive means scroll up (zoom in)
       zoomAmount = fromIntegral scrollY * (-0.1)  -- scale factor for zoom sensitivity
-   in Just (Zoom zoomAmount, True)
+   in Just (Zoom zoomAmount, True, False)
 
 mouseMotionToAction :: SDL.MouseMotionEventData -> Maybe ActionEvent
 mouseMotionToAction (SDL.MouseMotionEventData _window _mouseDevice _mouseButtons _absolutePosition relativePosition) =
   let (SDL.V2 relX relY) = relativePosition
       x = fromIntegral (relX * 10)
       y = fromIntegral (relY * 10)
-   in Just ((MouseMove (V2 x y)), True)
+   in Just (MouseMove (V2 x y), True, False)
 
 keyToAction :: SDL.KeyboardEventData -> Maybe ActionEvent
-keyToAction (SDL.KeyboardEventData _window motion isRepeated keysym)
-  | isRepeated = Nothing
-  | otherwise =
-      let modifiers = modifiersToList (SDL.keysymModifier keysym)
-          key = SDL.keysymKeycode keysym
-       in case HashMap.lookup (modifiers, key) defaultBindings of
-            Just action -> Just (action, motion == SDL.Pressed)
-            Nothing -> Nothing
+keyToAction (SDL.KeyboardEventData _window motion isRepeated keysym) =
+  let modifiers = modifiersToList (SDL.keysymModifier keysym)
+      key = SDL.keysymKeycode keysym
+   in case HashMap.lookup (modifiers, key) defaultBindings of
+        Just action -> Just (action, motion == SDL.Pressed, isRepeated)
+        Nothing -> Nothing

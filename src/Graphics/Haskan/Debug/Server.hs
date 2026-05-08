@@ -35,8 +35,8 @@ data DebugServerHandle = DebugServerHandle
 
 type CommandQueue = TQueue (DebugCommand, TMVar DebugResponse)
 
-startDebugServer :: MonadIO m => FilePath -> TQueue ActionEvent -> CommandQueue -> m DebugServerHandle
-startDebugServer socketPath actionQueue cmdQueue = liftIO $ do
+startDebugServer :: MonadIO m => FilePath -> (ActionEvent -> IO ()) -> CommandQueue -> m DebugServerHandle
+startDebugServer socketPath writeAction cmdQueue = liftIO $ do
   logInfoIO LogGeneral $ "starting debug server on " <> Text.pack socketPath
   -- Remove old socket if exists
   handle (\(_ :: SomeException) -> pure ()) $ removeFile socketPath
@@ -47,7 +47,7 @@ startDebugServer socketPath actionQueue cmdQueue = liftIO $ do
 
   tid <- forkIO $ forever $ do
     (conn, _) <- accept sock
-    void $ forkIO $ handleConnection conn actionQueue cmdQueue
+    void $ forkIO $ handleConnection conn writeAction cmdQueue
 
   pure $ DebugServerHandle tid socketPath
 
@@ -57,8 +57,8 @@ stopDebugServer (DebugServerHandle tid path) = liftIO $ do
   killThread tid
   handle (\(_ :: SomeException) -> pure ()) $ removeFile path
 
-handleConnection :: Socket -> TQueue ActionEvent -> CommandQueue -> IO ()
-handleConnection sock actionQueue cmdQueue = handle (\(_ :: SomeException) -> pure ()) $ do
+handleConnection :: Socket -> (ActionEvent -> IO ()) -> CommandQueue -> IO ()
+handleConnection sock writeAction cmdQueue = handle (\(_ :: SomeException) -> pure ()) $ do
   bracket (socketToHandle sock ReadWriteMode) hClose $ \hdl -> do
     hPutStrLn hdl "{ \"status\": \"connected\" }"
     hFlush hdl
@@ -78,7 +78,7 @@ handleConnection sock actionQueue cmdQueue = handle (\(_ :: SomeException) -> pu
             Right mAction -> do
               case mAction of
                 Nothing -> pure ()
-                Just ev -> STM.atomically $ TQueue.writeTQueue actionQueue ev
+                Just ev -> writeAction ev
               hPutStrLn hdl "{ \"status\": \"ok\" }"
               hFlush hdl
               loop hdl
