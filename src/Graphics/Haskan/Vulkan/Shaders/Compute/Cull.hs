@@ -14,9 +14,12 @@ import Graphics.Haskan.Vulkan.Shaders.EntityData
 
 -- | Cull uniform data.
 type CullData = Struct
-  '[ "frustumPlanes" ':-> Array 6 (V 4 Float)
-   , "entityCount"   ':-> Word32
-   , "_pad2"         ':-> V 3 Word32
+  '[ "frustumPlanes"  ':-> Array 6 (V 4 Float)
+   , "cameraPosition" ':-> V 4 Float
+   , "entityCount"    ':-> Word32
+   , "lodDistance1"   ':-> Float
+   , "lodDistance2"   ':-> Float
+   , "_pad3"          ':-> Word32
    ]
 
 -- | Draw command output (matches VkDrawIndexedIndirectCommand, 20 bytes).
@@ -29,7 +32,7 @@ type DrawCommand = Struct
    ]
 
 type DrawCommandsData = Struct
-  '[ "commands" ':-> Array 4096 DrawCommand
+  '[ "commands" ':-> Array 16384 DrawCommand
    ]
 
 type Defs
@@ -69,8 +72,42 @@ program = Module $ entryPoint @"main" @Compute do
       -- Frustum cull: test AABB against all 6 planes
       visible <- testAllPlanes aabbMin aabbMax p0 p1 p2 p3 p4 p5
 
-      -- Write draw command: visible entities draw normally, culled draw nothing
-      let ic = if visible == 1 then idxCount else 0
+      -- Distance-based LOD selection (squared distance, no sqrt)
+      camPos <- use @(Name "cullData" :.: Name "cameraPosition")
+      lodDist1 <- use @(Name "cullData" :.: Name "lodDistance1")
+      lodDist2 <- use @(Name "cullData" :.: Name "lodDistance2")
+
+      let minX = view @(Index 0) aabbMin
+          minY = view @(Index 1) aabbMin
+          minZ = view @(Index 2) aabbMin
+          maxX = view @(Index 0) aabbMax
+          maxY = view @(Index 1) aabbMax
+          maxZ = view @(Index 2) aabbMax
+          centerX = (minX + maxX) * 0.5
+          centerY = (minY + maxY) * 0.5
+          centerZ = (minZ + maxZ) * 0.5
+          camX = view @(Index 0) camPos
+          camY = view @(Index 1) camPos
+          camZ = view @(Index 2) camPos
+          dx = centerX - camX
+          dy = centerY - camY
+          dz = centerZ - camZ
+          distSq = dx * dx + dy * dy + dz * dz
+          lod1Sq = lodDist1 * lodDist1
+          lod2Sq = lodDist2 * lodDist2
+
+          -- Integer LOD: ensure complete triangles (multiples of 3)
+          triCount = idxCount `div` 3
+          halfTriCount = triCount `div` 2
+          quarterTriCount = triCount `div` 4
+          safeHalf = if halfTriCount >= 1 then halfTriCount * 3 else 3
+          safeQuarter = if quarterTriCount >= 1 then quarterTriCount * 3 else 3
+
+          ic = if visible == 0 then 0
+               else if distSq < lod1Sq then idxCount
+               else if distSq < lod2Sq then safeHalf
+               else safeQuarter
+
       assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "indexCount") idx ic
       assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "instanceCount") idx 1
       assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "firstIndex") idx firstIdx

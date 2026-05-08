@@ -147,9 +147,12 @@ instance Storable ComputeEntityData where
 
 -- | Compute culling uniform data (matches shader CullData, Extended/std140 layout).
 data ComputeCullData = ComputeCullData
-  { ccFrustumPlanes :: [V4 Foreign.C.CFloat]  -- 6 planes
-  , ccEntityCount :: Word32
-  , ccPad2 :: V3 Word32
+  { ccFrustumPlanes :: [V4 Foreign.C.CFloat]  -- 6 planes at offsets 0,16,32,48,64,80
+  , ccCameraPosition :: V4 Foreign.C.CFloat    -- offset 96
+  , ccEntityCount :: Word32                    -- offset 112
+  , ccLodDistance1 :: Foreign.C.CFloat         -- offset 116
+  , ccLodDistance2 :: Foreign.C.CFloat         -- offset 120
+  , ccPad3 :: Word32                           -- offset 124
   } deriving (Show)
 
 instance Storable ComputeCullData where
@@ -157,13 +160,19 @@ instance Storable ComputeCullData where
   alignment _ = 16
   peek ptr = do
     planes <- sequence [peekByteOff ptr (i * 16) | i <- [0..5]]
-    count <- peekByteOff ptr 96
-    pad <- peekByteOff ptr 112
-    pure (ComputeCullData planes count pad)
-  poke ptr (ComputeCullData planes count pad) = do
+    camPos <- peekByteOff ptr 96
+    count <- peekByteOff ptr 112
+    lod1 <- peekByteOff ptr 116
+    lod2 <- peekByteOff ptr 120
+    pad <- peekByteOff ptr 124
+    pure (ComputeCullData planes camPos count lod1 lod2 pad)
+  poke ptr (ComputeCullData planes camPos count lod1 lod2 pad) = do
     forM_ (zip [0..5] planes) $ \(i, p) -> pokeByteOff ptr (i * 16) p
-    pokeByteOff ptr 96 count
-    pokeByteOff ptr 112 pad
+    pokeByteOff ptr 96 camPos
+    pokeByteOff ptr 112 count
+    pokeByteOff ptr 116 lod1
+    pokeByteOff ptr 120 lod2
+    pokeByteOff ptr 124 pad
 
 -- | Matches VkDrawIndexedIndirectCommand layout (20 bytes, 4-byte alignment).
 data DrawIndexedIndirectCommand = DrawIndexedIndirectCommand
@@ -536,10 +545,14 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
           }
       let vp = (realToFrac <$>) <$> (projectionMatrix !*! Camera.unViewMatrix (Camera.toMatrix camera)) :: M44 Float
           planes = extractFrustumPlanes vp
+          camPos = Camera.cameraPosition camera
           cullData = ComputeCullData
             { ccFrustumPlanes = map (fmap realToFrac) planes
+            , ccCameraPosition = V4 (realToFrac $ camPos ^. _x) (realToFrac $ camPos ^. _y) (realToFrac $ camPos ^. _z) 1
             , ccEntityCount = fromIntegral (length drawList)
-            , ccPad2 = V3 0 0 0
+            , ccLodDistance1 = 100.0
+            , ccLodDistance2 = 400.0
+            , ccPad3 = 0
             }
       liftIO $ Buffer.updateStorageBuffer device ccrEntityMemory 0 entityData
       liftIO $ Buffer.updateUniformBuffer device ccrCullDataMemory [cullData]
@@ -776,9 +789,33 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   assetCache <- initCache ".haskan2-cache"
 
   let isGLTF = ".gltf" `Text.isSuffixOf` Text.pack meshName || ".glb" `Text.isSuffixOf` Text.pack meshName
+      isStressTest = meshName == "stress_test"
 
   -- Create ECS World and load scene
-  (ecsWorld, numEntities, sceneBounds, texturePixelMap) <- if isGLTF
+  (ecsWorld, numEntities, sceneBounds, texturePixelMap) <- if isStressTest
+    then do
+      -- Stress test: 10,000 cube entities
+      world <- ECS.createWorld
+      let cubeMesh = Mesh.unitCube
+      meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices cubeMesh) (Mesh.indices cubeMesh)
+      let whiteTexData = Texture.generateGridTexture 2 2 1
+      whiteTexHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
+
+      liftIO $ logInfoIO LogGeneral "spawning 10000 stress test entities"
+      forM_ [0..9999] $ \i -> do
+        let x = fromIntegral (i `mod` 100) * 1.0 - 50.0
+            z = fromIntegral (i `div` 100) * 1.0 - 50.0
+            y = sin (fromIntegral i * 0.1) * 1.0
+        entity <- ECS.spawnEntity world
+        ECS.setTransform world entity (Transform (V3 x y z) (Quaternion 1 (V3 0 0 0)) (V3 0.5 0.5 0.5))
+        ECS.setMesh world entity meshHandle
+        ECS.setMaterial world entity whiteTexHandle
+
+      let sceneBbox = BBox (V3 (-50) (-2) (-50)) (V3 50 2 50)
+      logInfoIO LogGeneral $ "stress test scene bounds: " <> showT sceneBbox
+      pure (world, 10000, sceneBbox, IntMap.empty)
+
+    else if isGLTF
     then do
       -- Load glTF scene
       result <- importGLTF rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName
@@ -838,9 +875,14 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   worldState <- liftIO $ STM.readTVarIO (world gameState)
   let tvCamera = activeCamera worldState
   currentCam <- liftIO $ STM.readTVarIO tvCamera
-  let adjustedCam = adjustCameraForScene sceneBounds currentCam
+  let adjustedCam = if isStressTest
+        then setDistance (setTarget currentCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) (150.0 :: Foreign.C.CFloat)
+        else adjustCameraForScene sceneBounds currentCam
   liftIO $ STM.atomically $ STM.writeTVar tvCamera adjustedCam
   logInfoIO LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance adjustedCam)
+
+  -- Ensure wireframe is off for stress test (performance)
+  when isStressTest $ liftIO $ STM.atomically $ STM.writeTVar (wireframeEnabled gameState) False
 
   -- Determine actual entity count for buffer/descriptor allocation
   initialDrawList <- extractDrawList ecsWorld rm IntMap.empty
@@ -876,7 +918,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   logDebugIO LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
 
   -- Create compute culling buffers
-  let maxEntities = 4096 :: Int
+  let maxEntities = 16384 :: Int
       dummyEntityData = ComputeEntityData
         { ceTransform = identity
         , ceAabbMin = V4 (-1000) (-1000) (-1000) 1
@@ -889,8 +931,11 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         }
       dummyCullData = ComputeCullData
         { ccFrustumPlanes = replicate 6 (V4 0 0 0 0)
+        , ccCameraPosition = V4 0 0 0 1
         , ccEntityCount = fromIntegral numDrawEntities
-        , ccPad2 = V3 0 0 0
+        , ccLodDistance1 = 1000.0
+        , ccLodDistance2 = 5000.0
+        , ccPad3 = 0
         }
       initialDrawCommands = replicate maxEntities (DrawIndexedIndirectCommand 0 0 0 0 0)
 

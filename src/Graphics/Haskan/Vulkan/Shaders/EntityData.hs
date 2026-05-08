@@ -18,5 +18,5 @@ type EntityData = Struct
    ]
 
 type EntitiesData = Struct
-  '[ "data" ':-> Array 4096 EntityData
+  '[ "data" ':-> Array 16384 EntityData
    ]

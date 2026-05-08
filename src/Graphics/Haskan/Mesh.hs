@@ -27,7 +27,36 @@ groundPlaneMesh size =
           indices = [0, 1, 2, 0, 2, 3]
         }
 
--- | Create a subdivided ground plane with checkerboard vertex colors.
+-- | Create a unit cube centered at origin (side length = 1).
+unitCube :: Mesh
+unitCube =
+  let s = 0.5
+      -- Front face (z = s)
+      vf0 = Vertex (V3 (-s) (-s) s) (V2 0 0) (V3 0 0 1) (V3 1 1 1)
+      vf1 = Vertex (V3 s (-s) s) (V2 1 0) (V3 0 0 1) (V3 1 1 1)
+      vf2 = Vertex (V3 s s s) (V2 1 1) (V3 0 0 1) (V3 1 1 1)
+      vf3 = Vertex (V3 (-s) s s) (V2 0 1) (V3 0 0 1) (V3 1 1 1)
+      -- Back face (z = -s)
+      vb0 = Vertex (V3 (-s) (-s) (-s)) (V2 1 0) (V3 0 0 (-1)) (V3 1 1 1)
+      vb1 = Vertex (V3 s (-s) (-s)) (V2 0 0) (V3 0 0 (-1)) (V3 1 1 1)
+      vb2 = Vertex (V3 s s (-s)) (V2 0 1) (V3 0 0 (-1)) (V3 1 1 1)
+      vb3 = Vertex (V3 (-s) s (-s)) (V2 1 1) (V3 0 0 (-1)) (V3 1 1 1)
+      verts = [vf0, vf1, vf2, vf3, vb0, vb1, vb2, vb3]
+      idxs =
+        [ -- Front
+          0, 1, 2, 0, 2, 3,
+          -- Back
+          4, 6, 5, 4, 7, 6,
+          -- Right
+          1, 5, 6, 1, 6, 2,
+          -- Left
+          4, 0, 3, 4, 3, 7,
+          -- Top
+          3, 2, 6, 3, 6, 7,
+          -- Bottom
+          4, 5, 1, 4, 1, 0
+        ]
+   in Mesh {vertices = verts, indices = idxs}
 -- subdivisions: number of quads along each axis (total quads = subdivisions^2)
 -- size: half-extent of the plane
 groundPlaneMeshGrid :: Int -> Foreign.C.CFloat -> Mesh
