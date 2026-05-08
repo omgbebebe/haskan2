@@ -11,13 +11,16 @@ module Graphics.Haskan.Vulkan.Shaders.Compute.Cull
 import FIR
 import Math.Linear
 
--- | Per-entity data in SSBO.
+-- | Per-entity data in SSBO (must match CPU ComputeEntityData, Base/std430).
 type EntityData = Struct
   '[ "transform"     ':-> M 4 4 Float
    , "aabbMin"       ':-> V 4 Float
    , "aabbMax"       ':-> V 4 Float
    , "materialIndex" ':-> Word32
-   , "_pad"          ':-> V 3 Word32
+   , "firstIndex"    ':-> Word32
+   , "vertexOffset"  ':-> Int32
+   , "indexCount"    ':-> Word32
+   , "_pad"          ':-> Word32
    ]
 
 -- | Cull uniform data.
@@ -27,9 +30,17 @@ type CullData = Struct
    , "_pad2"         ':-> V 3 Word32
    ]
 
--- Visibility result wrapper.
-type VisibleFlagsData = Struct
-  '[ "flags" ':-> Array MaxEntities Word32
+-- | Draw command output (matches VkDrawIndexedIndirectCommand, 20 bytes).
+type DrawCommand = Struct
+  '[ "indexCount"    ':-> Word32
+   , "instanceCount" ':-> Word32
+   , "firstIndex"    ':-> Word32
+   , "vertexOffset"  ':-> Int32
+   , "firstInstance" ':-> Word32
+   ]
+
+type DrawCommandsData = Struct
+  '[ "commands" ':-> Array MaxEntities DrawCommand
    ]
 
 -- | Entities SSBO wrapper.
@@ -43,7 +54,7 @@ type MaxEntities = 4096
 
 type Defs
   =  '[ "entities"     ':-> StorageBuffer '[ DescriptorSet 0, Binding 0 ] EntitiesData
-      , "visibleFlags" ':-> StorageBuffer '[ DescriptorSet 0, Binding 1 ] VisibleFlagsData
+      , "drawCommands" ':-> StorageBuffer '[ DescriptorSet 0, Binding 1 ] DrawCommandsData
       , "cullData"     ':-> Uniform       '[ DescriptorSet 0, Binding 2 ] CullData
       , "main"         ':-> EntryPoint    '[ LocalSize 64 1 1 ] Compute
       ]
@@ -63,6 +74,9 @@ program = Module $ entryPoint @"main" @Compute do
       entity    <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32) idx
       let aabbMin = view @(Name "aabbMin") entity
           aabbMax = view @(Name "aabbMax") entity
+          firstIdx = view @(Name "firstIndex") entity
+          vertexOff = view @(Name "vertexOffset") entity
+          idxCount = view @(Name "indexCount") entity
 
       -- Load frustum planes
       p0 <- use @(Name "cullData" :.: Name "frustumPlanes" :.: AnIndex Word32) 0
@@ -75,8 +89,13 @@ program = Module $ entryPoint @"main" @Compute do
       -- Frustum cull: test AABB against all 6 planes
       visible <- testAllPlanes aabbMin aabbMax p0 p1 p2 p3 p4 p5
 
-      -- Write visibility flag
-      assign @(Name "visibleFlags" :.: Name "flags" :.: AnIndex Word32) idx visible
+      -- Write draw command: visible entities draw normally, culled draw nothing
+      let ic = if visible == 1 then idxCount else 0
+      assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "indexCount") idx ic
+      assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "instanceCount") idx 1
+      assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "firstIndex") idx firstIdx
+      assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "vertexOffset") idx vertexOff
+      assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "firstInstance") idx idx
 
 -- Test AABB against all 6 frustum planes.
 -- Returns 1 if visible, 0 if culled.

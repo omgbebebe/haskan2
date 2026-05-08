@@ -326,19 +326,19 @@ updateComputeDescriptorSets ::
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkBuffer -> -- entities SSBO
-  Vulkan.VkBuffer -> -- visibleFlags SSBO
+  Vulkan.VkBuffer -> -- drawCommands SSBO
   Vulkan.VkBuffer -> -- cullData UBO
   m ()
-updateComputeDescriptorSets dev descriptorSet entitiesBuffer visibleFlagsBuffer cullDataBuffer = do
+updateComputeDescriptorSets dev descriptorSet entitiesBuffer drawCommandsBuffer cullDataBuffer = do
   let entitiesBufferInfo =
         Vulkan.createVk
           ( set @"buffer" entitiesBuffer
               &* set @"offset" 0
               &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
           )
-      visibleFlagsBufferInfo =
+      drawCommandsBufferInfo =
         Vulkan.createVk
-          ( set @"buffer" visibleFlagsBuffer
+          ( set @"buffer" drawCommandsBuffer
               &* set @"offset" 0
               &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
           )
@@ -361,7 +361,7 @@ updateComputeDescriptorSets dev descriptorSet entitiesBuffer visibleFlagsBuffer 
               &* set @"descriptorCount" 1
               &* set @"dstArrayElement" 0
           )
-      writeVisibleFlags =
+      writeDrawCommands =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
@@ -370,7 +370,7 @@ updateComputeDescriptorSets dev descriptorSet entitiesBuffer visibleFlagsBuffer 
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
               &* set @"pTexelBufferView" Vulkan.VK_NULL
               &* set @"pImageInfo" Vulkan.VK_NULL
-              &* setVkRef @"pBufferInfo" visibleFlagsBufferInfo
+              &* setVkRef @"pBufferInfo" drawCommandsBufferInfo
               &* set @"descriptorCount" 1
               &* set @"dstArrayElement" 0
           )
@@ -388,5 +388,5 @@ updateComputeDescriptorSets dev descriptorSet entitiesBuffer visibleFlagsBuffer 
               &* set @"dstArrayElement" 0
           )
   liftIO $
-    Foreign.Marshal.Array.withArray [writeEntities, writeVisibleFlags, writeCullData] $ \writePtr ->
+    Foreign.Marshal.Array.withArray [writeEntities, writeDrawCommands, writeCullData] $ \writePtr ->
       Vulkan.vkUpdateDescriptorSets dev 3 writePtr 0 Vulkan.vkNullPtr

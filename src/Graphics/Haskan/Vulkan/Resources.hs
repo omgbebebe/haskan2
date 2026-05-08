@@ -26,6 +26,7 @@ module Graphics.Haskan.Vulkan.Resources
   , lookupBuffer
   , lookupMesh
   , lookupTexture
+  , updateMesh
     -- Destruction
   , destroyBuffer
   , destroyMesh
@@ -42,30 +43,32 @@ import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable)
 import Data.Vector.Storable (Vector)
-import Data.Word (Word64, Word8)
+import Data.Word (Word32, Word64, Word8)
+import Data.Int (Int32)
 import GHC.Generics (Generic)
+import Graphics.Haskan.Vertex (Vertex)
 import Graphics.Haskan.BoundingBox (BBox)
 import Graphics.Vulkan qualified as Vulkan
 
 -- | Opaque handle for buffer resources.
-newtype BufferHandle = BufferHandle {unBufferHandle :: Word64}
+newtype BufferHandle = BufferHandle { unBufferHandle :: Word64 }
   deriving (Eq, Ord, Show, Generic)
 
 instance Hashable BufferHandle
 
 -- | Opaque handle for mesh resources.
-newtype MeshHandle = MeshHandle {unMeshHandle :: Word64}
+newtype MeshHandle = MeshHandle { unMeshHandle :: Word64 }
   deriving (Eq, Ord, Show, Generic)
 
 instance Hashable MeshHandle
 
 -- | Opaque handle for texture resources.
-newtype TextureHandle = TextureHandle {unTextureHandle :: Word64}
+newtype TextureHandle = TextureHandle { unTextureHandle :: Word64 }
   deriving (Eq, Ord, Show, Generic)
 
 instance Hashable TextureHandle
 
--- | GPU buffer with embedded cleanup action.
+-- | GPU buffer with embedded cleanup.
 data BufferResource = BufferResource
   { brVkBuffer :: !Vulkan.VkBuffer
   , brMemory :: !Vulkan.VkDeviceMemory
@@ -79,7 +82,11 @@ data MeshResource = MeshResource
   , mrVertexBuffer :: !BufferResource
   , mrIndexBuffer :: !BufferResource
   , mrIndexCount :: !Int
+  , mrFirstIndex :: !Word32
+  , mrVertexOffset :: !Int32
   , mrBounds :: !BBox
+  , mrVertices :: ![Vertex]
+  , mrIndices :: ![Word32]
   }
 
 -- | Texture with image, view, memory, and cleanup action.
@@ -144,6 +151,11 @@ lookupBuffer rm handle = liftIO $ STM.atomically $ HashMap.lookup handle <$> STM
 -- | Look up a mesh by handle.
 lookupMesh :: MonadIO m => ResourceManager -> MeshHandle -> m (Maybe MeshResource)
 lookupMesh rm handle = liftIO $ STM.atomically $ HashMap.lookup handle <$> STM.readTVar (rmMeshes rm)
+
+-- | Update an existing mesh resource in the registry.
+updateMesh :: MonadIO m => ResourceManager -> MeshHandle -> MeshResource -> m ()
+updateMesh rm handle resource =
+  liftIO $ STM.atomically $ STM.modifyTVar' (rmMeshes rm) (HashMap.insert handle resource)
 
 -- | Look up a texture by handle.
 lookupTexture :: MonadIO m => ResourceManager -> TextureHandle -> m (Maybe TextureResource)

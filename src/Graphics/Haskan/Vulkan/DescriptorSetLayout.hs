@@ -166,7 +166,7 @@ createComputeDescriptorSetLayout dev = do
               &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_COMPUTE_BIT
               &* set @"pImmutableSamplers" Vulkan.VK_NULL
           )
-      visibleFlagsBinding =
+      drawCommandsBinding =
         Vulkan.createVk
           ( set @"binding" 1
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
@@ -188,7 +188,7 @@ createComputeDescriptorSetLayout dev = do
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
               &* set @"bindingCount" 3
-              &* setListRef @"pBindings" [entitiesBinding, visibleFlagsBinding, cullDataBinding]
+              &* setListRef @"pBindings" [entitiesBinding, drawCommandsBinding, cullDataBinding]
           )
    in liftIO $
         withPtr

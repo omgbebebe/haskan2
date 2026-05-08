@@ -31,6 +31,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word32)
+import Data.Int (Int32)
 
 import FIR qualified
 import Foreign.C qualified
@@ -116,7 +117,10 @@ data ComputeEntityData = ComputeEntityData
   , ceAabbMin :: V4 Foreign.C.CFloat
   , ceAabbMax :: V4 Foreign.C.CFloat
   , ceMaterialIndex :: Word32
-  , cePad :: V3 Word32
+  , ceFirstIndex :: Word32
+  , ceVertexOffset :: Foreign.C.CInt
+  , ceIndexCount :: Word32
+  , cePad2 :: Word32
   } deriving (Show)
 
 instance Storable ComputeEntityData where
@@ -127,12 +131,18 @@ instance Storable ComputeEntityData where
     <*> peekByteOff ptr 64
     <*> peekByteOff ptr 80
     <*> peekByteOff ptr 96
+    <*> peekByteOff ptr 100
+    <*> peekByteOff ptr 104
+    <*> peekByteOff ptr 108
     <*> peekByteOff ptr 112
-  poke ptr (ComputeEntityData t amin amax mat pad) = do
+  poke ptr (ComputeEntityData t amin amax mat fi vo ic pad) = do
     pokeByteOff ptr 0 t
     pokeByteOff ptr 64 amin
     pokeByteOff ptr 80 amax
     pokeByteOff ptr 96 mat
+    pokeByteOff ptr 100 fi
+    pokeByteOff ptr 104 vo
+    pokeByteOff ptr 108 ic
     pokeByteOff ptr 112 pad
 
 -- | Compute culling uniform data (matches shader CullData, Extended/std140 layout).
@@ -155,6 +165,31 @@ instance Storable ComputeCullData where
     pokeByteOff ptr 96 count
     pokeByteOff ptr 112 pad
 
+-- | Matches VkDrawIndexedIndirectCommand layout (20 bytes, 4-byte alignment).
+data DrawIndexedIndirectCommand = DrawIndexedIndirectCommand
+  { diicIndexCount :: Word32
+  , diicInstanceCount :: Word32
+  , diicFirstIndex :: Word32
+  , diicVertexOffset :: Int32
+  , diicFirstInstance :: Word32
+  } deriving (Show)
+
+instance Storable DrawIndexedIndirectCommand where
+  sizeOf _ = 20
+  alignment _ = 4
+  peek ptr = DrawIndexedIndirectCommand
+    <$> peekByteOff ptr 0
+    <*> peekByteOff ptr 4
+    <*> peekByteOff ptr 8
+    <*> peekByteOff ptr 12
+    <*> peekByteOff ptr 16
+  poke ptr (DrawIndexedIndirectCommand ic ins fi vo fii) = do
+    pokeByteOff ptr 0 ic
+    pokeByteOff ptr 4 ins
+    pokeByteOff ptr 8 fi
+    pokeByteOff ptr 12 vo
+    pokeByteOff ptr 16 fii
+
 -- | Resources for GPU-driven compute culling.
 data ComputeCullResources = ComputeCullResources
   { ccrPipeline :: Vulkan.VkPipeline
@@ -162,8 +197,8 @@ data ComputeCullResources = ComputeCullResources
   , ccrDescriptorSet :: Vulkan.VkDescriptorSet
   , ccrEntityBuffer :: Vulkan.VkBuffer
   , ccrEntityMemory :: Vulkan.VkDeviceMemory
-  , ccrVisibleFlagsBuffer :: Vulkan.VkBuffer
-  , ccrVisibleFlagsMemory :: Vulkan.VkDeviceMemory
+  , ccrDrawCommandsBuffer :: Vulkan.VkBuffer
+  , ccrDrawCommandsMemory :: Vulkan.VkDeviceMemory
   , ccrCullDataBuffer :: Vulkan.VkBuffer
   , ccrCullDataMemory :: Vulkan.VkDeviceMemory
   , ccrMaxEntities :: Int
@@ -440,9 +475,8 @@ renderFrameLoop ::
   STM.TVar Bool ->
   IORef FrameStats ->
   ComputeCullResources ->
-  STM.TVar (IntMap Word32) ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvVisibleFlags = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -451,9 +485,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
           mvpMemory = frameMvpMemories !! frameNumber
       camera <- liftIO $ STM.readTVarIO tvCamera
       drawList <- extractDrawList ecsWorld rm textureIndexMap
-      prevVisibleFlags <- liftIO $ STM.readTVarIO tvVisibleFlags
-      let filteredDrawList = filterVisible drawList prevVisibleFlags
-      logDebugIO LogRender $ "draw list: " <> showT (length drawList) <> " entities, visible: " <> showT (length filteredDrawList)
+      logDebugIO LogRender $ "draw list: " <> showT (length drawList) <> " entities"
       -- Compute debug NDC positions (using transposed matrices to match GPU)
       liftIO $ do
         let camPos = realToFrac <$> Camera.cameraPosition camera
@@ -489,16 +521,19 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
             rdiEntities = entityDebugInfos
           }
       -- Upload compute culling data
-      entityData <- liftIO $ forM drawList $ \dc -> do
+      entityData <- liftIO $ forM (zip [0..] drawList) $ \(idx, dc) -> do
         let worldMat = dcWorldMatrix dc
-        let meshRes = dcMesh dc
+            meshRes = dcMesh dc
             (wmin, wmax) = transformAABB worldMat (mrBounds meshRes)
         pure ComputeEntityData
           { ceTransform = (realToFrac <$>) <$> Linear.Matrix.transpose worldMat
           , ceAabbMin = V4 (realToFrac $ wmin ^. _x) (realToFrac $ wmin ^. _y) (realToFrac $ wmin ^. _z) 1
           , ceAabbMax = V4 (realToFrac $ wmax ^. _x) (realToFrac $ wmax ^. _y) (realToFrac $ wmax ^. _z) (1 :: Foreign.C.CFloat)
           , ceMaterialIndex = dcMaterialIndex dc
-          , cePad = V3 0 0 0
+          , ceFirstIndex = fromIntegral (mrFirstIndex meshRes)
+          , ceVertexOffset = fromIntegral (mrVertexOffset meshRes)
+          , ceIndexCount = fromIntegral (mrIndexCount meshRes)
+          , cePad2 = 0
           }
       let vp = (realToFrac <$>) <$> (projectionMatrix !*! Camera.unViewMatrix (Camera.toMatrix camera)) :: M44 Float
           planes = extractFrustumPlanes vp
@@ -558,7 +593,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdGBufferLayout = drGBufferPipelineLayout
                         , dpdGBufferDescriptor = frameDescriptorSet
                         , dpdGBufferSampler = textureSampler
-                        , dpdDrawList = filteredDrawList
+                        , dpdDrawList = drawList
                         , dpdEntityUniformSize = entityUniformSize
                         , dpdDevice = device
                         , dpdLightingRenderPass = drLightingRenderPass
@@ -616,20 +651,6 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                       let snapshots = map drawCallToSnapshot drawList
                       snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> projectionMatrix) snapshots
                       liftIO $ insp snap
-                  -- Wait for GPU to finish and read back visible flags
-                  liftIO $ do
-                    let fence = renderFinishedFences !! (frameNumber `mod` Render.maxFramesInFlight)
-                    Foreign.Marshal.Array.withArray [fence] $ \ptr ->
-                      Vulkan.vkWaitForFences device 1 ptr Vulkan.VK_TRUE maxBound >>= throwVkResult
-                  visibleFlags <- liftIO $ do
-                    let size = fromIntegral (ccrMaxEntities * sizeOf (undefined :: Word32))
-                    memPtr <- allocaAndPeek $ \ptr ->
-                      Vulkan.vkMapMemory device ccrVisibleFlagsMemory 0 size Vulkan.VK_ZERO_FLAGS ptr
-                    flags <- Foreign.Marshal.Array.peekArray (length drawList) (castPtr memPtr :: Ptr Word32)
-                    Vulkan.vkUnmapMemory device ccrVisibleFlagsMemory
-                    pure flags
-                  liftIO $ STM.atomically $ STM.writeTVar tvVisibleFlags (IntMap.fromList $ zip [0..] $ map fromIntegral visibleFlags)
-                  logDebugIO LogRender $ "visible flags read back: " <> showT (length (filter (==1) visibleFlags)) <> " visible"
                   pure (False, False)
                 Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
                 Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
@@ -681,7 +702,6 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         tvWireframe
         frameStatsRef
         ccr
-        tvVisibleFlags
 
 -- | Main rendering loop.
 --
@@ -831,6 +851,25 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   let numDrawEntities = length initialDrawList
   logInfoIO LogRender $ "initial draw list has " <> showT numDrawEntities <> " entities"
 
+  -- Merge all unique meshes into single vertex/index buffers for GPU-driven indirect draw
+  liftIO $ do
+    let meshHandles = nub (map (mrHandle . dcMesh) initialDrawList)
+    unless (null meshHandles) $ do
+      (mergedMesh, offsets) <- Buffer.mergeMeshes rm physicalDevice device meshHandles
+      -- Update each mesh in registry to use shared merged buffers with correct offsets
+      let sharedVertBuf = (mrVertexBuffer mergedMesh) { brDestroy = pure () }
+          sharedIdxBuf = (mrIndexBuffer mergedMesh) { brDestroy = pure () }
+      forM_ (HashMap.toList offsets) $ \(mh, (fi, vo)) -> do
+        mMesh <- lookupMesh rm mh
+        forM_ mMesh $ \mesh -> do
+          updateMesh rm mh $ mesh
+            { mrVertexBuffer = sharedVertBuf
+            , mrIndexBuffer = sharedIdxBuf
+            , mrFirstIndex = fi
+            , mrVertexOffset = vo
+            }
+      logInfoIO LogRender $ "merged " <> showT (length meshHandles) <> " meshes into single buffers"
+
   -- Create per-frame uniform buffers for multi-entity rendering
   -- Each entity gets 256 bytes (padded from 192 bytes for 3 M44 matrices)
   let entityUniformSize = 256 :: Int
@@ -851,22 +890,25 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         , ceAabbMin = V4 (-1000) (-1000) (-1000) 1
         , ceAabbMax = V4 1000 1000 1000 1
         , ceMaterialIndex = 0
-        , cePad = V3 0 0 0
+        , ceFirstIndex = 0
+        , ceVertexOffset = 0
+        , ceIndexCount = 0
+        , cePad2 = 0
         }
       dummyCullData = ComputeCullData
         { ccFrustumPlanes = replicate 6 (V4 0 0 0 0)
         , ccEntityCount = fromIntegral numDrawEntities
         , ccPad2 = V3 0 0 0
         }
-      initialVisibleFlags = replicate maxEntities (0 :: Word32)
+      initialDrawCommands = replicate maxEntities (DrawIndexedIndirectCommand 0 0 0 0 0)
 
   (entitySsboBuffer, entitySsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxEntities dummyEntityData) Vulkan.VK_ZERO_FLAGS
-  (visibleFlagsBuffer, visibleFlagsMemory) <- Buffer.managedStorageBuffer physicalDevice device initialVisibleFlags Vulkan.VK_ZERO_FLAGS
+  (drawCommandsBuffer, drawCommandsMemory) <- Buffer.managedStorageBuffer physicalDevice device initialDrawCommands Vulkan.VK_ZERO_FLAGS
   (cullDataBuffer, cullDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [dummyCullData]
-  logDebugIO LogBuffer $ "compute buffers created: entitySSBO=" <> showT (maxEntities * sizeOf (undefined :: ComputeEntityData)) <> " visibleFlags=" <> showT (maxEntities * sizeOf (undefined :: Word32)) <> " cullData=" <> showT (sizeOf (undefined :: ComputeCullData))
+  logDebugIO LogBuffer $ "compute buffers created: entitySSBO=" <> showT (maxEntities * sizeOf (undefined :: ComputeEntityData)) <> " drawCommands=" <> showT (maxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)) <> " cullData=" <> showT (sizeOf (undefined :: ComputeCullData))
 
   -- Update compute descriptor set with buffers
-  DescriptorSet.updateComputeDescriptorSets device computeDescriptorSet entitySsboBuffer visibleFlagsBuffer cullDataBuffer
+  DescriptorSet.updateComputeDescriptorSets device computeDescriptorSet entitySsboBuffer drawCommandsBuffer cullDataBuffer
   logDebugIO LogRender "compute descriptor set updated"
 
   let computeCullResources = ComputeCullResources
@@ -875,8 +917,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         , ccrDescriptorSet = computeDescriptorSet
         , ccrEntityBuffer = entitySsboBuffer
         , ccrEntityMemory = entitySsboMemory
-        , ccrVisibleFlagsBuffer = visibleFlagsBuffer
-        , ccrVisibleFlagsMemory = visibleFlagsMemory
+        , ccrDrawCommandsBuffer = drawCommandsBuffer
+        , ccrDrawCommandsMemory = drawCommandsMemory
         , ccrCullDataBuffer = cullDataBuffer
         , ccrCullDataMemory = cullDataMemory
         , ccrMaxEntities = maxEntities
@@ -1019,7 +1061,6 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   worldState <- liftIO $ STM.readTVarIO (world gameState)
   frameStatsRef <- liftIO $ newIORef emptyFrameStats
-  tvVisibleFlags <- liftIO $ STM.newTVarIO IntMap.empty
   let tvCamera = activeCamera worldState
       tvInspect = inspectFrame gameState
       tvInsp = inspector gameState
@@ -1033,7 +1074,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
               with (createDeferredResources physicalDevice device context descriptorSetLayout [pushConstantRange] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvVisibleFlags
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources
             outerLoop renderFrameLoopFinished
 
 

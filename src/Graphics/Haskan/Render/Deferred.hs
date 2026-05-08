@@ -11,6 +11,7 @@ import Data.Foldable (for_)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Word (Word32)
 import Foreign (castPtr)
 import Foreign.Marshal.Array qualified
 import Foreign.Storable (sizeOf)
@@ -63,11 +64,23 @@ buildDeferredGraph DeferredPassData {..} = do
         RenderPass.withGBufferRenderPass commandBuffer dpdGBufferRenderPass dpdGBufferFramebuffer dpdExtent $ do
           -- Solid geometry pass
           GraphicsPipeline.cmdBindPipeline commandBuffer dpdGBufferPipeline
+          -- Bind merged vertex/index buffers once (all entities share them)
+          case dpdDrawList of
+            [] -> pure ()
+            (firstDc:_) -> do
+              let firstMesh = dcMesh firstDc
+                  vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
+                  idxBuf  = brVkBuffer (mrIndexBuffer firstMesh)
+              Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
+                Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
+                  Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
+              Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+          -- Draw each entity with its own offset/count/material
           for_ (zip [0..] dpdDrawList) $ \(entityIdx, dc) -> do
             let mesh = dcMesh dc
-                vertBuf = brVkBuffer (mrVertexBuffer mesh)
-                idxBuf  = brVkBuffer (mrIndexBuffer mesh)
-                idxCnt  = mrIndexCount mesh
+                idxCnt  = fromIntegral (mrIndexCount mesh)
+                firstIdx = fromIntegral (mrFirstIndex mesh)
+                vertOff = fromIntegral (mrVertexOffset mesh)
                 dynamicOffset = fromIntegral (entityIdx * dpdEntityUniformSize)
                 matIdx = dcMaterialIndex dc
             -- Push material index
@@ -90,19 +103,25 @@ buildDeferredGraph DeferredPassData {..} = do
                   dsPtr
                   1
                   dynOffsetPtr
-            Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-              Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
-                Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
-            Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
-            CommandBuffer.cmdDraw commandBuffer idxCnt
+            CommandBuffer.cmdDraw commandBuffer idxCnt vertOff (fromIntegral entityIdx)
           -- Wireframe overlay pass (same geometry, wireframe pipeline)
           when dpdWireframeEnabled $ do
             GraphicsPipeline.cmdBindPipeline commandBuffer dpdWireframePipeline
+            case dpdDrawList of
+              [] -> pure ()
+              (firstDc:_) -> do
+                let firstMesh = dcMesh firstDc
+                    vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
+                    idxBuf  = brVkBuffer (mrIndexBuffer firstMesh)
+                Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
+                  Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
+                    Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
+                Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
             for_ (zip [0..] dpdDrawList) $ \(entityIdx, dc) -> do
               let mesh = dcMesh dc
-                  vertBuf = brVkBuffer (mrVertexBuffer mesh)
-                  idxBuf  = brVkBuffer (mrIndexBuffer mesh)
-                  idxCnt  = mrIndexCount mesh
+                  idxCnt  = fromIntegral (mrIndexCount mesh)
+                  firstIdx = fromIntegral (mrFirstIndex mesh)
+                  vertOff = fromIntegral (mrVertexOffset mesh)
                   dynamicOffset = fromIntegral (entityIdx * dpdEntityUniformSize)
                   matIdx = dcMaterialIndex dc
               -- Push material index for wireframe pass too
@@ -125,11 +144,7 @@ buildDeferredGraph DeferredPassData {..} = do
                     dsPtr
                     1
                     dynOffsetPtr
-              Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-                Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
-                  Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
-              Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
-              CommandBuffer.cmdDraw commandBuffer idxCnt
+              CommandBuffer.cmdDraw commandBuffer idxCnt vertOff (fromIntegral entityIdx)
     }
 
   -- Lighting pass: fullscreen triangle compositing

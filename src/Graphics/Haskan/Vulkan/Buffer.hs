@@ -3,6 +3,12 @@ module Graphics.Haskan.Vulkan.Buffer where
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
+import Data.HashMap.Strict (HashMap)
+import Data.HashMap.Strict qualified as HashMap
+import Data.Maybe (catMaybes)
+import Data.List (foldl')
+import Data.Word (Word32)
+import Data.Int (Int32)
 import Foreign qualified
 import Foreign.Marshal qualified
 import Foreign.Storable (Storable, sizeOf)
@@ -213,11 +219,60 @@ createMeshResource rm pdev dev vertices indices = do
           , mrVertexBuffer = vertBuf
           , mrIndexBuffer = idxBuf
           , mrIndexCount = length indices
+          , mrFirstIndex = 0
+          , mrVertexOffset = 0
           , mrBounds = bounds
+          , mrVertices = vertices
+          , mrIndices = indices
           }
 
   registerMesh rm mesh
   pure meshH
+
+-- | Merge multiple mesh resources into single vertex and index buffers.
+-- Returns the merged mesh resource (registered in RM) and a map from original MeshHandle to (firstIndex, vertexOffset).
+mergeMeshes ::
+  (MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  [MeshHandle] ->
+  m (MeshResource, HashMap.HashMap MeshHandle (Word32, Int32))
+mergeMeshes rm pdev dev meshHandles = do
+  meshes <- catMaybes <$> mapM (lookupMesh rm) meshHandles
+  let (allVertices, allIndices, offsets) = foldl' accumulate ([], [], HashMap.empty) meshes
+        where
+          accumulate (verts, idxs, offs) mesh =
+            let voff = length verts
+                ioff = length idxs
+                newIdxs = map (+ fromIntegral voff) (mrIndices mesh)
+                newOffs = HashMap.insert (mrHandle mesh) (fromIntegral ioff, fromIntegral voff) offs
+            in (verts ++ mrVertices mesh, idxs ++ newIdxs, newOffs)
+
+  vertBuf <- makeBufferResource pdev dev allVertices Vulkan.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+  idxBuf <- makeBufferResource pdev dev allIndices Vulkan.VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+
+  -- Create shared buffers with no-op destroy (managed by mergedMesh)
+  let sharedVertBuf = vertBuf { brDestroy = pure () }
+      sharedIdxBuf = idxBuf { brDestroy = pure () }
+
+  let mergedHandle = MeshHandle 0  -- dummy handle
+      mergedMesh = MeshResource
+        { mrHandle = mergedHandle
+        , mrVertexBuffer = vertBuf
+        , mrIndexBuffer = idxBuf
+        , mrIndexCount = length allIndices
+        , mrFirstIndex = 0
+        , mrVertexOffset = 0
+        , mrBounds = fromPoints (map (fmap realToFrac . vPos) allVertices)
+        , mrVertices = allVertices
+        , mrIndices = allIndices
+        }
+
+  -- Register merged mesh so its buffers get destroyed at shutdown
+  _ <- registerMesh rm mergedMesh
+
+  pure (mergedMesh, offsets)
 
 -- | Resolve a mesh handle to its raw Vulkan buffers and index count.
 meshBuffers ::
