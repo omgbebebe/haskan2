@@ -468,7 +468,6 @@ renderFrameLoop ::
   STM.TVar (Maybe RenderDebugInfo) ->
   ECS.World ->
   ResourceManager ->
-  Int ->
   Vulkan.VkSampler ->
   [Vulkan.VkDescriptorSet] ->
   IntMap Word32 ->
@@ -476,7 +475,7 @@ renderFrameLoop ::
   IORef FrameStats ->
   ComputeCullResources ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -550,11 +549,8 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         _ -> do
           let view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
               projection = Linear.Matrix.transpose projectionMatrix
-          -- Update uniform buffer regions for each entity
-          liftIO $ for_ (zip [0..] drawList) $ \(entityIdx, dc) -> do
-            let model = Linear.Matrix.transpose $ (realToFrac <$>) <$> dcWorldMatrix dc
-                offset = entityIdx * entityUniformSize
-            Buffer.updateUniformBufferRegion device mvpMemory offset [model, view, projection]
+          -- Update static view+proj UBO (no per-entity dynamic offsets)
+          liftIO $ Buffer.updateUniformBufferRegion device mvpMemory 0 [view, projection]
 
           let recordAction imageIdx frameIdx = do
                 let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIdx
@@ -594,8 +590,9 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdGBufferDescriptor = frameDescriptorSet
                         , dpdGBufferSampler = textureSampler
                         , dpdDrawList = drawList
-                        , dpdEntityUniformSize = entityUniformSize
                         , dpdDevice = device
+                        , dpdDrawCommandsBuffer = ccrDrawCommandsBuffer
+                        , dpdEntityCount = fromIntegral (length drawList)
                         , dpdLightingRenderPass = drLightingRenderPass
                         , dpdLightingFramebuffer = lightingFramebuffer
                         , dpdLightingPipeline = drLightingPipeline
@@ -695,7 +692,6 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         tvRenderDebug
         ecsWorld
         rm
-        entityUniformSize
         textureSampler
         frameDescriptorSets
         textureIndexMap
@@ -870,17 +866,13 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
             }
       logInfoIO LogRender $ "merged " <> showT (length meshHandles) <> " meshes into single buffers"
 
-  -- Create per-frame uniform buffers for multi-entity rendering
-  -- Each entity gets 256 bytes (padded from 192 bytes for 3 M44 matrices)
-  let entityUniformSize = 256 :: Int
-      totalUniformSize = numDrawEntities * entityUniformSize
-      padTo256 :: [M44 Foreign.C.CFloat] -> [M44 Foreign.C.CFloat]
-      padTo256 mats = mats ++ replicate ((entityUniformSize - length mats * sizeOf (undefined :: M44 Foreign.C.CFloat)) `div` sizeOf (undefined :: M44 Foreign.C.CFloat)) identity
-      initialMvpData = concatMap (\m -> padTo256 [m, identity, projectionMatrix]) (replicate numDrawEntities modelMatrix)
+  -- Create per-frame uniform buffers for view+proj (static, no dynamic offsets)
+  let viewProjUniformSize = 128 :: Int
+      initialViewProjData = [identity, projectionMatrix] :: [M44 Foreign.C.CFloat]
 
-  logDebugIO LogBuffer $ "initialMvpData length=" <> showT (length initialMvpData) <> " size=" <> showT (length initialMvpData * sizeOf (undefined :: M44 Foreign.C.CFloat))
+  logDebugIO LogBuffer $ "initialViewProjData length=" <> showT (length initialViewProjData) <> " size=" <> showT (length initialViewProjData * sizeOf (undefined :: M44 Foreign.C.CFloat))
   frameMvpBuffers <- replicateM Render.maxFramesInFlight $
-    Buffer.managedUniformBuffer physicalDevice device initialMvpData
+    Buffer.managedUniformBuffer physicalDevice device initialViewProjData
   logDebugIO LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
 
   -- Create compute culling buffers
@@ -903,7 +895,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       initialDrawCommands = replicate maxEntities (DrawIndexedIndirectCommand 0 0 0 0 0)
 
   (entitySsboBuffer, entitySsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxEntities dummyEntityData) Vulkan.VK_ZERO_FLAGS
-  (drawCommandsBuffer, drawCommandsMemory) <- Buffer.managedStorageBuffer physicalDevice device initialDrawCommands Vulkan.VK_ZERO_FLAGS
+  (drawCommandsBuffer, drawCommandsMemory) <- Buffer.managedStorageBuffer physicalDevice device initialDrawCommands Vulkan.VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
   (cullDataBuffer, cullDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [dummyCullData]
   logDebugIO LogBuffer $ "compute buffers created: entitySSBO=" <> showT (maxEntities * sizeOf (undefined :: ComputeEntityData)) <> " drawCommands=" <> showT (maxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)) <> " cullData=" <> showT (sizeOf (undefined :: ComputeCullData))
 
@@ -1021,7 +1013,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
     DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
   logDebugIO LogRender $ "allocated " <> showT (length frameDescriptorSets) <> " frame descriptor sets"
 
-  -- Update each frame descriptor set with the frame's uniform buffer and bindless textures
+  -- Update each frame descriptor set with the frame's uniform buffer, bindless textures, and entity SSBO
   logInfoIO LogVulkan "updating frame descriptor sets"
   for_ (zip [0..] frameMvpBuffers) $ \(frameIdx, (buf, _)) -> do
     let ds = frameDescriptorSets !! frameIdx
@@ -1029,18 +1021,11 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       device
       ds
       buf
-      (fromIntegral entityUniformSize)
+      (fromIntegral viewProjUniformSize)
       textureSampler
       bindlessTextureViews
+      entitySsboBuffer
   logInfoIO LogVulkan "frame descriptor sets updated"
-
-  -- Create push constant range for material index (fragment shader, 4 bytes)
-  let pushConstantRange =
-        Vulkan.createVk
-          ( Vulkan.set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
-              Vulkan.&* Vulkan.set @"offset" 0
-              Vulkan.&* Vulkan.set @"size" 4
-          )
 
   logInfoIO LogRender "all resources created, entering render loop"
 
@@ -1073,8 +1058,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           then pure ()
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-              with (createDeferredResources physicalDevice device context descriptorSetLayout [pushConstantRange] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources
+              with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources
             outerLoop renderFrameLoopFinished
 
 

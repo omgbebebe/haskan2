@@ -31,7 +31,7 @@ createDescriptorPool :: MonadIO m => Vulkan.VkDevice -> Int -> m Vulkan.VkDescri
 createDescriptorPool dev numSets = do
   let poolSize =
         Vulkan.createVk
-          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
               &* set @"descriptorCount" (fromIntegral numSets)
           )
       samplerPoolSize =
@@ -39,13 +39,18 @@ createDescriptorPool dev numSets = do
           ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
               &* set @"descriptorCount" (fromIntegral (numSets * maxBindlessTextures))
           )
+      ssboPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"descriptorCount" (fromIntegral numSets)
+          )
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"poolSizeCount" 2
-              &* setListRef @"pPoolSizes" [poolSize, samplerPoolSize]
+              &* set @"poolSizeCount" 3
+              &* setListRef @"pPoolSizes" [poolSize, samplerPoolSize, ssboPoolSize]
               &* set @"maxSets" (fromIntegral numSets)
           )
    in liftIO $

@@ -13,6 +13,7 @@ module Graphics.Haskan.Vulkan.Shaders.Wireframe
 
 import FIR
 import Math.Linear
+import Graphics.Haskan.Vulkan.Shaders.EntityData
 
 -- Vertex: transform by MVP (same UBO as g-buffer)
 type VertexDefs =
@@ -22,11 +23,14 @@ type VertexDefs =
        ':-> Uniform
               '[Binding 0, DescriptorSet 0]
               ( Struct
-                  '[ "model" ':-> M 4 4 Float
-                   , "view" ':-> M 4 4 Float
+                  '[ "view" ':-> M 4 4 Float
                    , "projection" ':-> M 4 4 Float
                    ]
               )
+   , "entities"
+       ':-> StorageBuffer
+              '[Binding 2, DescriptorSet 0]
+              EntitiesData
    , "main"        ':-> EntryPoint '[] Vertex
    ]
 
@@ -34,8 +38,11 @@ vertex :: ShaderModule "main" VertexShader VertexDefs _
 vertex = shader do
   ~(Vec3 x y z) <- get @"in_position"
   projection <- use @(Name "ubo" :.: Name "projection")
-  model      <- use @(Name "ubo" :.: Name "model")
   view       <- use @(Name "ubo" :.: Name "view")
+
+  entityIdx <- get @"gl_InstanceIndex"
+  model <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32 :.: Name "transform") entityIdx
+
   let mvp = (projection !*! view) !*! model
   put @"gl_Position" (mvp !*^ Vec4 x y z 1)
 
@@ -44,12 +51,12 @@ type GeometryDefs =
   '[ "in_uv"  ':-> Input '[Location 0] (Array 3 (V 2 Float))
    , "out_uv" ':-> Output '[Location 0] (V 2 Float)
    , "main"   ':-> EntryPoint
-                      '[ Triangles
-                       , OutputLineStrip
-                       , OutputVertices 6
-                       , Invocations 1
-                       ]
-                       Geometry
+                       '[ Triangles
+                        , OutputLineStrip
+                        , OutputVertices 6
+                        , Invocations 1
+                        ]
+                        Geometry
    ]
 
 geometry :: ShaderModule "main" GeometryShader GeometryDefs _

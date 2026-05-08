@@ -74,6 +74,8 @@ createDevice dev queueFamilyIndices enabledLayers = do
   availableFeatures <- liftIO $ allocaAndPeek_ (Vulkan.vkGetPhysicalDeviceFeatures dev)
   let geometrySupported = Vulkan.getField @"geometryShader" availableFeatures == Vulkan.VK_TRUE
       cullDistanceSupported = Vulkan.getField @"shaderCullDistance" availableFeatures == Vulkan.VK_TRUE
+      vertexStorageSupported = Vulkan.getField @"vertexPipelineStoresAndAtomics" availableFeatures == Vulkan.VK_TRUE
+      multiDrawIndirectSupported = Vulkan.getField @"multiDrawIndirect" availableFeatures == Vulkan.VK_TRUE
 
   -- Check descriptor indexing support (requires Vulkan 1.2+)
   descriptorIndexingSupported <- if majorVersion >= 1 && minorVersion >= 2
@@ -108,7 +110,9 @@ createDevice dev queueFamilyIndices enabledLayers = do
       enabledExtensions = [Vulkan.VK_KHR_SWAPCHAIN_EXTENSION_NAME]
       enabledBasicFeatures = Vulkan.createVk
         (set @"geometryShader" (if geometrySupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
-            &* set @"shaderCullDistance" (if cullDistanceSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE))
+            &* set @"shaderCullDistance" (if cullDistanceSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
+            &* set @"vertexPipelineStoresAndAtomics" (if vertexStorageSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
+            &* set @"multiDrawIndirect" (if multiDrawIndirectSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE))
       queueCreateInfos :: [Vulkan.VkDeviceQueueCreateInfo]
       queueCreateInfos =
         map

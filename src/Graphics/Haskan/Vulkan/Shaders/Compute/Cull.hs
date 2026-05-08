@@ -10,18 +10,7 @@ module Graphics.Haskan.Vulkan.Shaders.Compute.Cull
 
 import FIR
 import Math.Linear
-
--- | Per-entity data in SSBO (must match CPU ComputeEntityData, Base/std430).
-type EntityData = Struct
-  '[ "transform"     ':-> M 4 4 Float
-   , "aabbMin"       ':-> V 4 Float
-   , "aabbMax"       ':-> V 4 Float
-   , "materialIndex" ':-> Word32
-   , "firstIndex"    ':-> Word32
-   , "vertexOffset"  ':-> Int32
-   , "indexCount"    ':-> Word32
-   , "_pad"          ':-> Word32
-   ]
+import Graphics.Haskan.Vulkan.Shaders.EntityData
 
 -- | Cull uniform data.
 type CullData = Struct
@@ -40,17 +29,8 @@ type DrawCommand = Struct
    ]
 
 type DrawCommandsData = Struct
-  '[ "commands" ':-> Array MaxEntities DrawCommand
+  '[ "commands" ':-> Array 4096 DrawCommand
    ]
-
--- | Entities SSBO wrapper.
-type EntitiesData = Struct
-  '[ "data" ':-> Array MaxEntities EntityData
-   ]
-
--- Maximum number of entities supported by the cull shader.
--- Must match CPU allocation.
-type MaxEntities = 4096
 
 type Defs
   =  '[ "entities"     ':-> StorageBuffer '[ DescriptorSet 0, Binding 0 ] EntitiesData

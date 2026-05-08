@@ -9,6 +9,7 @@ module Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer where
 
 import FIR
 import Math.Linear
+import Graphics.Haskan.Vulkan.Shaders.EntityData
 
 ------------------------------------------------
 -- pipeline input
@@ -33,15 +34,19 @@ type VertexDefs =
      "out_normal"   ':-> Output '[Location 1] (V 4 Float),
      "out_albedo"   ':-> Output '[Location 2] (V 4 Float),
      "out_uv"       ':-> Output '[Location 3] (V 2 Float),
+     "out_materialIndex" ':-> Output '[Location 4, Flat] Word32,
      "ubo"
        ':-> Uniform
               '[Binding 0, DescriptorSet 0]
               ( Struct
-                  '[ "model" ':-> M 4 4 Float,
-                     "view" ':-> M 4 4 Float,
+                  '[ "view" ':-> M 4 4 Float,
                      "projection" ':-> M 4 4 Float
                    ]
               ),
+     "entities"
+       ':-> StorageBuffer
+              '[Binding 2, DescriptorSet 0]
+              EntitiesData,
      "main" ':-> EntryPoint '[] Vertex
    ]
 
@@ -52,8 +57,12 @@ vertex = shader do
   ~(Vec3 nx ny nz) <- get @"in_normal"
   uv <- get @"in_uv"
   projection <- use @(Name "ubo" :.: Name "projection")
-  model <- use @(Name "ubo" :.: Name "model")
   view <- use @(Name "ubo" :.: Name "view")
+
+  entityIdx <- get @"gl_InstanceIndex"
+  model <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32 :.: Name "transform") entityIdx
+  matIdx <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32 :.: Name "materialIndex") entityIdx
+
   let mvp = (projection !*! view) !*! model
       worldPos = model !*^ Vec4 x y z 1
       worldNorm = model !*^ Vec4 nx ny nz 0
@@ -62,6 +71,7 @@ vertex = shader do
   put @"out_normal" worldNorm
   put @"out_albedo" (Vec4 r g b 1)
   put @"out_uv" uv
+  put @"out_materialIndex" matIdx
   put @"gl_Position" pos
 
 ------------------------------------------------
@@ -72,6 +82,7 @@ type FragmentDefs =
       "in_normal"   ':-> Input '[Location 1] (V 4 Float),
       "in_albedo"   ':-> Input '[Location 2] (V 4 Float),
       "in_uv"       ':-> Input '[Location 3] (V 2 Float),
+      "in_materialIndex" ':-> Input '[Location 4, Flat] Word32,
       "out_position" ':-> Output '[Location 0] (V 4 Float),
       "out_normal"   ':-> Output '[Location 1] (V 4 Float),
       "out_albedo"   ':-> Output '[Location 2] (V 4 Float),
@@ -79,10 +90,6 @@ type FragmentDefs =
          ':-> BindlessTexture2D
                 '[Binding 1, DescriptorSet 0]
                 (RGBA8 UNorm),
-       "materialIndex"
-         ':-> PushConstant
-                '[ ]
-                (Struct '[ "index" ':-> Word32 ]),
        "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
      ]
 
@@ -91,7 +98,7 @@ fragment = shader do
   pos <- get @"in_position"
   norm <- get @"in_normal"
   uv <- get @"in_uv"
-  matIdx <- use @(Name "materialIndex" :.: Name "index")
+  matIdx <- get @"in_materialIndex"
   texColor <- use @(BindlessTexel "tex") matIdx NilOps uv
   put @"out_position" pos
   put @"out_normal" norm

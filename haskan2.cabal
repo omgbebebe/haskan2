@@ -64,6 +64,7 @@ library
                        Graphics.Haskan.Vulkan.Render
                        Graphics.Haskan.Vulkan.ShaderModule
                        Graphics.Haskan.Vulkan.Shaders.Texture
+                       Graphics.Haskan.Vulkan.Shaders.EntityData
                        Graphics.Haskan.Vulkan.Shaders.Compute.Test
                        Graphics.Haskan.Vulkan.Shaders.Compute.Cull
                        Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer

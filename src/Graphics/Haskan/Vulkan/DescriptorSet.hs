@@ -170,17 +170,18 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews = do
     Foreign.Marshal.Array.withArray writes $ \writeUpdatePtr ->
       Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length writes)) writeUpdatePtr 0 Vulkan.vkNullPtr
 
--- | Update UBO and bindless texture array in a descriptor set.
+-- | Update UBO, bindless texture array, and entity SSBO in a descriptor set.
 updateDescriptorSetsBindless ::
   MonadIO m =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
-  Vulkan.VkBuffer ->
+  Vulkan.VkBuffer -> -- view+proj UBO
   Vulkan.VkDeviceSize ->
   Vulkan.VkSampler ->
   [Vulkan.VkImageView] ->
+  Vulkan.VkBuffer -> -- entity SSBO
   m ()
-updateDescriptorSetsBindless dev descriptorSet buffer range sampler imageViews = do
+updateDescriptorSetsBindless dev descriptorSet buffer range sampler imageViews entityBuffer = do
   let bufferInfo :: Vulkan.VkDescriptorBufferInfo
       bufferInfo =
         Vulkan.createVk
@@ -205,7 +206,7 @@ updateDescriptorSetsBindless dev descriptorSet buffer range sampler imageViews =
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"dstSet" descriptorSet
               &* set @"dstBinding" 0
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
               &* set @"pTexelBufferView" Vulkan.VK_NULL
               &* set @"pImageInfo" Vulkan.VK_NULL
               &* setVkRef @"pBufferInfo" bufferInfo
@@ -226,9 +227,30 @@ updateDescriptorSetsBindless dev descriptorSet buffer range sampler imageViews =
               &* set @"descriptorCount" (fromIntegral (length imageViews))
               &* set @"dstArrayElement" 0
           )
+      entityBufferInfo :: Vulkan.VkDescriptorBufferInfo
+      entityBufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" entityBuffer
+              &* set @"offset" 0
+              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+          )
+      writeEntity :: Vulkan.VkWriteDescriptorSet
+      writeEntity =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 2
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pImageInfo" Vulkan.VK_NULL
+              &* setVkRef @"pBufferInfo" entityBufferInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
   liftIO $
-    Foreign.Marshal.Array.withArray [writeUpdate, writeUpdateTexture] $ \writeUpdatePtr ->
-      Vulkan.vkUpdateDescriptorSets dev 2 writeUpdatePtr 0 Vulkan.vkNullPtr
+    Foreign.Marshal.Array.withArray [writeUpdate, writeUpdateTexture, writeEntity] $ \writeUpdatePtr ->
+      Vulkan.vkUpdateDescriptorSets dev 3 writeUpdatePtr 0 Vulkan.vkNullPtr
 
 -- | Update a single combined image sampler binding in a descriptor set.
 updateTextureBinding ::

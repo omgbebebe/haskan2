@@ -35,10 +35,10 @@ managedDescriptorSetLayout dev =
 
 createDescriptorSetLayout :: MonadIO m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 createDescriptorSetLayout dev = do
-  let binding =
+  let viewProjBinding =
         Vulkan.createVk
           ( set @"binding" 0
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
               &* set @"descriptorCount" 1
               &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_VERTEX_BIT
               &* set @"pImmutableSamplers" Vulkan.VK_NULL
@@ -51,6 +51,14 @@ createDescriptorSetLayout dev = do
               &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
               &* set @"pImmutableSamplers" Vulkan.VK_NULL
           )
+      entityBinding =
+        Vulkan.createVk
+          ( set @"binding" 2
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"descriptorCount" 1
+              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_VERTEX_BIT
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+          )
       -- Binding flags for binding 1: partially bound (allows unused descriptors in array)
       bindingFlags :: Vulkan12.VkDescriptorBindingFlags
       bindingFlags = Vulkan12.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
@@ -58,16 +66,16 @@ createDescriptorSetLayout dev = do
       bindingFlagsCreateInfo = Vulkan.createVk
         ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO
             &* set @"pNext" Vulkan.VK_NULL
-            &* set @"bindingCount" 2
-            &* setListRef @"pBindingFlags" [Vulkan.VK_ZERO_FLAGS, bindingFlags]  -- binding 0: no flags, binding 1: partially bound
+            &* set @"bindingCount" 3
+            &* setListRef @"pBindingFlags" [Vulkan.VK_ZERO_FLAGS, bindingFlags, Vulkan.VK_ZERO_FLAGS]  -- binding 0: no flags, binding 1: partially bound, binding 2: no flags
         )
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
               &* set @"pNext" (castPtr $ Vulkan.unsafePtr bindingFlagsCreateInfo)
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" 2
-              &* setListRef @"pBindings" [binding, textureBinding]
+              &* set @"bindingCount" 3
+              &* setListRef @"pBindings" [viewProjBinding, textureBinding, entityBinding]
           )
    in liftIO $ withPtr bindingFlagsCreateInfo $ \_bfcPtr ->
         withPtr createInfo $ \ciPtr ->

@@ -36,8 +36,9 @@ data DeferredPassData = DeferredPassData
   , dpdGBufferDescriptor :: !Vulkan.VkDescriptorSet
   , dpdGBufferSampler     :: !Vulkan.VkSampler
   , dpdDrawList           :: ![DrawCall]
-  , dpdEntityUniformSize  :: !Int
   , dpdDevice             :: !Vulkan.VkDevice
+  , dpdDrawCommandsBuffer :: !Vulkan.VkBuffer
+  , dpdEntityCount        :: !Word32
     -- Lighting pass
   , dpdLightingRenderPass  :: !Vulkan.VkRenderPass
   , dpdLightingFramebuffer :: !Vulkan.VkFramebuffer
@@ -75,36 +76,21 @@ buildDeferredGraph DeferredPassData {..} = do
                 Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
                   Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
               Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
-          -- Draw each entity with its own offset/count/material
-          for_ (zip [0..] dpdDrawList) $ \(entityIdx, dc) -> do
-            let mesh = dcMesh dc
-                idxCnt  = fromIntegral (mrIndexCount mesh)
-                firstIdx = fromIntegral (mrFirstIndex mesh)
-                vertOff = fromIntegral (mrVertexOffset mesh)
-                dynamicOffset = fromIntegral (entityIdx * dpdEntityUniformSize)
-                matIdx = dcMaterialIndex dc
-            -- Push material index
-            liftIO $ Foreign.Marshal.Array.withArray [matIdx] $ \pushPtr ->
-              Vulkan.vkCmdPushConstants
-                commandBuffer
-                dpdGBufferLayout
-                Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
-                0
-                (fromIntegral (sizeOf matIdx))
-                (castPtr pushPtr)
-            Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
-              Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
-                DescriptorSet.cmdBindDescriptorSets
-                  commandBuffer
-                  Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                  dpdGBufferLayout
-                  0
-                  1
-                  dsPtr
-                  1
-                  dynOffsetPtr
-            CommandBuffer.cmdDraw commandBuffer idxCnt vertOff (fromIntegral entityIdx)
-          -- Wireframe overlay pass (same geometry, wireframe pipeline)
+          -- Bind descriptor set once (no dynamic offsets)
+          Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
+            DescriptorSet.cmdBindDescriptorSets
+              commandBuffer
+              Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+              dpdGBufferLayout
+              0
+              1
+              dsPtr
+              0
+              Vulkan.vkNullPtr
+          -- Single indirect draw call for all entities
+          when (dpdEntityCount > 0) $
+            CommandBuffer.cmdDrawIndexedIndirect commandBuffer dpdDrawCommandsBuffer dpdEntityCount 20
+          -- Wireframe overlay pass
           when dpdWireframeEnabled $ do
             GraphicsPipeline.cmdBindPipeline commandBuffer dpdWireframePipeline
             case dpdDrawList of
@@ -117,34 +103,20 @@ buildDeferredGraph DeferredPassData {..} = do
                   Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
                     Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
                 Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
-            for_ (zip [0..] dpdDrawList) $ \(entityIdx, dc) -> do
-              let mesh = dcMesh dc
-                  idxCnt  = fromIntegral (mrIndexCount mesh)
-                  firstIdx = fromIntegral (mrFirstIndex mesh)
-                  vertOff = fromIntegral (mrVertexOffset mesh)
-                  dynamicOffset = fromIntegral (entityIdx * dpdEntityUniformSize)
-                  matIdx = dcMaterialIndex dc
-              -- Push material index for wireframe pass too
-              liftIO $ Foreign.Marshal.Array.withArray [matIdx] $ \pushPtr ->
-                Vulkan.vkCmdPushConstants
-                  commandBuffer
-                  dpdWireframeLayout
-                  Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
-                  0
-                  (fromIntegral (sizeOf matIdx))
-                  (castPtr pushPtr)
-              Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
-                Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
-                  DescriptorSet.cmdBindDescriptorSets
-                    commandBuffer
-                    Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                    dpdWireframeLayout
-                    0
-                    1
-                    dsPtr
-                    1
-                    dynOffsetPtr
-              CommandBuffer.cmdDraw commandBuffer idxCnt vertOff (fromIntegral entityIdx)
+            -- Bind descriptor set for wireframe (shares layout)
+            Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
+              DescriptorSet.cmdBindDescriptorSets
+                commandBuffer
+                Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+                dpdWireframeLayout
+                0
+                1
+                dsPtr
+                0
+                Vulkan.vkNullPtr
+            -- Single indirect draw for wireframe too
+            when (dpdEntityCount > 0) $
+              CommandBuffer.cmdDrawIndexedIndirect commandBuffer dpdDrawCommandsBuffer dpdEntityCount 20
     }
 
   -- Lighting pass: fullscreen triangle compositing

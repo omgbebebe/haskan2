@@ -1,0 +1,22 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeOperators #-}
+
+module Graphics.Haskan.Vulkan.Shaders.EntityData where
+
+import FIR
+import Math.Linear
+
+type EntityData = Struct
+  '[ "transform"     ':-> M 4 4 Float
+   , "aabbMin"       ':-> V 4 Float
+   , "aabbMax"       ':-> V 4 Float
+   , "materialIndex" ':-> Word32
+   , "firstIndex"    ':-> Word32
+   , "vertexOffset"  ':-> Int32
+   , "indexCount"    ':-> Word32
+   , "_pad"          ':-> Word32
+   ]
+
+type EntitiesData = Struct
+  '[ "data" ':-> Array 4096 EntityData
+   ]
