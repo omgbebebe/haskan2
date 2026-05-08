@@ -24,7 +24,7 @@ import Data.Hashable (Hashable (..))
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
 import Data.IORef (IORef, newIORef, readIORef, writeIORef)
-import Data.List (sort)
+import Data.List (nub, sort)
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -547,17 +547,17 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   graphicsQueueHandler <- Device.getDeviceQueueHandler device graphicsQueueFamilyIndex 0
   presentQueueHandler <- Device.getDeviceQueueHandler device presentQueueFamilyIndex 0
 
-  liftIO $ FIR.compileTo "data/shaders/fir/vert.spv" [FIR.SPIRV (FIR.Version 1 0)] Shaders.vertex
-  liftIO $ FIR.compileTo "data/shaders/fir/frag.spv" [FIR.SPIRV (FIR.Version 1 0)] Shaders.fragment
+  liftIO $ FIR.compileTo "data/shaders/fir/vert.spv" [FIR.SPIRV (FIR.Version 1 5)] Shaders.vertex
+  liftIO $ FIR.compileTo "data/shaders/fir/frag.spv" [FIR.SPIRV (FIR.Version 1 5)] Shaders.fragment
 
-  liftIO $ FIR.compileTo "data/shaders/fir/gbuf_vert.spv" [FIR.SPIRV (FIR.Version 1 0)] GBufferShaders.vertex
-  liftIO $ FIR.compileTo "data/shaders/fir/gbuf_frag.spv" [FIR.SPIRV (FIR.Version 1 0)] GBufferShaders.fragment
-  liftIO $ FIR.compileTo "data/shaders/fir/light_vert.spv" [FIR.SPIRV (FIR.Version 1 0)] LightingShaders.vertex
-  liftIO $ FIR.compileTo "data/shaders/fir/light_frag.spv" [FIR.SPIRV (FIR.Version 1 0)] LightingShaders.fragment
+  liftIO $ FIR.compileTo "data/shaders/fir/gbuf_vert.spv" [FIR.SPIRV (FIR.Version 1 5)] GBufferShaders.vertex
+  liftIO $ FIR.compileTo "data/shaders/fir/gbuf_frag.spv" [FIR.SPIRV (FIR.Version 1 5)] GBufferShaders.fragment
+  liftIO $ FIR.compileTo "data/shaders/fir/light_vert.spv" [FIR.SPIRV (FIR.Version 1 5)] LightingShaders.vertex
+  liftIO $ FIR.compileTo "data/shaders/fir/light_frag.spv" [FIR.SPIRV (FIR.Version 1 5)] LightingShaders.fragment
 
-  liftIO $ FIR.compileTo "data/shaders/fir/wire_vert.spv" [FIR.SPIRV (FIR.Version 1 0)] WireframeShaders.vertex
-  liftIO $ FIR.compileTo "data/shaders/fir/wire_geom.spv" [FIR.SPIRV (FIR.Version 1 0)] WireframeShaders.geometry
-  liftIO $ FIR.compileTo "data/shaders/fir/wire_frag.spv" [FIR.SPIRV (FIR.Version 1 0)] WireframeShaders.fragment
+  liftIO $ FIR.compileTo "data/shaders/fir/wire_vert.spv" [FIR.SPIRV (FIR.Version 1 5)] WireframeShaders.vertex
+  liftIO $ FIR.compileTo "data/shaders/fir/wire_geom.spv" [FIR.SPIRV (FIR.Version 1 5)] WireframeShaders.geometry
+  liftIO $ FIR.compileTo "data/shaders/fir/wire_frag.spv" [FIR.SPIRV (FIR.Version 1 5)] WireframeShaders.fragment
 
   vertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/vert.spv"
   fragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/frag.spv"
@@ -711,36 +711,33 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
             clamp lo hi v = max lo (min hi v)
         in Vector.fromList [dstPixel dx dy !! c | dy <- [0..dh-1], dx <- [0..dw-1], c <- [0..3]]
 
-  -- Build set of unique texture handles from draw list
-  let uniqueTextures = foldr collectUniqueTextures [] initialDrawList
-      collectUniqueTextures dc acc = case dcMaterial dc of
-        Just tr -> let h = trHandle tr in if h `elem` acc then acc else h : acc
-        Nothing -> acc
+  -- Build set of unique texture handles from ECS materials (not draw list,
+  -- because glTF textures use dummy handles not registered in resource manager)
+  ecsMaterials <- liftIO $ STM.readTVarIO (ECS.wMaterials ecsWorld)
+  let uniqueTextures = nub $ IntMap.elems ecsMaterials
       numUniqueTextures = length uniqueTextures
 
   logInfoIO LogTexture $ "unique textures: " <> showT numUniqueTextures
 
-  -- Build texture handle -> layer index map
+  -- Build texture handle -> bindless index map
   let textureIndexMap = IntMap.fromList $ zip (map (fromIntegral . unTextureHandle) uniqueTextures) [0..]
       unTextureHandle (TextureHandle h) = h
 
-  -- Create texture2DArray from unique textures (all resized to 256x256)
-  textureArrayView <- if numUniqueTextures == 0
+  -- Create individual textures for bindless descriptor array
+  bindlessTextureViews <- if numUniqueTextures == 0
     then do
-      -- No textures, create a 1-layer white texture array
+      -- No textures, create a single white texture
       let whiteTexData = Texture.generateGridTexture 2 2 1
       whiteHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
       mView <- Texture.textureImageView rm whiteHandle
       case mView of
-        Just view -> pure view
+        Just view -> pure [view]
         Nothing -> liftIO $ fail "failed to create white texture"
     else do
-      -- Collect pixel data from all unique textures
-      -- For glTF: use decoded pixel data map (no individual GPU textures created)
-      -- For OBJ: read pixel data from individual GPU texture resources
-      arrayLayers <- forM uniqueTextures $ \texHandle -> do
+      -- Create individual texture for each unique texture
+      views <- forM uniqueTextures $ \texHandle -> do
         let hId = fromIntegral (unTextureHandle texHandle)
-        case IntMap.lookup hId texturePixelMap of
+        pixelData <- case IntMap.lookup hId texturePixelMap of
           -- glTF path: decoded pixel data available
           Just (tw, th, pixelData) ->
             if tw == 256 && th == 256
@@ -759,13 +756,14 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
                   if tw == 256 && th == 256
                     then pure pixelData
                     else pure $ resizeImageBilinear pixelData tw th 256 256
-      texArrayHandle <- Texture.createTexture2DArray rm physicalDevice device 256 256 arrayLayers graphicsQueueHandler textureCommandBuffer
-      mView <- Texture.textureImageView rm texArrayHandle
-      case mView of
-        Just view -> pure view
-        Nothing -> liftIO $ fail "failed to create texture array"
+        texHandle' <- Texture.createTextureFromData rm physicalDevice device 256 256 pixelData graphicsQueueHandler textureCommandBuffer
+        mView <- Texture.textureImageView rm texHandle'
+        case mView of
+          Just view -> pure view
+          Nothing -> liftIO $ fail "failed to create texture view"
+      pure views
 
-  logInfoIO LogTexture "texture array created"
+  logInfoIO LogTexture $ "bindless textures created: " <> showT (length bindlessTextureViews)
 
   -- Create descriptor pool sized for frame descriptor sets (one per frame)
   let totalDescriptorSets = Render.maxFramesInFlight
@@ -777,17 +775,17 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
     DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
   logDebugIO LogRender $ "allocated " <> showT (length frameDescriptorSets) <> " frame descriptor sets"
 
-  -- Update each frame descriptor set with the frame's uniform buffer
+  -- Update each frame descriptor set with the frame's uniform buffer and bindless textures
   logInfoIO LogVulkan "updating frame descriptor sets"
   for_ (zip [0..] frameMvpBuffers) $ \(frameIdx, (buf, _)) -> do
     let ds = frameDescriptorSets !! frameIdx
-    DescriptorSet.updateDescriptorSetsRange
+    DescriptorSet.updateDescriptorSetsBindless
       device
       ds
       buf
       (fromIntegral entityUniformSize)
-      textureArrayView
       textureSampler
+      bindlessTextureViews
   logInfoIO LogVulkan "frame descriptor sets updated"
 
   -- Create push constant range for material index (fragment shader, 4 bytes)

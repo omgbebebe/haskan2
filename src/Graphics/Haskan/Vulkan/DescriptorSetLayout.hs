@@ -41,28 +41,35 @@ createDescriptorSetLayout dev = do
               &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_VERTEX_BIT
               &* set @"pImmutableSamplers" Vulkan.VK_NULL
           )
-      sampler =
+      textureBinding =
         Vulkan.createVk
           ( set @"binding" 1
-              &* set @"descriptorCount" 1
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+              &* set @"descriptorCount" (fromIntegral maxBindlessTextures)
               &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
           )
+      -- Binding flags for binding 1: partially bound (allows unused descriptors in array)
+      bindingFlags :: Vulkan12.VkDescriptorBindingFlags
+      bindingFlags = Vulkan12.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+      bindingFlagsCreateInfo :: Vulkan12.VkDescriptorSetLayoutBindingFlagsCreateInfo
+      bindingFlagsCreateInfo = Vulkan.createVk
+        ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"bindingCount" 2
+            &* setListRef @"pBindingFlags" [Vulkan.VK_ZERO_FLAGS, bindingFlags]  -- binding 0: no flags, binding 1: partially bound
+        )
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"pNext" (castPtr $ Vulkan.unsafePtr bindingFlagsCreateInfo)
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
               &* set @"bindingCount" 2
-              &* setListRef @"pBindings" [binding, sampler]
+              &* setListRef @"pBindings" [binding, textureBinding]
           )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+   in liftIO $ withPtr bindingFlagsCreateInfo $ \_bfcPtr ->
+        withPtr createInfo $ \ciPtr ->
+          allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
 
 managedLightingDescriptorSetLayout :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 managedLightingDescriptorSetLayout dev =

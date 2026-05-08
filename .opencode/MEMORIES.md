@@ -191,5 +191,45 @@ True bindless descriptor indexing is **fundamentally different** from Texture2DA
 - `OpTypeRuntimeArray` emission in SPIR-V backend
 - Capability tracking for `RuntimeDescriptorArray` and per-type non-uniform indexing capabilities
 
-### Recommendation
-Continue with `Texture2DArray` + preprocessor for now. True bindless requires significant FIR type-system work and possibly upstream coordination. The research document provides a complete roadmap when we revisit this.
+### FIR Data Types & Optics Structure (Critical Findings)
+
+#### ProgramState is a promoted kind, not a Type
+- `data ProgramState = ProgramState ...` with `DataKinds` promotes `ProgramState` to a **kind**
+- Type variables like `(i :: ProgramState)` have kind `ProgramState`, **NOT** `Type`
+- `Code :: Type -> Type`, so `Code i` where `i :: ProgramState` is a **kind error**
+- This is the root cause of the `BindlessTexel` `KnownASTOptic` instance failure
+
+#### ImageTexel has NO AST-level `view` support
+- `FIR.Syntax.AST` has **zero** `KnownASTOptic`/`Gettable`/`ReifiedGetter` instances for `ImageTexel`
+- Image texel optics only work through `use`/`assign` in the `Program` monad
+- `use @(ImageTexel "name") ops coords` creates an AST node via `opticSing`, not through `view`
+
+#### BindlessTexel must follow the same pattern as ImageTexel
+- ~~The broken `KnownASTOptic`/`Gettable`/`ReifiedGetter` instances in `FIR.Syntax.AST` (lines ~582-724) are wrong and should be removed~~ **REMOVED 2026-05-08**
+- `BindlessTexel` only supports `use`/`assign` in `Program`, not `view` on `Code`
+- `FIR.Syntax.Optics` has working `KnownOptic`/`Gettable` instances for `BindlessTexel`
+- `CodeGen/Optics.hs` handles `SBindlessTexel` code generation correctly
+- `CodeGen/Pointers.hs` adds `NonUniformEXT` decoration for runtime array accesses
+
+### Status (2026-05-08)
+- **FIR builds clean** after removing broken `BindlessTexel` AST instances
+- `Tests/Images/Bindless.hs` updated to use `use @(BindlessTexel "textures") idx NilOps coord`
+- `haskan2` executable builds successfully
+- True bindless shader compilation works end-to-end: `SBindlessTexel` → `CodeGen/Optics.hs` → SPIR-V with `NonUniformEXT` decoration
+- **Haskan2 integration complete**:
+  - `Shaders/Deferred/GBuffer.hs` fragment shader uses `BindlessTexture2D` + `BindlessTexel`
+  - `DescriptorSetLayout.hs` main layout uses bindless array (binding 1, `descriptorCount = 1024`, `PARTIALLY_BOUND` + `UPDATE_AFTER_BIND`)
+  - `DescriptorPool.hs` pool sized for `maxFrames * maxBindlessTextures` samplers with `UPDATE_AFTER_BIND` flag
+  - `DescriptorSet.hs` new `updateDescriptorSetsBindless` writes UBO + texture view array
+  - `Engine.hs` creates individual textures per material, writes all views to each frame descriptor set
+  - Push constant still passes material index (now interpreted as bindless descriptor index)
+- Executable runs (`--help` verified)
+
+### Key Files Changed
+- `3rdparty/fir/src/FIR/Syntax/AST.hs` — removed broken `BindlessTexel` instances
+- `3rdparty/fir/test/Tests/Images/Bindless.hs` — uses `BindlessTexel` optic
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/GBuffer.hs` — bindless fragment shader
+- `src/Graphics/Haskan/Vulkan/DescriptorSetLayout.hs` — bindless layout
+- `src/Graphics/Haskan/Vulkan/DescriptorPool.hs` — bindless pool sizing
+- `src/Graphics/Haskan/Vulkan/DescriptorSet.hs` — `updateDescriptorSetsBindless`
+- `src/Graphics/Haskan/Engine.hs` — individual texture creation + bindless descriptor updates

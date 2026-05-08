@@ -26,16 +26,16 @@ managedDescriptorPool dev imageViewCount =
     (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
 
 createDescriptorPool :: MonadIO m => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
-createDescriptorPool dev imageViewCount = do
+createDescriptorPool dev numSets = do
   let poolSize =
         Vulkan.createVk
           ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC
-              &* set @"descriptorCount" (fromIntegral imageViewCount)
+              &* set @"descriptorCount" (fromIntegral numSets)
           )
       samplerPoolSize =
         Vulkan.createVk
           ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-              &* set @"descriptorCount" (fromIntegral imageViewCount)
+              &* set @"descriptorCount" (fromIntegral (numSets * maxBindlessTextures))
           )
       createInfo =
         Vulkan.createVk
@@ -44,7 +44,7 @@ createDescriptorPool dev imageViewCount = do
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
               &* set @"poolSizeCount" 2
               &* setListRef @"pPoolSizes" [poolSize, samplerPoolSize]
-              &* set @"maxSets" (fromIntegral imageViewCount)
+              &* set @"maxSets" (fromIntegral numSets)
           )
    in liftIO $
         withPtr
@@ -52,6 +52,8 @@ createDescriptorPool dev imageViewCount = do
           ( \ciPtr ->
               allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
           )
+  where
+    maxBindlessTextures = 1024
 
 managedLightingDescriptorPool :: MonadManaged m => Vulkan.VkDevice -> Int -> Int -> m Vulkan.VkDescriptorPool
 managedLightingDescriptorPool dev numSets texturesPerSet =

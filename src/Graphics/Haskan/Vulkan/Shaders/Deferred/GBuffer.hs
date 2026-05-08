@@ -75,16 +75,16 @@ type FragmentDefs =
       "out_position" ':-> Output '[Location 0] (V 4 Float),
       "out_normal"   ':-> Output '[Location 1] (V 4 Float),
       "out_albedo"   ':-> Output '[Location 2] (V 4 Float),
-      "tex"
-        ':-> Texture2DArray
-               '[Binding 1, DescriptorSet 0]
-               (RGBA8 UNorm),
-      "materialIndex"
-        ':-> PushConstant
-               '[ ]
-               (Struct '[ "index" ':-> Word32 ]),
-      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
-    ]
+       "tex"
+         ':-> BindlessTexture2D
+                '[Binding 1, DescriptorSet 0]
+                (RGBA8 UNorm),
+       "materialIndex"
+         ':-> PushConstant
+                '[ ]
+                (Struct '[ "index" ':-> Word32 ]),
+       "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
+     ]
 
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do
@@ -92,9 +92,7 @@ fragment = shader do
   norm <- get @"in_normal"
   uv <- get @"in_uv"
   matIdx <- use @(Name "materialIndex" :.: Name "index")
-  let layer = fromIntegral matIdx :: Code Float
-      coord = Vec3 (view @(Index 0) uv) (view @(Index 1) uv) layer
-  texColor <- use @(ImageTexel "tex") NilOps coord
+  texColor <- use @(BindlessTexel "tex") matIdx NilOps uv
   put @"out_position" pos
   put @"out_normal" norm
   put @"out_albedo" texColor
