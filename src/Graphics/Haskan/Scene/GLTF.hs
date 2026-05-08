@@ -27,7 +27,10 @@ import Graphics.Haskan.Mesh (Mesh (..))
 import Graphics.Haskan.Scene.ECS (World, EntityId)
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform)
+import Graphics.Haskan.Assets.Cache (AssetCache)
+import Graphics.Haskan.Assets.TexturePreprocessor (TextureConfig, defaultTextureConfig)
 import Graphics.Haskan.Vertex (Vertex (..))
+
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.Resources (ResourceManager, MeshHandle, TextureHandle)
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
@@ -115,9 +118,10 @@ importGLTF ::
   Vulkan.VkDevice ->
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
+  AssetCache ->
   FilePath ->
   m GLTFImportResult
-importGLTF rm pdev dev queue cmdBuf path = do
+importGLTF rm pdev dev queue cmdBuf cache path = do
   logInfo LogGeneral $ "loading glTF: " <> Text.pack path
 
   -- Load glTF file using gltf-loader
@@ -138,7 +142,7 @@ importGLTF rm pdev dev queue cmdBuf path = do
   world <- ECS.createWorld
 
   -- Load textures from images
-  textures <- loadTextures rm pdev dev queue cmdBuf gltf
+  textures <- loadTextures rm pdev dev queue cmdBuf cache gltf
   logInfo LogGeneral $ "loaded " <> showT (length textures) <> " textures"
 
   -- Build material -> texture mapping
@@ -165,11 +169,12 @@ loadTextures ::
   Vulkan.VkDevice ->
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
+  AssetCache ->
   GLTFTypes.Gltf ->
   m [TextureHandle]
-loadTextures rm pdev dev queue cmdBuf gltf = do
+loadTextures rm pdev dev queue cmdBuf cache gltf = do
   let images = gltfImages gltf
-  mapM (loadImage rm pdev dev queue cmdBuf) (Vector.toList images)
+  mapM (loadImage rm pdev dev queue cmdBuf cache) (Vector.toList images)
 
 -- | Load a single glTF image as a Vulkan texture.
 loadImage ::
@@ -179,13 +184,13 @@ loadImage ::
   Vulkan.VkDevice ->
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
+  AssetCache ->
   GLTFTypes.Image ->
   m TextureHandle
-loadImage rm pdev dev queue cmdBuf img = do
+loadImage rm pdev dev queue cmdBuf cache img = do
   case GLTFTypes.imageData img of
     Just bs -> do
-      (pixelData, width, height) <- Texture.decodeImageBytes bs
-      Texture.createTextureFromData rm pdev dev width height pixelData queue cmdBuf
+      Texture.createTextureFromBytesCached rm pdev dev cache bs queue cmdBuf
     Nothing -> do
       -- No image data - create a white fallback texture
       let whitePixels = Texture.generateGridTexture 2 2 1

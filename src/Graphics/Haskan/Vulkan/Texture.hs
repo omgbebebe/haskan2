@@ -10,12 +10,15 @@ module Graphics.Haskan.Vulkan.Texture
   , generateGridTexture
   , generateCheckerboardTexture
   , createTextureFromData
+  , createTextureFromBytesCached
+  , createTexture2DArray
   ) where
 import Codec.Picture
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits
 import Data.ByteString (ByteString)
+import Data.Foldable (for_)
 import Data.Vector.Storable qualified
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word8)
@@ -26,6 +29,15 @@ import Graphics.Haskan.Vulkan.CommandBuffer qualified as Haskan
 import Graphics.Haskan.Vulkan.ImageView qualified as Haskan
 import Graphics.Haskan.Vulkan.Memory qualified as Haskan
 import Graphics.Haskan.Vulkan.Resources
+import Graphics.Haskan.Assets.Cache (AssetCache)
+import Graphics.Haskan.Assets.TexturePreprocessor
+  ( TextureConfig
+  , defaultTextureConfig
+  , loadTextureCached
+  , loadTextureBytesCached
+  )
+import Graphics.Haskan.Assets.InternalFormat (InternalTexture(..), TextureMetadata(..))
+
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
@@ -196,21 +208,20 @@ createSampler dev =
           )
    in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateSampler dev ciPtr Vulkan.vkNullPtr))
 
--- | Create and register a texture resource. Staging buffer is destroyed immediately after copy.
-createTextureResource ::
+-- | Shared texture upload logic: staging buffer -> image -> imageView -> register.
+uploadTexture ::
   (MonadFail m, MonadManaged m, MonadIO m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
-  FilePath ->
+  Int -> Int ->
+  Data.Vector.Storable.Vector Word8 ->
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   m TextureHandle
-createTextureResource rm pdev dev filePath queue commandBuffer = do
-  (imgData, width, height) <- liftIO (readImageFromFile filePath)
+uploadTexture rm pdev dev width height imgData queue commandBuffer = do
   let dataList = Vector.toList imgData
 
-  -- Staging buffer (temporary, not registered)
   (stagingBuffer, stagingMemoryRequirement) <-
     Haskan.managedBuffer dev dataList Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
 
@@ -282,9 +293,6 @@ createTextureResource rm pdev dev filePath queue commandBuffer = do
   liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
   imageView <- Haskan.createImageView dev format image
 
-  -- Staging buffer/memory are MonadManaged; they will be cleaned up when the
-  -- renderLoop's MonadManaged scope exits.  Do NOT destroy them here.
-
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 
   let destroy = do
@@ -294,15 +302,70 @@ createTextureResource rm pdev dev filePath queue commandBuffer = do
 
       resource =
         TextureResource
-          { trHandle = texH,
-            trImage = image,
-            trImageView = imageView,
-            trMemory = imageMemory,
-            trDestroy = destroy
+          { trHandle = texH
+          , trImage = image
+          , trImageView = imageView
+          , trMemory = imageMemory
+          , trWidth = width
+          , trHeight = height
+          , trPixelData = Just imgData
+          , trDestroy = destroy
           }
 
   registerTexture rm resource
   pure texH
+
+-- | Create and register a texture resource from file, using asset cache.
+createTextureResource ::
+  (MonadFail m, MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  AssetCache ->
+  FilePath ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+createTextureResource rm pdev dev cache filePath queue commandBuffer = do
+  result <- loadTextureCached cache filePath defaultTextureConfig
+  case result of
+    Left err -> fail $ "createTextureResource: " <> err
+    Right (InternalTexture meta imgData) ->
+      uploadTexture rm pdev dev (itmWidth meta) (itmHeight meta) imgData queue commandBuffer
+
+-- | Create and register a texture from raw RGBA8 pixel data.
+createTextureFromData ::
+  (MonadFail m, MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Int ->
+  Int ->
+  Data.Vector.Storable.Vector Word8 ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+createTextureFromData rm pdev dev width height imgData queue commandBuffer =
+  uploadTexture rm pdev dev width height imgData queue commandBuffer
+
+-- | Create and register a texture from raw bytes, using asset cache.
+createTextureFromBytesCached ::
+  (MonadFail m, MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  AssetCache ->
+  ByteString ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+createTextureFromBytesCached rm pdev dev cache rawBytes queue commandBuffer = do
+  result <- loadTextureBytesCached cache rawBytes defaultTextureConfig
+  case result of
+    Left err -> fail $ "createTextureFromBytesCached: " <> err
+    Right (InternalTexture meta imgData) ->
+      uploadTexture rm pdev dev (itmWidth meta) (itmHeight meta) imgData queue commandBuffer
+
 
 -- | Resolve a texture handle to its VkImageView.
 textureImageView :: MonadIO m => ResourceManager -> TextureHandle -> m (Maybe Vulkan.VkImageView)
@@ -343,31 +406,34 @@ generateGridTexture width height spacing =
           2 -> if majorGrid then 180 else if onGrid then 120 else 64   -- B
           _ -> 255                                                    -- A
 
--- | Create and register a texture from raw RGBA8 pixel data.
-createTextureFromData ::
+-- | Create a 2D texture array from multiple RGBA8 textures.
+-- All textures must have the same width and height.
+createTexture2DArray ::
   (MonadFail m, MonadManaged m, MonadIO m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
-  Int ->
-  Int ->
-  Data.Vector.Storable.Vector Word8 ->
+  Int -> -- ^ width
+  Int -> -- ^ height
+  [Data.Vector.Storable.Vector Word8] -> -- ^ one per layer
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   m TextureHandle
-createTextureFromData rm pdev dev width height imgData queue commandBuffer = do
-  let dataList = Vector.toList imgData
+createTexture2DArray rm pdev dev width height layers queue commandBuffer = do
+  let numLayers = length layers
+      layerSize = width * height * 4
+      allData = Vector.toList $ mconcat layers
 
-  -- Staging buffer (temporary, not registered)
+  -- Staging buffer
   (stagingBuffer, stagingMemoryRequirement) <-
-    Haskan.managedBuffer dev dataList Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    Haskan.managedBuffer dev allData Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
 
   stagingMemory <-
     Haskan.managedBufferMemory pdev dev stagingMemoryRequirement
 
   liftIO $ do
-    Haskan.bindBufferMemory dev stagingBuffer stagingMemory dataList
-    Haskan.copyDataToDeviceMemory dev stagingMemory dataList
+    Haskan.bindBufferMemory dev stagingBuffer stagingMemory allData
+    Haskan.copyDataToDeviceMemory dev stagingMemory allData
 
   let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
       imageExtent =
@@ -383,7 +449,7 @@ createTextureFromData rm pdev dev width height imgData queue commandBuffer = do
               &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
               &* set @"extent" imageExtent
               &* set @"mipLevels" 1
-              &* set @"arrayLayers" 1
+              &* set @"arrayLayers" (fromIntegral numLayers)
               &* set @"format" format
               &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
               &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
@@ -400,6 +466,7 @@ createTextureFromData rm pdev dev width height imgData queue commandBuffer = do
   imageMemoryRequirements <-
     allocaAndPeek_
       (Vulkan.vkGetImageMemoryRequirements dev image)
+  logDebug LogTexture $ "texture2DArray image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " layers=" <> showT numLayers <> " width=" <> showT width <> " height=" <> showT height
 
   imageMemory <-
     Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
@@ -407,27 +474,33 @@ createTextureFromData rm pdev dev width height imgData queue commandBuffer = do
   liftIO $ bindImageMemory dev image imageMemory 0
 
   Haskan.withCommandBufferOneTime queue commandBuffer $ do
-    Haskan.layerTransition
+    Haskan.layerTransitionAll
       commandBuffer
       image
       Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
       Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      (fromIntegral numLayers)
 
-    Haskan.copyBufferToImage
-      commandBuffer
-      stagingBuffer
-      image
-      (fromIntegral width)
-      (fromIntegral height)
+    for_ (zip [0..] layers) $ \(layerIdx, _) -> do
+      let offset = fromIntegral (layerIdx * layerSize)
+      Haskan.copyBufferToImageLayer
+        commandBuffer
+        stagingBuffer
+        image
+        (fromIntegral width)
+        (fromIntegral height)
+        (fromIntegral layerIdx)
+        offset
 
-    Haskan.layerTransition
+    Haskan.layerTransitionAll
       commandBuffer
       image
       Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
       Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      (fromIntegral numLayers)
 
   liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
-  imageView <- Haskan.createImageView dev format image
+  imageView <- Haskan.createImageView2DArray dev format image (fromIntegral numLayers)
 
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 
@@ -442,6 +515,9 @@ createTextureFromData rm pdev dev width height imgData queue commandBuffer = do
           , trImage = image
           , trImageView = imageView
           , trMemory = imageMemory
+          , trWidth = width
+          , trHeight = height
+          , trPixelData = Nothing -- GPU-only array, no CPU pixel data stored
           , trDestroy = destroy
           }
 

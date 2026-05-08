@@ -6,11 +6,14 @@ module Graphics.Haskan.Render.Deferred
   ) where
 
 import Control.Monad (when)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Foldable (for_)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Foreign (castPtr)
 import Foreign.Marshal.Array qualified
+import Foreign.Storable (sizeOf)
 import Graphics.Haskan.Render.Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
@@ -67,6 +70,16 @@ buildDeferredGraph DeferredPassData {..} = do
                 idxCnt  = mrIndexCount mesh
                 dynamicOffset = fromIntegral (entityIdx * dpdEntityUniformSize)
                 entityDescriptorSet = dpdGBufferDescriptors !! entityIdx
+                matIdx = dcMaterialIndex dc
+            -- Push material index
+            liftIO $ Foreign.Marshal.Array.withArray [matIdx] $ \pushPtr ->
+              Vulkan.vkCmdPushConstants
+                commandBuffer
+                dpdGBufferLayout
+                Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+                0
+                (fromIntegral (sizeOf matIdx))
+                (castPtr pushPtr)
             Foreign.Marshal.Array.withArray [entityDescriptorSet] $ \dsPtr ->
               Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
                 DescriptorSet.cmdBindDescriptorSets
@@ -93,6 +106,16 @@ buildDeferredGraph DeferredPassData {..} = do
                   idxCnt  = mrIndexCount mesh
                   dynamicOffset = fromIntegral (entityIdx * dpdEntityUniformSize)
                   entityDescriptorSet = dpdGBufferDescriptors !! entityIdx
+                  matIdx = dcMaterialIndex dc
+              -- Push material index for wireframe pass too
+              liftIO $ Foreign.Marshal.Array.withArray [matIdx] $ \pushPtr ->
+                Vulkan.vkCmdPushConstants
+                  commandBuffer
+                  dpdWireframeLayout
+                  Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+                  0
+                  (fromIntegral (sizeOf matIdx))
+                  (castPtr pushPtr)
               Foreign.Marshal.Array.withArray [entityDescriptorSet] $ \dsPtr ->
                 Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
                   DescriptorSet.cmdBindDescriptorSets

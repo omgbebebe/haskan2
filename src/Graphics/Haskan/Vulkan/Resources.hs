@@ -41,7 +41,8 @@ import Data.Foldable (for_)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable)
-import Data.Word (Word64)
+import Data.Vector.Storable (Vector)
+import Data.Word (Word64, Word8)
 import GHC.Generics (Generic)
 import Graphics.Haskan.BoundingBox (BBox)
 import Graphics.Vulkan qualified as Vulkan
@@ -87,6 +88,9 @@ data TextureResource = TextureResource
   , trImage :: !Vulkan.VkImage
   , trImageView :: !Vulkan.VkImageView
   , trMemory :: !Vulkan.VkDeviceMemory
+  , trWidth :: !Int
+  , trHeight :: !Int
+  , trPixelData :: !(Maybe (Data.Vector.Storable.Vector Word8))
   , trDestroy :: !(IO ())
   }
 

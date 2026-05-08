@@ -8,6 +8,7 @@ module Graphics.Haskan.Logger
   , LoggerConfig (..)
   , defaultLoggerConfig
   , readLoggerConfig
+  , setLogFile
   , logDebug
   , logInfo
   , logWarn
@@ -19,6 +20,7 @@ module Graphics.Haskan.Logger
 
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (elemIndex)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
@@ -52,6 +54,17 @@ defaultLoggerConfig = LoggerConfig Info []
 {-# NOINLINE globalConfig #-}
 globalConfig :: LoggerConfig
 globalConfig = unsafePerformIO readLoggerConfig
+
+{-# NOINLINE globalLogger #-}
+globalLogger :: IORef FastLogger
+globalLogger = unsafePerformIO $ do
+  (logger, _) <- newFastLogger (LogStdout 4096)
+  newIORef logger
+
+setLogFile :: FilePath -> IO ()
+setLogFile path = do
+  (newLogger, _) <- newFastLogger (LogFileNoRotate path 4096)
+  writeIORef globalLogger newLogger
 
 readLoggerConfig :: IO LoggerConfig
 readLoggerConfig = do
@@ -100,8 +113,8 @@ logMsg level cat msg = liftIO $ do
   when (catMatch && levelMatch) $ do
     ts <- formatTimestamp <$> getTime Realtime
     let prefix = ts <> " [" <> showT level <> "] [" <> showT cat <> "] "
-    withFastLogger (LogStdout 4096) $ \l ->
-      log' l (toLogStr (prefix <> msg))
+    logger <- readIORef globalLogger
+    log' logger (toLogStr (prefix <> msg))
 
 log' :: FastLogger -> LogStr -> IO ()
 log' logger msg = logger (msg <> "\n")

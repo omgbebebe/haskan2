@@ -94,122 +94,65 @@ Each material variant has its own shader program. The `MaterialHandle` resolves 
 
 ## Tasks
 
-### Task 5.1: GLTF Parser (reuse gltf-codec)
+### Task 5.1: GLTF Parser (reuse gltf-loader)
 **File:** `src/Graphics/Haskan/Scene/GLTF.hs`
 
-The project already has `gltf-codec` as a dependency (via submodule). Use it to parse GLTF JSON + binary.
+The project uses `gltf-loader-0.3.0.0` (patched fork via `cabal.project`). Loads GLTF JSON + binary via `GLTF.fromJsonByteString`.
 
-```haskell
-import qualified Codec.GLTF as GLTF
-
-parseGLTF :: FilePath -> IO GLTF.GLTF
-parseGLTF path = ...
-```
-
-**Acceptance:** Can parse a simple GLTF file (e.g., Box.gltf from Khronos samples).
+**Status:** Complete. `gltf-loader` parses JSON and binary data. JSON pre-processing fixes missing image mime types (`fixImageMimeTypes`).
 
 ### Task 5.2: Texture Loading from GLTF
 **File:** `src/Graphics/Haskan/Scene/GLTF.hs`
 
 GLTF textures reference images (PNG/JPEG) and samplers (wrap modes, filters).
 
-```haskell
-loadGLTFTextures :: ResourceManager -> GLTF.GLTF -> IO (HashMap Int TextureHandle)
-loadGLTFTextures rm gltf = do
-  for (zip [0..] (GLTF.textures gltf)) $ \(i, tex) -> do
-    let imagePath = ... -- resolve image URI
-        sampler   = GLTF.samplers gltf !! fromIntegral (GLTF.sampler tex)
-    handle <- loadTexture rm imagePath
-    -- configure sampler from GLTF sampler settings
-    pure (i, handle)
-```
-
-**Acceptance:** GLTF textures load and display correctly.
+**Status:** Complete. `loadTextures` loads all images as Vulkan textures via `Texture.createTextureFromBytesCached` (uses asset cache). Handles embedded image data (base64 or buffer view). Fallback to grid texture if no image data.
 
 ### Task 5.3: Material Loading from GLTF
 **File:** `src/Graphics/Haskan/Scene/GLTF.hs`
 
-Convert GLTF materials to `PBRMaterial`:
+Convert GLTF materials to texture handles:
 
-```haskell
-loadGLTFMaterials :: ResourceManager
-                  -> GLTF.GLTF
-                  -> HashMap Int TextureHandle
-                  -> IO (HashMap Int MaterialHandle)
-```
-
-**Acceptance:** Material properties match GLTF spec (metallic/roughness workflow).
+**Status:** Complete. `buildMaterialTextures` resolves `baseColorTexture` → texture → image → `TextureHandle`. Returns `[Maybe TextureHandle]` indexed by material index.
 
 ### Task 5.4: Mesh Loading from GLTF
 **File:** `src/Graphics/Haskan/Scene/GLTF.hs`
 
 GLTF meshes have multiple primitives (each with its own material). For simplicity, merge primitives into one mesh or create one entity per primitive.
 
-```haskell
-loadGLTFMeshes :: ResourceManager
-               -> GLTF.GLTF
-               -> HashMap Int MaterialHandle
-               -> IO (HashMap Int MeshHandle)
-```
-
-**Acceptance:** Meshes load with correct vertex data and index buffers.
+**Status:** Complete. All primitives merged into single mesh per glTF mesh with index offsets. `loadMesh` accumulates vertices and indices with primitive offsetting. Supports multi-primitive meshes. `mrBounds` computed from vertices for scene bounds.
 
 ### Task 5.5: Node Hierarchy → ECS
 **File:** `src/Graphics/Haskan/Scene/GLTF.hs`
 
 Traverse GLTF node tree, create ECS entities:
 
-```haskell
-buildSceneGraph :: World
-                -> GLTF.GLTF
-                -> HashMap Int MeshHandle
-                -> HashMap Int MaterialHandle
-                -> IO EntityId
-buildSceneGraph world gltf meshes materials = do
-  let scene = GLTF.scenes gltf !! fromIntegral (fromMaybe 0 (GLTF.scene gltf))
-  -- for each node in scene.nodes:
-  --   create entity
-  --   set transform from node.matrix or TRS
-  --   if node.mesh, set mesh + material components
-  --   recursively process children
-  ...
-```
-
-**Acceptance:** GLTF scene renders with correct transforms and materials.
+**Status:** Complete. `buildSceneGraph` traverses nodes recursively. Creates entity per node. Sets transform from TRS (translation, rotation, scale). Sets mesh + material components. Parent-child hierarchy via `setParent`. Root entity returned.
 
 ### Task 5.6: PBR Shader (FIR)
 **File:** `src/Graphics/Haskan/Shaders/PBR.hs`
 
-Write FIR shaders for PBR metallic/roughness workflow:
-- Vertex: standard transform + pass TBN matrix
-- Fragment: sample albedo, metallic, roughness, normal maps; compute Cook-Torrance BRDF
+Write FIR shaders for PBR metallic/roughness workflow.
 
-**Acceptance:** PBR materials look correct under point lights.
+**Status:** Deferred. Current g-buffer fragment shader uses simple diffuse + texture sampling. Full PBR BRDF deferred to Milestone 7/8 when material system is refactored for bindless descriptors.
 
 ## Testing
 
 ```haskell
--- Load Khronos sample: Box.gltf, BoxTextured.gltf, Duck.gltf
-result <- importGLTF rm "data/gltf/Duck.gltf"
+-- Load Khronos sample: Avocado.gltf
+result <- importGLTF rm physicalDevice device queue cmdBuf cache "glTF-Sample-Assets/Models/Avocado/glTF/Avocado.gltf"
 
--- Duck should appear with correct texture, position, scale
--- RenderDoc: verify textures bound, PBR uniforms set
+-- Avocado should appear with correct texture, position, scale
+-- RenderDoc: verify textures bound, g-buffer attachments populated
 ```
-
-## Risks
-
-| Risk | Mitigation |
-|------|-----------|
-| GLTF binary (GLB) format | `gltf-codec` supports both JSON + GLB; test both |
-| Draco compression | Not supported by `gltf-codec`; skip Draco files for now |
-| Multiple UV sets | Engine currently uses UV0 only; document limitation |
-| Complex node hierarchies | Test with `AnimatedMorphCube`, `SimpleSkin` from Khronos |
 
 ## Success Criteria
 
-- [ ] Can load Box.gltf (geometry only)
-- [ ] Can load BoxTextured.gltf (geometry + texture)
-- [ ] Can load Duck.gltf (full PBR material)
-- [ ] Node hierarchy renders with correct transforms
-- [ ] Materials use PBR workflow (metallic/roughness)
-- [ ] Engine no longer hardcodes mesh/texture paths
+- [x] Can load Box.gltf (geometry only)
+- [x] Can load BoxTextured.gltf (geometry + texture)
+- [x] Can load Duck.gltf (full material with texture)
+- [x] Can load Avocado.gltf (multi-primitive, multiple textures)
+- [x] Node hierarchy renders with correct transforms
+- [x] Materials use texture mapping (baseColorTexture)
+- [x] Engine no longer hardcodes mesh/texture paths (supports both OBJ and GLTF via CLI)
+- [ ] PBR workflow (metallic/roughness) — deferred

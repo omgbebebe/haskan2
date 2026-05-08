@@ -23,6 +23,10 @@ extra-source-files: CHANGELOG.md
 
 library
     exposed-modules:  Graphics.Haskan
+                       Graphics.Haskan.Assets
+                       Graphics.Haskan.Assets.Cache
+                       Graphics.Haskan.Assets.InternalFormat
+                       Graphics.Haskan.Assets.TexturePreprocessor
                        Graphics.Haskan.BoundingBox
                        Graphics.Haskan.Logger
                        Graphics.Haskan.Camera

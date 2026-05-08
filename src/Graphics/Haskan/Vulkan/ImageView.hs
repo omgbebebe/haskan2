@@ -56,3 +56,52 @@ createImageView dev format img = do
           )
    in
       liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateImageView dev ptr Vulkan.VK_NULL)
+
+managedImageView2DArray ::
+  MonadManaged m =>
+  Vulkan.VkDevice ->
+  Vulkan.VkFormat ->
+  Vulkan.VkImage ->
+  Vulkan.Word32 -> -- ^ layer count
+  m Vulkan.VkImageView
+managedImageView2DArray dev format img layerCount =
+  alloc
+    "ImageView2DArray"
+    (createImageView2DArray dev format img layerCount)
+    (\ptr -> Vulkan.vkDestroyImageView dev ptr Vulkan.vkNullPtr)
+
+createImageView2DArray ::
+  MonadIO m =>
+  Vulkan.VkDevice ->
+  Vulkan.VkFormat ->
+  Vulkan.VkImage ->
+  Vulkan.Word32 -> -- ^ layer count
+  m Vulkan.VkImageView
+createImageView2DArray dev format img layerCount = do
+  let createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"image" img
+              &* set @"viewType" Vulkan.VK_IMAGE_VIEW_TYPE_2D_ARRAY
+              &* set @"format" format
+              &* set @"components" cmapping
+              &* set @"subresourceRange" subresourceRange
+          )
+      cmapping =
+        Vulkan.createVk
+          ( set @"r" Vulkan.VK_COMPONENT_SWIZZLE_IDENTITY
+              &* set @"g" Vulkan.VK_COMPONENT_SWIZZLE_IDENTITY
+              &* set @"b" Vulkan.VK_COMPONENT_SWIZZLE_IDENTITY
+              &* set @"a" Vulkan.VK_COMPONENT_SWIZZLE_IDENTITY
+          )
+      subresourceRange =
+        Vulkan.createVk
+          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+              &* set @"baseMipLevel" 0
+              &* set @"levelCount" 1
+              &* set @"baseArrayLayer" 0
+              &* set @"layerCount" layerCount
+          )
+   in
+      liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateImageView dev ptr Vulkan.VK_NULL)

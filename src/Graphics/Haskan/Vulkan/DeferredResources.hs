@@ -56,6 +56,7 @@ createDeferredResources ::
   Vulkan.VkDevice ->
   RenderContext ->
   Vulkan.VkDescriptorSetLayout ->
+  [Vulkan.VkPushConstantRange] ->
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
@@ -64,7 +65,7 @@ createDeferredResources ::
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader = do
   let extent = rcSurfaceExtent ctx
       gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
       depthFormat = Vulkan.VK_FORMAT_D16_UNORM
@@ -117,8 +118,8 @@ createDeferredResources pdev device ctx descriptorSetLayout gbufVertShader gbufF
     Framebuffer.managedGBufferFramebuffer device gBufferRenderPass extent views depthView
   logDebug LogRender $ "g-buffer framebuffers created: " <> showT (length gBufferFramebuffers)
 
-  -- G-buffer pipeline layout (reuse existing descriptor set layout)
-  gBufferPipelineLayout <- PipelineLayout.managedPipelineLayout device [descriptorSetLayout]
+  -- G-buffer pipeline layout (reuse existing descriptor set layout, with push constants)
+  gBufferPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [descriptorSetLayout] pushConstantRanges
   logDebug LogRender "g-buffer pipeline layout created"
 
   -- G-buffer pipeline

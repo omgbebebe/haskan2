@@ -113,53 +113,51 @@ buildDeferredGraph devCtx swapCtx renderables lights = do
 ## Tasks
 
 ### Task 4.1: G-Buffer Shader (FIR)
-**File:** `src/Graphics/Haskan/Shaders/Deferred/GBuffer.hs`
+**File:** `src/Graphics/Haskan/Vulkan/Shaders/Deferred/GBuffer.hs`
 
 Write FIR vertex + fragment shaders that output to MRT:
 - Position: `layout(location = 0) out vec4 outPosition`
 - Normal:   `layout(location = 1) out vec4 outNormal`
 - Albedo:   `layout(location = 2) out vec4 outAlbedo`
 
-**Acceptance:** Compiles to SPIR-V, validation layers happy.
+**Status:** Complete. G-buffer vertex shader transforms vertices and outputs world position, normal, UV. Fragment shader writes to 3 MRT attachments using `FIR` EDSL. Uses `Texture2DArray` with push constant material index for textured albedo.
 
 ### Task 4.2: G-Buffer Pass Implementation
-**File:** `src/Graphics/Haskan/Render/Deferred/GBuffer.hs`
+**File:** `src/Graphics/Haskan/Vulkan/DeferredResources.hs`
 
 Create render pass with 3 color attachments + 1 depth attachment.
 Create framebuffer referencing g-buffer images.
 Record draw calls for all renderables.
 
-**Acceptance:** Renders scene to off-screen targets. Can inspect with RenderDoc.
+**Status:** Complete. `DeferredResources` struct holds g-buffer pipeline, framebuffers, images, lighting pass resources. Per-swapchain-image g-buffer resources (one set per swapchain image).
 
 ### Task 4.3: Lighting Shader (FIR)
-**File:** `src/Graphics/Haskan/Shaders/Deferred/Lighting.hs`
+**File:** `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Lighting.hs`
 
-Full-screen triangle vertex shader (generates UVs from gl_VertexIndex).
-Fragment shader reads g-buffer samplers, computes Blinn-Phong or PBR lighting.
+Full-screen triangle vertex shader (generates UVs from `gl_VertexIndex`).
+Fragment shader reads g-buffer samplers, computes diffuse lighting.
 
-Support 1 point light for now.
-
-**Acceptance:** Produces lit image from g-buffer.
+**Status:** Complete. Fullscreen triangle with corrected UVs (flip Y). Samples position, normal, albedo from g-buffer attachments. Single directional light.
 
 ### Task 4.4: Lighting Pass Implementation
-**File:** `src/Graphics/Haskan/Render/Deferred/Lighting.hs`
+**File:** `src/Graphics/Haskan/Vulkan/DeferredResources.hs`
 
-Create render pass reading g-buffer images as input attachments or sampled images.
+Create render pass reading g-buffer images as input sampled images.
 Record full-screen draw.
 
-**Acceptance:** Final image shows lit scene.
+**Status:** Complete. Lighting render pass with 3 input attachments. Fullscreen pipeline with `TRIANGLE_LIST` topology. Descriptor sets updated per-frame with g-buffer image views.
 
 ### Task 4.5: Integrate into Graph
 **File:** `src/Graphics/Haskan/Render/Deferred.hs`
 
 Combine g-buffer + lighting into `buildDeferredGraph`.
 
-**Acceptance:** Switching from forward to deferred is one function call change in `Engine.hs`.
+**Status:** Complete. `buildDeferredGraph` takes `DeferredPassData` and produces g-buffer pass + lighting pass via render graph builder. `Engine.hs` builds deferred graph per frame, compiles, executes.
 
 ### Task 4.6: Multiple Lights
 Extend lighting shader to loop over N lights (uniform array or SSBO).
 
-**Acceptance:** 2+ point lights visible, movable at runtime.
+**Status:** Deferred. Current lighting pass uses single hardcoded directional light. Multiple lights require SSBO or uniform array — deferred to Milestone 7/8.
 
 ## Testing
 
@@ -182,8 +180,22 @@ compiled  <- compileGraph devCtx renderGraph
 
 ## Success Criteria
 
-- [ ] G-buffer renders position, normal, albedo correctly
-- [ ] Lighting pass produces correct illumination
-- [ ] 2+ lights work
-- [ ] Performance better than forward for 10+ lights
-- [ ] Can switch between forward and deferred at runtime (or compile time)
+- [x] G-buffer renders position, normal, albedo correctly
+- [x] Lighting pass produces correct illumination
+- [ ] 2+ lights work — deferred to M7/M8
+- [ ] Performance better than forward for 10+ lights — needs benchmarking
+- [x] Can switch between forward and deferred at runtime (compile time switch via `buildForwardGraph`/`buildDeferredGraph`)
+
+## Implementation Notes
+
+**Completed 2026-05-07.** See commits:
+- `d735a46` — milestone-4: deferred rendering with g-buffer + lighting pass
+- `92f9e9e` — Milestone 6: Wireframe geometry shader demo
+- `f3dccf4` — Milestone 6: wireframe geometry shader with runtime toggle, gltf index fix, device feature enablement
+
+### Architecture Decisions
+- **Per-swapchain-image g-buffer resources:** One set of 3 g-buffer images + framebuffer per swapchain image. Simplifies synchronization — no need to transition layouts between frames.
+- **G-buffer color format:** `VK_FORMAT_R8G8B8A8_UNORM` for position/normal/albedo attachments. Position could use higher precision (R16G16B16A16_SFLOAT) for large scenes.
+- **Semaphores indexed by swapchain image:** `renderFinishedSemaphores !! imageIndex` (swapchain image), `renderFinishedFences !! frameNumber` (frame-in-flight slot).
+- **Initial layout:** `SHADER_READ_ONLY_OPTIMAL` for g-buffer images matches post-render state; one-time barrier after creation.
+- **Fullscreen triangle:** Lighting pass uses 3-vertex triangle covering clip space instead of quad. More efficient (no shared edge vertices).

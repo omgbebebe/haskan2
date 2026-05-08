@@ -105,3 +105,55 @@ python3 scripts/debug_client.py key escape true   # inject key press
 
 ## Debugging Tips
 - **Get library sources for reference:** `cabal get <package_name>` (e.g. `cabal get linear`) downloads source to `./linear-1.23.3/` — useful for checking type signatures and implementation details without leaving the project directory.
+
+## Asset Preprocessor Subsystem
+
+### New Modules
+- `Graphics.Haskan.Assets.Cache` — file-based cache keyed by djb2 hash of `(sourceBytes <> configFingerprint)`. Stores under `.haskan2-cache/textures/` and `meshes/`
+- `Graphics.Haskan.Assets.InternalFormat` — `InternalTexture`, `InternalMesh`, `TextureMetadata`, `TextureFormat` (RGBA8 variants), versioned cache header
+- `Graphics.Haskan.Assets.TexturePreprocessor` — `TextureConfig` (resize to PoT, target format, mips placeholder), bilinear resize, serialize/deserialize, cache-aware `loadTextureCached`
+
+### Design Decisions
+- Cache key = hash of raw source + config fingerprint (format, dimensions, mips flag)
+- Internal texture format: 24-byte header + raw RGBA8 bytes
+- `nextPowerOfTwo` with bilinear `resizeImage` for array compatibility
+- `StrictData` on all records
+
+### Pending Integration
+- Wire `loadTextureCached` into `Texture.createTextureResource` to bypass JuicyPixels on cached loads
+- Add mesh preprocessing skeleton (vertex format normalization, index optimization)
+- Add cache eviction / size limit policy
+- Parallel batch preprocessing for model loading
+
+## Bindless Rendering: Current vs Future
+
+### What We Have Now (Texture2DArray)
+- FIR patch adds `Texture2DArray` type synonym (arrayed 2D sampled image)
+- Coordinates are `vec3(u, v, layer)` — layer selects array slice
+- All layers must have **identical dimensions** — this is a Vulkan/Texture2DArray constraint
+- Material index passed via push constant in fragment shader
+- Descriptor set layout uses `UPDATE_AFTER_BIND` + `PARTIALLY_BOUND` flags
+
+### What True Bindless Requires (Future Work)
+Reference: `.opencode/fir_bindless.research.md`
+
+True bindless descriptor indexing is **fundamentally different** from Texture2DArray:
+
+| Aspect | Texture2DArray (Current) | True Bindless (Future) |
+|--------|--------------------------|------------------------|
+| Array type | Single image, N layers | N separate descriptors in runtime array |
+| Dimensions | All layers identical | Each descriptor can have different size |
+| SPIR-V type | `OpTypeImage Dim=2D Arrayed=1` | `OpTypeRuntimeArray` of image descriptors |
+| Coordinate | `vec3(u,v,layer)` | Dynamic index + standard `vec2` sampling |
+| Non-uniform | Not needed (single image) | Requires `NonUniform` decoration propagation |
+| Capability | `Shader` + `SampledImageArray` | `RuntimeDescriptorArray` + `SampledImageArrayNonUniformIndexing` |
+
+### FIR Changes Needed for True Bindless
+- AST extensions for `RuntimeArray` / `Bindless` type constructors
+- `nonUniform` combinator to annotate divergent indices
+- `NonUniform` decoration propagation through access chain to final resource operand (VUID-RuntimeSpirv-None-10148)
+- `OpTypeRuntimeArray` emission in SPIR-V backend
+- Capability tracking for `RuntimeDescriptorArray` and per-type non-uniform indexing capabilities
+
+### Recommendation
+Continue with `Texture2DArray` + preprocessor for now. True bindless requires significant FIR type-system work and possibly upstream coordination. The research document provides a complete roadmap when we revisit this.

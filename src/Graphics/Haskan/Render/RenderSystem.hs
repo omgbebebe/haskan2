@@ -5,6 +5,7 @@ module Graphics.Haskan.Render.RenderSystem
 
 import Control.Concurrent.STM qualified as STM
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Word (Word32)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
 import Data.Maybe (catMaybes)
@@ -16,7 +17,7 @@ import Graphics.Haskan.Scene.Transform (Transform, toMatrix)
 import Graphics.Haskan.Vulkan.Resources
   ( ResourceManager
   , MeshHandle
-  , TextureHandle
+  , TextureHandle(..)
   , lookupMesh
   , lookupTexture
   , MeshResource
@@ -28,14 +29,16 @@ data DrawCall = DrawCall
   , dcTransform :: !Transform
   , dcWorldMatrix :: !(M44 Float)
   , dcMaterial :: !(Maybe TextureResource)
+  , dcMaterialIndex :: !Word32
   }
 
 extractDrawList ::
   MonadIO m =>
   World ->
   ResourceManager ->
+  IntMap Word32 -> -- ^ texture handle -> material index mapping
   m [DrawCall]
-extractDrawList world rm = liftIO $ do
+extractDrawList world rm texIndexMap = liftIO $ do
   meshes <- STM.readTVarIO (wMeshes world)
   transforms <- STM.readTVarIO (wTransforms world)
   parents <- STM.readTVarIO (wParents world)
@@ -43,7 +46,7 @@ extractDrawList world rm = liftIO $ do
 
   let worldMatrices = computeWorldMatrices transforms parents
 
-  fmap catMaybes $ mapM (resolveEntity rm transforms materials worldMatrices) (IntMap.toList meshes)
+  fmap catMaybes $ mapM (resolveEntity rm transforms materials worldMatrices texIndexMap) (IntMap.toList meshes)
 
 computeWorldMatrices ::
   IntMap Transform ->
@@ -65,9 +68,10 @@ resolveEntity ::
   IntMap Transform ->
   IntMap TextureHandle ->
   IntMap (M44 Float) ->
+  IntMap Word32 ->
   (Int, MeshHandle) ->
   IO (Maybe DrawCall)
-resolveEntity rm transforms materials worldMatrices (eidKey, meshHandle) = do
+resolveEntity rm transforms materials worldMatrices texIndexMap (eidKey, meshHandle) = do
   mMeshRes <- lookupMesh rm meshHandle
   let mTransform = IntMap.lookup eidKey transforms
       mMaterialHandle = IntMap.lookup eidKey materials
@@ -77,11 +81,16 @@ resolveEntity rm transforms materials worldMatrices (eidKey, meshHandle) = do
     Just h -> lookupTexture rm h
     Nothing -> pure Nothing
 
+  let matIdx = case mMaterialHandle of
+        Just h -> IntMap.findWithDefault 0 (fromIntegral $ unTextureHandle h) texIndexMap
+        Nothing -> 0
+
   case (mMeshRes, mTransform, mWorldMatrix) of
     (Just mesh, Just trans, Just wm) -> pure $ Just DrawCall
       { dcMesh = mesh
       , dcTransform = trans
       , dcWorldMatrix = wm
       , dcMaterial = mMatRes
+      , dcMaterialIndex = matIdx
       }
     _ -> pure Nothing

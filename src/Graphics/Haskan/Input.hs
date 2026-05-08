@@ -94,7 +94,9 @@ mouseWheelToAction (SDL.MouseWheelEventData _window _mouseDevice scroll _directi
 mouseMotionToAction :: SDL.MouseMotionEventData -> Maybe ActionEvent
 mouseMotionToAction (SDL.MouseMotionEventData _window _mouseDevice _mouseButtons _absolutePosition relativePosition) =
   let (SDL.V2 relX relY) = relativePosition
-   in Just ((MouseMove (V2 (fromIntegral (relX * 10)) (fromIntegral (relY * 10)))), True)
+      x = fromIntegral (relX * 10)
+      y = fromIntegral (relY * 10)
+   in Just ((MouseMove (V2 x y)), True)
 
 keyToAction :: SDL.KeyboardEventData -> Maybe ActionEvent
 keyToAction (SDL.KeyboardEventData _window motion isRepeated keysym)

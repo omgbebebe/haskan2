@@ -20,15 +20,38 @@ Without structured frame capture, you are debugging via `printf` of raw `M44` ma
 
 A minimal implementation exists in `Graphics.Haskan.Debug.FrameInspector`:
 
-- **Trigger:** F12 key press sets a `TVar Bool`, sampled after `vkQueuePresentKHR`
-- **Capture:** CPU-side data only — camera, transform, draw call count, frame time
+- **Trigger:** F12 key press sets a `TVar Bool`, sampled in `renderFrameLoop`
+- **Capture:** CPU-side data — camera position/target, entity NDC vertices, projection/view matrices, frame number
 - **Output:** Single markdown file per snapshot to `snapshots/frame-<N>.md`
+- **ECS integration:** `extractDrawList` provides renderables; `EntityDebugInfo` includes world matrix, position, NDC vertices
+- **Render graph awareness:** Deferred pipeline (g-buffer + lighting) captured; pass names in snapshot
 - **Limitations:**
   - No GPU data (timestamps, pipeline statistics, occlusion queries)
-  - No ECS integration — renderables are hardcoded in `renderFrameLoop`
-  - No render graph awareness — single "forward" pass hardcoded
   - No historical comparison or diff
   - Synchronous file I/O blocks the render thread
+  - No automated triggers (validation error, frame time threshold)
+
+## Integration Points (Current)
+
+### ECS (Milestone 2)
+
+`renderFrameLoop` captures entity data from `drawList`:
+```haskell
+entityDebugInfos = zipWith (\idx dc ->
+  let modelMat = transpose $ dcWorldMatrix dc
+      mvp = projMat !*! viewMat !*! modelMat
+      ndcVerts = map (toNDC mvp) sampleLocalVerts
+  in EntityDebugInfo { ediEntityId = idx, ... }
+  ) [0..] drawList
+```
+
+### Render Graph (Milestone 3/4)
+
+Graph compilation produces `CompiledGraph` with pass list. Capture records pass names (`"gbuffer"`, `"lighting"`).
+
+### Resource Manager (Milestone 1)
+
+Camera snapshot includes position, target, distance, azimuth, elevation. Render debug info includes frame number, entity count, projection matrix.
 
 ## Desired Final State
 

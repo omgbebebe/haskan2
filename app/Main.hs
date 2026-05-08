@@ -1,6 +1,7 @@
 module Main where
 
 import Graphics.Haskan qualified as Haskan
+import Graphics.Haskan.Logger (setLogFile)
 import Options.Applicative
 import System.Exit (die)
 import Data.Text (Text)
@@ -11,6 +12,7 @@ data CliOpts = CliOpts
   , optTimeout :: !(Maybe Integer)
   , optTitle :: !Text
   , optDebugSocket :: !(Maybe FilePath)
+  , optLogFile :: !(Maybe FilePath)
   }
 
 cliParser :: Parser CliOpts
@@ -39,6 +41,11 @@ cliParser =
      <> metavar "PATH"
      <> help "Unix socket path for debug server"
       ))
+    <*> optional (strOption
+      ( long "log-file"
+     <> metavar "PATH"
+     <> help "Write logs to file instead of stdout"
+      ))
 
 opts :: ParserInfo CliOpts
 opts = info (cliParser <**> helper)
@@ -50,6 +57,9 @@ opts = info (cliParser <**> helper)
 main :: IO ()
 main = do
   cli <- execParser opts
+  case optLogFile cli of
+    Just path -> setLogFile path
+    Nothing   -> pure ()
   putStrLn ("Loading model: " ++ optModelName cli)
   Haskan.runHaskan
     (optTitle cli)

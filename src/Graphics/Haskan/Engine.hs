@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Engine where
@@ -12,7 +13,7 @@ import Control.Concurrent.STM.TChan qualified as TChan
 import Control.Concurrent.STM.TQueue (TQueue)
 import Control.Concurrent.STM.TQueue qualified as TQueue
 import Control.Concurrent.STM.TVar (TVar)
-import Control.Monad (replicateM, unless, when)
+import Control.Monad (forM, replicateM, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged, runManaged, with)
 import Data.Aeson (ToJSON (..), object, (.=))
@@ -20,9 +21,13 @@ import Data.Foldable (for_)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable (..))
+import Data.IntMap.Strict (IntMap)
+import Data.IntMap.Strict qualified as IntMap
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Vector.Storable qualified as Vector
+import Data.Word (Word32)
 import FIR qualified
 import Foreign.C qualified
 import Foreign.Marshal.Array qualified
@@ -45,6 +50,7 @@ import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
+import Graphics.Haskan.Assets.Cache (initCache)
 import Graphics.Haskan.BoundingBox (BBox (..), bboxDiagonal, emptyBBox, fromPoints, mergeBBox, mergePoint)
 import Graphics.Haskan.Resources (throwVkResult)
 import Graphics.Haskan.Utils.ObjLoader qualified as ObjLoader
@@ -79,6 +85,7 @@ import Graphics.Haskan.Window qualified as Window
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
+import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Linear (M44, V2 (..), V3 (..), V4 (..))
 import Linear.Matrix (identity, transpose, (!*), (!*!))
 import Linear.Projection qualified
@@ -290,9 +297,10 @@ renderFrameLoop ::
   Int ->
   Vulkan.VkSampler ->
   [[Vulkan.VkDescriptorSet]] ->
+  IntMap Word32 ->
   STM.TVar Bool ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets tvWireframe = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets textureIndexMap tvWireframe = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -300,7 +308,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
       let imageAvailableSemaphore = imageAvailableSemaphores !! (frameNumber)
           mvpMemory = frameMvpMemories !! frameNumber
       camera <- liftIO $ STM.readTVarIO tvCamera
-      drawList <- extractDrawList ecsWorld rm
+      drawList <- extractDrawList ecsWorld rm textureIndexMap
       -- Compute debug NDC positions (using transposed matrices to match GPU)
       liftIO $ do
         let camPos = realToFrac <$> Camera.cameraPosition camera
@@ -466,6 +474,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         entityUniformSize
         textureSampler
         entityDescriptorSets
+        textureIndexMap
         tvWireframe
 
 -- | Main rendering loop.
@@ -531,13 +540,16 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
   logDebug LogTexture "textureCommandBuffer created"
 
+  -- Initialize asset cache for texture preprocessing
+  assetCache <- initCache ".haskan2-cache"
+
   let isGLTF = ".gltf" `Text.isSuffixOf` Text.pack meshName || ".glb" `Text.isSuffixOf` Text.pack meshName
 
   -- Create ECS World and load scene
   (ecsWorld, numEntities, sceneBounds) <- if isGLTF
     then do
       -- Load glTF scene
-      result <- importGLTF rm physicalDevice device graphicsQueueHandler textureCommandBuffer meshName
+      result <- importGLTF rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName
       let world = girWorld result
           meshes = girMeshes result
           textures = girTextures result
@@ -613,37 +625,88 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
     Buffer.managedUniformBuffer physicalDevice device initialMvpData
   logDebug LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
 
-  -- Create texture resource via ResourceManager (only for OBJ path)
-  textureImageView <- if isGLTF
-    then do
-      -- For glTF, textures are loaded with the scene
-      -- Use a placeholder white texture for now
-      logDebug LogTexture "skipping texture load for glTF (textures embedded in scene)"
-      -- Create a minimal white texture
-      let whiteTexData = Texture.generateGridTexture 2 2 1
-      whiteTextureHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
-      mView <- Texture.textureImageView rm whiteTextureHandle
-      case mView of
-        Just view -> pure view
-        Nothing -> fail "failed to create white texture"
-    else do
-      logDebug LogTexture "about to create texture resource"
-      textureHandle <- Texture.createTextureResource rm physicalDevice device "data/texture/page-14-droid-hubs.png" graphicsQueueHandler textureCommandBuffer
-      logInfo LogTexture "texture resource created successfully"
-      mView <- Texture.textureImageView rm textureHandle
-      case mView of
-        Just view -> do
-          logInfo LogTexture "texture image view resolved"
-          pure view
-        Nothing -> fail "failed to resolve texture image view"
-
   logInfo LogTexture "creating sampler"
   textureSampler <- Texture.managedSampler device
   logInfo LogTexture "sampler created"
 
-  -- Extract initial draw list to get entity materials for descriptor set setup
-  initialDrawList <- extractDrawList ecsWorld rm
+  -- Collect all unique textures used by entities and build texture array
+  initialDrawList <- extractDrawList ecsWorld rm IntMap.empty
   logInfo LogRender $ "initial draw list has " <> showT (length initialDrawList) <> " entities"
+
+  -- Helper: bilinear resize of RGBA8 image data
+  let resizeImageBilinear src sw sh dw dh =
+        let srcIdx x y = (y * sw + x) * 4
+            sample x y =
+              let x0 = clamp 0 (sw - 1) (floor x)
+                  y0 = clamp 0 (sh - 1) (floor y)
+                  x1 = clamp 0 (sw - 1) (x0 + 1)
+                  y1 = clamp 0 (sh - 1) (y0 + 1)
+                  fx = x - fromIntegral x0
+                  fy = y - fromIntegral y0
+                  ixf = 1 - fx
+                  iyf = 1 - fy
+                  lerpPixel a b t = round (fromIntegral a * (1 - t) + fromIntegral b * t)
+                  blendChannel i =
+                    let c00 = src Vector.! (srcIdx x0 y0 + i)
+                        c10 = src Vector.! (srcIdx x1 y0 + i)
+                        c01 = src Vector.! (srcIdx x0 y1 + i)
+                        c11 = src Vector.! (srcIdx x1 y1 + i)
+                        c0 = lerpPixel c00 c10 fx
+                        c1 = lerpPixel c01 c11 fx
+                    in lerpPixel c0 c1 fy
+             in [blendChannel 0, blendChannel 1, blendChannel 2, blendChannel 3]
+            dstPixel dx dy =
+              let sx = fromIntegral dx * fromIntegral sw / fromIntegral dw
+                  sy = fromIntegral dy * fromIntegral sh / fromIntegral dh
+              in sample sx sy
+            clamp lo hi v = max lo (min hi v)
+        in Vector.fromList [dstPixel dx dy !! c | dy <- [0..dh-1], dx <- [0..dw-1], c <- [0..3]]
+
+  -- Build set of unique texture handles from draw list
+  let uniqueTextures = foldr collectUniqueTextures [] initialDrawList
+      collectUniqueTextures dc acc = case dcMaterial dc of
+        Just tr -> let h = trHandle tr in if h `elem` acc then acc else h : acc
+        Nothing -> acc
+      numUniqueTextures = length uniqueTextures
+
+  logInfo LogTexture $ "unique textures: " <> showT numUniqueTextures
+
+  -- Build texture handle -> layer index map
+  let textureIndexMap = IntMap.fromList $ zip (map (fromIntegral . unTextureHandle) uniqueTextures) [0..]
+      unTextureHandle (TextureHandle h) = h
+
+  -- Create texture2DArray from unique textures (all resized to 256x256)
+  textureArrayView <- if numUniqueTextures == 0
+    then do
+      -- No textures, create a 1-layer white texture array
+      let whiteTexData = Texture.generateGridTexture 2 2 1
+      whiteHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
+      mView <- Texture.textureImageView rm whiteHandle
+      case mView of
+        Just view -> pure view
+        Nothing -> fail "failed to create white texture"
+    else do
+      -- Collect pixel data from all unique textures, resize to 256x256
+      arrayLayers <- forM uniqueTextures $ \texHandle -> do
+        mTexRes <- lookupTexture rm texHandle
+        case mTexRes of
+          Nothing -> pure $ Texture.generateCheckerboardTexture 256 256 32
+          Just texRes -> case trPixelData texRes of
+            Nothing -> pure $ Texture.generateCheckerboardTexture 256 256 32
+            Just pixelData -> do
+              let tw = trWidth texRes
+                  th = trHeight texRes
+              -- Resize to 256x256 if needed
+              if tw == 256 && th == 256
+                then pure pixelData
+                else pure $ resizeImageBilinear pixelData tw th 256 256
+      texArrayHandle <- Texture.createTexture2DArray rm physicalDevice device 256 256 arrayLayers graphicsQueueHandler textureCommandBuffer
+      mView <- Texture.textureImageView rm texArrayHandle
+      case mView of
+        Just view -> pure view
+        Nothing -> fail "failed to create texture array"
+
+  logInfo LogTexture "texture array created"
 
   -- Create descriptor pool sized for per-entity descriptor sets
   let totalDescriptorSets = numEntities * Render.maxFramesInFlight
@@ -663,12 +726,9 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         | e <- [0 .. numEntities - 1]
         ]
 
-  -- Update each descriptor set with frame buffer and entity texture
+  -- Update each descriptor set with frame buffer and shared texture array
   logInfo LogVulkan "updating per-entity descriptor sets"
-  for_ (zip [0..] initialDrawList) $ \(entityIdx, dc) -> do
-    let entityTexView = case dcMaterial dc of
-          Just mat -> trImageView mat
-          Nothing  -> textureImageView
+  for_ (zip [0..] initialDrawList) $ \(entityIdx, _dc) -> do
     for_ (zip [0..] frameMvpBuffers) $ \(frameIdx, (buf, _)) -> do
       let ds = entityDescriptorSets !! entityIdx !! frameIdx
       DescriptorSet.updateDescriptorSetsRange
@@ -676,9 +736,17 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         ds
         buf
         (fromIntegral entityUniformSize)
-        entityTexView
+        textureArrayView
         textureSampler
   logInfo LogVulkan "per-entity descriptor sets updated"
+
+  -- Create push constant range for material index (fragment shader, 4 bytes)
+  let pushConstantRange =
+        Vulkan.createVk
+          ( Vulkan.set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+              Vulkan.&* Vulkan.set @"offset" 0
+              Vulkan.&* Vulkan.set @"size" 4
+          )
 
   logInfo LogRender "all resources created, entering render loop"
 
@@ -710,8 +778,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           then pure ()
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-              with (createDeferredResources physicalDevice device context descriptorSetLayout gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets tvWireframe
+              with (createDeferredResources physicalDevice device context descriptorSetLayout [pushConstantRange] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets textureIndexMap tvWireframe
             outerLoop renderFrameLoopFinished
 
 

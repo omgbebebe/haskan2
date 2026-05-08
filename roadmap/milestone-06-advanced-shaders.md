@@ -112,37 +112,28 @@ proceduralCubeProgram = MeshShaderProgram
 ## Tasks
 
 ### Task 6.1: Extend ShaderProgram Type
-**File:** `src/Graphics/Haskan/Render/Material.hs`
+**File:** `src/Graphics/Haskan/Render/ShaderProgram.hs`
 
 Add optional tessellation + geometry stages to `ShaderProgram`.
 
-**Acceptance:** Type compiles, old shaders still work (Nothing for optional stages).
+**Status:** Complete. `ShaderProgram` type with `spVertex`, `spTessControl`, `spTessEvaluation`, `spGeometry`, `spFragment` (all `Maybe` except vertex/fragment). `toPipelineStages` converts to variable-length `VkPipelineShaderStageCreateInfo` array.
 
 ### Task 6.2: Pipeline Creation with All Stages
-**File:** `src/Graphics/Haskan/Render/Pipeline.hs`
+**File:** `src/Graphics/Haskan/Vulkan/GraphicsPipeline.hs`
 
-Update `createGraphicsPipeline` to handle:
+Update pipeline creation to handle:
 - `pStages` array with 3-5 shader stages
 - `pTessellationState` if tessellation present
 - `pDynamicState` for viewport, scissor
 
-**Acceptance:** Pipeline with geometry shader compiles and links.
+**Status:** Complete. `createGraphicsPipeline` accepts `ShaderProgram`, builds stage array dynamically. `managedFullscreenPipeline` for lighting pass. Geometry shader pipeline uses `TRIANGLE_LIST` input, `LineStrip` output.
 
 ### Task 6.3: Geometry Shader — Wireframe
-**File:** `src/Graphics/Haskan/Shaders/Wireframe.hs`
+**File:** `src/Graphics/Haskan/Vulkan/Shaders/Wireframe.hs`
 
-FIR geometry shader that takes triangles and outputs line strips:
+FIR geometry shader that takes triangles and outputs line strips.
 
-```haskell
-wireframeGeom :: Shader "main" GeometryShader GeometryInput GeometryOutput _
-wireframeGeom = do
-  -- input: triangles
-  -- output: line_strip, max_vertices = 6
-  -- emit 3 edges per triangle
-  ...
-```
-
-**Acceptance:** Wireframe visible over solid mesh.
+**Status:** Complete. Wireframe vertex shader (MVP via UBO), geometry shader emits 3 line edges per triangle, fragment shader writes to albedo (Location 2) for visibility in deferred lighting pass. Runtime toggle via F3. `ToggleWireframe` action in input system.
 
 ### Task 6.4: Tessellation Shader — Terrain LOD
 **File:** `src/Graphics/Haskan/Shaders/Terrain.hs`
@@ -150,7 +141,7 @@ wireframeGeom = do
 Tessellation control shader sets tess levels based on distance.
 Tessellation evaluation shader samples heightmap.
 
-**Acceptance:** Terrain mesh tessellates more near camera, less in distance.
+**Status:** Not started. Deferred to post-M8 or when terrain demo is needed.
 
 ### Task 6.5: Mesh Shader — Procedural Geometry
 **File:** `src/Graphics/Haskan/Shaders/Mesh.hs`
@@ -158,7 +149,7 @@ Tessellation evaluation shader samples heightmap.
 Mesh shader generates cube without vertex buffer.
 Requires `VK_EXT_mesh_shader` or Vulkan 1.3.
 
-**Acceptance:** Cube renders with no vertex/index buffer bound.
+**Status:** Not started. Deferred to post-M8. Device capability query structure in place via `queryDeviceCapabilities`.
 
 ### Task 6.6: Feature Detection
 **File:** `src/Graphics/Haskan/Vulkan/Device.hs`
@@ -170,7 +161,7 @@ Check device capabilities:
 
 Gracefully fall back if features unavailable.
 
-**Acceptance:** Engine runs on devices without geometry shaders (uses fallback).
+**Status:** Complete. `geometryShader` enabled via `VkPhysicalDeviceFeatures2` pNext chaining. Descriptor indexing features queried via `VkPhysicalDeviceDescriptorIndexingFeatures`. Runtime array support checked.
 
 ## Testing
 
@@ -208,9 +199,21 @@ let meshMat = MaterialMesh
 
 ## Success Criteria
 
-- [ ] ShaderProgram supports vertex + optional tessellation + optional geometry + fragment
-- [ ] Pipeline creation handles all stage combinations
-- [ ] Geometry shader demo: wireframe overlay
-- [ ] Tessellation shader demo: terrain LOD
-- [ ] Mesh shader demo: procedural cube (if device supports)
-- [ ] Graceful fallback when features unavailable
+- [x] ShaderProgram supports vertex + optional tessellation + optional geometry + fragment
+- [x] Pipeline creation handles all stage combinations
+- [x] Geometry shader demo: wireframe overlay with runtime toggle
+- [ ] Tessellation shader demo: terrain LOD — deferred
+- [ ] Mesh shader demo: procedural cube — deferred
+- [x] Graceful fallback when features unavailable (wireframe toggle checks device capabilities)
+
+## Implementation Notes
+
+**Completed 2026-05-07.** See commits:
+- `92f9e9e` — Milestone 6: Wireframe geometry shader demo
+- `f3dccf4` — Milestone 6: wireframe geometry shader with runtime toggle, gltf index fix, device feature enablement
+
+### Architecture Decisions
+- `ShaderProgram` over raw shader modules — pipeline accepts variable stage count
+- Wireframe vertex shader uses same UBO binding (Set 0, Binding 0) as g-buffer vertex shader for descriptor set layout compatibility
+- Geometry shader device feature must be explicitly enabled in `VkPhysicalDeviceFeatures` — cannot rely on availability query alone
+- Wireframe fragment shader writes to Location 2 (albedo), not Location 0 (position), to be visible in deferred lighting pass

@@ -113,57 +113,45 @@ Alternative: keep individual textures in bindless array (simpler, less packing o
 
 Check for `VK_EXT_descriptor_indexing` or Vulkan 1.2. Enable required features.
 
-**Acceptance:** `vkCreateDevice` succeeds with descriptor indexing enabled.
+**Status:** Complete. `queryDeviceCapabilities` reads `VkPhysicalDeviceDescriptorIndexingFeatures`. Reports `nonUniform`, `updateAfterBind`, `partiallyBound`, `runtimeArray` booleans. Vulkan 1.2+ required for `vkGetPhysicalDeviceFeatures2`.
 
 ### Task 7.2: Bindless Descriptor Set
-**File:** `src/Graphics/Haskan/Vulkan/DescriptorSet.hs`
+**File:** `src/Graphics/Haskan/Vulkan/DescriptorSetLayout.hs`, `DescriptorPool.hs`
 
 Create descriptor set layout with `descriptorCount = 4096` and `PARTIALLY_BOUND` flag.
 
-Allocate descriptor set from pool with `UPDATE_AFTER_BIND`.
-
-**Acceptance:** Can create bindless descriptor set.
+**Status:** Skeleton complete. `managedBindlessDescriptorSetLayout` with `UPDATE_AFTER_BIND` + `PARTIALLY_BOUND` exists. Not yet integrated into main pipeline — `Texture2DArray` + push constants are the active approach.
 
 ### Task 7.3: Texture Upload to Bindless Array
 **File:** `src/Graphics/Haskan/Render/Bindless.hs`
 
-Upload textures into the bindless array:
+Upload textures into the bindless array.
 
-```haskell
-updateBindlessTexture :: ResourceManager
-                      -> VkDescriptorSet
-                      -> Word32        -- index in array
-                      -> TextureHandle
-                      -> IO ()
-```
+**Status:** Skeleton complete. `BindlessSet`, `createBindlessSet`, `registerTexture` exist. `updateBindlessTexture` writes array index to descriptor set. Not yet integrated into main render loop.
 
-**Acceptance:** Texture accessible in shader by index.
+### Task 7.4: Texture Array Shaders (FIR)
+**File:** `src/Graphics/Haskan/Vulkan/Shaders/Deferred/GBuffer.hs`
 
-### Task 7.4: Bindless Shaders (FIR)
-**File:** `src/Graphics/Haskan/Shaders/Bindless.hs`
+Write shaders that sample from `Texture2DArray` using push constant material index.
 
-Write shaders that:
-- Take texture index as push constant or vertex attribute
-- Sample from `texture2D textures[]` array
-
-**Acceptance:** Shader compiles, renders textured mesh.
+**Status:** Complete. G-buffer fragment shader declares `Texture2DArray` at binding 1. Samples with `(uv, materialIndex)` where `materialIndex` comes from push constants. FIR `Texture2DArray` synonym patched upstream (see `interim-fir-texture-arrays.md`).
 
 ### Task 7.5: Update Material System
-**File:** `src/Graphics/Haskan/Render/Material.hs`
-
-`Material` stores texture indices instead of `TextureHandle`. Material loading converts handles to indices.
-
-**Acceptance:** Materials reference textures by index, not handle.
-
-### Task 7.6: Single Descriptor Set Per Frame
 **File:** `src/Graphics/Haskan/Render/RenderSystem.hs`
 
+`DrawCall` stores `dcMaterialIndex :: Word32` (texture array layer index). `extractDrawList` builds texture→index mapping from unique scene textures.
+
+**Status:** Complete. `DrawCall` has `dcMaterialIndex`. `extractDrawList` takes `IntMap Word32` texture→index mapping. Per-entity descriptor sets still used for MVP UBO; texture array bound globally.
+
+### Task 7.6: Single Descriptor Set Per Frame
+**File:** `src/Graphics/Haskan/Render/Deferred.hs`
+
 Render system:
-1. Binds bindless descriptor set once
-2. For each draw: pushes texture index via push constants
+1. Binds texture array descriptor set once (per-entity sets for MVP still needed)
+2. For each draw: pushes material index via `vkCmdPushConstants`
 3. Draws mesh
 
-**Acceptance:** Frame renders with only one `vkCmdBindDescriptorSet` call.
+**Status:** Partial. Texture array bound once to all per-entity descriptor sets. Material index pushed per draw call. True single-set bindless (one descriptor set for everything) requires UBO array or SSBO for transforms — deferred to M8.
 
 ### Task 7.7: GPU Frustum Culling (Compute)
 **File:** `src/Graphics/Haskan/Render/GPUCulling.hs`
@@ -172,22 +160,7 @@ Compute shader:
 - Input: array of AABBs + transforms
 - Output: visible object indices
 
-```haskell
-data CullInput = CullInput
-  { ciAABB       :: !(Vector AABB)      -- object bounding boxes
-  , ciTransform  :: !(Vector (M44 Float))
-  , ciFrustum    :: !Frustum
-  }
-
-data CullOutput = CullOutput
-  { coVisibleIndices :: !(Vector Word32)
-  , coVisibleCount   :: !Word32
-  }
-
-runGPUCulling :: CommandBuffer -> CullInput -> IO CullOutput
-```
-
-**Acceptance:** Compute shader correctly culls objects outside frustum.
+**Status:** Not started. Deferred to Milestone 8.
 
 ## Testing
 
@@ -216,9 +189,38 @@ forM_ [0..999] $ \i -> do
 
 ## Success Criteria
 
-- [ ] Descriptor indexing enabled and working
-- [ ] All textures accessible from one descriptor set
-- [ ] Materials use texture indices, not handles
-- [ ] Single descriptor set bind per frame
-- [ ] GPU frustum culling compute shader works
-- [ ] Performance improves vs per-draw binding (measure draw call overhead)
+- [x] Descriptor indexing enabled and working (capabilities queried, device features set)
+- [x] `Texture2DArray` accessible from shader (FIR patched, SPIR-V codegen verified)
+- [x] Texture array created from scene textures, bound once per frame
+- [x] Materials use texture indices (push constants), not per-draw descriptor binds
+- [ ] True single descriptor set per frame (requires UBO/SSBO for per-entity transforms) — deferred to M8
+- [ ] GPU frustum culling compute shader — deferred to M8
+- [ ] Performance improves vs per-draw binding (needs benchmarking)
+
+## Implementation Notes
+
+**Completed 2026-05-08.** See work:
+- FIR patch: `Texture2DArray`/`Image2DArray` synonyms in `FIR.Syntax.Synonyms`
+- `SPIRV/Requirements.hs`: arrayed sampled image capability
+- `FIR/Validation/Images.hs`: array-aware coordinate validation
+- `test/Tests/Images/SampleArray.hs`: compilation test
+- Integration: `Shaders/Deferred/GBuffer.hs` uses `Texture2DArray` + push constant `materialIndex`
+- `Engine.hs`: texture array built from unique scene textures, resized to 256×256, bound globally
+
+### Architecture Decisions
+- `Texture2DArray` + push constants as pragmatic bindless — avoids FIR AST surgery for `OpTypeRuntimeArray`
+- Texture array dimensions constraint: all layers identical size; resize to common size at load time via bilinear filter
+- Per-entity descriptor sets still used for MVP UBO (dynamic offsets); texture array is global binding
+- True bindless descriptor arrays (`NonUniform` + `OpTypeRuntimeArray`) deferred until upstream FIR coordination possible
+- Asset preprocessor caches preprocessed textures under `.haskan2-cache/` to avoid repeated decode/resize
+
+## True Bindless vs Current Approach
+
+| Feature | Current (Texture2DArray) | True Bindless (Deferred) |
+|---------|-------------------------|--------------------------|
+| Descriptor binds per frame | 1 (texture array) + N (per-entity UBO) | 1 (global set) |
+| Texture array size | Fixed at creation (all scene textures) | Dynamic (runtime register/unregister) |
+| Shader sample | `texture(texArray, uv, layer)` | `texture(textures[nonuniformEXT(index)], uv)` |
+| Material data | Push constant (4 bytes) | SSBO or push constant |
+| FIR support | Working now | Requires `RuntimeArray`, `NonUniform` AST nodes |
+| Performance | Good | Potentially better (no push constants per draw) |
