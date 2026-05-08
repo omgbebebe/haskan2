@@ -191,45 +191,68 @@ True bindless descriptor indexing is **fundamentally different** from Texture2DA
 - `OpTypeRuntimeArray` emission in SPIR-V backend
 - Capability tracking for `RuntimeDescriptorArray` and per-type non-uniform indexing capabilities
 
-### FIR Data Types & Optics Structure (Critical Findings)
+## M8 Progress — GPU-Driven Compute Culling
 
-#### ProgramState is a promoted kind, not a Type
-- `data ProgramState = ProgramState ...` with `DataKinds` promotes `ProgramState` to a **kind**
-- Type variables like `(i :: ProgramState)` have kind `ProgramState`, **NOT** `Type`
-- `Code :: Type -> Type`, so `Code i` where `i :: ProgramState` is a **kind error**
-- This is the root cause of the `BindlessTexel` `KnownASTOptic` instance failure
+### Cull Compute Shader (`Shaders/Compute/Cull.hs`)
+- Fixed FIR optic/type errors:
+  - `gl_GlobalInvocationID` via `~(Vec3 idx _ _) <- get` pattern
+  - `AnIndex Word32` (not `@Word32`) for runtime array indexing
+  - `use @(Name "..." :.: AnIndex Word32) idx` pattern for SSBO array access
+  - Wrapped `visibleFlags` in `Struct '["flags" ':-> Array MaxEntities Word32]` (FIR requires SSBOs to be structs or arrays of structs)
+  - Moved `use @(Name "cullData" ...)` out of polymorphic helper `testAllPlanes` into concrete `program` to resolve `Binding.Has` type family
+  - `pure (Lit ())` for `Program` monad unit (not `pure ()`)
+- Manually unrolled `testAllPlanes` (FIR does not support general recursion)
+- `testPlane` uses AABB-frustum plane test (select p-vertex, dot product)
 
-#### ImageTexel has NO AST-level `view` support
-- `FIR.Syntax.AST` has **zero** `KnownASTOptic`/`Gettable`/`ReifiedGetter` instances for `ImageTexel`
-- Image texel optics only work through `use`/`assign` in the `Program` monad
-- `use @(ImageTexel "name") ops coords` creates an AST node via `opticSing`, not through `view`
+### Compute Pipeline Infrastructure
+- `DescriptorSetLayout.hs`: `managedComputeDescriptorSetLayout` — 3 bindings (SSBO entities, SSBO visibleFlags, UBO cullData), all `COMPUTE_BIT`
+- `DescriptorPool.hs`: `managedComputeDescriptorPool` — 2 SSBO slots + 1 UBO slot, `maxSets = 1`
+- `DescriptorSet.hs`: `updateComputeDescriptorSets` — writes all 3 buffer infos
+- `ComputePipeline.hs` already existed for test shader
 
-#### BindlessTexel must follow the same pattern as ImageTexel
-- ~~The broken `KnownASTOptic`/`Gettable`/`ReifiedGetter` instances in `FIR.Syntax.AST` (lines ~582-724) are wrong and should be removed~~ **REMOVED 2026-05-08**
-- `BindlessTexel` only supports `use`/`assign` in `Program`, not `view` on `Code`
-- `FIR.Syntax.Optics` has working `KnownOptic`/`Gettable` instances for `BindlessTexel`
-- `CodeGen/Optics.hs` handles `SBindlessTexel` code generation correctly
-- `CodeGen/Pointers.hs` adds `NonUniformEXT` decoration for runtime array accesses
+### Engine Integration
+- `Engine.hs` compiles cull shader: `FIR.compileTo "data/shaders/fir/cull_comp.spv" ... CullShaders.program`
+- Creates compute pipeline layout + pipeline + descriptor set
+- Creates SSBO/UBO buffers:
+  - Entity SSBO: 4096 entries, 128 bytes/entry (124-byte struct + 4 bytes array padding), dummy data
+  - Visible flags SSBO: 4096 Word32s, initialized to 0
+  - Cull data UBO: 128 bytes (std140), dummy frustum planes + entity count
+- Defined `ComputeEntityData` and `ComputeCullData` Storable types matching FIR layouts
+- `ComputeCullResources` record groups all compute resources
+- Wired `vkCmdBindPipeline(COMPUTE)` + `vkCmdBindDescriptorSets` + `vkCmdDispatch` before deferred graph in `renderFrameLoop`
+- Recursive `renderFrameLoop` call updated to pass `ComputeCullResources`
 
-### Status (2026-05-08)
-- **FIR builds clean** after removing broken `BindlessTexel` AST instances
-- `Tests/Images/Bindless.hs` updated to use `use @(BindlessTexel "textures") idx NilOps coord`
-- `haskan2` executable builds successfully
-- True bindless shader compilation works end-to-end: `SBindlessTexel` → `CodeGen/Optics.hs` → SPIR-V with `NonUniformEXT` decoration
-- **Haskan2 integration complete**:
-  - `Shaders/Deferred/GBuffer.hs` fragment shader uses `BindlessTexture2D` + `BindlessTexel`
-  - `DescriptorSetLayout.hs` main layout uses bindless array (binding 1, `descriptorCount = 1024`, `PARTIALLY_BOUND` + `UPDATE_AFTER_BIND`)
-  - `DescriptorPool.hs` pool sized for `maxFrames * maxBindlessTextures` samplers with `UPDATE_AFTER_BIND` flag
-  - `DescriptorSet.hs` new `updateDescriptorSetsBindless` writes UBO + texture view array
-  - `Engine.hs` creates individual textures per material, writes all views to each frame descriptor set
-  - Push constant still passes material index (now interpreted as bindless descriptor index)
-- Executable runs (`--help` verified)
+### Remaining M8 Work
+1. Populate entity SSBO with real transforms/AABBs each frame
+2. Populate cull data UBO with actual frustum planes each frame
+3. Add memory barrier (compute shader writes -> host read)
+4. Read back visible flags SSBO after dispatch
+5. Filter `drawList` to visible-only entities before g-buffer pass
+6. Benchmark CPU-driven vs GPU-culled draw loop
+7. Phase 2: merge meshes, generate `VkDrawIndexedIndirectCommand` in compute, single `vkCmdDrawIndexedIndirect`
 
 ### Key Files Changed
-- `3rdparty/fir/src/FIR/Syntax/AST.hs` — removed broken `BindlessTexel` instances
-- `3rdparty/fir/test/Tests/Images/Bindless.hs` — uses `BindlessTexel` optic
-- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/GBuffer.hs` — bindless fragment shader
-- `src/Graphics/Haskan/Vulkan/DescriptorSetLayout.hs` — bindless layout
-- `src/Graphics/Haskan/Vulkan/DescriptorPool.hs` — bindless pool sizing
-- `src/Graphics/Haskan/Vulkan/DescriptorSet.hs` — `updateDescriptorSetsBindless`
-- `src/Graphics/Haskan/Engine.hs` — individual texture creation + bindless descriptor updates
+- `src/Graphics/Haskan/Vulkan/Shaders/Compute/Cull.hs` — frustum culling compute shader
+- `src/Graphics/Haskan/Vulkan/DescriptorSetLayout.hs` — compute descriptor set layout
+- `src/Graphics/Haskan/Vulkan/DescriptorPool.hs` — compute descriptor pool
+- `src/Graphics/Haskan/Vulkan/DescriptorSet.hs` — `updateComputeDescriptorSets`
+- `src/Graphics/Haskan/Engine.hs` — compute pipeline creation, buffer allocation, dispatch wiring
+
+## Critical Context
+- Build: `nix develop --command cabal build all`
+- Run: `nix develop --command cabal run haskan2 -- -t 5 MODEL`
+- `linear` `M44` row-major → transpose before `updateUniformBufferRegion`
+- Camera: `OrbitalCamera`, WASD XY plane, wheel zoom
+- Present mode: `IMMEDIATE_KHR`
+- Shader texture format: `Rgba8 UNorm`; view `VK_FORMAT_R8G8B8A8_UNORM`
+- Vulkan raw `4211000` = 1.4.312; `vulkaninfo` reports 1.4.341
+- Cold start ABeautifulGame ~12s; warm ~0.4s
+- Cache dir: `.haskan2-cache/textures/`
+- Capabilities: `RuntimeDescriptorArray`=33, `SampledImageArrayNonUniformIndexing`=65; `NonUniformEXT`=5309
+- `EmptyDataDeriving` required for `Image`; boot files resolve `FIR.Prim.Image` ↔ `FIR.Prim.Types` cycle
+- FIR `Base` layout = std430 (storage buffers, push constants); `Extended` layout = std140 (uniform buffers)
+- FIR struct array stride = `NextAligned(structSize, structAlignment)` under Base layout
+- `EntityData` struct size = 124, array stride = 128; `CullData` struct size = 128 (std140 rounded up)
+- FIR shaders do not support general recursion; loops must be unrolled manually
+- `Program` monad `do` blocks: `let` for `view` on `Code` values, `<-` for `use`/`assign` monadic actions
+- `pure (Lit ())` for unit in `Program`, not `pure ()`

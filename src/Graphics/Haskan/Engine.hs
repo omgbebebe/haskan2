@@ -13,7 +13,7 @@ import Control.Concurrent.STM.TChan qualified as TChan
 import Control.Concurrent.STM.TQueue (TQueue)
 import Control.Concurrent.STM.TQueue qualified as TQueue
 import Control.Concurrent.STM.TVar (TVar)
-import Control.Monad (forM, replicateM, unless, when)
+import Control.Monad (forM, forM_, replicateM, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged, runManaged, with)
 import Data.Aeson (ToJSON (..), object, (.=))
@@ -34,7 +34,7 @@ import Data.Word (Word32)
 import FIR qualified
 import Foreign.C qualified
 import Foreign.Marshal.Array qualified
-import Foreign.Storable (sizeOf)
+import Foreign.Storable (Storable (..), peekByteOff, pokeByteOff)
 import GHC.Generics
 import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
@@ -61,6 +61,7 @@ import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.CommandPool qualified as CommandPool
+import Graphics.Haskan.Vulkan.ComputePipeline qualified as ComputePipeline
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..), createDeferredResources)
 import Graphics.Haskan.Vulkan.DescriptorPool qualified as DescriptorPool
 import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
@@ -82,6 +83,7 @@ import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShade
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
 import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
+import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Haskan.Window qualified as Window
@@ -101,6 +103,66 @@ toListOfV4 :: V4 (V4 a) -> [[a]]
 toListOfV4 (V4 r1 r2 r3 r4) = [toList r1, toList r2, toList r3, toList r4]
   where
     toList (V4 a b c d) = [a, b, c, d]
+
+-- | Compute culling entity data (matches shader EntityData, Base/std430 layout).
+-- Array stride is 128 bytes (124-byte struct + 4 bytes padding).
+data ComputeEntityData = ComputeEntityData
+  { ceTransform :: M44 Foreign.C.CFloat
+  , ceAabbMin :: V4 Foreign.C.CFloat
+  , ceAabbMax :: V4 Foreign.C.CFloat
+  , ceMaterialIndex :: Word32
+  , cePad :: V3 Word32
+  } deriving (Show)
+
+instance Storable ComputeEntityData where
+  sizeOf _ = 128
+  alignment _ = 16
+  peek ptr = ComputeEntityData
+    <$> peekByteOff ptr 0
+    <*> peekByteOff ptr 64
+    <*> peekByteOff ptr 80
+    <*> peekByteOff ptr 96
+    <*> peekByteOff ptr 112
+  poke ptr (ComputeEntityData t amin amax mat pad) = do
+    pokeByteOff ptr 0 t
+    pokeByteOff ptr 64 amin
+    pokeByteOff ptr 80 amax
+    pokeByteOff ptr 96 mat
+    pokeByteOff ptr 112 pad
+
+-- | Compute culling uniform data (matches shader CullData, Extended/std140 layout).
+data ComputeCullData = ComputeCullData
+  { ccFrustumPlanes :: [V4 Foreign.C.CFloat]  -- 6 planes
+  , ccEntityCount :: Word32
+  , ccPad2 :: V3 Word32
+  } deriving (Show)
+
+instance Storable ComputeCullData where
+  sizeOf _ = 128
+  alignment _ = 16
+  peek ptr = do
+    planes <- sequence [peekByteOff ptr (i * 16) | i <- [0..5]]
+    count <- peekByteOff ptr 96
+    pad <- peekByteOff ptr 112
+    pure (ComputeCullData planes count pad)
+  poke ptr (ComputeCullData planes count pad) = do
+    forM_ (zip [0..5] planes) $ \(i, p) -> pokeByteOff ptr (i * 16) p
+    pokeByteOff ptr 96 count
+    pokeByteOff ptr 112 pad
+
+-- | Resources for GPU-driven compute culling.
+data ComputeCullResources = ComputeCullResources
+  { ccrPipeline :: Vulkan.VkPipeline
+  , ccrPipelineLayout :: Vulkan.VkPipelineLayout
+  , ccrDescriptorSet :: Vulkan.VkDescriptorSet
+  , ccrEntityBuffer :: Vulkan.VkBuffer
+  , ccrEntityMemory :: Vulkan.VkDeviceMemory
+  , ccrVisibleFlagsBuffer :: Vulkan.VkBuffer
+  , ccrVisibleFlagsMemory :: Vulkan.VkDeviceMemory
+  , ccrCullDataBuffer :: Vulkan.VkBuffer
+  , ccrCullDataMemory :: Vulkan.VkDeviceMemory
+  , ccrMaxEntities :: Int
+  }
 
 data EngineConfig = EngineConfig
   { targetRenderFPS :: !Integer,
@@ -337,8 +399,9 @@ renderFrameLoop ::
   IntMap Word32 ->
   STM.TVar Bool ->
   IORef FrameStats ->
+  ComputeCullResources ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -418,6 +481,23 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                       , pcExtent = rcSurfaceExtent
                       }
                 wireframeEnabled' <- liftIO $ STM.readTVarIO tvWireframe
+
+                -- Compute culling dispatch
+                let numWorkgroups = ((length drawList + 63) `div` 64)
+                when (numWorkgroups > 0) $ do
+                  liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE ccrPipeline
+                  liftIO $ Foreign.Marshal.Array.withArray [ccrDescriptorSet] $ \dsPtr ->
+                    Vulkan.vkCmdBindDescriptorSets
+                      commandBuffer
+                      Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
+                      ccrPipelineLayout
+                      0
+                      1
+                      dsPtr
+                      0
+                      Vulkan.vkNullPtr
+                  liftIO $ CommandBuffer.cmdDispatch commandBuffer (fromIntegral numWorkgroups) 1 1
+
                 -- Build deferred render graph for this frame
                 let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
                       buildDeferredGraph DeferredPassData
@@ -520,6 +600,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         textureIndexMap
         tvWireframe
         frameStatsRef
+        ccr
 
 -- | Main rendering loop.
 --
@@ -559,6 +640,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   liftIO $ FIR.compileTo "data/shaders/fir/wire_geom.spv" [FIR.SPIRV (FIR.Version 1 5)] WireframeShaders.geometry
   liftIO $ FIR.compileTo "data/shaders/fir/wire_frag.spv" [FIR.SPIRV (FIR.Version 1 5)] WireframeShaders.fragment
 
+  liftIO $ FIR.compileTo "data/shaders/fir/cull_comp.spv" [FIR.SPIRV (FIR.Version 1 5)] CullShaders.program
+
   vertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/vert.spv"
   fragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/frag.spv"
 
@@ -571,10 +654,18 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   wireGeomShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_geom.spv"
   wireFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_frag.spv"
 
-  descriptorSetLayout <- DescriptorSetLayout.managedDescriptorSetLayout device
+  cullShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cull_comp.spv"
 
+  descriptorSetLayout <- DescriptorSetLayout.managedDescriptorSetLayout device
   pipelineLayout <- PipelineLayout.managedPipelineLayout device [descriptorSetLayout]
   graphicsCommandPool <- CommandPool.managedCommandPool device graphicsQueueFamilyIndex
+
+  -- Compute culling infrastructure
+  computeDescriptorSetLayout <- DescriptorSetLayout.managedComputeDescriptorSetLayout device
+  computePipelineLayout <- PipelineLayout.managedPipelineLayout device [computeDescriptorSetLayout]
+  computePipeline <- ComputePipeline.managedComputePipeline device computePipelineLayout cullShader
+  computeDescriptorPool <- DescriptorPool.managedComputeDescriptorPool device
+  computeDescriptorSet <- DescriptorSet.allocateDescriptorSet device computeDescriptorPool [computeDescriptorSetLayout]
 
   imageAvailableSemaphores <- replicateM Render.maxFramesInFlight (Semaphore.managedSemaphore device)
   renderFinishedSemaphores <- replicateM 4 (Semaphore.managedSemaphore device)
@@ -677,6 +768,44 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   frameMvpBuffers <- replicateM Render.maxFramesInFlight $
     Buffer.managedUniformBuffer physicalDevice device initialMvpData
   logDebugIO LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
+
+  -- Create compute culling buffers
+  let maxEntities = 4096 :: Int
+      dummyEntityData = ComputeEntityData
+        { ceTransform = identity
+        , ceAabbMin = V4 (-1000) (-1000) (-1000) 1
+        , ceAabbMax = V4 1000 1000 1000 1
+        , ceMaterialIndex = 0
+        , cePad = V3 0 0 0
+        }
+      dummyCullData = ComputeCullData
+        { ccFrustumPlanes = replicate 6 (V4 0 0 0 0)
+        , ccEntityCount = fromIntegral numDrawEntities
+        , ccPad2 = V3 0 0 0
+        }
+      initialVisibleFlags = replicate maxEntities (0 :: Word32)
+
+  (entitySsboBuffer, entitySsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxEntities dummyEntityData) Vulkan.VK_ZERO_FLAGS
+  (visibleFlagsBuffer, visibleFlagsMemory) <- Buffer.managedStorageBuffer physicalDevice device initialVisibleFlags Vulkan.VK_ZERO_FLAGS
+  (cullDataBuffer, cullDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [dummyCullData]
+  logDebugIO LogBuffer $ "compute buffers created: entitySSBO=" <> showT (maxEntities * sizeOf (undefined :: ComputeEntityData)) <> " visibleFlags=" <> showT (maxEntities * sizeOf (undefined :: Word32)) <> " cullData=" <> showT (sizeOf (undefined :: ComputeCullData))
+
+  -- Update compute descriptor set with buffers
+  DescriptorSet.updateComputeDescriptorSets device computeDescriptorSet entitySsboBuffer visibleFlagsBuffer cullDataBuffer
+  logDebugIO LogRender "compute descriptor set updated"
+
+  let computeCullResources = ComputeCullResources
+        { ccrPipeline = computePipeline
+        , ccrPipelineLayout = computePipelineLayout
+        , ccrDescriptorSet = computeDescriptorSet
+        , ccrEntityBuffer = entitySsboBuffer
+        , ccrEntityMemory = entitySsboMemory
+        , ccrVisibleFlagsBuffer = visibleFlagsBuffer
+        , ccrVisibleFlagsMemory = visibleFlagsMemory
+        , ccrCullDataBuffer = cullDataBuffer
+        , ccrCullDataMemory = cullDataMemory
+        , ccrMaxEntities = maxEntities
+        }
 
   logInfoIO LogTexture "creating sampler"
   textureSampler <- Texture.managedSampler device
@@ -828,7 +957,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
               with (createDeferredResources physicalDevice device context descriptorSetLayout [pushConstantRange] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources
             outerLoop renderFrameLoopFinished
 
 

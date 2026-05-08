@@ -5,6 +5,8 @@ module Graphics.Haskan.Vulkan.DescriptorPool
     createLightingDescriptorPool,
     managedBindlessDescriptorPool,
     createBindlessDescriptorPool,
+    managedComputeDescriptorPool,
+    createComputeDescriptorPool,
   )
 where
 
@@ -106,6 +108,41 @@ createBindlessDescriptorPool dev maxTextures = do
               &* set @"flags" Vulkan12.VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
               &* set @"poolSizeCount" 1
               &* setListRef @"pPoolSizes" [samplerPoolSize]
+              &* set @"maxSets" 1
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
+          )
+
+managedComputeDescriptorPool :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkDescriptorPool
+managedComputeDescriptorPool dev =
+  alloc
+    "ComputeDescriptorPool"
+    (createComputeDescriptorPool dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
+
+createComputeDescriptorPool :: MonadIO m => Vulkan.VkDevice -> m Vulkan.VkDescriptorPool
+createComputeDescriptorPool dev = do
+  let ssboPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"descriptorCount" 2
+          )
+      uboPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"descriptorCount" 1
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"poolSizeCount" 2
+              &* setListRef @"pPoolSizes" [ssboPoolSize, uboPoolSize]
               &* set @"maxSets" 1
           )
    in liftIO $

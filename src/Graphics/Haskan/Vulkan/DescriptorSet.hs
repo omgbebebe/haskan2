@@ -319,3 +319,74 @@ cmdBindDescriptorSets commandBuffer pipelineBindPoint layout firstSet descriptor
       pDescriptorSets
       dynamicOffsetCount
       pDynamicOffsets
+
+-- | Update compute culling descriptor set with SSBOs and UBO.
+updateComputeDescriptorSets ::
+  MonadIO m =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkBuffer -> -- entities SSBO
+  Vulkan.VkBuffer -> -- visibleFlags SSBO
+  Vulkan.VkBuffer -> -- cullData UBO
+  m ()
+updateComputeDescriptorSets dev descriptorSet entitiesBuffer visibleFlagsBuffer cullDataBuffer = do
+  let entitiesBufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" entitiesBuffer
+              &* set @"offset" 0
+              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+          )
+      visibleFlagsBufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" visibleFlagsBuffer
+              &* set @"offset" 0
+              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+          )
+      cullDataBufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" cullDataBuffer
+              &* set @"offset" 0
+              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+          )
+      writeEntities =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 0
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pImageInfo" Vulkan.VK_NULL
+              &* setVkRef @"pBufferInfo" entitiesBufferInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+      writeVisibleFlags =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 1
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pImageInfo" Vulkan.VK_NULL
+              &* setVkRef @"pBufferInfo" visibleFlagsBufferInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+      writeCullData =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 2
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pImageInfo" Vulkan.VK_NULL
+              &* setVkRef @"pBufferInfo" cullDataBufferInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+  liftIO $
+    Foreign.Marshal.Array.withArray [writeEntities, writeVisibleFlags, writeCullData] $ \writePtr ->
+      Vulkan.vkUpdateDescriptorSets dev 3 writePtr 0 Vulkan.vkNullPtr

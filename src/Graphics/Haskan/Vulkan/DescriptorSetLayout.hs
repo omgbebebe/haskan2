@@ -5,6 +5,8 @@ module Graphics.Haskan.Vulkan.DescriptorSetLayout
     createLightingDescriptorSetLayout,
     managedBindlessDescriptorSetLayout,
     createBindlessDescriptorSetLayout,
+    managedComputeDescriptorSetLayout,
+    createComputeDescriptorSetLayout,
     maxBindlessTextures,
   )
 where
@@ -145,3 +147,52 @@ createBindlessDescriptorSetLayout dev = do
    in liftIO $ withPtr bindingFlagsCreateInfo $ \_bfcPtr ->
         withPtr createInfo $ \ciPtr ->
           allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+
+-- | Compute culling descriptor set layout: 2 SSBOs + 1 UBO.
+managedComputeDescriptorSetLayout :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedComputeDescriptorSetLayout dev =
+  alloc
+    "ComputeDescriptorSetLayout"
+    (createComputeDescriptorSetLayout dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+
+createComputeDescriptorSetLayout :: MonadIO m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createComputeDescriptorSetLayout dev = do
+  let entitiesBinding =
+        Vulkan.createVk
+          ( set @"binding" 0
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"descriptorCount" 1
+              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_COMPUTE_BIT
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+          )
+      visibleFlagsBinding =
+        Vulkan.createVk
+          ( set @"binding" 1
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"descriptorCount" 1
+              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_COMPUTE_BIT
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+          )
+      cullDataBinding =
+        Vulkan.createVk
+          ( set @"binding" 2
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"descriptorCount" 1
+              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_COMPUTE_BIT
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"bindingCount" 3
+              &* setListRef @"pBindings" [entitiesBinding, visibleFlagsBinding, cullDataBinding]
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+          )
