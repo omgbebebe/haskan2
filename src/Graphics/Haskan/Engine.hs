@@ -23,6 +23,8 @@ import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable (..))
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.List (sort)
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -117,6 +119,39 @@ data FrameTime = FrameTime
     deltaTime :: !Integer
   }
   deriving (Show)
+
+-- | Accumulated frame timing statistics for performance baseline.
+data FrameStats = FrameStats
+  { fsFrameCount :: !Int,        -- ^ Frames since last log
+    fsAccumTime :: !Integer,     -- ^ Accumulated frame time (ns)
+    fsMinTime :: !Integer,       -- ^ Minimum frame time (ns)
+    fsMaxTime :: !Integer,       -- ^ Maximum frame time (ns)
+    fsTotalFrames :: !Int        -- ^ Total frames rendered
+  }
+
+emptyFrameStats :: FrameStats
+emptyFrameStats = FrameStats 0 0 999999999999 0 0
+
+-- | Update frame stats with a new frame time. Returns stats and maybe a log message.
+updateFrameStats :: FrameStats -> Integer -> (FrameStats, Maybe Text)
+updateFrameStats stats frameTime =
+  let count = fsFrameCount stats + 1
+      accum = fsAccumTime stats + frameTime
+      minT = min (fsMinTime stats) frameTime
+      maxT = max (fsMaxTime stats) frameTime
+      total = fsTotalFrames stats + 1
+      newStats = FrameStats count accum minT maxT total
+  in if count >= 60
+       then let avg = accum `div` fromIntegral count
+                avgMs = fromIntegral avg / 1_000_000 :: Double
+                minMs = fromIntegral minT / 1_000_000 :: Double
+                maxMs = fromIntegral maxT / 1_000_000 :: Double
+                fps = 1_000_000_000.0 / fromIntegral avg :: Double
+                msg = Text.pack $
+                  "Frame stats [last 60 frames]: avg=" ++ show avgMs ++ "ms, min=" ++ show minMs ++ "ms, max=" ++ show maxMs ++ "ms, fps=" ++ show fps
+                          ++ " | total frames=" ++ show total
+            in (FrameStats 0 0 999999999999 0 total, Just msg)
+       else (newStats, Nothing)
 
 type Position = V3 Float
 
@@ -300,8 +335,9 @@ renderFrameLoop ::
   [[Vulkan.VkDescriptorSet]] ->
   IntMap Word32 ->
   STM.TVar Bool ->
+  IORef FrameStats ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets textureIndexMap tvWireframe = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets textureIndexMap tvWireframe frameStatsRef = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -457,7 +493,12 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
     else do
       let renderTime = frameEndTime - frameStartTime
           delay = ((1000000000 `div` targetFPS) - renderTime) `div` 1000
-      liftIO $ threadDelay (fromIntegral delay)
+      liftIO $ do
+        threadDelay (fromIntegral delay)
+        stats <- readIORef frameStatsRef
+        let (newStats, mMsg) = updateFrameStats stats renderTime
+        writeIORef frameStatsRef newStats
+        for_ mMsg $ \msg -> logInfoIO LogRender msg
       renderFrameLoop
         ctx
         dr
@@ -477,6 +518,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         entityDescriptorSets
         textureIndexMap
         tvWireframe
+        frameStatsRef
 
 -- | Main rendering loop.
 --
@@ -767,6 +809,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           renderFinishedSemaphores
 
   worldState <- liftIO $ STM.readTVarIO (world gameState)
+  frameStatsRef <- liftIO $ newIORef emptyFrameStats
   let tvCamera = activeCamera worldState
       tvInspect = inspectFrame gameState
       tvInsp = inspector gameState
@@ -780,7 +823,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
               with (createDeferredResources physicalDevice device context descriptorSetLayout [pushConstantRange] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets textureIndexMap tvWireframe
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets textureIndexMap tvWireframe frameStatsRef
             outerLoop renderFrameLoopFinished
 
 

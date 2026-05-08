@@ -153,8 +153,10 @@ Partial migration from IORef-based global logger to `effectful` effects library.
 - `nextPowerOfTwo` with bilinear `resizeImage` for array compatibility
 - `StrictData` on all records
 
+### Done
+- `loadTextureCached` / `loadTextureBytesCached` wired into `Texture.createTextureResource` and `Texture.createTextureFromBytesCached`. Cache directory `.haskan2-cache/textures/` confirmed populated.
+
 ### Pending Integration
-- Wire `loadTextureCached` into `Texture.createTextureResource` to bypass JuicyPixels on cached loads
 - Add mesh preprocessing skeleton (vertex format normalization, index optimization)
 - Add cache eviction / size limit policy
 - Parallel batch preprocessing for model loading
