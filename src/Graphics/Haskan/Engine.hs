@@ -295,8 +295,9 @@ mainLoop meshName EngineConfig {..} = do
         let actionEvents = catMaybes $ map (payloadToActionEvent . SDL.eventPayload) events
             quitting = (Escape, True) `elem` actionEvents
         liftIO $ STM.atomically $ for_ actionEvents $ TQueue.writeTQueue actionQueue
+        running <- liftIO $ STM.readTVarIO isRunning
         SDL.delay 20
-        unless (quitting) inputLoop
+        unless (quitting || not running) inputLoop
 
   inputLoop
   logInfoIO LogGeneral "sending Terminate message"
@@ -332,12 +333,12 @@ renderFrameLoop ::
   ResourceManager ->
   Int ->
   Vulkan.VkSampler ->
-  [[Vulkan.VkDescriptorSet]] ->
+  [Vulkan.VkDescriptorSet] ->
   IntMap Word32 ->
   STM.TVar Bool ->
   IORef FrameStats ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets textureIndexMap tvWireframe frameStatsRef = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -395,7 +396,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                 let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIdx
                     gBufferFramebuffer = drGBufferFramebuffers !! fromIntegral imageIdx
                     lightingFramebuffer = drLightingFramebuffers !! fromIntegral imageIdx
-                    frameEntityDescriptorSets = map (!! frameIdx) entityDescriptorSets
+                    frameDescriptorSet = frameDescriptorSets !! frameIdx
                     lightingDescriptorSet = drLightingDescriptorSets !! fromIntegral imageIdx
                     gBufferImagesForFrame = drGBufferImages !! fromIntegral imageIdx
                     gBufferPassCtx = PassContext
@@ -425,7 +426,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdGBufferFramebuffer = gBufferFramebuffer
                         , dpdGBufferPipeline = drGBufferPipeline
                         , dpdGBufferLayout = drGBufferPipelineLayout
-                        , dpdGBufferDescriptors = frameEntityDescriptorSets
+                        , dpdGBufferDescriptor = frameDescriptorSet
                         , dpdGBufferSampler = textureSampler
                         , dpdDrawList = drawList
                         , dpdEntityUniformSize = entityUniformSize
@@ -515,7 +516,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         rm
         entityUniformSize
         textureSampler
-        entityDescriptorSets
+        frameDescriptorSets
         textureIndexMap
         tvWireframe
         frameStatsRef
@@ -766,37 +767,28 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   logInfoIO LogTexture "texture array created"
 
-  -- Create descriptor pool sized for per-entity descriptor sets
-  let totalDescriptorSets = numDrawEntities * Render.maxFramesInFlight
+  -- Create descriptor pool sized for frame descriptor sets (one per frame)
+  let totalDescriptorSets = Render.maxFramesInFlight
   descriptorPool <- DescriptorPool.managedDescriptorPool device totalDescriptorSets
   logDebugIO LogRender $ "descriptor pool created for " <> showT totalDescriptorSets <> " sets"
 
-  -- Allocate per-entity, per-frame descriptor sets
-  allDescriptorSets <- replicateM totalDescriptorSets $
+  -- Allocate one descriptor set per frame
+  frameDescriptorSets <- replicateM totalDescriptorSets $
     DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
-  logDebugIO LogRender $ "allocated " <> showT (length allDescriptorSets) <> " descriptor sets"
+  logDebugIO LogRender $ "allocated " <> showT (length frameDescriptorSets) <> " frame descriptor sets"
 
-  -- Organize descriptor sets: entityDescriptorSets !! entityIdx !! frameIdx
-  let entityDescriptorSets =
-        [ [ allDescriptorSets !! (e * Render.maxFramesInFlight + f)
-          | f <- [0 .. Render.maxFramesInFlight - 1]
-          ]
-        | e <- [0 .. numDrawEntities - 1]
-        ]
-
-  -- Update each descriptor set with frame buffer and shared texture array
-  logInfoIO LogVulkan "updating per-entity descriptor sets"
-  for_ (zip [0..] initialDrawList) $ \(entityIdx, _dc) -> do
-    for_ (zip [0..] frameMvpBuffers) $ \(frameIdx, (buf, _)) -> do
-      let ds = entityDescriptorSets !! entityIdx !! frameIdx
-      DescriptorSet.updateDescriptorSetsRange
-        device
-        ds
-        buf
-        (fromIntegral entityUniformSize)
-        textureArrayView
-        textureSampler
-  logInfoIO LogVulkan "per-entity descriptor sets updated"
+  -- Update each frame descriptor set with the frame's uniform buffer
+  logInfoIO LogVulkan "updating frame descriptor sets"
+  for_ (zip [0..] frameMvpBuffers) $ \(frameIdx, (buf, _)) -> do
+    let ds = frameDescriptorSets !! frameIdx
+    DescriptorSet.updateDescriptorSetsRange
+      device
+      ds
+      buf
+      (fromIntegral entityUniformSize)
+      textureArrayView
+      textureSampler
+  logInfoIO LogVulkan "frame descriptor sets updated"
 
   -- Create push constant range for material index (fragment shader, 4 bytes)
   let pushConstantRange =
@@ -838,7 +830,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
               with (createDeferredResources physicalDevice device context descriptorSetLayout [pushConstantRange] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler entityDescriptorSets textureIndexMap tvWireframe frameStatsRef
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef
             outerLoop renderFrameLoopFinished
 
 
@@ -990,6 +982,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore actionQueue debugCmdQueue 
             when isRunning $ loop tFPS _gameState newTime
           Just Terminate -> do
             logInfoIO LogGeneral "terminating stateUpdate loop by signal"
+            STM.atomically $ STM.writeTVar (isRunning _gameState) False
 
   currentTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   loop targetFPS gameState currentTime

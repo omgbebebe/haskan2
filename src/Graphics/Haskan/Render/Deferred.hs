@@ -32,7 +32,7 @@ data DeferredPassData = DeferredPassData
   , dpdGBufferFramebuffer :: !Vulkan.VkFramebuffer
   , dpdGBufferPipeline    :: !Vulkan.VkPipeline
   , dpdGBufferLayout      :: !Vulkan.VkPipelineLayout
-  , dpdGBufferDescriptors :: ![Vulkan.VkDescriptorSet]
+  , dpdGBufferDescriptor :: !Vulkan.VkDescriptorSet
   , dpdGBufferSampler     :: !Vulkan.VkSampler
   , dpdDrawList           :: ![DrawCall]
   , dpdEntityUniformSize  :: !Int
@@ -69,7 +69,6 @@ buildDeferredGraph DeferredPassData {..} = do
                 idxBuf  = brVkBuffer (mrIndexBuffer mesh)
                 idxCnt  = mrIndexCount mesh
                 dynamicOffset = fromIntegral (entityIdx * dpdEntityUniformSize)
-                entityDescriptorSet = dpdGBufferDescriptors !! entityIdx
                 matIdx = dcMaterialIndex dc
             -- Push material index
             liftIO $ Foreign.Marshal.Array.withArray [matIdx] $ \pushPtr ->
@@ -80,7 +79,7 @@ buildDeferredGraph DeferredPassData {..} = do
                 0
                 (fromIntegral (sizeOf matIdx))
                 (castPtr pushPtr)
-            Foreign.Marshal.Array.withArray [entityDescriptorSet] $ \dsPtr ->
+            Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
               Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
                 DescriptorSet.cmdBindDescriptorSets
                   commandBuffer
@@ -105,7 +104,6 @@ buildDeferredGraph DeferredPassData {..} = do
                   idxBuf  = brVkBuffer (mrIndexBuffer mesh)
                   idxCnt  = mrIndexCount mesh
                   dynamicOffset = fromIntegral (entityIdx * dpdEntityUniformSize)
-                  entityDescriptorSet = dpdGBufferDescriptors !! entityIdx
                   matIdx = dcMaterialIndex dc
               -- Push material index for wireframe pass too
               liftIO $ Foreign.Marshal.Array.withArray [matIdx] $ \pushPtr ->
@@ -116,7 +114,7 @@ buildDeferredGraph DeferredPassData {..} = do
                   0
                   (fromIntegral (sizeOf matIdx))
                   (castPtr pushPtr)
-              Foreign.Marshal.Array.withArray [entityDescriptorSet] $ \dsPtr ->
+              Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
                 Foreign.Marshal.Array.withArray [dynamicOffset] $ \dynOffsetPtr ->
                   DescriptorSet.cmdBindDescriptorSets
                     commandBuffer

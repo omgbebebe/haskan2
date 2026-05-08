@@ -42,8 +42,8 @@ data TextureConfig = TextureConfig
 
 defaultTextureConfig :: TextureConfig
 defaultTextureConfig = TextureConfig
-  { tcTargetWidth     = Nothing
-  , tcTargetHeight    = Nothing
+  { tcTargetWidth     = Just 256
+  , tcTargetHeight    = Just 256
   , tcForcePowerOfTwo = True
   , tcGenerateMips    = False
   , tcTargetFormat    = R8G8B8A8_UNORM

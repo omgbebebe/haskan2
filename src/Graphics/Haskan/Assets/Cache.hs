@@ -15,6 +15,7 @@ import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
+import qualified Data.ByteString.Char8 as BSC
 import Data.ByteString.Builder (Builder, byteString, word32HexFixed, toLazyByteString)
 import Data.ByteString.Lazy (toStrict)
 import Data.List (foldl')
@@ -56,7 +57,7 @@ initCache root = liftIO $ do
 -- | Compute the on-disk path for a cached entry.
 cachePath :: AssetCache -> CacheKey -> FilePath -> FilePath
 cachePath (AssetCache root) (CacheKey key) subdir =
-  root </> subdir </> show key <> ".bin"
+  root </> subdir </> BSC.unpack key <> ".bin"
 
 -- | Check if a cached entry exists and is valid (non-empty).
 cacheLookup :: MonadIO m => AssetCache -> CacheKey -> FilePath -> m Bool
