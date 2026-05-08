@@ -223,13 +223,24 @@ True bindless descriptor indexing is **fundamentally different** from Texture2DA
 - Recursive `renderFrameLoop` call updated to pass `ComputeCullResources`
 
 ### Remaining M8 Work
-1. Populate entity SSBO with real transforms/AABBs each frame
-2. Populate cull data UBO with actual frustum planes each frame
-3. Add memory barrier (compute shader writes -> host read)
-4. Read back visible flags SSBO after dispatch
-5. Filter `drawList` to visible-only entities before g-buffer pass
-6. Benchmark CPU-driven vs GPU-culled draw loop
-7. Phase 2: merge meshes, generate `VkDrawIndexedIndirectCommand` in compute, single `vkCmdDrawIndexedIndirect`
+1. ~~Populate entity SSBO with real transforms/AABBs each frame~~ (done)
+2. ~~Populate cull data UBO with actual frustum planes each frame~~ (done)
+3. ~~Read back visible flags SSBO after dispatch~~ (done)
+4. ~~Filter `drawList` to visible-only entities before g-buffer pass~~ (done)
+5. Benchmark CPU-driven vs GPU-culled draw loop
+6. Phase 2: merge meshes, generate `VkDrawIndexedIndirectCommand` in compute, single `vkCmdDrawIndexedIndirect`
+
+### Fixes Applied (2026-05-08)
+- Added `BlockArguments` to `haskan2.cabal` default-extensions to resolve `liftIO $ do` parse error
+- Added missing imports: `Control.Lens ((^.))`, `Linear.V3/V4` lens accessors, `Foreign.Ptr (Ptr, castPtr)`, `Linear ((^+^), (^-^))`
+- Fixed debug NDC positions `do` block indentation (`STM.atomically` aligned with `let`)
+- Fixed `V4` element type: `(1 :: Foreign.C.CFloat)` instead of bare `1`
+- Fixed `DrawCall` field: `dcMesh` instead of non-existent `dcMeshHandle`
+- Fixed `allocaAndPeek` usage: `allocaAndPeek` already calls `throwVkResult` internally
+- Fixed `vp` matrix type: explicit `(realToFrac <$> <$>)` to get `M44 Float` for `extractFrustumPlanes`
+- **Fixed gltf-loader index truncation bug**: `meshPrimitiveIndices` was hardcoded to `Vector Word16`. ABeautifulGame's board mesh uses `UNSIGNED_INT` (5125) with 277,248 indices. Indices > 65535 were silently truncated, corrupting geometry. Changed to `Vector Word32` throughout: `Gltf.hs`, `BufferAccessor.hs`, `Decoders.hs`.
+- **Removed auto-added ground plane for glTF models**: was clashing with scene geometry
+- **Fixed autozoom**: `computeWorldSpaceBounds` reads ECS entities + transforms, computes actual world-space AABBs via `transformAABB`. `adjustCameraForScene` now sets camera target to bbox center and uses FOV-based distance: `distance = max(nearPlane + R, R / sin(FOV/2) * padding)` where R = diagonal/2. Works for tiny models (Avocado: 0.46) to normal models (ABeautifulGame: 5.81).
 
 ### Key Files Changed
 - `src/Graphics/Haskan/Vulkan/Shaders/Compute/Cull.hs` — frustum culling compute shader
@@ -248,7 +259,7 @@ True bindless descriptor indexing is **fundamentally different** from Texture2DA
 - Vulkan raw `4211000` = 1.4.312; `vulkaninfo` reports 1.4.341
 - Cold start ABeautifulGame ~12s; warm ~0.4s
 - Cache dir: `.haskan2-cache/textures/`
-- Capabilities: `RuntimeDescriptorArray`=33, `SampledImageArrayNonUniformIndexing`=65; `NonUniformEXT`=5309
+- Capabilities: `RuntimeDescriptorArray`=5302, `SampledImageArrayNonUniformIndexing`=65; `NonUniform`=5300 (not 5309)
 - `EmptyDataDeriving` required for `Image`; boot files resolve `FIR.Prim.Image` ↔ `FIR.Prim.Types` cycle
 - FIR `Base` layout = std430 (storage buffers, push constants); `Extended` layout = std140 (uniform buffers)
 - FIR struct array stride = `NextAligned(structSize, structAlignment)` under Base layout

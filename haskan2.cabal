@@ -122,6 +122,7 @@ library
     default-extensions:
                       OverloadedStrings
                       DataKinds
+                      BlockArguments
 
 executable haskan2
     if os(windows)

@@ -13,6 +13,7 @@ import Control.Concurrent.STM.TChan qualified as TChan
 import Control.Concurrent.STM.TQueue (TQueue)
 import Control.Concurrent.STM.TQueue qualified as TQueue
 import Control.Concurrent.STM.TVar (TVar)
+import Control.Lens ((^.))
 import Control.Monad (forM, forM_, replicateM, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged, runManaged, with)
@@ -34,6 +35,7 @@ import Data.Word (Word32)
 import FIR qualified
 import Foreign.C qualified
 import Foreign.Marshal.Array qualified
+import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (Storable (..), peekByteOff, pokeByteOff)
 import GHC.Generics
 import Graphics.Haskan.Camera (Camera (..))
@@ -53,9 +55,10 @@ import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
+import Graphics.Haskan.Scene.Transform qualified as Transform
 import Graphics.Haskan.Assets.Cache (initCache)
-import Graphics.Haskan.BoundingBox (BBox (..), bboxDiagonal, emptyBBox, fromPoints, mergeBBox, mergePoint)
-import Graphics.Haskan.Resources (throwVkResult)
+import Graphics.Haskan.BoundingBox (BBox (..), bboxCenter, bboxDiagonal, emptyBBox, fromPoints, mergeBBox, mergePoint)
+import Graphics.Haskan.Resources (throwVkResult, allocaAndPeek)
 import Graphics.Haskan.Utils.ObjLoader qualified as ObjLoader
 import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
@@ -91,10 +94,12 @@ import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
-import Linear (M44, V2 (..), V3 (..), V4 (..))
+import Linear (M44, V2 (..), V3 (..), V4 (..), (^+^), (^-^))
 import Linear.Matrix (identity, transpose, (!*), (!*!))
 import Linear.Projection qualified
 import Linear.Quaternion (Quaternion (..))
+import Linear.V3 (_x, _y, _z)
+import Linear.V4 (_w)
 import SDL qualified
 import System.IO.Unsafe (unsafePerformIO)
 import System.Clock (Clock (..), getTime, toNanoSecs)
@@ -163,6 +168,41 @@ data ComputeCullResources = ComputeCullResources
   , ccrCullDataMemory :: Vulkan.VkDeviceMemory
   , ccrMaxEntities :: Int
   }
+
+-- | Transform local AABB to world space by transforming all 8 corners.
+transformAABB :: M44 Float -> BBox -> (V3 Float, V3 Float)
+transformAABB worldMat (BBox (V3 minX minY minZ) (V3 maxX maxY maxZ)) =
+  let corners =
+        [ V3 minX minY minZ, V3 maxX minY minZ, V3 minX maxY minZ, V3 maxX maxY minZ
+        , V3 minX minY maxZ, V3 maxX minY maxZ, V3 minX maxY maxZ, V3 maxX maxY maxZ
+        ]
+      worldCorners = map (\(V3 x y z) -> let V4 wx wy wz _ = worldMat !* V4 x y z 1 in V3 wx wy wz) corners
+      xs = map (\(V3 x _ _) -> x) worldCorners
+      ys = map (\(V3 _ y _) -> y) worldCorners
+      zs = map (\(V3 _ _ z) -> z) worldCorners
+  in (V3 (minimum xs) (minimum ys) (minimum zs), V3 (maximum xs) (maximum ys) (maximum zs))
+
+-- | Extract 6 frustum planes from a row-major view-projection matrix.
+-- Returns planes in order: left, right, bottom, top, near, far.
+-- Plane normal points inward (towards visible volume).
+extractFrustumPlanes :: M44 Float -> [V4 Float]
+extractFrustumPlanes vp =
+  let r1 = vp ^. _x
+      r2 = vp ^. _y
+      r3 = vp ^. _z
+      r4 = vp ^. _w
+      left   = r1 ^+^ r4
+      right  = r4 ^-^ r1
+      bottom = r2 ^+^ r4
+      top    = r4 ^-^ r2
+      near   = r3 ^+^ r4
+      far    = r4 ^-^ r3
+  in [left, right, bottom, top, near, far]
+
+-- | Filter draw list using visible flags from previous frame.
+filterVisible :: [DrawCall] -> IntMap Word32 -> [DrawCall]
+filterVisible drawList visibleFlags =
+  [dc | (idx, dc) <- zip [0..] drawList, IntMap.findWithDefault 1 idx visibleFlags == 1]
 
 data EngineConfig = EngineConfig
   { targetRenderFPS :: !Integer,
@@ -400,8 +440,9 @@ renderFrameLoop ::
   STM.TVar Bool ->
   IORef FrameStats ->
   ComputeCullResources ->
+  STM.TVar (IntMap Word32) ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvVisibleFlags = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -410,6 +451,9 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
           mvpMemory = frameMvpMemories !! frameNumber
       camera <- liftIO $ STM.readTVarIO tvCamera
       drawList <- extractDrawList ecsWorld rm textureIndexMap
+      prevVisibleFlags <- liftIO $ STM.readTVarIO tvVisibleFlags
+      let filteredDrawList = filterVisible drawList prevVisibleFlags
+      logDebugIO LogRender $ "draw list: " <> showT (length drawList) <> " entities, visible: " <> showT (length filteredDrawList)
       -- Compute debug NDC positions (using transposed matrices to match GPU)
       liftIO $ do
         let camPos = realToFrac <$> Camera.cameraPosition camera
@@ -444,6 +488,28 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
             rdiProjectionMatrix = map (map realToFrac) (toListOfV4 (fmap (fmap realToFrac) projMat)),
             rdiEntities = entityDebugInfos
           }
+      -- Upload compute culling data
+      entityData <- liftIO $ forM drawList $ \dc -> do
+        let worldMat = dcWorldMatrix dc
+        let meshRes = dcMesh dc
+            (wmin, wmax) = transformAABB worldMat (mrBounds meshRes)
+        pure ComputeEntityData
+          { ceTransform = (realToFrac <$>) <$> Linear.Matrix.transpose worldMat
+          , ceAabbMin = V4 (realToFrac $ wmin ^. _x) (realToFrac $ wmin ^. _y) (realToFrac $ wmin ^. _z) 1
+          , ceAabbMax = V4 (realToFrac $ wmax ^. _x) (realToFrac $ wmax ^. _y) (realToFrac $ wmax ^. _z) (1 :: Foreign.C.CFloat)
+          , ceMaterialIndex = dcMaterialIndex dc
+          , cePad = V3 0 0 0
+          }
+      let vp = (realToFrac <$>) <$> (projectionMatrix !*! Camera.unViewMatrix (Camera.toMatrix camera)) :: M44 Float
+          planes = extractFrustumPlanes vp
+          cullData = ComputeCullData
+            { ccFrustumPlanes = map (fmap realToFrac) planes
+            , ccEntityCount = fromIntegral (length drawList)
+            , ccPad2 = V3 0 0 0
+            }
+      liftIO $ Buffer.updateStorageBuffer device ccrEntityMemory 0 entityData
+      liftIO $ Buffer.updateUniformBuffer device ccrCullDataMemory [cullData]
+      logDebugIO LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
       case drawList of
         [] -> pure (False, False)
         _ -> do
@@ -492,7 +558,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdGBufferLayout = drGBufferPipelineLayout
                         , dpdGBufferDescriptor = frameDescriptorSet
                         , dpdGBufferSampler = textureSampler
-                        , dpdDrawList = drawList
+                        , dpdDrawList = filteredDrawList
                         , dpdEntityUniformSize = entityUniformSize
                         , dpdDevice = device
                         , dpdLightingRenderPass = drLightingRenderPass
@@ -550,6 +616,20 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                       let snapshots = map drawCallToSnapshot drawList
                       snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> projectionMatrix) snapshots
                       liftIO $ insp snap
+                  -- Wait for GPU to finish and read back visible flags
+                  liftIO $ do
+                    let fence = renderFinishedFences !! (frameNumber `mod` Render.maxFramesInFlight)
+                    Foreign.Marshal.Array.withArray [fence] $ \ptr ->
+                      Vulkan.vkWaitForFences device 1 ptr Vulkan.VK_TRUE maxBound >>= throwVkResult
+                  visibleFlags <- liftIO $ do
+                    let size = fromIntegral (ccrMaxEntities * sizeOf (undefined :: Word32))
+                    memPtr <- allocaAndPeek $ \ptr ->
+                      Vulkan.vkMapMemory device ccrVisibleFlagsMemory 0 size Vulkan.VK_ZERO_FLAGS ptr
+                    flags <- Foreign.Marshal.Array.peekArray (length drawList) (castPtr memPtr :: Ptr Word32)
+                    Vulkan.vkUnmapMemory device ccrVisibleFlagsMemory
+                    pure flags
+                  liftIO $ STM.atomically $ STM.writeTVar tvVisibleFlags (IntMap.fromList $ zip [0..] $ map fromIntegral visibleFlags)
+                  logDebugIO LogRender $ "visible flags read back: " <> showT (length (filter (==1) visibleFlags)) <> " visible"
                   pure (False, False)
                 Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
                 Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
@@ -601,6 +681,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         tvWireframe
         frameStatsRef
         ccr
+        tvVisibleFlags
 
 -- | Main rendering loop.
 --
@@ -693,21 +774,11 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           pixelMap = IntMap.fromList $
             zip (map (fromIntegral . unTextureHandle) textures) textureData
 
-      -- Compute scene bounding box from all mesh vertices
-      let sceneBbox = computeSceneBounds meshes rm
+      -- Compute world-space scene bounds from ECS entities
+      sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
       logInfoIO LogGeneral $ "scene bounds: " <> showT sceneBbox
 
-      -- Add ground plane with checkerboard texture
-      let groundMesh = Mesh.groundPlaneMesh 50.0
-      groundMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
-      let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
-      checkerTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
-      groundEntity <- ECS.spawnEntity world
-      ECS.setTransform world groundEntity (Transform (V3 0 0 (-0.5)) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-      ECS.setMesh world groundEntity groundMeshHandle
-      ECS.setMaterial world groundEntity checkerTexHandle
-
-      pure (world, length meshes + 1, sceneBbox, pixelMap)
+      pure (world, length meshes, sceneBbox, pixelMap)
     else do
       -- Load OBJ model (original behavior)
       world <- ECS.createWorld
@@ -741,7 +812,11 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       ECS.setMesh world groundEntity groundMeshHandle
       ECS.setMaterial world groundEntity checkerTexHandle
 
-      pure (world, 4, objBounds, IntMap.empty)  -- 3 cubes + ground plane
+      -- Compute world-space bounds from ECS entities (includes ground plane)
+      sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
+      logInfoIO LogGeneral $ "scene bounds: " <> showT sceneBbox
+
+      pure (world, 4, sceneBbox, IntMap.empty)  -- 3 cubes + ground plane
 
   -- Adjust camera based on scene bounds
   worldState <- liftIO $ STM.readTVarIO (world gameState)
@@ -944,6 +1019,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   worldState <- liftIO $ STM.readTVarIO (world gameState)
   frameStatsRef <- liftIO $ newIORef emptyFrameStats
+  tvVisibleFlags <- liftIO $ STM.newTVarIO IntMap.empty
   let tvCamera = activeCamera worldState
       tvInspect = inspectFrame gameState
       tvInsp = inspector gameState
@@ -957,7 +1033,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
               with (createDeferredResources physicalDevice device context descriptorSetLayout [pushConstantRange] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm entityUniformSize textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvVisibleFlags
             outerLoop renderFrameLoopFinished
 
 
@@ -1128,7 +1204,26 @@ computeMeshBounds :: Mesh.Mesh -> BBox
 computeMeshBounds mesh =
   fromPoints (map (fmap realToFrac . vPos) (Mesh.vertices mesh))
 
--- | Compute bounding box from all mesh resources in the scene.
+-- | Compute world-space bounding box from all entities in the ECS world.
+computeWorldSpaceBounds :: ECS.World -> ResourceManager -> IO BBox
+computeWorldSpaceBounds world rm = do
+  entities <- ECS.allEntitiesWithMesh world
+  boundsList <- forM entities $ \eid -> do
+    mMeshHandle <- ECS.getMesh world eid
+    mTransform <- ECS.getTransform world eid
+    case (mMeshHandle, mTransform) of
+      (Just meshHandle, Just transform) -> do
+        mMeshRes <- lookupMesh rm meshHandle
+        case mMeshRes of
+          Just meshRes -> do
+            let worldMat = Transform.toMatrix transform
+                (wmin, wmax) = transformAABB worldMat (mrBounds meshRes)
+            pure $ Just $ BBox wmin wmax
+          Nothing -> pure Nothing
+      _ -> pure Nothing
+  pure $ foldl mergeBBox emptyBBox (catMaybes boundsList)
+
+-- | Compute bounding box from all mesh resources in the scene (local space).
 computeSceneBounds :: [MeshHandle] -> ResourceManager -> BBox
 computeSceneBounds meshes rm = unsafePerformIO $ do
   boundsList <- mapM (\mh -> do
@@ -1139,11 +1234,18 @@ computeSceneBounds meshes rm = unsafePerformIO $ do
     ) meshes
   pure $ foldl mergeBBox emptyBBox boundsList
 
--- | Set camera distance based on scene bounding box.
+-- | Set camera target and distance based on scene bounding box.
 adjustCameraForScene :: Camera a => BBox -> a -> a
 adjustCameraForScene bbox cam =
-  let diag = bboxDiagonal bbox
-      targetDist = diag * 1.8
-      -- Clamp to reasonable range
-      dist = max 3.0 (min 100.0 targetDist)
-  in setMaxDistance (setDistance cam (realToFrac dist)) (realToFrac (dist * 3.0))
+  let center = bboxCenter bbox
+      diag = bboxDiagonal bbox
+      fov = pi / 12  -- 15 degrees vertical FOV
+      padding = 1.5
+      r = diag / 2
+      -- Distance to fit bounding sphere in frustum
+      targetDist = max (0.1 + r) (r / sin (fov / 2) * padding)
+      -- Allow zooming out to 5x the initial distance
+      maxDist = targetDist * 5.0
+      cam' = setTarget cam (fmap realToFrac center)
+      cam'' = setMaxDistance cam' (realToFrac maxDist)
+  in setDistance cam'' (realToFrac targetDist)
