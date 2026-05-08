@@ -1,6 +1,6 @@
 [submodule "3rdparty/fir"]
 	path = 3rdparty/fir
-	url = https://gitlab.com/sheaf/fir.git
+	url = git@github.com:omgbebebe/haskan2-fir.git
 [submodule "3rdparty/gltf"]
 	path = 3rdparty/gltf
 	url = https://gitlab.com/dpwiz/gltf.git
