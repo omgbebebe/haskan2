@@ -2,6 +2,7 @@ module Graphics.Haskan.Vulkan.Buffer where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
+import Data.Bits ((.|.))
 import Foreign qualified
 import Foreign.Marshal qualified
 import Foreign.Storable (Storable, sizeOf)
@@ -115,6 +116,22 @@ managedIndexBuffer pdev dev indices = do
   memory <- managedBufferMemory pdev dev memoryRequirements
   bindBufferMemory dev buffer memory indices
   pure buffer
+
+managedStorageBuffer ::
+  (MonadManaged m, Storable a) =>
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  [a] ->
+  Vulkan.VkBufferUsageBitmask Vulkan.FlagMask ->
+  m (Vulkan.VkBuffer, Vulkan.VkDeviceMemory)
+managedStorageBuffer pdev dev values extraUsage = do
+  (buffer, memoryRequirements) <- managedBuffer dev values (Vulkan.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT .|. extraUsage)
+  memory <- managedBufferMemory pdev dev memoryRequirements
+  bindBufferMemory dev buffer memory values
+  pure (buffer, memory)
+
+updateStorageBuffer :: (MonadIO m, Storable a) => Vulkan.VkDevice -> Vulkan.VkDeviceMemory -> Int -> [a] -> m ()
+updateStorageBuffer = updateUniformBufferRegion
 
 managedUniformBuffer ::
   (MonadManaged m, Storable a) =>

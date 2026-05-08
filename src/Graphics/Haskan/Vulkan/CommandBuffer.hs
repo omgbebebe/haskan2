@@ -1,6 +1,7 @@
 module Graphics.Haskan.Vulkan.CommandBuffer where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Word (Word32)
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -83,6 +84,9 @@ withCommandBuffer' commandBuffer flags action =
 
 cmdDraw :: MonadIO m => Vulkan.VkCommandBuffer -> Int -> m ()
 cmdDraw commandBuffer indexCount = liftIO $ Vulkan.vkCmdDrawIndexed commandBuffer (fromIntegral indexCount) 1 0 0 0
+
+cmdDispatch :: MonadIO m => Vulkan.VkCommandBuffer -> Word32 -> Word32 -> Word32 -> m ()
+cmdDispatch commandBuffer gx gy gz = liftIO $ Vulkan.vkCmdDispatch commandBuffer gx gy gz
 
 copyBufferToImageLayer ::
   MonadIO m =>

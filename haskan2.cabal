@@ -45,6 +45,7 @@ library
                        Graphics.Haskan.Vulkan.Buffer
                        Graphics.Haskan.Vulkan.CommandBuffer
                        Graphics.Haskan.Vulkan.CommandPool
+                       Graphics.Haskan.Vulkan.ComputePipeline
                        Graphics.Haskan.Vulkan.DeferredResources
                        Graphics.Haskan.Vulkan.DescriptorSet
                        Graphics.Haskan.Vulkan.DescriptorSetLayout
@@ -63,6 +64,7 @@ library
                        Graphics.Haskan.Vulkan.Render
                        Graphics.Haskan.Vulkan.ShaderModule
                        Graphics.Haskan.Vulkan.Shaders.Texture
+                       Graphics.Haskan.Vulkan.Shaders.Compute.Test
                        Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer
                        Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting
                        Graphics.Haskan.Vulkan.Shaders.Wireframe
