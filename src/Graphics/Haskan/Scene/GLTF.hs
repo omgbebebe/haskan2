@@ -74,6 +74,8 @@ import Text.GLTF.Loader.Gltf
   , gltfTextures
   , pbrBaseColorTexture
   , textureSourceId
+  , materialOcclusionTexture
+  , materialOcclusionStrength
   )
 import Text.GLTF.Loader.Errors (Errors)
 
@@ -154,12 +156,13 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
   let materialTextures = buildMaterialTextures gltf textures
       materialMRTextures = buildMaterialMetallicRoughnessTextures gltf textures
       materialNormalTextures = buildMaterialNormalTextures gltf textures
+      materialOcclusionTextures = buildMaterialOcclusionTextures gltf textures
 
   -- Load meshes and create mesh resources
   meshes <- loadMeshes rm pdev dev gltf
 
   -- Build scene graph from nodes
-  rootEntity <- buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures
+  rootEntity <- buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures
 
   pure GLTFImportResult
     { girWorld = world
@@ -270,6 +273,23 @@ buildMaterialNormalTextures gltf textures =
       texturesList = Vector.toList (GLTFTypes.gltfTextures gltf)
       resolveMaterial mat = do
         texInfo <- GLTFTypes.materialNormalTexture mat
+        let texIdx = GLTFTypes.textureId texInfo
+        gltfTex <- if texIdx >= 0 && texIdx < length texturesList
+                     then Just (texturesList !! texIdx)
+                     else Nothing
+        imgIdx <- textureSourceId gltfTex
+        if imgIdx >= 0 && imgIdx < length textures
+          then Just (textures !! imgIdx)
+          else Nothing
+   in map resolveMaterial materials
+
+-- | Build a mapping from material index to its occlusion texture handle.
+buildMaterialOcclusionTextures :: GLTFTypes.Gltf -> [TextureHandle] -> [Maybe TextureHandle]
+buildMaterialOcclusionTextures gltf textures =
+  let materials = Vector.toList (gltfMaterials gltf)
+      texturesList = Vector.toList (GLTFTypes.gltfTextures gltf)
+      resolveMaterial mat = do
+        texInfo <- GLTFTypes.materialOcclusionTexture mat
         let texIdx = GLTFTypes.textureId texInfo
         gltfTex <- if texIdx >= 0 && texIdx < length texturesList
                      then Just (texturesList !! texIdx)
@@ -392,8 +412,9 @@ buildSceneGraph ::
   [Maybe TextureHandle] -> -- material index -> base color texture handle
   [Maybe TextureHandle] -> -- material index -> metallic-roughness texture handle
   [Maybe TextureHandle] -> -- material index -> normal texture handle
+  [Maybe TextureHandle] -> -- material index -> occlusion texture handle
   m EntityId
-buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures = do
+buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures = do
   let nodes = gltfNodes gltf
       -- Find root nodes (nodes that are not children of any other node)
       allChildren = concatMap (Vector.toList . nodeChildren) (Vector.toList nodes)
@@ -405,7 +426,7 @@ buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNo
 
   -- Process each root node
   for_ rootIndices $ \nodeIdx -> do
-    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures nodeIdx sceneRoot
+    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures nodeIdx sceneRoot
     pure ()
 
   pure sceneRoot
@@ -419,10 +440,11 @@ processNode ::
   [Maybe TextureHandle] -> -- material index -> base color texture handle
   [Maybe TextureHandle] -> -- material index -> metallic-roughness texture handle
   [Maybe TextureHandle] -> -- material index -> normal texture handle
+  [Maybe TextureHandle] -> -- material index -> occlusion texture handle
   Int -> -- node index
   EntityId -> -- parent entity
   m EntityId
-processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures nodeIdx parentEntity = do
+processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures nodeIdx parentEntity = do
   let nodes = gltfNodes gltf
       node = nodes Vector.! nodeIdx
 
@@ -483,6 +505,20 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
                         logInfoIO LogGeneral $ "entity " <> showT entity <> " normal texture assigned"
                         ECS.setNormalTexture world entity texHandle
                       Nothing -> pure ()
+                  -- Set occlusion texture and strength if present
+                  when (matIdx >= 0 && matIdx < length materialOcclusionTextures) $ do
+                    case materialOcclusionTextures !! matIdx of
+                      Just texHandle -> do
+                        logInfoIO LogGeneral $ "entity " <> showT entity <> " occlusion texture assigned"
+                        ECS.setOcclusionTexture world entity texHandle
+                      Nothing -> pure ()
+                  let materialsList = Vector.toList (gltfMaterials gltf)
+                  when (matIdx >= 0 && matIdx < length materialsList) $ do
+                    let mat = materialsList !! matIdx
+                        occStrength = GLTFTypes.materialOcclusionStrength mat
+                    when (occStrength /= 1.0) $ do
+                      logInfoIO LogGeneral $ "entity " <> showT entity <> " occlusion strength=" <> showT occStrength
+                    ECS.setOcclusionStrength world entity occStrength
                 Nothing -> do
                   logInfoIO LogGeneral $ "entity " <> showT entity <> " -> no material"
             [] -> pure ()
@@ -490,7 +526,7 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
 
   -- Process children
   for_ (Vector.toList (nodeChildren node)) $ \childIdx -> do
-    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures childIdx entity
+    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures childIdx entity
     pure ()
 
   pure entity

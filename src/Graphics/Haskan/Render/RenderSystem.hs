@@ -34,6 +34,8 @@ data DrawCall = DrawCall
   , dcRoughnessFactor :: !Float
   , dcMetallicRoughnessIndex :: !Word32
   , dcNormalIndex :: !Word32
+  , dcOcclusionIndex :: !Word32
+  , dcOcclusionStrength :: !Float
   }
 
 extractDrawList ::
@@ -51,10 +53,12 @@ extractDrawList world rm texIndexMap = liftIO $ do
   roughnessFactors <- STM.readTVarIO (wRoughnessFactors world)
   mrTextures <- STM.readTVarIO (wMetallicRoughnessTextures world)
   normalTextures <- STM.readTVarIO (wNormalTextures world)
+  occlusionTextures <- STM.readTVarIO (wOcclusionTextures world)
+  occlusionStrengths <- STM.readTVarIO (wOcclusionStrengths world)
 
   let worldMatrices = computeWorldMatrices transforms parents
 
-  fmap catMaybes $ mapM (resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures worldMatrices texIndexMap) (IntMap.toList meshes)
+  fmap catMaybes $ mapM (resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures occlusionTextures occlusionStrengths worldMatrices texIndexMap) (IntMap.toList meshes)
 
 computeWorldMatrices ::
   IntMap Transform ->
@@ -79,11 +83,13 @@ resolveEntity ::
   IntMap Float ->
   IntMap TextureHandle ->
   IntMap TextureHandle ->
+  IntMap TextureHandle ->
+  IntMap Float ->
   IntMap (M44 Float) ->
   IntMap Word32 ->
   (Int, MeshHandle) ->
   IO (Maybe DrawCall)
-resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures worldMatrices texIndexMap (eidKey, meshHandle) = do
+resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures occlusionTextures occlusionStrengths worldMatrices texIndexMap (eidKey, meshHandle) = do
   mMeshRes <- lookupMesh rm meshHandle
   let mTransform = IntMap.lookup eidKey transforms
       mMaterialHandle = IntMap.lookup eidKey materials
@@ -92,6 +98,8 @@ resolveEntity rm transforms materials metallicFactors roughnessFactors mrTexture
       mRoughness = IntMap.lookup eidKey roughnessFactors
       mMRTexture = IntMap.lookup eidKey mrTextures
       mNormalTexture = IntMap.lookup eidKey normalTextures
+      mOcclusionTexture = IntMap.lookup eidKey occlusionTextures
+      mOcclusionStrength = IntMap.lookup eidKey occlusionStrengths
 
   mMatRes <- case mMaterialHandle of
     Just h -> lookupTexture rm h
@@ -103,8 +111,10 @@ resolveEntity rm transforms materials metallicFactors roughnessFactors mrTexture
       matIdx = lookUpIndex mMaterialHandle
       mrIdx = lookUpIndex mMRTexture
       normalIdx = lookUpIndex mNormalTexture
+      occlusionIdx = lookUpIndex mOcclusionTexture
       metallic = fromMaybe 0.0 mMetallic
       roughness = fromMaybe 0.5 mRoughness
+      occlusionStrength = fromMaybe 1.0 mOcclusionStrength
 
   case (mMeshRes, mTransform, mWorldMatrix) of
     (Just mesh, Just trans, Just wm) -> pure $ Just DrawCall
@@ -117,5 +127,7 @@ resolveEntity rm transforms materials metallicFactors roughnessFactors mrTexture
       , dcRoughnessFactor = roughness
       , dcMetallicRoughnessIndex = mrIdx
       , dcNormalIndex = normalIdx
+      , dcOcclusionIndex = occlusionIdx
+      , dcOcclusionStrength = occlusionStrength
       }
     _ -> pure Nothing

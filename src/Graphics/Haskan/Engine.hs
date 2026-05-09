@@ -169,10 +169,12 @@ data ComputeEntityData = ComputeEntityData
   , ceMetallicFactor :: Foreign.C.CFloat
   , ceRoughnessFactor :: Foreign.C.CFloat
   , ceNormalIndex :: Word32
+  , ceOcclusionIndex :: Word32
+  , ceOcclusionStrength :: Foreign.C.CFloat
   } deriving (Show)
 
 instance Storable ComputeEntityData where
-  sizeOf _ = 128
+  sizeOf _ = 144
   alignment _ = 16
   peek ptr = ComputeEntityData
     <$> peekByteOff ptr 0
@@ -186,7 +188,9 @@ instance Storable ComputeEntityData where
     <*> peekByteOff ptr 116
     <*> peekByteOff ptr 120
     <*> peekByteOff ptr 124
-  poke ptr (ComputeEntityData t amin amax mat fi vo ic mri met rou ni) = do
+    <*> peekByteOff ptr 128
+    <*> peekByteOff ptr 132
+  poke ptr (ComputeEntityData t amin amax mat fi vo ic mri met rou ni oi os) = do
     pokeByteOff ptr 0 t
     pokeByteOff ptr 64 amin
     pokeByteOff ptr 80 amax
@@ -198,6 +202,8 @@ instance Storable ComputeEntityData where
     pokeByteOff ptr 116 met
     pokeByteOff ptr 120 rou
     pokeByteOff ptr 124 ni
+    pokeByteOff ptr 128 oi
+    pokeByteOff ptr 132 os
 
 -- | Compute culling uniform data (matches shader CullData, Extended/std140 layout).
 data ComputeCullData = ComputeCullData
@@ -602,6 +608,8 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
           , ceMetallicFactor = realToFrac (dcMetallicFactor dc)
           , ceRoughnessFactor = realToFrac (dcRoughnessFactor dc)
           , ceNormalIndex = dcNormalIndex dc
+          , ceOcclusionIndex = dcOcclusionIndex dc
+          , ceOcclusionStrength = realToFrac (dcOcclusionStrength dc)
           }
       let vp = (realToFrac <$>) <$> (projectionMatrix !*! Camera.unViewMatrix (Camera.toMatrix camera)) :: M44 Float
           planes = extractFrustumPlanes vp
@@ -1010,6 +1018,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         , ceMetallicFactor = 0.0
         , ceRoughnessFactor = 0.5
         , ceNormalIndex = 0
+        , ceOcclusionIndex = 0
+        , ceOcclusionStrength = 1.0
         }
       dummyCullData = ComputeCullData
         { ccFrustumPlanes = replicate 6 (V4 0 0 0 0)

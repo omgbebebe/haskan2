@@ -302,7 +302,7 @@ True bindless descriptor indexing is **fundamentally different** from Texture2DA
 - **DrawCall extension:** `dcMetallicFactor`, `dcRoughnessFactor`, `dcMetallicRoughnessIndex`, `dcNormalIndex`
 - **SSBO wiring:** `Engine.hs` uploads all PBR fields to entity SSBO
 - **glTF loader extension:**
-  - `gltf-loader-0.3.0.0` extended with `pbrMetallicRoughnessTexture` and `normalTexture` fields in `PbrMetallicRoughness` and `Material` types
+  - `3rdparty/gltf-loader` extended with `pbrMetallicRoughnessTexture` and `normalTexture` fields in `PbrMetallicRoughness` and `Material` types
   - `GLTF.hs` builds material mappings for all three texture types (baseColor, metallicRoughness, normal)
   - Scene graph assigns PBR scalar factors and texture handles to entities
 
@@ -315,5 +315,5 @@ True bindless descriptor indexing is **fundamentally different** from Texture2DA
 - `src/Graphics/Haskan/Render/RenderSystem.hs` — PBR fields in DrawCall
 - `src/Graphics/Haskan/Engine.hs` — SSBO upload with PBR data
 - `src/Graphics/Haskan/Scene/GLTF.hs` — PBR texture loading and assignment
-- `gltf-loader-0.3.0.0/src/Text/GLTF/Loader/Gltf.hs` — MR/normal texture fields
-- `gltf-loader-0.3.0.0/src/Text/GLTF/Loader/Internal/Adapter.hs` — adapter for new fields
+- `3rdparty/gltf-loader/src/Text/GLTF/Loader/Gltf.hs` — MR/normal/occlusion texture fields
+- `3rdparty/gltf-loader/src/Text/GLTF/Loader/Internal/Adapter.hs` — adapter for new PBR fields

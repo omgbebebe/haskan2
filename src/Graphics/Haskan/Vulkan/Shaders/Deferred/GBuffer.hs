@@ -168,6 +168,16 @@ fragment = shader do
       worldNz = if useNormalTexture then ndx * tz + ndy * bnz + ndz * nz else nz
       worldNLen = sqrt (worldNx * worldNx + worldNy * worldNy + worldNz * worldNz + 0.0001)
 
+  -- Read occlusion data from entity SSBO
+  occlusionIdx <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32 :.: Name "occlusionIndex") entityIdx
+  occlusionStrength <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32 :.: Name "occlusionStrength") entityIdx
+
+  -- Sample occlusion texture if available (red channel = occlusion)
+  let useOcclusionTexture = occlusionIdx /= 0
+  occlusionSample <- use @(BindlessTexel "tex") occlusionIdx NilOps uv
+  let aoRaw = view @(Index 0) occlusionSample
+      ao = if useOcclusionTexture then 1.0 - occlusionStrength * (1.0 - aoRaw) else 1.0
+
   put @"out_position" (Vec4 (view @(Index 0) pos) (view @(Index 1) pos) (view @(Index 2) pos) metallicFinal)
   put @"out_normal" (Vec4 (worldNx / worldNLen) (worldNy / worldNLen) (worldNz / worldNLen) roughnessFinal)
-  put @"out_albedo" (Vec4 (view @(Index 0) texColor) (view @(Index 1) texColor) (view @(Index 2) texColor) 1)
+  put @"out_albedo" (Vec4 (view @(Index 0) texColor) (view @(Index 1) texColor) (view @(Index 2) texColor) ao)

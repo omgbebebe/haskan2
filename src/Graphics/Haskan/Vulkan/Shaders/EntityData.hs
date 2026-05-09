@@ -18,6 +18,8 @@ type EntityData = Struct
    , "metallicFactor" ':-> Float
    , "roughnessFactor" ':-> Float
    , "normalIndex"   ':-> Word32
+   , "occlusionIndex" ':-> Word32
+   , "occlusionStrength" ':-> Float
    ]
 
 type EntitiesData = Struct

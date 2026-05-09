@@ -23,6 +23,10 @@ module Graphics.Haskan.Scene.ECS
   , getMetallicRoughnessTexture
   , setNormalTexture
   , getNormalTexture
+  , setOcclusionTexture
+  , getOcclusionTexture
+  , setOcclusionStrength
+  , getOcclusionStrength
   , setParent
   , getParent
   , hasParent
@@ -57,12 +61,16 @@ data World = World
   , wRoughnessFactors :: !(TVar (IntMap Float))
   , wMetallicRoughnessTextures :: !(TVar (IntMap TextureHandle))
   , wNormalTextures :: !(TVar (IntMap TextureHandle))
+  , wOcclusionTextures :: !(TVar (IntMap TextureHandle))
+  , wOcclusionStrengths :: !(TVar (IntMap Float))
   }
 
 createWorld :: MonadIO m => m World
 createWorld = liftIO $ do
   World
     <$> STM.newTVarIO 0
+    <*> STM.newTVarIO IntMap.empty
+    <*> STM.newTVarIO IntMap.empty
     <*> STM.newTVarIO IntMap.empty
     <*> STM.newTVarIO IntMap.empty
     <*> STM.newTVarIO IntMap.empty
@@ -89,6 +97,8 @@ despawnEntity eid World {..} = liftIO $ STM.atomically $ do
   STM.modifyTVar' wRoughnessFactors (IntMap.delete k)
   STM.modifyTVar' wMetallicRoughnessTextures (IntMap.delete k)
   STM.modifyTVar' wNormalTextures (IntMap.delete k)
+  STM.modifyTVar' wOcclusionTextures (IntMap.delete k)
+  STM.modifyTVar' wOcclusionStrengths (IntMap.delete k)
 
 setTransform :: MonadIO m => World -> EntityId -> Transform -> m ()
 setTransform World {..} eid t =
@@ -154,6 +164,22 @@ setNormalTexture World {..} eid h =
 getNormalTexture :: MonadIO m => World -> EntityId -> m (Maybe TextureHandle)
 getNormalTexture World {..} eid =
   liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wNormalTextures
+
+setOcclusionTexture :: MonadIO m => World -> EntityId -> TextureHandle -> m ()
+setOcclusionTexture World {..} eid h =
+  liftIO $ STM.atomically $ STM.modifyTVar' wOcclusionTextures (IntMap.insert (entityKey eid) h)
+
+getOcclusionTexture :: MonadIO m => World -> EntityId -> m (Maybe TextureHandle)
+getOcclusionTexture World {..} eid =
+  liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wOcclusionTextures
+
+setOcclusionStrength :: MonadIO m => World -> EntityId -> Float -> m ()
+setOcclusionStrength World {..} eid v =
+  liftIO $ STM.atomically $ STM.modifyTVar' wOcclusionStrengths (IntMap.insert (entityKey eid) v)
+
+getOcclusionStrength :: MonadIO m => World -> EntityId -> m (Maybe Float)
+getOcclusionStrength World {..} eid =
+  liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wOcclusionStrengths
 
 setParent :: MonadIO m => World -> EntityId -> EntityId -> m ()
 setParent World {..} child parent =
