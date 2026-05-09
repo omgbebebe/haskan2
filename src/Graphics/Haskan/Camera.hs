@@ -133,17 +133,16 @@ orbitalModify cam@OrbitalCamera {..} mod =
     (MoveY n) -> cam {target = target + (V3 0.0 0.0 n)}
     (MoveForward n) ->
       let fwd = orbitalCameraForward cam
-          -- Project forward to world XY plane (Z is up), keep Z unchanged
-          V3 fx fy _ = fwd
-          fwdXY = normalize (V3 fx fy 0)
-      in cam {target = target + (fwdXY ^* n)}
+          V3 fx _ fz = fwd
+          fwdXZ = normalize (V3 fx 0 fz)
+      in cam {target = target + (fwdXZ ^* n)}
     (MoveRight n) ->
       let fwd = orbitalCameraForward cam
-          V3 fx fy _ = fwd
-          fwdXY = normalize (V3 fx fy 0)
-          -- Right vector is forward rotated -90° around Z in XY plane
-          rightXY = V3 fy (-fx) 0
-      in cam {target = target + (rightXY ^* n)}
+          V3 fx _ fz = fwd
+          fwdXZ = normalize (V3 fx 0 fz)
+          -- Right vector = cross(Y-up, forward) in XZ plane
+          rightXZ = V3 fz 0 (-fx)
+      in cam {target = target + (rightXZ ^* n)}
     (Rotate (V3 yaw pitch roll)) ->
       -- Apply rotation deltas as quaternion rotations (avoids gimbal lock)
       let yawQ = axisAngle (V3 0 1 0) yaw

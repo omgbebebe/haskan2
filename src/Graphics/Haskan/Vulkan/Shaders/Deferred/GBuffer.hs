@@ -190,6 +190,7 @@ fragment = shader do
       emissiveB = if useEmissiveTexture then view @(Index 2) emissiveSample else 0.0
 
   put @"out_position" (Vec4 (view @(Index 0) pos) (view @(Index 1) pos) (view @(Index 2) pos) metallicFinal)
-  put @"out_normal" (Vec4 (worldNx / worldNLen) (worldNy / worldNLen) (worldNz / worldNLen) roughnessFinal)
+  -- Encode normal from [-1,1] to [0,1] for UNORM storage
+  put @"out_normal" (Vec4 (worldNx / worldNLen * 0.5 + 0.5) (worldNy / worldNLen * 0.5 + 0.5) (worldNz / worldNLen * 0.5 + 0.5) roughnessFinal)
   put @"out_albedo" (Vec4 (view @(Index 0) texColor) (view @(Index 1) texColor) (view @(Index 2) texColor) ao)
   put @"out_emissive" (Vec4 emissiveR emissiveG emissiveB 1.0)

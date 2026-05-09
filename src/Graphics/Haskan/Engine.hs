@@ -108,6 +108,7 @@ import Linear.V4 (_w)
 import SDL qualified
 import System.IO.Unsafe (unsafePerformIO)
 import System.Clock (Clock (..), getTime, toNanoSecs)
+import System.Directory (doesFileExist)
 
 toListOfV4 :: V4 (V4 a) -> [[a]]
 toListOfV4 (V4 r1 r2 r3 r4) = [toList r1, toList r2, toList r3, toList r4]
@@ -319,7 +320,8 @@ data EngineConfig = EngineConfig
     targetInputFPS :: !Integer,
     title :: !Text,
     debugSocketPath :: !(Maybe FilePath),
-    timeoutSeconds :: !(Maybe Integer)
+    timeoutSeconds :: !(Maybe Integer),
+    uvCheckMode :: !(Maybe String)
   }
   deriving (Show)
 
@@ -450,7 +452,7 @@ mainLoop meshName EngineConfig {..} = do
   tvInspectFrame <- liftIO $ STM.newTVarIO False
   tvInspector <- liftIO $ STM.newTVarIO (Just (defaultInspector "snapshots"))
   tvRenderDebugState <- liftIO $ STM.newTVarIO Nothing
-  tvWireframeEnabled <- liftIO $ STM.newTVarIO True
+  tvWireframeEnabled <- liftIO $ STM.newTVarIO False
   tvDebugMode <- liftIO $ STM.newTVarIO 0
   tvPendingScreenshot <- liftIO $ STM.newTVarIO False
   tvPendingAllStages <- liftIO $ STM.newTVarIO False
@@ -503,7 +505,7 @@ mainLoop meshName EngineConfig {..} = do
   Window.showWindow window
 
   renderLoopFinished <- liftIO $ newEmptyMVar
-  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished controlChannel meshName
+  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished controlChannel meshName uvCheckMode
 
   stateUpdateLoopFinished <- liftIO $ newEmptyMVar
   liftIO $ forkIOWithHandler "stateUpdateLoop" stateUpdateLoopFinished $ stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished inputBuffer debugCmdQueue controlChannel
@@ -648,6 +650,10 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         _ -> do
           let view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
               projection = Linear.Matrix.transpose projectionMatrix
+          -- Log camera position periodically for manual positioning
+          when (frameNumber `mod` 60 == 0) $ do
+            let cp = Camera.cameraPosition camera
+            logInfoIO LogGeneral $ "camera: pos=" <> showT cp <> " dist=" <> showT (Camera.cameraDistance camera) <> " az=" <> showT (Camera.cameraAzimuth camera) <> " el=" <> showT (Camera.cameraElevation camera)
           -- Update static view+proj UBO (no per-entity dynamic offsets)
           liftIO $ Buffer.updateUniformBufferRegion device mvpMemory 0 [view, projection]
 
@@ -853,8 +859,9 @@ renderLoop ::
   MVar () ->
   TChan ControlMessage ->
   String ->
+  Maybe String ->
   m ()
-renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore controlChannel meshName = do
+renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore controlChannel meshName uvCheckMode = do
   control <- liftIO $ STM.atomically $ TChan.dupTChan controlChannel
 
   -- Create resource manager for mesh and texture
@@ -935,7 +942,36 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       isStressTest = meshName == "stress_test"
 
   -- Create ECS World and load scene
-  (ecsWorld, numEntities, sceneBounds, texturePixelMap) <- if isStressTest
+  (ecsWorld, numEntities, sceneBounds, texturePixelMap) <- case uvCheckMode of
+    Just mode -> do
+      -- UV check mode: render primitive with UV checker texture
+      world <- ECS.createWorld
+      let testMesh = case mode of
+            "cube" -> Mesh.unitCube
+            "sphere" -> Mesh.uvSphere 32 32 0.5
+            "plane" -> Mesh.uvPlane 0.5
+            _ -> Mesh.unitCube
+      meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices testMesh) (Mesh.indices testMesh)
+      -- Try to load UV checker texture, fallback to generated checkerboard
+      let uvCheckerPath = "data/textures/uv_checker.png"
+      uvTexHandle <- liftIO (doesFileExist uvCheckerPath) >>= \exists ->
+        if exists
+          then do
+            (pixelData, tw, th) <- Texture.readImageFromFile uvCheckerPath
+            Texture.createTextureFromData rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
+          else do
+            let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
+            Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
+      entity <- ECS.spawnEntity world
+      ECS.setTransform world entity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setMesh world entity meshHandle
+      ECS.setMaterial world entity uvTexHandle
+      ECS.setMetallicFactor world entity 0.0
+      ECS.setRoughnessFactor world entity 0.5
+      let sceneBbox = BBox (V3 (-1) (-1) (-1)) (V3 1 1 1)
+      pure (world, 1, sceneBbox, IntMap.empty)
+
+    Nothing -> if isStressTest
     then do
       -- Stress test: 10,000 cube entities
       world <- ECS.createWorld
@@ -1031,8 +1067,12 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   let adjustedCam = if isStressTest
         then setDistance (setTarget currentCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) (150.0 :: Foreign.C.CFloat)
         else adjustCameraForScene sceneBounds currentCam
-  liftIO $ STM.atomically $ STM.writeTVar tvCamera adjustedCam
-  logInfoIO LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance adjustedCam)
+      -- Default camera for UV check mode: slightly elevated, looking at origin
+      inspectCam = case uvCheckMode of
+        Just _ -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.0) 0.78 (realToFrac (pi / 6 :: Double))
+        Nothing -> setAngles (setDistance adjustedCam 3.1) 2.3520544 (-0.39384797)
+  liftIO $ STM.atomically $ STM.writeTVar tvCamera inspectCam
+  logInfoIO LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance inspectCam)
 
   -- Ensure wireframe is off for stress test (performance)
   when isStressTest $ liftIO $ STM.atomically $ STM.writeTVar (wireframeEnabled gameState) False

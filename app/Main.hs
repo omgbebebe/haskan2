@@ -19,6 +19,9 @@ data CliOpts = CliOpts
   , optTitle :: !Text
   , optDebugSocket :: !(Maybe FilePath)
   , optLogFile :: !(Maybe FilePath)
+  , optUVCheckCube :: !Bool
+  , optUVCheckSphere :: !Bool
+  , optUVCheckPlane :: !Bool
   }
 
 cliParser :: Parser CliOpts
@@ -27,6 +30,7 @@ cliParser =
     <$> argument str
       ( metavar "MODEL"
      <> help "Model file name (e.g. unit_cube.obj)"
+     <> value ""
       )
     <*> optional (option auto
       ( long "timeout"
@@ -52,6 +56,18 @@ cliParser =
      <> metavar "PATH"
      <> help "Write logs to file in addition to stdout"
       ))
+    <*> switch
+      ( long "uv-check-cube"
+     <> help "Render UV-checker cube"
+      )
+    <*> switch
+      ( long "uv-check-sphere"
+     <> help "Render UV-checker sphere"
+      )
+    <*> switch
+      ( long "uv-check-plane"
+     <> help "Render UV-checker plane"
+      )
 
 opts :: ParserInfo CliOpts
 opts = info (cliParser <**> helper)
@@ -75,3 +91,6 @@ main = do
     (optModelName cli)
     (optTimeout cli)
     (optDebugSocket cli)
+    (optUVCheckCube cli)
+    (optUVCheckSphere cli)
+    (optUVCheckPlane cli)

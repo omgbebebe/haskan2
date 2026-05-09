@@ -23,6 +23,7 @@ effectful-2.6.1.0/
 .haskan2-cache/
 data/debug/
 data/hdri/
+data/textures/
 
 # Docs
 .opencode/INPUT_SUBSYSTEM_ANALISIS.md

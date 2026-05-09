@@ -6,8 +6,8 @@ import Graphics.Haskan.Engine (EngineConfig (..))
 import Graphics.Haskan.Engine qualified as Engine
 import Graphics.Haskan.Logger (logInfoIO, LogCategory(..))
 
-runHaskan :: Text -> String -> Maybe Integer -> Maybe FilePath -> IO ()
-runHaskan title meshName mTimeout mDebugSocket = do
+runHaskan :: Text -> String -> Maybe Integer -> Maybe FilePath -> Bool -> Bool -> Bool -> IO ()
+runHaskan title meshName mTimeout mDebugSocket uvCheckCube uvCheckSphere uvCheckPlane = do
   logInfoIO LogGeneral "Initializing Haskan Engine"
   logInfoIO LogGeneral "Starting Engine main loop"
   Engine.mainLoop
@@ -19,6 +19,10 @@ runHaskan title meshName mTimeout mDebugSocket = do
         targetInputFPS = 60,
         title = title,
         debugSocketPath = mDebugSocket,
-        timeoutSeconds = mTimeout
+        timeoutSeconds = mTimeout,
+        uvCheckMode = if uvCheckCube then Just "cube"
+                       else if uvCheckSphere then Just "sphere"
+                       else if uvCheckPlane then Just "plane"
+                       else Nothing
       }
   logInfoIO LogGeneral "Shutting down Haskan"

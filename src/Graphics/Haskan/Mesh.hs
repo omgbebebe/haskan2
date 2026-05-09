@@ -81,9 +81,63 @@ unitCube =
         ]
    in Mesh {vertices = verts, indices = idxs}
 
--- subdivisions: number of quads along each axis (total quads = subdivisions^2)
--- size: half-extent of the plane
-groundPlaneMeshGrid :: Int -> Foreign.C.CFloat -> Mesh
+-- | Create a UV-mapped sphere centered at origin.
+-- latSegments: number of latitude segments (excluding poles)
+-- lonSegments: number of longitude segments
+-- radius: sphere radius
+uvSphere :: Int -> Int -> Foreign.C.CFloat -> Mesh
+uvSphere latSegments lonSegments radius =
+  let r = radius
+      latCount = latSegments
+      lonCount = lonSegments
+      -- Helper to compute vertex at given lat/lon index
+      mkVert latIdx lonIdx =
+        let theta = pi * fromIntegral latIdx / fromIntegral latCount
+            phi = 2 * pi * fromIntegral lonIdx / fromIntegral lonCount
+            x = realToFrac (r * sin theta * cos phi) :: Foreign.C.CFloat
+            y = realToFrac (r * cos theta) :: Foreign.C.CFloat
+            z = realToFrac (r * sin theta * sin phi) :: Foreign.C.CFloat
+            nx = realToFrac (sin theta * cos phi) :: Foreign.C.CFloat
+            ny = realToFrac (cos theta) :: Foreign.C.CFloat
+            nz = realToFrac (sin theta * sin phi) :: Foreign.C.CFloat
+            u = realToFrac (fromIntegral lonIdx / fromIntegral lonCount) :: Foreign.C.CFloat
+            v = realToFrac (1.0 - fromIntegral latIdx / fromIntegral latCount) :: Foreign.C.CFloat
+            tx = realToFrac (-sin phi) :: Foreign.C.CFloat
+            ty = realToFrac (0 :: Float) :: Foreign.C.CFloat
+            tz = realToFrac (cos phi) :: Foreign.C.CFloat
+        in Vertex (V3 x y z) (V2 u v) (V3 nx ny nz) (V4 tx ty tz 1) (V3 1 1 1)
+      -- Generate vertices: latCount+1 rows, lonCount+1 columns
+      verts = [mkVert latIdx lonIdx | latIdx <- [0..latCount], lonIdx <- [0..lonCount]]
+      -- Generate indices for quads (two triangles per quad)
+      idxs = concat
+        [ let base = latIdx * (lonCount + 1) + lonIdx
+              nextBase = (latIdx + 1) * (lonCount + 1) + lonIdx
+           in [ fromIntegral base
+              , fromIntegral nextBase
+              , fromIntegral (nextBase + 1)
+              , fromIntegral base
+              , fromIntegral (nextBase + 1)
+              , fromIntegral (base + 1)
+              ]
+        | latIdx <- [0..latCount-1]
+        , lonIdx <- [0..lonCount-1]
+        ]
+  in Mesh {vertices = verts, indices = idxs}
+
+-- | Create a UV-mapped plane in the XZ plane (Y=0) with UVs 0..1.
+-- size: half-extent
+uvPlane :: Foreign.C.CFloat -> Mesh
+uvPlane size =
+  let s = size
+      t = V4 1 0 0 1
+      v0 = Vertex (V3 (-s) 0 (-s)) (V2 0 0) (V3 0 1 0) t (V3 1 1 1)
+      v1 = Vertex (V3 s 0 (-s)) (V2 1 0) (V3 0 1 0) t (V3 1 1 1)
+      v2 = Vertex (V3 s 0 s) (V2 1 1) (V3 0 1 0) t (V3 1 1 1)
+      v3 = Vertex (V3 (-s) 0 s) (V2 0 1) (V3 0 1 0) t (V3 1 1 1)
+   in Mesh
+        { vertices = [v0, v1, v2, v3],
+          indices = [0, 1, 2, 0, 2, 3]
+        }
 groundPlaneMeshGrid subdivisions size =
   let n = subdivisions
       s = size
