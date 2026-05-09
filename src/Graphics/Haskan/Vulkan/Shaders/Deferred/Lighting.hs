@@ -53,11 +53,15 @@ type FragmentDefs =
        ':-> Texture2D
               '[Binding 1, DescriptorSet 0]
               (RGBA8 UNorm),
-     "gbuf_albedo"
-       ':-> Texture2D
-              '[Binding 2, DescriptorSet 0]
-              (RGBA8 UNorm),
-      "out_colour" ':-> Output '[Location 0] (V 4 Float),
+      "gbuf_albedo"
+        ':-> Texture2D
+               '[Binding 2, DescriptorSet 0]
+               (RGBA8 UNorm),
+      "gbuf_emissive"
+        ':-> Texture2D
+               '[Binding 3, DescriptorSet 0]
+               (RGBA8 UNorm),
+       "out_colour" ':-> Output '[Location 0] (V 4 Float),
       "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
     ]
 
@@ -68,6 +72,7 @@ fragment = shader do
   posSample <- use @(ImageTexel "gbuf_position") NilOps uv
   normSample <- use @(ImageTexel "gbuf_normal") NilOps uv
   albSample <- use @(ImageTexel "gbuf_albedo") NilOps uv
+  emissiveSample <- use @(ImageTexel "gbuf_emissive") NilOps uv
 
   let posX = view @(Index 0) posSample
       posY = view @(Index 1) posSample
@@ -81,6 +86,9 @@ fragment = shader do
       metallic = view @(Index 3) posSample
       roughness = view @(Index 3) normSample
       ao = view @(Index 3) albSample
+      emissiveR = view @(Index 0) emissiveSample
+      emissiveG = view @(Index 1) emissiveSample
+      emissiveB = view @(Index 2) emissiveSample
 
       -- Normalize normal
       normLen = sqrt (normX * normX + normY * normY + normZ * normZ + 0.0001)
@@ -162,10 +170,10 @@ fragment = shader do
       lity = brdfy * nDotL
       litz = brdfz * nDotL
 
-      -- Ambient + AO
-      ambx = albR * 0.03 * ao
-      amby = albG * 0.03 * ao
-      ambz = albB * 0.03 * ao
+      -- Ambient + AO + Emissive
+      ambx = albR * 0.03 * ao + emissiveR
+      amby = albG * 0.03 * ao + emissiveG
+      ambz = albB * 0.03 * ao + emissiveB
 
       colx = ambx + litx
       coly = amby + lity

@@ -287,6 +287,7 @@ loaderMaterial = Material
     materialAlphaMode = Opaque,
     materialDoubleSided = True,
     materialEmissiveFactor = V3 1.0 2.0 3.0,
+    materialEmissiveTexture = Nothing,
     materialName = Just "Material",
     materialPbrMetallicRoughness = Just loaderPbrMetallicRoughness,
     materialNormalTexture = Nothing,

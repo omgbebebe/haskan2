@@ -171,6 +171,7 @@ data ComputeEntityData = ComputeEntityData
   , ceNormalIndex :: Word32
   , ceOcclusionIndex :: Word32
   , ceOcclusionStrength :: Foreign.C.CFloat
+  , ceEmissiveIndex :: Word32
   } deriving (Show)
 
 instance Storable ComputeEntityData where
@@ -190,7 +191,8 @@ instance Storable ComputeEntityData where
     <*> peekByteOff ptr 124
     <*> peekByteOff ptr 128
     <*> peekByteOff ptr 132
-  poke ptr (ComputeEntityData t amin amax mat fi vo ic mri met rou ni oi os) = do
+    <*> peekByteOff ptr 136
+  poke ptr (ComputeEntityData t amin amax mat fi vo ic mri met rou ni oi os ei) = do
     pokeByteOff ptr 0 t
     pokeByteOff ptr 64 amin
     pokeByteOff ptr 80 amax
@@ -204,6 +206,7 @@ instance Storable ComputeEntityData where
     pokeByteOff ptr 124 ni
     pokeByteOff ptr 128 oi
     pokeByteOff ptr 132 os
+    pokeByteOff ptr 136 ei
 
 -- | Compute culling uniform data (matches shader CullData, Extended/std140 layout).
 data ComputeCullData = ComputeCullData
@@ -610,6 +613,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
           , ceNormalIndex = dcNormalIndex dc
           , ceOcclusionIndex = dcOcclusionIndex dc
           , ceOcclusionStrength = realToFrac (dcOcclusionStrength dc)
+          , ceEmissiveIndex = dcEmissiveIndex dc
           }
       let vp = (realToFrac <$>) <$> (projectionMatrix !*! Camera.unViewMatrix (Camera.toMatrix camera)) :: M44 Float
           planes = extractFrustumPlanes vp
@@ -1020,6 +1024,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         , ceNormalIndex = 0
         , ceOcclusionIndex = 0
         , ceOcclusionStrength = 1.0
+        , ceEmissiveIndex = 0
         }
       dummyCullData = ComputeCullData
         { ccFrustumPlanes = replicate 6 (V4 0 0 0 0)

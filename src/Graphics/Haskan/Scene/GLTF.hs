@@ -76,6 +76,7 @@ import Text.GLTF.Loader.Gltf
   , textureSourceId
   , materialOcclusionTexture
   , materialOcclusionStrength
+  , materialEmissiveTexture
   )
 import Text.GLTF.Loader.Errors (Errors)
 
@@ -157,12 +158,13 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
       materialMRTextures = buildMaterialMetallicRoughnessTextures gltf textures
       materialNormalTextures = buildMaterialNormalTextures gltf textures
       materialOcclusionTextures = buildMaterialOcclusionTextures gltf textures
+      materialEmissiveTextures = buildMaterialEmissiveTextures gltf textures
 
   -- Load meshes and create mesh resources
   meshes <- loadMeshes rm pdev dev gltf
 
   -- Build scene graph from nodes
-  rootEntity <- buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures
+  rootEntity <- buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures
 
   pure GLTFImportResult
     { girWorld = world
@@ -300,6 +302,23 @@ buildMaterialOcclusionTextures gltf textures =
           else Nothing
    in map resolveMaterial materials
 
+-- | Build a mapping from material index to its emissive texture handle.
+buildMaterialEmissiveTextures :: GLTFTypes.Gltf -> [TextureHandle] -> [Maybe TextureHandle]
+buildMaterialEmissiveTextures gltf textures =
+  let materials = Vector.toList (gltfMaterials gltf)
+      texturesList = Vector.toList (GLTFTypes.gltfTextures gltf)
+      resolveMaterial mat = do
+        texInfo <- GLTFTypes.materialEmissiveTexture mat
+        let texIdx = GLTFTypes.textureId texInfo
+        gltfTex <- if texIdx >= 0 && texIdx < length texturesList
+                     then Just (texturesList !! texIdx)
+                     else Nothing
+        imgIdx <- textureSourceId gltfTex
+        if imgIdx >= 0 && imgIdx < length textures
+          then Just (textures !! imgIdx)
+          else Nothing
+   in map resolveMaterial materials
+
 -- | Load all meshes from glTF into engine Mesh resources.
 -- Meshes are loaded concurrently to utilize multiple CPU cores.
 loadMeshes ::
@@ -413,8 +432,9 @@ buildSceneGraph ::
   [Maybe TextureHandle] -> -- material index -> metallic-roughness texture handle
   [Maybe TextureHandle] -> -- material index -> normal texture handle
   [Maybe TextureHandle] -> -- material index -> occlusion texture handle
+  [Maybe TextureHandle] -> -- material index -> emissive texture handle
   m EntityId
-buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures = do
+buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures = do
   let nodes = gltfNodes gltf
       -- Find root nodes (nodes that are not children of any other node)
       allChildren = concatMap (Vector.toList . nodeChildren) (Vector.toList nodes)
@@ -426,7 +446,7 @@ buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNo
 
   -- Process each root node
   for_ rootIndices $ \nodeIdx -> do
-    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures nodeIdx sceneRoot
+    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures nodeIdx sceneRoot
     pure ()
 
   pure sceneRoot
@@ -441,10 +461,11 @@ processNode ::
   [Maybe TextureHandle] -> -- material index -> metallic-roughness texture handle
   [Maybe TextureHandle] -> -- material index -> normal texture handle
   [Maybe TextureHandle] -> -- material index -> occlusion texture handle
+  [Maybe TextureHandle] -> -- material index -> emissive texture handle
   Int -> -- node index
   EntityId -> -- parent entity
   m EntityId
-processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures nodeIdx parentEntity = do
+processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures nodeIdx parentEntity = do
   let nodes = gltfNodes gltf
       node = nodes Vector.! nodeIdx
 
@@ -519,6 +540,13 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
                     when (occStrength /= 1.0) $ do
                       logInfoIO LogGeneral $ "entity " <> showT entity <> " occlusion strength=" <> showT occStrength
                     ECS.setOcclusionStrength world entity occStrength
+                  -- Set emissive texture if present
+                  when (matIdx >= 0 && matIdx < length materialEmissiveTextures) $ do
+                    case materialEmissiveTextures !! matIdx of
+                      Just texHandle -> do
+                        logInfoIO LogGeneral $ "entity " <> showT entity <> " emissive texture assigned"
+                        ECS.setEmissiveTexture world entity texHandle
+                      Nothing -> pure ()
                 Nothing -> do
                   logInfoIO LogGeneral $ "entity " <> showT entity <> " -> no material"
             [] -> pure ()
@@ -526,7 +554,7 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
 
   -- Process children
   for_ (Vector.toList (nodeChildren node)) $ \childIdx -> do
-    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures childIdx entity
+    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures childIdx entity
     pure ()
 
   pure entity

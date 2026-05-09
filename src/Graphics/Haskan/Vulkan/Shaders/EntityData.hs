@@ -20,6 +20,7 @@ type EntityData = Struct
    , "normalIndex"   ':-> Word32
    , "occlusionIndex" ':-> Word32
    , "occlusionStrength" ':-> Float
+   , "emissiveIndex" ':-> Word32
    ]
 
 type EntitiesData = Struct

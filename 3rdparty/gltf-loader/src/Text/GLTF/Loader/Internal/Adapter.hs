@@ -132,6 +132,7 @@ adaptMaterial Material.Material{..} = Material
     materialAlphaMode = adaptAlphaMode alphaMode,
     materialDoubleSided = doubleSided,
     materialEmissiveFactor = toV3 emissiveFactor,
+    materialEmissiveTexture = adaptTextureInfo <$> emissiveTexture,
     materialName = name,
     materialPbrMetallicRoughness = adaptPbrMetallicRoughness <$> pbrMetallicRoughness,
     materialNormalTexture = adaptTextureInfo <$> normalTexture,

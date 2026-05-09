@@ -92,10 +92,11 @@ type FragmentDefs =
       "in_materialIndex" ':-> Input '[Location 4, Flat] Word32,
       "in_entityIndex"   ':-> Input '[Location 5, Flat] Word32,
       "in_tangent"       ':-> Input '[Location 6] (V 4 Float),
-      "out_position" ':-> Output '[Location 0] (V 4 Float),
-      "out_normal"   ':-> Output '[Location 1] (V 4 Float),
-      "out_albedo"   ':-> Output '[Location 2] (V 4 Float),
-       "tex"
+       "out_position" ':-> Output '[Location 0] (V 4 Float),
+       "out_normal"   ':-> Output '[Location 1] (V 4 Float),
+       "out_albedo"   ':-> Output '[Location 2] (V 4 Float),
+       "out_emissive" ':-> Output '[Location 3] (V 4 Float),
+        "tex"
          ':-> BindlessTexture2D
                 '[Binding 1, DescriptorSet 0]
                 (RGBA8 UNorm),
@@ -178,6 +179,17 @@ fragment = shader do
   let aoRaw = view @(Index 0) occlusionSample
       ao = if useOcclusionTexture then 1.0 - occlusionStrength * (1.0 - aoRaw) else 1.0
 
+  -- Read emissive index from entity SSBO
+  emissiveIdx <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32 :.: Name "emissiveIndex") entityIdx
+
+  -- Sample emissive texture if available
+  let useEmissiveTexture = emissiveIdx /= 0
+  emissiveSample <- use @(BindlessTexel "tex") emissiveIdx NilOps uv
+  let emissiveR = if useEmissiveTexture then view @(Index 0) emissiveSample else 0.0
+      emissiveG = if useEmissiveTexture then view @(Index 1) emissiveSample else 0.0
+      emissiveB = if useEmissiveTexture then view @(Index 2) emissiveSample else 0.0
+
   put @"out_position" (Vec4 (view @(Index 0) pos) (view @(Index 1) pos) (view @(Index 2) pos) metallicFinal)
   put @"out_normal" (Vec4 (worldNx / worldNLen) (worldNy / worldNLen) (worldNz / worldNLen) roughnessFinal)
   put @"out_albedo" (Vec4 (view @(Index 0) texColor) (view @(Index 1) texColor) (view @(Index 2) texColor) ao)
+  put @"out_emissive" (Vec4 emissiveR emissiveG emissiveB 1.0)

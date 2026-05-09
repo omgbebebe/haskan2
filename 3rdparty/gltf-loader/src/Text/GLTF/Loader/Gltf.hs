@@ -39,7 +39,12 @@ module Text.GLTF.Loader.Gltf
     _materialAlphaMode,
     _materialDoubleSided,
     _materialEmissiveFactor,
+    _materialEmissiveTexture,
     _materialName,
+    _materialNormalScale,
+    _materialNormalTexture,
+    _materialOcclusionStrength,
+    _materialOcclusionTexture,
     _materialPbrMetallicRoughness,
     -- ** Mesh Lenses
     _meshPrimitives,
@@ -127,6 +132,8 @@ data Material = Material
     materialDoubleSided :: Bool,
     -- | The factors for the emissive color of the material.
     materialEmissiveFactor :: V3 Float,
+    -- | The emissive map texture.
+    materialEmissiveTexture :: Maybe TextureInfo,
     -- | The user-defined name of this object.
     materialName :: Maybe Text,
     -- | Metallic roughness Physically Based Rendering (PBR) methodology parameter values.
@@ -370,6 +377,12 @@ _materialName :: Lens' Material (Maybe Text)
 _materialName = lens
   materialName
   (\material name -> material { materialName = name })
+
+-- | The emissive map texture.
+_materialEmissiveTexture :: Lens' Material (Maybe TextureInfo)
+_materialEmissiveTexture = lens
+  materialEmissiveTexture
+  (\material emissiveTex -> material { materialEmissiveTexture = emissiveTex })
 
 -- | Metallic roughness Physically Based Rendering (PBR) methodology parameter values.
 _materialPbrMetallicRoughness :: Lens' Material (Maybe PbrMetallicRoughness)

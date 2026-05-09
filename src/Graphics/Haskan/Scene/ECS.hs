@@ -27,6 +27,8 @@ module Graphics.Haskan.Scene.ECS
   , getOcclusionTexture
   , setOcclusionStrength
   , getOcclusionStrength
+  , setEmissiveTexture
+  , getEmissiveTexture
   , setParent
   , getParent
   , hasParent
@@ -63,12 +65,14 @@ data World = World
   , wNormalTextures :: !(TVar (IntMap TextureHandle))
   , wOcclusionTextures :: !(TVar (IntMap TextureHandle))
   , wOcclusionStrengths :: !(TVar (IntMap Float))
+  , wEmissiveTextures :: !(TVar (IntMap TextureHandle))
   }
 
 createWorld :: MonadIO m => m World
 createWorld = liftIO $ do
   World
     <$> STM.newTVarIO 0
+    <*> STM.newTVarIO IntMap.empty
     <*> STM.newTVarIO IntMap.empty
     <*> STM.newTVarIO IntMap.empty
     <*> STM.newTVarIO IntMap.empty
@@ -99,6 +103,7 @@ despawnEntity eid World {..} = liftIO $ STM.atomically $ do
   STM.modifyTVar' wNormalTextures (IntMap.delete k)
   STM.modifyTVar' wOcclusionTextures (IntMap.delete k)
   STM.modifyTVar' wOcclusionStrengths (IntMap.delete k)
+  STM.modifyTVar' wEmissiveTextures (IntMap.delete k)
 
 setTransform :: MonadIO m => World -> EntityId -> Transform -> m ()
 setTransform World {..} eid t =
@@ -180,6 +185,14 @@ setOcclusionStrength World {..} eid v =
 getOcclusionStrength :: MonadIO m => World -> EntityId -> m (Maybe Float)
 getOcclusionStrength World {..} eid =
   liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wOcclusionStrengths
+
+setEmissiveTexture :: MonadIO m => World -> EntityId -> TextureHandle -> m ()
+setEmissiveTexture World {..} eid h =
+  liftIO $ STM.atomically $ STM.modifyTVar' wEmissiveTextures (IntMap.insert (entityKey eid) h)
+
+getEmissiveTexture :: MonadIO m => World -> EntityId -> m (Maybe TextureHandle)
+getEmissiveTexture World {..} eid =
+  liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wEmissiveTextures
 
 setParent :: MonadIO m => World -> EntityId -> EntityId -> m ()
 setParent World {..} child parent =
