@@ -16,6 +16,7 @@ data Vertex = Vertex
   { vPos :: V3 Foreign.C.CFloat,
     vTexUV :: V2 Foreign.C.CFloat,
     vNorm :: V3 Foreign.C.CFloat,
+    vTangent :: V4 Foreign.C.CFloat,
     vCol :: V3 Foreign.C.CFloat
   }
   deriving (Eq, Show)
@@ -27,20 +28,24 @@ instance Storable Vertex where
     let vPosSz = sizeOf (undefined :: V3 Foreign.C.CFloat)
         vTexUVSz = sizeOf (undefined :: V2 Foreign.C.CFloat)
         vNormSz = sizeOf (undefined :: V3 Foreign.C.CFloat)
+        vTangentSz = sizeOf (undefined :: V4 Foreign.C.CFloat)
      in Vertex
           <$> peekByteOff ptr 0
           <*> peekByteOff ptr vPosSz
           <*> peekByteOff ptr (vPosSz + vTexUVSz)
           <*> peekByteOff ptr (vPosSz + vTexUVSz + vNormSz)
+          <*> peekByteOff ptr (vPosSz + vTexUVSz + vNormSz + vTangentSz)
   poke ptr Vertex {..} =
     let vPosSz = sizeOf (undefined :: V3 Foreign.C.CFloat)
         vTexUVSz = sizeOf (undefined :: V2 Foreign.C.CFloat)
         vNormSz = sizeOf (undefined :: V3 Foreign.C.CFloat)
+        vTangentSz = sizeOf (undefined :: V4 Foreign.C.CFloat)
      in do
           pokeByteOff ptr 0 vPos
           pokeByteOff ptr (vPosSz) vTexUV
           pokeByteOff ptr (vPosSz + vTexUVSz) vNorm
-          pokeByteOff ptr (vPosSz + vTexUVSz + vNormSz) vCol
+          pokeByteOff ptr (vPosSz + vTexUVSz + vNormSz) vTangent
+          pokeByteOff ptr (vPosSz + vTexUVSz + vNormSz + vTangentSz) vCol
 
 vertexFormat :: VertexFormat Vertex
 vertexFormat =
@@ -48,10 +53,11 @@ vertexFormat =
     >$< v3_s32float
       >*< v2_s32float
       >*< v3_s32float
+      >*< v4_s32float
       >*< v3_s32float
   where
     vertex Vertex {..} =
-      (vPos, (vTexUV, (vNorm, vCol)))
+      (vPos, (vTexUV, (vNorm, (vTangent, vCol))))
 
 (>*<) :: Divisible f => f a -> f b -> f (a, b)
 (>*<) = divided

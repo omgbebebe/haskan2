@@ -40,6 +40,13 @@ v4_word8 =
         ([Component {format = Vulkan.VK_FORMAT_R8G8B8A8_UINT}])
     )
 
+v4_s32float :: VertexFormat (V4 Foreign.C.CFloat)
+v4_s32float =
+  VertexFormat
+    ( Const
+        ([Component {format = Vulkan.VK_FORMAT_R32G32B32A32_SFLOAT}])
+    )
+
 strideSize :: VertexFormat v -> Int
 strideSize (VertexFormat (Const components)) =
   sum (map componentSize components)

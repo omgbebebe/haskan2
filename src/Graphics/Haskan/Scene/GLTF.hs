@@ -33,6 +33,7 @@ import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform)
 import Graphics.Haskan.Assets.Cache (AssetCache)
 import Graphics.Haskan.Assets.TexturePreprocessor (TextureConfig, defaultTextureConfig)
 import Graphics.Haskan.Vertex (Vertex (..))
+import Graphics.Haskan.Utils.TangentSpace (computeTangents)
 
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.Resources (ResourceManager, MeshHandle, TextureHandle (..), allocHandle, rmNextId)
@@ -280,6 +281,7 @@ buildMaterialNormalTextures gltf textures =
    in map resolveMaterial materials
 
 -- | Load all meshes from glTF into engine Mesh resources.
+-- Meshes are loaded concurrently to utilize multiple CPU cores.
 loadMeshes ::
   (MonadIO m) =>
   ResourceManager ->
@@ -288,8 +290,16 @@ loadMeshes ::
   GLTFTypes.Gltf ->
   m [MeshHandle]
 loadMeshes rm pdev dev gltf = do
-  let meshes = gltfMeshes gltf
-  mapM (loadMesh rm pdev dev) (Vector.toList meshes)
+  let meshes = Vector.toList (gltfMeshes gltf)
+      numMeshes = length meshes
+  logInfoIO LogGeneral $ "loading " <> showT numMeshes <> " meshes concurrently"
+  
+  liftIO $ do
+    mvars <- mapM (\_ -> newEmptyMVar) meshes
+    for_ (zip meshes mvars) $ \(mesh, mvar) -> forkIO $ do
+      result <- loadMesh rm pdev dev mesh
+      putMVar mvar result
+    mapM takeMVar mvars
 
 -- | Load a single glTF mesh (all primitives merged into one engine Mesh).
 loadMesh ::
@@ -324,27 +334,47 @@ primitiveToVertices prim =
   let positions = Vector.toList (meshPrimitivePositions prim)
       normals = Vector.toList (meshPrimitiveNormals prim)
       texCoords = Vector.toList (meshPrimitiveTexCoords prim)
+      idxs = Vector.toList (meshPrimitiveIndices prim)
       -- Default values if attributes are missing
       defaultNormal = V3 0 0 1
       defaultUV = V2 0 0
       defaultColor = V3 1 1 1
+      defaultTangent = V4 1 0 0 1
+      -- Flip V coordinate to match Vulkan convention (glTF V=0 is bottom-left, Vulkan V=0 is top-left)
+      flipV (V2 u v) = V2 u v
+      
+      -- Compute tangents from geometry
+      n = length positions
+      paddedNormals = take n (normals ++ repeat defaultNormal)
+      paddedUVs = take n (map flipV texCoords ++ repeat defaultUV)
+      tangents = if length idxs >= 3
+        then Vector.toList $ computeTangents
+               (Vector.fromList positions)
+               (Vector.fromList paddedNormals)
+               (Vector.fromList paddedUVs)
+               (Vector.fromList idxs)
+        else replicate n defaultTangent
+        
       -- Zip them together
       nCount = length normals
       uvCount = length texCoords
-      -- Flip V coordinate to match Vulkan convention (glTF V=0 is bottom-left, Vulkan V=0 is top-left)
-      flipV (V2 u v) = V2 u v
-   in zipWith3
-        (\pos norm uv ->
+   in zipWith4
+        (\pos norm uv tangent ->
           Vertex
             { vPos = v3ToCFloat pos
             , vNorm = if nCount > 0 then v3ToCFloat norm else v3ToCFloat defaultNormal
-            , vTexUV = if uvCount > 0 then v2ToCFloat (flipV uv) else v2ToCFloat defaultUV
+            , vTexUV = if uvCount > 0 then v2ToCFloat uv else v2ToCFloat defaultUV
+            , vTangent = v4ToCFloat tangent
             , vCol = v3ToCFloat defaultColor
             }
         )
         positions
         (normals ++ repeat defaultNormal)
-        (texCoords ++ repeat defaultUV)
+        (map flipV texCoords ++ repeat defaultUV)
+        tangents
+  where
+    zipWith4 f (a:as) (b:bs) (c:cs) (d:ds) = f a b c d : zipWith4 f as bs cs ds
+    zipWith4 _ _ _ _ _ = []
 
 -- | Convert a glTF primitive to engine indices.
 primitiveToIndices :: GLTFTypes.MeshPrimitive -> [Word32]
@@ -483,6 +513,9 @@ nodeToTransform node =
 
 v3ToCFloat :: V3 Float -> V3 Foreign.C.CFloat
 v3ToCFloat (V3 x y z) = V3 (realToFrac x) (realToFrac y) (realToFrac z)
+
+v4ToCFloat :: V4 Float -> V4 Foreign.C.CFloat
+v4ToCFloat (V4 x y z w) = V4 (realToFrac x) (realToFrac y) (realToFrac z) (realToFrac w)
 
 v2ToCFloat :: V2 Float -> V2 Foreign.C.CFloat
 v2ToCFloat (V2 x y) = V2 (realToFrac x) (realToFrac y)
