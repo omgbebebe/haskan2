@@ -56,7 +56,7 @@ createDescriptorSetLayout dev = do
           ( set @"binding" 2
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
               &* set @"descriptorCount" 1
-              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_VERTEX_BIT
+              &* set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
               &* set @"pImmutableSamplers" Vulkan.VK_NULL
           )
       -- Binding flags for binding 1: partially bound (allows unused descriptors in array)
@@ -98,7 +98,7 @@ createLightingDescriptorSetLayout dev = do
               &* set @"pImmutableSamplers" Vulkan.VK_NULL
               &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
           )
-      bindings = map mkSamplerBinding [0, 1, 2]
+      bindings = map mkSamplerBinding [0, 1, 2, 3]
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO

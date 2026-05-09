@@ -134,13 +134,14 @@ createGBufferRenderPass dev colorFormat depthFormat =
         [ mkColorAttachment colorFormat  -- position
         , mkColorAttachment colorFormat  -- normal
         , mkColorAttachment colorFormat  -- albedo
+        , mkColorAttachment colorFormat  -- material (metallic, roughness, AO)
         ]
       colorAttachmentRefs =
         [ Vulkan.createVk
             ( set @"attachment" i
                 &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
             )
-        | i <- [0..2]
+        | i <- [0..3]
         ]
       depthAttachment =
         Vulkan.createVk
@@ -155,13 +156,13 @@ createGBufferRenderPass dev colorFormat depthFormat =
           )
       depthAttachmentRef =
         Vulkan.createVk
-          ( set @"attachment" 3
+          ( set @"attachment" 4
               &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
           )
       subpass =
         Vulkan.createVk
           ( set @"pipelineBindPoint" Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-              &* set @"colorAttachmentCount" 3
+              &* set @"colorAttachmentCount" 4
               &* setListRef @"pColorAttachments" colorAttachmentRefs
               &* set @"inputAttachmentCount" 0
               &* setListRef @"pInputAttachments" []
@@ -191,7 +192,7 @@ createGBufferRenderPass dev colorFormat depthFormat =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
               &* set @"pNext" Vulkan.VK_NULL
-              &* set @"attachmentCount" 4
+              &* set @"attachmentCount" 5
               &* setListRef @"pAttachments" (colorAttachments ++ [depthAttachment])
               &* set @"subpassCount" 1
               &* setListRef @"pSubpasses" [subpass]
@@ -316,11 +317,13 @@ withGBufferRenderPass commandBuffer renderPass framebuffer extent action =
   let posClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.0 &* setAt @"float32" @2 0.0 &* setAt @"float32" @3 0.0)
       normClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.0 &* setAt @"float32" @2 0.0 &* setAt @"float32" @3 0.0)
       albClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.0 &* setAt @"float32" @2 0.0 &* setAt @"float32" @3 0.0)
+      matClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.5 &* setAt @"float32" @2 1.0 &* setAt @"float32" @3 1.0)
       depthClear = Vulkan.createVk (set @"depth" 1 &* set @"stencil" 0)
       clearValues =
         [ Vulkan.createVk (set @"color" posClear)
         , Vulkan.createVk (set @"color" normClear)
         , Vulkan.createVk (set @"color" albClear)
+        , Vulkan.createVk (set @"color" matClear)
         , Vulkan.createVk (set @"depthStencil" depthClear)
         ]
    in withRenderPass commandBuffer renderPass framebuffer extent clearValues action

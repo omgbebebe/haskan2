@@ -14,7 +14,10 @@ type EntityData = Struct
    , "firstIndex"    ':-> Word32
    , "vertexOffset"  ':-> Int32
    , "indexCount"    ':-> Word32
-   , "_pad"          ':-> Word32
+   , "metallicRoughnessIndex" ':-> Word32
+   , "metallicFactor" ':-> Float
+   , "roughnessFactor" ':-> Float
+   , "normalIndex"   ':-> Word32
    ]
 
 type EntitiesData = Struct

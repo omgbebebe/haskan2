@@ -15,6 +15,14 @@ module Graphics.Haskan.Scene.ECS
   , setMaterial
   , getMaterial
   , hasMaterial
+  , setMetallicFactor
+  , getMetallicFactor
+  , setRoughnessFactor
+  , getRoughnessFactor
+  , setMetallicRoughnessTexture
+  , getMetallicRoughnessTexture
+  , setNormalTexture
+  , getNormalTexture
   , setParent
   , getParent
   , hasParent
@@ -45,12 +53,20 @@ data World = World
   , wMeshes :: !(TVar (IntMap MeshHandle))
   , wMaterials :: !(TVar (IntMap TextureHandle))
   , wParents :: !(TVar (IntMap EntityId))
+  , wMetallicFactors :: !(TVar (IntMap Float))
+  , wRoughnessFactors :: !(TVar (IntMap Float))
+  , wMetallicRoughnessTextures :: !(TVar (IntMap TextureHandle))
+  , wNormalTextures :: !(TVar (IntMap TextureHandle))
   }
 
 createWorld :: MonadIO m => m World
 createWorld = liftIO $ do
   World
     <$> STM.newTVarIO 0
+    <*> STM.newTVarIO IntMap.empty
+    <*> STM.newTVarIO IntMap.empty
+    <*> STM.newTVarIO IntMap.empty
+    <*> STM.newTVarIO IntMap.empty
     <*> STM.newTVarIO IntMap.empty
     <*> STM.newTVarIO IntMap.empty
     <*> STM.newTVarIO IntMap.empty
@@ -69,6 +85,10 @@ despawnEntity eid World {..} = liftIO $ STM.atomically $ do
   STM.modifyTVar' wMeshes (IntMap.delete k)
   STM.modifyTVar' wMaterials (IntMap.delete k)
   STM.modifyTVar' wParents (IntMap.delete k)
+  STM.modifyTVar' wMetallicFactors (IntMap.delete k)
+  STM.modifyTVar' wRoughnessFactors (IntMap.delete k)
+  STM.modifyTVar' wMetallicRoughnessTextures (IntMap.delete k)
+  STM.modifyTVar' wNormalTextures (IntMap.delete k)
 
 setTransform :: MonadIO m => World -> EntityId -> Transform -> m ()
 setTransform World {..} eid t =
@@ -102,6 +122,38 @@ getMaterial World {..} eid =
 
 hasMaterial :: MonadIO m => World -> EntityId -> m Bool
 hasMaterial world eid = maybe False (const True) <$> getMaterial world eid
+
+setMetallicFactor :: MonadIO m => World -> EntityId -> Float -> m ()
+setMetallicFactor World {..} eid v =
+  liftIO $ STM.atomically $ STM.modifyTVar' wMetallicFactors (IntMap.insert (entityKey eid) v)
+
+getMetallicFactor :: MonadIO m => World -> EntityId -> m (Maybe Float)
+getMetallicFactor World {..} eid =
+  liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wMetallicFactors
+
+setRoughnessFactor :: MonadIO m => World -> EntityId -> Float -> m ()
+setRoughnessFactor World {..} eid v =
+  liftIO $ STM.atomically $ STM.modifyTVar' wRoughnessFactors (IntMap.insert (entityKey eid) v)
+
+getRoughnessFactor :: MonadIO m => World -> EntityId -> m (Maybe Float)
+getRoughnessFactor World {..} eid =
+  liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wRoughnessFactors
+
+setMetallicRoughnessTexture :: MonadIO m => World -> EntityId -> TextureHandle -> m ()
+setMetallicRoughnessTexture World {..} eid h =
+  liftIO $ STM.atomically $ STM.modifyTVar' wMetallicRoughnessTextures (IntMap.insert (entityKey eid) h)
+
+getMetallicRoughnessTexture :: MonadIO m => World -> EntityId -> m (Maybe TextureHandle)
+getMetallicRoughnessTexture World {..} eid =
+  liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wMetallicRoughnessTextures
+
+setNormalTexture :: MonadIO m => World -> EntityId -> TextureHandle -> m ()
+setNormalTexture World {..} eid h =
+  liftIO $ STM.atomically $ STM.modifyTVar' wNormalTextures (IntMap.insert (entityKey eid) h)
+
+getNormalTexture :: MonadIO m => World -> EntityId -> m (Maybe TextureHandle)
+getNormalTexture World {..} eid =
+  liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wNormalTextures
 
 setParent :: MonadIO m => World -> EntityId -> EntityId -> m ()
 setParent World {..} child parent =

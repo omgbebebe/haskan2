@@ -8,7 +8,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Word (Word32)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import Linear.Matrix (M44, (!*!))
 import Linear.Matrix qualified as Matrix
 
@@ -30,6 +30,10 @@ data DrawCall = DrawCall
   , dcWorldMatrix :: !(M44 Float)
   , dcMaterial :: !(Maybe TextureResource)
   , dcMaterialIndex :: !Word32
+  , dcMetallicFactor :: !Float
+  , dcRoughnessFactor :: !Float
+  , dcMetallicRoughnessIndex :: !Word32
+  , dcNormalIndex :: !Word32
   }
 
 extractDrawList ::
@@ -43,10 +47,14 @@ extractDrawList world rm texIndexMap = liftIO $ do
   transforms <- STM.readTVarIO (wTransforms world)
   parents <- STM.readTVarIO (wParents world)
   materials <- STM.readTVarIO (wMaterials world)
+  metallicFactors <- STM.readTVarIO (wMetallicFactors world)
+  roughnessFactors <- STM.readTVarIO (wRoughnessFactors world)
+  mrTextures <- STM.readTVarIO (wMetallicRoughnessTextures world)
+  normalTextures <- STM.readTVarIO (wNormalTextures world)
 
   let worldMatrices = computeWorldMatrices transforms parents
 
-  fmap catMaybes $ mapM (resolveEntity rm transforms materials worldMatrices texIndexMap) (IntMap.toList meshes)
+  fmap catMaybes $ mapM (resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures worldMatrices texIndexMap) (IntMap.toList meshes)
 
 computeWorldMatrices ::
   IntMap Transform ->
@@ -67,23 +75,36 @@ resolveEntity ::
   ResourceManager ->
   IntMap Transform ->
   IntMap TextureHandle ->
+  IntMap Float ->
+  IntMap Float ->
+  IntMap TextureHandle ->
+  IntMap TextureHandle ->
   IntMap (M44 Float) ->
   IntMap Word32 ->
   (Int, MeshHandle) ->
   IO (Maybe DrawCall)
-resolveEntity rm transforms materials worldMatrices texIndexMap (eidKey, meshHandle) = do
+resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures worldMatrices texIndexMap (eidKey, meshHandle) = do
   mMeshRes <- lookupMesh rm meshHandle
   let mTransform = IntMap.lookup eidKey transforms
       mMaterialHandle = IntMap.lookup eidKey materials
       mWorldMatrix = IntMap.lookup eidKey worldMatrices
+      mMetallic = IntMap.lookup eidKey metallicFactors
+      mRoughness = IntMap.lookup eidKey roughnessFactors
+      mMRTexture = IntMap.lookup eidKey mrTextures
+      mNormalTexture = IntMap.lookup eidKey normalTextures
 
   mMatRes <- case mMaterialHandle of
     Just h -> lookupTexture rm h
     Nothing -> pure Nothing
 
-  let matIdx = case mMaterialHandle of
+  let lookUpIndex mHandle = case mHandle of
         Just h -> IntMap.findWithDefault 0 (fromIntegral $ unTextureHandle h) texIndexMap
         Nothing -> 0
+      matIdx = lookUpIndex mMaterialHandle
+      mrIdx = lookUpIndex mMRTexture
+      normalIdx = lookUpIndex mNormalTexture
+      metallic = fromMaybe 0.0 mMetallic
+      roughness = fromMaybe 0.5 mRoughness
 
   case (mMeshRes, mTransform, mWorldMatrix) of
     (Just mesh, Just trans, Just wm) -> pure $ Just DrawCall
@@ -92,5 +113,9 @@ resolveEntity rm transforms materials worldMatrices texIndexMap (eidKey, meshHan
       , dcWorldMatrix = wm
       , dcMaterial = mMatRes
       , dcMaterialIndex = matIdx
+      , dcMetallicFactor = metallic
+      , dcRoughnessFactor = roughness
+      , dcMetallicRoughnessIndex = mrIdx
+      , dcNormalIndex = normalIdx
       }
     _ -> pure Nothing

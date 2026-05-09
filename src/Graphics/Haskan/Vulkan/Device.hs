@@ -75,6 +75,7 @@ createDevice dev queueFamilyIndices enabledLayers = do
   let geometrySupported = Vulkan.getField @"geometryShader" availableFeatures == Vulkan.VK_TRUE
       cullDistanceSupported = Vulkan.getField @"shaderCullDistance" availableFeatures == Vulkan.VK_TRUE
       vertexStorageSupported = Vulkan.getField @"vertexPipelineStoresAndAtomics" availableFeatures == Vulkan.VK_TRUE
+      fragmentStorageSupported = Vulkan.getField @"fragmentStoresAndAtomics" availableFeatures == Vulkan.VK_TRUE
       multiDrawIndirectSupported = Vulkan.getField @"multiDrawIndirect" availableFeatures == Vulkan.VK_TRUE
 
   -- Check descriptor indexing support (requires Vulkan 1.2+)
@@ -112,6 +113,7 @@ createDevice dev queueFamilyIndices enabledLayers = do
         (set @"geometryShader" (if geometrySupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
             &* set @"shaderCullDistance" (if cullDistanceSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
             &* set @"vertexPipelineStoresAndAtomics" (if vertexStorageSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
+            &* set @"fragmentStoresAndAtomics" (if fragmentStorageSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
             &* set @"multiDrawIndirect" (if multiDrawIndirectSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE))
       queueCreateInfos :: [Vulkan.VkDeviceQueueCreateInfo]
       queueCreateInfos =

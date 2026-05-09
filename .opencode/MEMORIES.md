@@ -267,3 +267,53 @@ True bindless descriptor indexing is **fundamentally different** from Texture2DA
 - FIR shaders do not support general recursion; loops must be unrolled manually
 - `Program` monad `do` blocks: `let` for `view` on `Code` values, `<-` for `use`/`assign` monadic actions
 - `pure (Lit ())` for unit in `Program`, not `pure ()`
+
+## FIR Type Inference / Constraint Propagation Bug (2026-05-09)
+
+**Problem:** `view @(Index n)` on texture samples (`use @(ImageTexel "...")`) fails with `Couldn't match type 'V 3 Float' with 'Float'` when downstream shader code accumulates many constraints (e.g. PBR math).
+
+**Root cause:** GHC cannot fully reduce `ImageTexelType (LookupImageProperties "name" i) '[]` in contexts with many accumulated type constraints. The closed type family reduction stalls, so `view` cannot pick the `V 4 Float` instance and falls back to a vector default.
+
+**Symptoms:**
+- `view @(Index 0) posSample` works in isolation
+- Same lines fail when PBR math block is added below them
+- `imageRead` fails identically (it's `use` with explicit `imgTexel ~ ImageTexelType` constraint)
+- Error only affects `posSample`/`normSample`, not `albSample` — depends on which constraints accumulate first
+
+**Workaround (verified):** Rewrite shader math using only scalar `Float` operations after extracting components via `view`. Do not use vector operations (`Vec3`, `dot`, `normalise`, etc.) on sampled values in the same shader.
+
+**FIR quirk list:**
+- `normalise` is British spelling (not `normalize`)
+- `dot` returns `Scalar v`, needs explicit per-component multiplication
+- `if-then-else` on `gl_VertexIndex` requires `fromIntegral` to `Code Float` first
+- `ImageTexelType` for `RGBA8 UNorm` should be `V 4 Float`, but constraint solver chokes on it in heavy contexts
+
+**Decision:** Do NOT patch FIR internals for this. The bindless patches were mechanical (new constructors/capabilities). This bug is in GHC's interaction with FIR type family machinery. Fixing it requires touching `FIR.Validation.Images` type families and potentially GHC-specific solver behavior. Any change risks breaking existing shaders. Scalar math is SPIR-V's native SSA form anyway (vectors are just sugar).
+
+**Alternative if needed:** Write local FIR helper module with `sampleRGBA :: Texture2D ... -> Code (V 2 Float) -> Shader (Code Float, Code Float, Code Float, Code Float)` that wraps `use` + `view` boilerplate without touching FIR internals.
+
+## M9 Progress — PBR Implementation
+
+### What was done
+- **Lighting shader:** Full Cook-Torrance BRDF with Schlick Fresnel, GGX NDF, Schlick-Smith geometry, scalar-only math (avoids FIR vector inference bug)
+- **G-buffer shader:** Reads `metallicFactor`/`roughnessFactor` from entity SSBO, samples metallic-roughness texture via bindless array when `metallicRoughnessIndex != 0`, writes metallic to position alpha and roughness to normal alpha
+- **Validation fixes:** G-buffer + wireframe pipeline color blend attachment count 3→4 (matches 4-attachment render pass); enabled `fragmentStoresAndAtomics` device feature
+- **ECS extension:** `wMetallicFactors`, `wRoughnessFactors`, `wMetallicRoughnessTextures`, `wNormalTextures`
+- **DrawCall extension:** `dcMetallicFactor`, `dcRoughnessFactor`, `dcMetallicRoughnessIndex`, `dcNormalIndex`
+- **SSBO wiring:** `Engine.hs` uploads all PBR fields to entity SSBO
+- **glTF loader extension:**
+  - `gltf-loader-0.3.0.0` extended with `pbrMetallicRoughnessTexture` and `normalTexture` fields in `PbrMetallicRoughness` and `Material` types
+  - `GLTF.hs` builds material mappings for all three texture types (baseColor, metallicRoughness, normal)
+  - Scene graph assigns PBR scalar factors and texture handles to entities
+
+### Key Files Changed
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Lighting.hs` — scalar PBR BRDF
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/GBuffer.hs` — MR texture sampling + alpha packing
+- `src/Graphics/Haskan/Vulkan/DeferredResources.hs` — attachment count 3→4
+- `src/Graphics/Haskan/Vulkan/Device.hs` — `fragmentStoresAndAtomics` feature
+- `src/Graphics/Haskan/Scene/ECS.hs` — PBR component stores
+- `src/Graphics/Haskan/Render/RenderSystem.hs` — PBR fields in DrawCall
+- `src/Graphics/Haskan/Engine.hs` — SSBO upload with PBR data
+- `src/Graphics/Haskan/Scene/GLTF.hs` — PBR texture loading and assignment
+- `gltf-loader-0.3.0.0/src/Text/GLTF/Loader/Gltf.hs` — MR/normal texture fields
+- `gltf-loader-0.3.0.0/src/Text/GLTF/Loader/Internal/Adapter.hs` — adapter for new fields

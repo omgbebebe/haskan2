@@ -149,14 +149,16 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
   (textures, textureData) <- loadTextures rm pdev dev queue cmdBuf cache gltf
   logInfoIO LogGeneral $ "loaded " <> showT (length textures) <> " textures"
 
-  -- Build material -> texture mapping
+  -- Build material -> texture mappings
   let materialTextures = buildMaterialTextures gltf textures
+      materialMRTextures = buildMaterialMetallicRoughnessTextures gltf textures
+      materialNormalTextures = buildMaterialNormalTextures gltf textures
 
   -- Load meshes and create mesh resources
   meshes <- loadMeshes rm pdev dev gltf
 
   -- Build scene graph from nodes
-  rootEntity <- buildSceneGraph world gltf meshes materialTextures
+  rootEntity <- buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures
 
   pure GLTFImportResult
     { girWorld = world
@@ -221,6 +223,7 @@ decodeImage cache img =
       let whitePixels = Texture.generateGridTexture 2 2 1
       pure (Right (2, 2, whitePixels))
 
+-- | Build a mapping from material index to its metallic-roughness texture handle.
 -- | Build a mapping from material index to its base color texture handle.
 -- Returns a list where index = material index, value = Maybe TextureHandle.
 buildMaterialTextures :: GLTFTypes.Gltf -> [TextureHandle] -> [Maybe TextureHandle]
@@ -231,6 +234,41 @@ buildMaterialTextures gltf textures =
       resolveMaterial mat = do
         pbr <- GLTFTypes.materialPbrMetallicRoughness mat
         texInfo <- pbrBaseColorTexture pbr
+        let texIdx = GLTFTypes.textureId texInfo
+        gltfTex <- if texIdx >= 0 && texIdx < length texturesList
+                     then Just (texturesList !! texIdx)
+                     else Nothing
+        imgIdx <- textureSourceId gltfTex
+        if imgIdx >= 0 && imgIdx < length textures
+          then Just (textures !! imgIdx)
+          else Nothing
+   in map resolveMaterial materials
+
+-- | Build a mapping from material index to its metallic-roughness texture handle.
+buildMaterialMetallicRoughnessTextures :: GLTFTypes.Gltf -> [TextureHandle] -> [Maybe TextureHandle]
+buildMaterialMetallicRoughnessTextures gltf textures =
+  let materials = Vector.toList (gltfMaterials gltf)
+      texturesList = Vector.toList (GLTFTypes.gltfTextures gltf)
+      resolveMaterial mat = do
+        pbr <- GLTFTypes.materialPbrMetallicRoughness mat
+        texInfo <- GLTFTypes.pbrMetallicRoughnessTexture pbr
+        let texIdx = GLTFTypes.textureId texInfo
+        gltfTex <- if texIdx >= 0 && texIdx < length texturesList
+                     then Just (texturesList !! texIdx)
+                     else Nothing
+        imgIdx <- textureSourceId gltfTex
+        if imgIdx >= 0 && imgIdx < length textures
+          then Just (textures !! imgIdx)
+          else Nothing
+   in map resolveMaterial materials
+
+-- | Build a mapping from material index to its normal texture handle.
+buildMaterialNormalTextures :: GLTFTypes.Gltf -> [TextureHandle] -> [Maybe TextureHandle]
+buildMaterialNormalTextures gltf textures =
+  let materials = Vector.toList (gltfMaterials gltf)
+      texturesList = Vector.toList (GLTFTypes.gltfTextures gltf)
+      resolveMaterial mat = do
+        texInfo <- GLTFTypes.materialNormalTexture mat
         let texIdx = GLTFTypes.textureId texInfo
         gltfTex <- if texIdx >= 0 && texIdx < length texturesList
                      then Just (texturesList !! texIdx)
@@ -321,9 +359,11 @@ buildSceneGraph ::
   World ->
   GLTFTypes.Gltf ->
   [MeshHandle] ->
-  [Maybe TextureHandle] -> -- material index -> texture handle
+  [Maybe TextureHandle] -> -- material index -> base color texture handle
+  [Maybe TextureHandle] -> -- material index -> metallic-roughness texture handle
+  [Maybe TextureHandle] -> -- material index -> normal texture handle
   m EntityId
-buildSceneGraph world gltf meshes materialTextures = do
+buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures = do
   let nodes = gltfNodes gltf
       -- Find root nodes (nodes that are not children of any other node)
       allChildren = concatMap (Vector.toList . nodeChildren) (Vector.toList nodes)
@@ -335,7 +375,7 @@ buildSceneGraph world gltf meshes materialTextures = do
 
   -- Process each root node
   for_ rootIndices $ \nodeIdx -> do
-    _ <- processNode world gltf meshes materialTextures nodeIdx sceneRoot
+    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures nodeIdx sceneRoot
     pure ()
 
   pure sceneRoot
@@ -346,11 +386,13 @@ processNode ::
   World ->
   GLTFTypes.Gltf ->
   [MeshHandle] ->
-  [Maybe TextureHandle] -> -- material index -> texture handle
+  [Maybe TextureHandle] -> -- material index -> base color texture handle
+  [Maybe TextureHandle] -> -- material index -> metallic-roughness texture handle
+  [Maybe TextureHandle] -> -- material index -> normal texture handle
   Int -> -- node index
   EntityId -> -- parent entity
   m EntityId
-processNode world gltf meshes materialTextures nodeIdx parentEntity = do
+processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures nodeIdx parentEntity = do
   let nodes = gltfNodes gltf
       node = nodes Vector.! nodeIdx
 
@@ -385,6 +427,32 @@ processNode world gltf meshes materialTextures nodeIdx parentEntity = do
                         ECS.setMaterial world entity texHandle
                       Nothing -> do
                         logInfoIO LogGeneral $ "entity " <> showT entity <> " material " <> showT matIdx <> " -> NO texture (using fallback)"
+                  -- Set PBR scalar factors from glTF material
+                  let materialsList = Vector.toList (gltfMaterials gltf)
+                  when (matIdx >= 0 && matIdx < length materialsList) $ do
+                    let mat = materialsList !! matIdx
+                    case GLTFTypes.materialPbrMetallicRoughness mat of
+                      Just pbr -> do
+                        let met = GLTFTypes.pbrMetallicFactor pbr
+                            rou = GLTFTypes.pbrRoughnessFactor pbr
+                        logInfoIO LogGeneral $ "entity " <> showT entity <> " PBR factors: metallic=" <> showT met <> " roughness=" <> showT rou
+                        ECS.setMetallicFactor world entity met
+                        ECS.setRoughnessFactor world entity rou
+                      Nothing -> pure ()
+                  -- Set metallic-roughness texture if present
+                  when (matIdx >= 0 && matIdx < length materialMRTextures) $ do
+                    case materialMRTextures !! matIdx of
+                      Just texHandle -> do
+                        logInfoIO LogGeneral $ "entity " <> showT entity <> " MR texture assigned"
+                        ECS.setMetallicRoughnessTexture world entity texHandle
+                      Nothing -> pure ()
+                  -- Set normal texture if present
+                  when (matIdx >= 0 && matIdx < length materialNormalTextures) $ do
+                    case materialNormalTextures !! matIdx of
+                      Just texHandle -> do
+                        logInfoIO LogGeneral $ "entity " <> showT entity <> " normal texture assigned"
+                        ECS.setNormalTexture world entity texHandle
+                      Nothing -> pure ()
                 Nothing -> do
                   logInfoIO LogGeneral $ "entity " <> showT entity <> " -> no material"
             [] -> pure ()
@@ -392,7 +460,7 @@ processNode world gltf meshes materialTextures nodeIdx parentEntity = do
 
   -- Process children
   for_ (Vector.toList (nodeChildren node)) $ \childIdx -> do
-    _ <- processNode world gltf meshes materialTextures childIdx entity
+    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures childIdx entity
     pure ()
 
   pure entity

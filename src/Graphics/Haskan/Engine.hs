@@ -156,7 +156,7 @@ flushInputBuffer (InputBuffer eventsVar overflowVar) = do
   pure (toList events, overflow)
 
 -- | Compute culling entity data (matches shader EntityData, Base/std430 layout).
--- Array stride is 128 bytes (124-byte struct + 4 bytes padding).
+-- Array stride is 128 bytes.
 data ComputeEntityData = ComputeEntityData
   { ceTransform :: M44 Foreign.C.CFloat
   , ceAabbMin :: V4 Foreign.C.CFloat
@@ -165,7 +165,10 @@ data ComputeEntityData = ComputeEntityData
   , ceFirstIndex :: Word32
   , ceVertexOffset :: Foreign.C.CInt
   , ceIndexCount :: Word32
-  , cePad2 :: Word32
+  , ceMetallicRoughnessIndex :: Word32
+  , ceMetallicFactor :: Foreign.C.CFloat
+  , ceRoughnessFactor :: Foreign.C.CFloat
+  , ceNormalIndex :: Word32
   } deriving (Show)
 
 instance Storable ComputeEntityData where
@@ -180,7 +183,10 @@ instance Storable ComputeEntityData where
     <*> peekByteOff ptr 104
     <*> peekByteOff ptr 108
     <*> peekByteOff ptr 112
-  poke ptr (ComputeEntityData t amin amax mat fi vo ic pad) = do
+    <*> peekByteOff ptr 116
+    <*> peekByteOff ptr 120
+    <*> peekByteOff ptr 124
+  poke ptr (ComputeEntityData t amin amax mat fi vo ic mri met rou ni) = do
     pokeByteOff ptr 0 t
     pokeByteOff ptr 64 amin
     pokeByteOff ptr 80 amax
@@ -188,7 +194,10 @@ instance Storable ComputeEntityData where
     pokeByteOff ptr 100 fi
     pokeByteOff ptr 104 vo
     pokeByteOff ptr 108 ic
-    pokeByteOff ptr 112 pad
+    pokeByteOff ptr 112 mri
+    pokeByteOff ptr 116 met
+    pokeByteOff ptr 120 rou
+    pokeByteOff ptr 124 ni
 
 -- | Compute culling uniform data (matches shader CullData, Extended/std140 layout).
 data ComputeCullData = ComputeCullData
@@ -589,7 +598,10 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
           , ceFirstIndex = fromIntegral (mrFirstIndex meshRes)
           , ceVertexOffset = fromIntegral (mrVertexOffset meshRes)
           , ceIndexCount = fromIntegral (mrIndexCount meshRes)
-          , cePad2 = 0
+          , ceMetallicRoughnessIndex = dcMetallicRoughnessIndex dc
+          , ceMetallicFactor = realToFrac (dcMetallicFactor dc)
+          , ceRoughnessFactor = realToFrac (dcRoughnessFactor dc)
+          , ceNormalIndex = dcNormalIndex dc
           }
       let vp = (realToFrac <$>) <$> (projectionMatrix !*! Camera.unViewMatrix (Camera.toMatrix camera)) :: M44 Float
           planes = extractFrustumPlanes vp
@@ -867,6 +879,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         ECS.setTransform world entity (Transform (V3 x y z) (Quaternion 1 (V3 0 0 0)) (V3 0.5 0.5 0.5))
         ECS.setMesh world entity meshHandle
         ECS.setMaterial world entity whiteTexHandle
+        ECS.setMetallicFactor world entity 0.0
+        ECS.setRoughnessFactor world entity 0.5
 
       let sceneBbox = BBox (V3 (-50) (-2) (-50)) (V3 50 2 50)
       logInfoIO LogGeneral $ "stress test scene bounds: " <> showT sceneBbox
@@ -903,14 +917,20 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       entity1 <- ECS.spawnEntity world
       ECS.setTransform world entity1 (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
       ECS.setMesh world entity1 meshHandle
+      ECS.setMetallicFactor world entity1 0.0
+      ECS.setRoughnessFactor world entity1 0.5
 
       entity2 <- ECS.spawnEntity world
       ECS.setTransform world entity2 (Transform (V3 2 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
       ECS.setMesh world entity2 meshHandle
+      ECS.setMetallicFactor world entity2 0.0
+      ECS.setRoughnessFactor world entity2 0.5
 
       entity3 <- ECS.spawnEntity world
       ECS.setTransform world entity3 (Transform (V3 (-2) 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
       ECS.setMesh world entity3 meshHandle
+      ECS.setMetallicFactor world entity3 0.0
+      ECS.setRoughnessFactor world entity3 0.5
 
       -- Add ground plane with checkerboard texture
       let groundMesh = Mesh.groundPlaneMesh 50.0
@@ -921,6 +941,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       ECS.setTransform world groundEntity (Transform (V3 0 0 (-0.5)) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
       ECS.setMesh world groundEntity groundMeshHandle
       ECS.setMaterial world groundEntity checkerTexHandle
+      ECS.setMetallicFactor world groundEntity 0.0
+      ECS.setRoughnessFactor world groundEntity 1.0
 
       -- Compute world-space bounds from ECS entities (includes ground plane)
       sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
@@ -984,7 +1006,10 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
         , ceFirstIndex = 0
         , ceVertexOffset = 0
         , ceIndexCount = 0
-        , cePad2 = 0
+        , ceMetallicRoughnessIndex = 0
+        , ceMetallicFactor = 0.0
+        , ceRoughnessFactor = 0.5
+        , ceNormalIndex = 0
         }
       dummyCullData = ComputeCullData
         { ccFrustumPlanes = replicate 6 (V4 0 0 0 0)

@@ -82,15 +82,17 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   lightingRenderPass <- RenderPass.managedLightingRenderPass device surfaceFormat
   logDebugIO LogRender "lighting render pass created"
 
-  -- Create g-buffer images and views (3 per swapchain image)
+  -- Create g-buffer images and views (4 per swapchain image: position, normal, albedo, material)
   gBufferImagesAndViews <- for [0..numSwapchainImages-1] $ \_ -> do
     posImage <- Swapchain.managedGBufferImage pdev device extent gbufColorFormat
     normImage <- Swapchain.managedGBufferImage pdev device extent gbufColorFormat
     albImage <- Swapchain.managedGBufferImage pdev device extent gbufColorFormat
+    matImage <- Swapchain.managedGBufferImage pdev device extent gbufColorFormat
     posView <- ImageView.managedImageView device gbufColorFormat posImage
     normView <- ImageView.managedImageView device gbufColorFormat normImage
     albView <- ImageView.managedImageView device gbufColorFormat albImage
-    pure ([posImage, normImage, albImage], [posView, normView, albView])
+    matView <- ImageView.managedImageView device gbufColorFormat matImage
+    pure ([posImage, normImage, albImage, matImage], [posView, normView, albView, matView])
 
   let gBufferImages = map fst gBufferImagesAndViews
       gBufferImageViews = map snd gBufferImagesAndViews
@@ -137,7 +139,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         }
       extent
       Vertex.vertexFormat
-      3
+      4
   logDebugIO LogRender "g-buffer pipeline created"
 
   -- Lighting pipeline layout (3 texture bindings)
@@ -176,7 +178,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         }
       extent
       Vertex.vertexFormat
-      3
+      4
   logDebugIO LogRender "wireframe pipeline created"
 
   -- Lighting framebuffers (one per swapchain image, using swapchain image views)
@@ -188,7 +190,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender $ "lighting framebuffers created: " <> showT (length lightingFramebuffers)
 
   -- Lighting descriptor pool and sets
-  lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages 3
+  lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages 4
   lightingDescriptorSets <- for [0..numSwapchainImages-1] $ \_ ->
     DescriptorSet.allocateDescriptorSet device lightingDescriptorPool [lightingDescriptorSetLayout]
   logDebugIO LogRender $ "lighting descriptor sets allocated: " <> showT (length lightingDescriptorSets)
