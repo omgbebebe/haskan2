@@ -46,6 +46,7 @@ import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot (..), defaultInspector, buildFrameSnapshot)
 import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), DebugCameraSnapshot (..), debugMessageToActionEvent, parseDebugMessage, encodeDebugResponse)
+import Graphics.Haskan.Debug.Screenshot qualified as Screenshot
 import Graphics.Haskan.Debug.Server (DebugServerHandle, CommandQueue, startDebugServer, stopDebugServer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (logInfoIO, logDebugIO, showT, LogCategory(..))
@@ -380,7 +381,10 @@ data GameState cam = GameState
     inspectFrame :: TVar Bool,
     inspector :: TVar (Maybe FrameInspector),
     renderDebugState :: TVar (Maybe RenderDebugInfo),
-    wireframeEnabled :: TVar Bool
+    wireframeEnabled :: TVar Bool,
+    debugMode :: TVar Word32,
+    pendingScreenshot :: TVar Bool,
+    pendingAllStages :: TVar Bool
   }
 
 data RenderDebugInfo = RenderDebugInfo
@@ -447,6 +451,9 @@ mainLoop meshName EngineConfig {..} = do
   tvInspector <- liftIO $ STM.newTVarIO (Just (defaultInspector "snapshots"))
   tvRenderDebugState <- liftIO $ STM.newTVarIO Nothing
   tvWireframeEnabled <- liftIO $ STM.newTVarIO True
+  tvDebugMode <- liftIO $ STM.newTVarIO 0
+  tvPendingScreenshot <- liftIO $ STM.newTVarIO False
+  tvPendingAllStages <- liftIO $ STM.newTVarIO False
 
   let gameState =
         GameState
@@ -460,6 +467,9 @@ mainLoop meshName EngineConfig {..} = do
           tvInspector
           tvRenderDebugState
           tvWireframeEnabled
+          tvDebugMode
+          tvPendingScreenshot
+          tvPendingAllStages
 
   -- Start debug server if configured
   mDebugServer <- case debugSocketPath of
@@ -549,8 +559,12 @@ renderFrameLoop ::
   STM.TVar Bool ->
   IORef FrameStats ->
   ComputeCullResources ->
+  STM.TVar Word32 ->
+  STM.TVar Bool ->
+  STM.TVar Bool ->
+  Vulkan.VkPhysicalDevice ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvDebugMode tvPendingScreenshot tvPendingAllStages physicalDevice = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -663,6 +677,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                       , pcExtent = rcSurfaceExtent
                       }
                 wireframeEnabled' <- liftIO $ STM.readTVarIO tvWireframe
+                debugMode' <- liftIO $ STM.readTVarIO tvDebugMode
 
                 -- Build deferred render graph for this frame
                 let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
@@ -683,6 +698,8 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdLightingPipeline = drLightingPipeline
                         , dpdLightingLayout = drLightingPipelineLayout
                         , dpdLightingDescriptor = lightingDescriptorSet
+                        , dpdCameraPos = realToFrac <$> Camera.cameraPosition camera
+                        , dpdDebugMode = debugMode'
                         , dpdGBufferImages = gBufferImagesForFrame
                         , dpdWireframePipeline = drWireframePipeline
                         , dpdWireframeLayout = drWireframePipelineLayout
@@ -742,6 +759,31 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                       let snapshots = map drawCallToSnapshot drawList
                       snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> projectionMatrix) snapshots
                       liftIO $ insp snap
+                  -- Check for screenshot requests
+                  liftIO $ do
+                    shouldScreenshot <- STM.atomically $ do
+                      b <- STM.readTVar tvPendingScreenshot
+                      when b $ STM.writeTVar tvPendingScreenshot False
+                      pure b
+                    when shouldScreenshot $ do
+                      Vulkan.vkDeviceWaitIdle device >>= throwVkResult
+                      let gbufferImages = drGBufferImages !! fromIntegral imageIndex
+                      logInfoIO LogGeneral "capturing screenshot..."
+                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
+                      logInfoIO LogGeneral "screenshot saved"
+                    shouldAllStages <- STM.atomically $ do
+                      b <- STM.readTVar tvPendingAllStages
+                      when b $ STM.writeTVar tvPendingAllStages False
+                      pure b
+                    when shouldAllStages $ do
+                      Vulkan.vkDeviceWaitIdle device >>= throwVkResult
+                      let gbufferImages = drGBufferImages !! fromIntegral imageIndex
+                      logInfoIO LogGeneral "capturing all pipeline stages..."
+                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 0) rcSurfaceExtent Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT "position"
+                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 1) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "normal"
+                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
+                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 3) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "emissive"
+                      logInfoIO LogGeneral "all stages saved"
                   pure (False, False)
                 Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
                 Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
@@ -792,6 +834,10 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         tvWireframe
         frameStatsRef
         ccr
+        tvDebugMode
+        tvPendingScreenshot
+        tvPendingAllStages
+        physicalDevice
 
 -- | Main rendering loop.
 --
@@ -865,6 +911,22 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   -- Create texture command buffer early (needed for both glTF and OBJ paths)
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
   logDebugIO LogTexture "textureCommandBuffer created"
+
+  -- Load IBL cubemaps
+  let envDir = "data/hdri/env/"
+      radianceFacePaths = map (envDir ++) ["env+X.png", "env-X.png", "env+Y.png", "env-Y.png", "env+Z.png", "env-Z.png"]
+      irradianceFacePaths = map (envDir ++) ["irradiance_posx.png", "irradiance_negx.png", "irradiance_posy.png", "irradiance_negy.png", "irradiance_posz.png", "irradiance_negz.png"]
+  radianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile radianceFacePaths
+  irradianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile irradianceFacePaths
+  let (radDatas, radWidths, _) = unzip3 radianceFaceDatas
+      (irrDatas, irrWidths, _) = unzip3 irradianceFaceDatas
+      radSize = head radWidths
+      irrSize = head irrWidths
+  radianceCubemap <- Texture.createCubemap rm physicalDevice device radSize radDatas graphicsQueueHandler textureCommandBuffer
+  irradianceCubemap <- Texture.createCubemap rm physicalDevice device irrSize irrDatas graphicsQueueHandler textureCommandBuffer
+  mRadianceView <- Texture.textureImageView rm radianceCubemap
+  mIrradianceView <- Texture.textureImageView rm irradianceCubemap
+  logInfoIO LogGeneral $ "IBL cubemaps loaded: radiance=" <> showT radSize <> "px irradiance=" <> showT irrSize <> "px"
 
   -- Initialize asset cache for texture preprocessing
   assetCache <- initCache ".haskan2-cache"
@@ -1193,6 +1255,9 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       tvInsp = inspector gameState
       tvRenderDebug = renderDebugState gameState
       tvWireframe = wireframeEnabled gameState
+      tvDebugMode = debugMode gameState
+      tvPendingScreenshot = pendingScreenshot gameState
+      tvPendingAllStages = pendingAllStages gameState
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
@@ -1200,8 +1265,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           then pure ()
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-              with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources
+               with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView) $ \dr ->
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvPendingScreenshot tvPendingAllStages physicalDevice
             outerLoop renderFrameLoopFinished
 
 
@@ -1294,6 +1359,18 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                   STM.atomically $ STM.writeTVar (wireframeEnabled gameState) (not current)
                   logInfoIO LogGeneral $ "wireframe toggled: " <> showT (not current)
                 (ToggleWireframe, False, _) -> pure ()
+                (DebugMode mode, True, _) -> do
+                  STM.atomically $ STM.writeTVar (debugMode gameState) (fromIntegral mode)
+                  logInfoIO LogGeneral $ "debug mode set to " <> showT mode
+                (DebugMode _, False, _) -> pure ()
+                (SaveScreenshot, True, _) -> do
+                  STM.atomically $ STM.writeTVar (pendingScreenshot gameState) True
+                  logInfoIO LogGeneral "screenshot requested"
+                (SaveScreenshot, False, _) -> pure ()
+                (SaveAllStages, True, _) -> do
+                  STM.atomically $ STM.writeTVar (pendingAllStages gameState) True
+                  logInfoIO LogGeneral "save all stages requested"
+                (SaveAllStages, False, _) -> pure ()
             -- Handle debug commands with responses
             for_ debugCmds $ \(cmd, respVar) -> do
               case cmd of

@@ -31,6 +31,9 @@ data Action
   | Escape
   | FrameInspect
   | ToggleWireframe
+  | DebugMode Int
+  | SaveScreenshot
+  | SaveAllStages
   deriving (Eq, Show, Generic)
 
 type ActionEvent = (Action, Bool, Bool)  -- (action, pressed, isRepeated)
@@ -64,7 +67,18 @@ defaultBindings =
       (([], SDL.KeycodeD), StrafeRight),
       (([], SDL.KeycodeF12), FrameInspect),
       (([], SDL.KeycodeF3), ToggleWireframe),
-      (([LShift], SDL.KeycodeQ), Escape)
+      (([LShift], SDL.KeycodeQ), Escape),
+      -- Debug modes
+      (([], SDL.KeycodeF1), DebugMode 1),   -- albedo
+      (([], SDL.KeycodeF2), DebugMode 2),   -- normals
+      (([], SDL.KeycodeF4), DebugMode 3),   -- roughness
+      (([], SDL.KeycodeF5), DebugMode 4),   -- metallic
+      (([], SDL.KeycodeF6), DebugMode 5),   -- position
+      (([], SDL.KeycodeF7), DebugMode 6),   -- emissive
+      (([], SDL.KeycodeF8), DebugMode 7),   -- AO
+      (([], SDL.KeycodeF9), DebugMode 0),   -- normal lit
+      (([], SDL.KeycodeF10), SaveScreenshot),
+      (([], SDL.KeycodeF11), SaveAllStages)
     ]
 
 modifiersToList :: SDL.KeyModifier -> [KeyModifier]

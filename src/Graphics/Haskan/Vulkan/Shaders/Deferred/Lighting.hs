@@ -43,6 +43,8 @@ vertex = shader do
 -- Samples g-buffer and computes PBR directional light
 -- All math done with scalars to avoid FIR vector-scalar inference issues
 
+type CameraPushConstant = Struct '[ "cameraX" ':-> Float, "cameraY" ':-> Float, "cameraZ" ':-> Float, "debugMode" ':-> Word32 ]
+
 type FragmentDefs =
   '[ "in_uv" ':-> Input '[Location 0] (V 2 Float),
      "gbuf_position"
@@ -61,9 +63,35 @@ type FragmentDefs =
         ':-> Texture2D
                '[Binding 3, DescriptorSet 0]
                (RGBA8 UNorm),
-       "out_colour" ':-> Output '[Location 0] (V 4 Float),
-      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
-    ]
+      "env_map"
+        ':-> TextureCube
+               '[Binding 4, DescriptorSet 0]
+               (RGBA8 UNorm),
+       "irradiance_map"
+         ':-> TextureCube
+                '[Binding 5, DescriptorSet 0]
+                (RGBA8 UNorm),
+       "cameraPos"
+         ':-> PushConstant
+                '[]
+                CameraPushConstant,
+        "out_colour" ':-> Output '[Location 0] (V 4 Float),
+       "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
+     ]
+
+-- Debug mode values
+-- 0 = normal lit
+-- 1 = albedo
+-- 2 = normals (world-space)
+-- 3 = roughness
+-- 4 = metallic
+-- 5 = position
+-- 6 = emissive
+-- 7 = AO
+-- 8 = NdotL
+-- 9 = irradiance
+-- 10 = specular IBL
+-- 11 = Fresnel
 
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do
@@ -101,11 +129,21 @@ fragment = shader do
       ldy = 1.0 / sqrt 3.0
       ldz = 1.0 / sqrt 3.0
 
-      -- View direction (camera at origin)
-      vlen = sqrt (posX * posX + posY * posY + posZ * posZ + 0.0001)
-      vx = (-posX) / vlen
-      vy = (-posY) / vlen
-      vz = (-posZ) / vlen
+  -- Camera position (push constant)
+  cameraPos <- get @"cameraPos"
+  let camX = view @(Name "cameraX") cameraPos
+      camY = view @(Name "cameraY") cameraPos
+      camZ = view @(Name "cameraZ") cameraPos
+      debugMode = view @(Name "debugMode") cameraPos
+
+  let -- View direction (from fragment to camera)
+      vdx = camX - posX
+      vdy = camY - posY
+      vdz = camZ - posZ
+      vlen = sqrt (vdx * vdx + vdy * vdy + vdz * vdz + 0.0001)
+      vx = vdx / vlen
+      vy = vdy / vlen
+      vz = vdz / vlen
 
       -- Dot products
       nDotL = max 0 (nx * ldx + ny * ldy + nz * ldz)
@@ -170,14 +208,51 @@ fragment = shader do
       lity = brdfy * nDotL
       litz = brdfz * nDotL
 
-      -- Ambient + AO + Emissive
-      ambx = albR * 0.03 * ao + emissiveR
-      amby = albG * 0.03 * ao + emissiveG
-      ambz = albB * 0.03 * ao + emissiveB
+      -- Reflection vector for IBL
+      rDotN = 2 * (vx * nx + vy * ny + vz * nz)
+      rx = nx * rDotN - vx
+      ry = ny * rDotN - vy
+      rz = nz * rDotN - vz
 
-      colx = ambx + litx
-      coly = amby + lity
-      colz = ambz + litz
+      -- Fresnel for IBL (Schlick with NdotV)
+      omvIBL = 1 - nDotV
+      omvIBL2 = omvIBL * omvIBL
+      omvIBL4 = omvIBL2 * omvIBL2
+      omvIBL5 = omvIBL4 * omvIBL
+      fresIBLx = f0x + (1 - f0x) * omvIBL5
+      fresIBLy = f0y + (1 - f0y) * omvIBL5
+      fresIBLz = f0z + (1 - f0z) * omvIBL5
+
+  -- Sample irradiance (diffuse IBL)
+  irrSample <- use @(ImageTexel "irradiance_map") NilOps (Vec3 nx ny nz)
+  let irrR = view @(Index 0) irrSample
+      irrG = view @(Index 1) irrSample
+      irrB = view @(Index 2) irrSample
+
+  -- Sample environment map (specular IBL)
+  envSample <- use @(ImageTexel "env_map") NilOps (Vec3 rx ry rz)
+  let envR = view @(Index 0) envSample
+      envG = view @(Index 1) envSample
+      envB = view @(Index 2) envSample
+
+      -- IBL intensity scale (bright outdoor HDRI)
+      envIntensity = 0.3
+
+      -- Ambient = IBL only (no hack ambient term)
+      -- Diffuse IBL (irradiance * albedo * (1-metallic) * AO)
+      iblDiffx = irrR * albR * (1 - metallic) * ao * envIntensity
+      iblDiffy = irrG * albG * (1 - metallic) * ao * envIntensity
+      iblDiffz = irrB * albB * (1 - metallic) * ao * envIntensity
+
+      -- Specular IBL (environment * Fresnel * intensity)
+      iblSpecx = envR * fresIBLx * envIntensity
+      iblSpecy = envG * fresIBLy * envIntensity
+      iblSpecz = envB * fresIBLz * envIntensity
+
+      -- Combine: direct light + emissive + IBL
+      colx = litx + emissiveR + iblDiffx + iblSpecx
+      coly = lity + emissiveG + iblDiffy + iblSpecy
+      colz = litz + emissiveB + iblDiffz + iblSpecz
 
       -- Tone mapping (Reinhard)
       mapx = colx / (colx + 1)
@@ -189,4 +264,71 @@ fragment = shader do
       gamy = sqrt mapy
       gamz = sqrt mapz
 
-  put @"out_colour" (Vec4 gamx gamy gamz 1)
+      -- Debug visualization helpers
+      -- Normals: map [-1,1] to [0,1]
+      dbgNormX = nx * 0.5 + 0.5
+      dbgNormY = ny * 0.5 + 0.5
+      dbgNormZ = nz * 0.5 + 0.5
+
+      -- Position: remap near origin for visibility
+      dbgPosX = posX * 0.1 + 0.5
+      dbgPosY = posY * 0.1 + 0.5
+      dbgPosZ = posZ * 0.1 + 0.5
+
+      -- Irradiance debug
+      dbgIrrX = irrR * envIntensity
+      dbgIrrY = irrG * envIntensity
+      dbgIrrZ = irrB * envIntensity
+
+      -- Specular IBL debug
+      dbgSpecX = iblSpecx
+      dbgSpecY = iblSpecy
+      dbgSpecZ = iblSpecz
+
+      -- Fresnel debug
+      dbgFresX = fresIBLx
+      dbgFresY = fresIBLy
+      dbgFresZ = fresIBLz
+
+      -- Debug output selection
+      -- Compare against polymorphic literals resolved to Code Word32
+      outR = if debugMode == 1 then albR else
+             if debugMode == 2 then dbgNormX else
+             if debugMode == 3 then roughness else
+             if debugMode == 4 then metallic else
+             if debugMode == 5 then dbgPosX else
+             if debugMode == 6 then emissiveR else
+             if debugMode == 7 then ao else
+             if debugMode == 8 then nDotL else
+             if debugMode == 9 then dbgIrrX else
+             if debugMode == 10 then dbgSpecX else
+             if debugMode == 11 then dbgFresX else
+             gamx
+
+      outG = if debugMode == 1 then albG else
+             if debugMode == 2 then dbgNormY else
+             if debugMode == 3 then roughness else
+             if debugMode == 4 then metallic else
+             if debugMode == 5 then dbgPosY else
+             if debugMode == 6 then emissiveG else
+             if debugMode == 7 then ao else
+             if debugMode == 8 then nDotL else
+             if debugMode == 9 then dbgIrrY else
+             if debugMode == 10 then dbgSpecY else
+             if debugMode == 11 then dbgFresY else
+             gamy
+
+      outB = if debugMode == 1 then albB else
+             if debugMode == 2 then dbgNormZ else
+             if debugMode == 3 then roughness else
+             if debugMode == 4 then metallic else
+             if debugMode == 5 then dbgPosZ else
+             if debugMode == 6 then emissiveB else
+             if debugMode == 7 then ao else
+             if debugMode == 8 then nDotL else
+             if debugMode == 9 then dbgIrrZ else
+             if debugMode == 10 then dbgSpecZ else
+             if debugMode == 11 then dbgFresZ else
+             gamz
+
+  put @"out_colour" (Vec4 outR outG outB 1)

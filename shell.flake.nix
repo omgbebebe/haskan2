@@ -26,7 +26,14 @@ mkShell {
     mermaid-cli
     imagemagick
     feh
-    (python3.withPackages (p :[ p.requests ]))
+    (python3.withPackages (p: with p; [
+      requests
+      numpy
+      pillow
+      openexr
+    ]))
+    ktx-tools
+    openexr imagemagick # to work with exr (HDRi)
   ] ++ nativeLibs;
   shellHook = ''
     export LD_LIBRARY_PATH="${lib.makeLibraryPath nativeLibs}:$LD_LIBRARY_PATH"

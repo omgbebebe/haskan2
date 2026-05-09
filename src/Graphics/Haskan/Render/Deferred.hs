@@ -22,8 +22,10 @@ import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Resources (BufferResource (..), MeshResource (..), TextureResource (..))
+import Foreign.C (CFloat)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Linear.V3 (V3(..))
 
 
 -- | Data needed to build a deferred rendering graph.
@@ -45,6 +47,10 @@ data DeferredPassData = DeferredPassData
   , dpdLightingPipeline    :: !Vulkan.VkPipeline
   , dpdLightingLayout      :: !Vulkan.VkPipelineLayout
   , dpdLightingDescriptor  :: !Vulkan.VkDescriptorSet
+    -- Camera position for lighting shader
+  , dpdCameraPos          :: !(V3 Float)
+    -- Debug mode (0 = normal, 1-11 = debug views)
+  , dpdDebugMode          :: !Word32
     -- G-buffer images for barrier
   , dpdGBufferImages      :: ![Vulkan.VkImage]
     -- Wireframe overlay
@@ -138,6 +144,11 @@ buildDeferredGraph DeferredPassData {..} = do
               dsPtr
               0
               Vulkan.vkNullPtr
+          -- Set camera position + debug mode push constant
+          let (V3 camX camY camZ) = dpdCameraPos
+              camPosData = [realToFrac camX, realToFrac camY, realToFrac camZ, realToFrac dpdDebugMode] :: [CFloat]
+          Foreign.Marshal.Array.withArray camPosData $ \camPtr ->
+            Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT 0 16 (Foreign.castPtr camPtr)
           -- Fullscreen triangle: 3 vertices, no indices
           Vulkan.vkCmdDraw commandBuffer 3 1 0 0
     }

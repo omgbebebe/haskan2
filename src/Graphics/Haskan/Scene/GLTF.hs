@@ -380,7 +380,7 @@ primitiveToVertices prim =
       defaultColor = V3 1 1 1
       defaultTangent = V4 1 0 0 1
       -- Flip V coordinate to match Vulkan convention (glTF V=0 is bottom-left, Vulkan V=0 is top-left)
-      flipV (V2 u v) = V2 u v
+      flipV (V2 u v) = V2 u (1 - v)
       
       -- Compute tangents from geometry
       n = length positions

@@ -64,17 +64,20 @@ createDeferredResources ::
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
+  Maybe Vulkan.VkImageView -> -- ^ env cubemap view
+  Maybe Vulkan.VkImageView -> -- ^ irradiance cubemap view
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader mEnvMapView mIrradianceView = do
   let extent = rcSurfaceExtent ctx
-      gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT  -- position needs negative values
+      gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM      -- normal, albedo, emissive
       depthFormat = Vulkan.VK_FORMAT_D16_UNORM
       numSwapchainImages = length (rcFramebuffers ctx)
 
   logInfoIO LogRender $ "creating deferred resources for " <> showT numSwapchainImages <> " swapchain images"
 
-  -- G-buffer render pass
-  gBufferRenderPass <- RenderPass.managedGBufferRenderPass device gbufColorFormat depthFormat
+  -- G-buffer render pass (position=SFLOAT, others=UNORM)
+  gBufferRenderPass <- RenderPass.managedGBufferRenderPassEx device gbufPosFormat gbufColorFormat depthFormat
   logDebugIO LogRender "g-buffer render pass created"
 
   -- Lighting render pass
@@ -82,13 +85,13 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   lightingRenderPass <- RenderPass.managedLightingRenderPass device surfaceFormat
   logDebugIO LogRender "lighting render pass created"
 
-  -- Create g-buffer images and views (4 per swapchain image: position, normal, albedo, material)
+  -- Create g-buffer images and views (4 per swapchain image: position=SFLOAT, normal=UNORM, albedo=UNORM, emissive=UNORM)
   gBufferImagesAndViews <- for [0..numSwapchainImages-1] $ \_ -> do
-    posImage <- Swapchain.managedGBufferImage pdev device extent gbufColorFormat
+    posImage <- Swapchain.managedGBufferImage pdev device extent gbufPosFormat
     normImage <- Swapchain.managedGBufferImage pdev device extent gbufColorFormat
     albImage <- Swapchain.managedGBufferImage pdev device extent gbufColorFormat
     matImage <- Swapchain.managedGBufferImage pdev device extent gbufColorFormat
-    posView <- ImageView.managedImageView device gbufColorFormat posImage
+    posView <- ImageView.managedImageView device gbufPosFormat posImage
     normView <- ImageView.managedImageView device gbufColorFormat normImage
     albView <- ImageView.managedImageView device gbufColorFormat albImage
     matView <- ImageView.managedImageView device gbufColorFormat matImage
@@ -142,9 +145,15 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       4
   logDebugIO LogRender "g-buffer pipeline created"
 
-  -- Lighting pipeline layout (3 texture bindings)
+  -- Lighting pipeline layout (6 texture bindings + camera push constant)
   lightingDescriptorSetLayout <- DescriptorSetLayout.managedLightingDescriptorSetLayout device
-  lightingPipelineLayout <- PipelineLayout.managedPipelineLayout device [lightingDescriptorSetLayout]
+  let cameraPushConstantRange =
+        Vulkan.createVk
+          ( set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+              &* set @"offset" 0
+              &* set @"size" 16
+          )
+  lightingPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [lightingDescriptorSetLayout] [cameraPushConstantRange]
   logDebugIO LogRender "lighting pipeline layout created"
 
   -- Lighting pipeline (fullscreen triangle, no vertex input)
@@ -190,7 +199,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender $ "lighting framebuffers created: " <> showT (length lightingFramebuffers)
 
   -- Lighting descriptor pool and sets
-  lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages 4
+  lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages 6
   lightingDescriptorSets <- for [0..numSwapchainImages-1] $ \_ ->
     DescriptorSet.allocateDescriptorSet device lightingDescriptorPool [lightingDescriptorSetLayout]
   logDebugIO LogRender $ "lighting descriptor sets allocated: " <> showT (length lightingDescriptorSets)
@@ -199,9 +208,12 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   sampler <- createSampler device
   logDebugIO LogRender "lighting sampler created"
 
-  -- Update lighting descriptor sets with g-buffer views
+  -- Update lighting descriptor sets with g-buffer views + cubemaps
   liftIO $ for_ (zip lightingDescriptorSets gBufferImageViews) $ \(ds, views) -> do
-    DescriptorSet.updateLightingDescriptorSets device ds sampler views
+    let allViews = case (mEnvMapView, mIrradianceView) of
+                     (Just env, Just irr) -> views ++ [env, irr]
+                     _ -> views ++ (replicate 2 Vulkan.VK_NULL_HANDLE)
+    DescriptorSet.updateLightingDescriptorSets device ds sampler allViews
   logDebugIO LogRender "lighting descriptor sets updated"
 
   pure DeferredResources

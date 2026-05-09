@@ -262,6 +262,7 @@ True bindless descriptor indexing is **fundamentally different** from Texture2DA
 - Capabilities: `RuntimeDescriptorArray`=5302, `SampledImageArrayNonUniformIndexing`=65; `NonUniform`=5300 (not 5309)
 - `EmptyDataDeriving` required for `Image`; boot files resolve `FIR.Prim.Image` ↔ `FIR.Prim.Types` cycle
 - FIR `Base` layout = std430 (storage buffers, push constants); `Extended` layout = std140 (uniform buffers)
+- **FIR push constants must be `Struct` types** — raw scalars (`Float`) and vectors (`V 3 Float`) are rejected by `inferLayout` with "unsupported type in conjunction with storage class PushConstant". Wrap in a struct: `Struct '["x" ':-> Float, ...]`
 - FIR struct array stride = `NextAligned(structSize, structAlignment)` under Base layout
 - `EntityData` struct size = 124, array stride = 128; `CullData` struct size = 128 (std140 rounded up)
 - FIR shaders do not support general recursion; loops must be unrolled manually
@@ -291,6 +292,53 @@ True bindless descriptor indexing is **fundamentally different** from Texture2DA
 **Decision:** Do NOT patch FIR internals for this. The bindless patches were mechanical (new constructors/capabilities). This bug is in GHC's interaction with FIR type family machinery. Fixing it requires touching `FIR.Validation.Images` type families and potentially GHC-specific solver behavior. Any change risks breaking existing shaders. Scalar math is SPIR-V's native SSA form anyway (vectors are just sugar).
 
 **Alternative if needed:** Write local FIR helper module with `sampleRGBA :: Texture2D ... -> Code (V 2 Float) -> Shader (Code Float, Code Float, Code Float, Code Float)` that wraps `use` + `view` boilerplate without touching FIR internals.
+
+## IBL / Environment Lighting (Milestone 9.5)
+
+### What was done
+- **HDRI processing pipeline:**
+  - Added `openexr`, `imagemagick`, `ktx-tools` to dev shell for EXR/Cubemap processing
+  - Added Python with `numpy`, `pillow` to dev shell
+  - Patched `cmft` (in nix.config) to load HDR files via `stbi_loadf` — proper float pipeline for HDR processing
+  - Used `cmft` to generate proper irradiance (32px) and prefiltered radiance (128px, 8 mips) from 16K HDRI
+  - Converted cmft output TGA faces to PNG for engine loading
+- **Engine cubemap support:**
+  - `Texture.hs`: Added `createCubemap` for 6-face RGBA8 cubemap creation with `VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT`
+  - `ImageView.hs`: Added `createImageViewCube` for cube image views
+  - `Engine.hs`: Parallel face loading via `forkIO`+`MVar` (0.8s instead of 12s)
+- **IBL shader fixes:**
+  - Removed ambient hack (`alb * 0.03`) — irradiance replaces it
+  - Added `envIntensity = 0.3` to scale IBL for bright outdoor HDRI
+  - Applied AO to IBL diffuse only, not direct light
+  - Replaced raw env map with cmft-prefiltered radiance map for specular IBL
+- **Descriptor set extensions:**
+  - Lighting descriptor layout: 4→6 bindings (radiance at 4, irradiance at 5)
+  - Lighting descriptor pool: 4→6 textures per set
+  - `DeferredResources.hs`: Accepts optional radiance/irradiance views
+- **FIR shader updates:**
+  - Added `TextureCube` synonym to `FIR.Syntax.Synonyms` in our fork
+  - Lighting fragment shader: proper IBL diffuse + specular with energy conservation
+  - **Fixed push constant type:** FIR rejects `V 3 Float` and raw `Float` in push constants; converted `cameraPos` to a `Struct '["cameraX" ':-> Float, "cameraY" ':-> Float, "cameraZ" ':-> Float]`
+- **Validation:** Build succeeds, cubemaps load correctly, loading fast, no oversaturation
+
+### Key Files Changed
+- `shell.flake.nix` — added `ktx-tools`, Python packages
+- `src/Graphics/Haskan/Vulkan/Texture.hs` — `createCubemap`
+- `src/Graphics/Haskan/Vulkan/ImageView.hs` — `createImageViewCube`
+- `src/Graphics/Haskan/Vulkan/DeferredResources.hs` — cubemap descriptor integration
+- `src/Graphics/Haskan/Vulkan/DescriptorSetLayout.hs` — 6 bindings
+- `src/Graphics/Haskan/Vulkan/DescriptorPool.hs` — 6 textures per set
+- `src/Graphics/Haskan/Vulkan/DescriptorSet.hs` — 6 image view updates
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Lighting.hs` — IBL sampling with intensity
+- `src/Graphics/Haskan/Engine.hs` — parallel cubemap loading, cmft paths
+- `3rdparty/fir/src/FIR/Syntax/Synonyms.hs` — `TextureCube` export
+- `/home/pion/work/nix.config/flakes/cmft/` — cmft HDR patch
+
+### Next Steps
+1. Add roughness-based LOD for radiance map (need mipped cubemap loading)
+2. Add BRDF LUT for split-sum approximation  
+3. Support HDR cubemap loading (16-bit/FP textures)
+4. GPU-based cubemap convolution compute shaders
 
 ## M9 Progress — PBR Implementation
 

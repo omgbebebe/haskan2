@@ -14,6 +14,7 @@ module Graphics.Haskan.Vulkan.Texture
   , decodeTextureCached
   , uploadTexture
   , createTexture2DArray
+  , createCubemap
   ) where
 import Codec.Picture
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -533,6 +534,130 @@ createTexture2DArray rm pdev dev width height layers queue commandBuffer = do
           , trWidth = width
           , trHeight = height
           , trPixelData = Nothing -- GPU-only array, no CPU pixel data stored
+          , trDestroy = destroy
+          }
+
+  registerTexture rm resource
+  pure texH
+
+-- | Create a cubemap texture from 6 RGBA8 face images.
+-- Faces must be square and all the same size.
+-- Order: +X, -X, +Y, -Y, +Z, -Z
+createCubemap ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Int -> -- ^ face width/height
+  [Data.Vector.Storable.Vector Word8] -> -- ^ 6 face pixel datas
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+createCubemap rm pdev dev faceSize faces queue commandBuffer = do
+  let numFaces = length faces
+      facePixelCount = faceSize * faceSize * 4
+      allData = Vector.toList $ mconcat faces
+
+  -- Staging buffer (manual alloc, freed after upload)
+  (stagingBuffer, stagingMemoryRequirement) <-
+    Haskan.createBuffer dev allData Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+
+  stagingMemory <-
+    Haskan.createBufferMemory pdev dev stagingMemoryRequirement
+
+  liftIO $ do
+    Haskan.bindBufferMemory dev stagingBuffer stagingMemory allData
+    Haskan.copyDataToDeviceMemory dev stagingMemory allData
+
+  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      imageExtent =
+        Vulkan.createVk
+          ( set @"width" (fromIntegral faceSize)
+              &* set @"height" (fromIntegral faceSize)
+              &* set @"depth" 1
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
+              &* set @"extent" imageExtent
+              &* set @"mipLevels" 1
+              &* set @"arrayLayers" 6
+              &* set @"format" format
+              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
+              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
+              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+              &* set @"flags" Vulkan.VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
+              &* set @"queueFamilyIndexCount" 0
+              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
+          )
+
+  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+
+  imageMemoryRequirements <-
+    allocaAndPeek_
+      (Vulkan.vkGetImageMemoryRequirements dev image)
+  logDebugIO LogTexture $ "cubemap image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " faceSize=" <> showT faceSize
+
+  imageMemory <-
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+
+  liftIO $ bindImageMemory dev image imageMemory 0
+
+  Haskan.withCommandBufferOneTime queue commandBuffer $ do
+    Haskan.layerTransitionAll
+      commandBuffer
+      image
+      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      6
+
+    for_ (zip [0..] faces) $ \(faceIdx, _) -> do
+      let offset = fromIntegral (faceIdx * facePixelCount)
+      Haskan.copyBufferToImageLayer
+        commandBuffer
+        stagingBuffer
+        image
+        (fromIntegral faceSize)
+        (fromIntegral faceSize)
+        (fromIntegral faceIdx)
+        offset
+
+    Haskan.layerTransitionAll
+      commandBuffer
+      image
+      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      6
+
+  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+
+  -- Free staging resources
+  liftIO $ do
+    Vulkan.vkDestroyBuffer dev stagingBuffer Vulkan.vkNullPtr
+    Vulkan.vkFreeMemory dev stagingMemory Vulkan.vkNullPtr
+
+  imageView <- Haskan.createImageViewCube dev format image
+
+  texH <- TextureHandle <$> allocHandle (rmNextId rm)
+
+  let destroy = do
+        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
+        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
+        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+
+      resource =
+        TextureResource
+          { trHandle = texH
+          , trImage = image
+          , trImageView = imageView
+          , trMemory = imageMemory
+          , trWidth = faceSize
+          , trHeight = faceSize
+          , trPixelData = Nothing
           , trDestroy = destroy
           }
 
