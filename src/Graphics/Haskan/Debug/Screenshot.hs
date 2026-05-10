@@ -103,7 +103,7 @@ readPixels :: Ptr Word8 -> Int -> Int -> Vulkan.VkFormat -> Bool -> IO [Word8]
 readPixels ptr width height format needsSwizzle
   | format == Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT = do
       let readPixel idx = do
-            let row = (height - 1) - (idx `div` width)  -- flip Y
+            let row = idx `div` width
                 col = idx `mod` width
                 offset = (row * width + col) * 8
             rHalf <- peekByteOff ptr (offset + 0) :: IO Half
@@ -119,7 +119,7 @@ readPixels ptr width height format needsSwizzle
       concat <$> mapM readPixel [0 .. width * height - 1]
   | otherwise = do
       let readPixel idx = do
-            let row = (height - 1) - (idx `div` width)  -- flip Y: Vulkan top->bottom, PNG bottom->top
+            let row = idx `div` width
                 col = idx `mod` width
                 offset = (row * width + col) * 4
             r <- peekByteOff ptr (offset + 0) :: IO Word8

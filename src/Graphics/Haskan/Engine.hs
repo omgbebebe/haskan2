@@ -681,9 +681,9 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
               projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
               skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
           -- Log camera position periodically for manual positioning
-          when (frameNumber `mod` 60 == 0) $ do
-            let cp = Camera.cameraPosition camera
-            logInfoIO LogGeneral $ "camera: pos=" <> showT cp <> " dist=" <> showT (Camera.cameraDistance camera) <> " az=" <> showT (Camera.cameraAzimuth camera) <> " el=" <> showT (Camera.cameraElevation camera)
+          -- when (frameNumber `mod` 60 == 0) $ do
+            -- let cp = Camera.cameraPosition camera
+            -- logInfoIO LogGeneral $ "camera: pos=" <> showT cp <> " dist=" <> showT (Camera.cameraDistance camera) <> " az=" <> showT (Camera.cameraAzimuth camera) <> " el=" <> showT (Camera.cameraElevation camera)
           -- Update static view+proj UBO (no per-entity dynamic offsets)
           liftIO $ Buffer.updateUniformBufferRegion device mvpMemory 0 [view, projection]
 
