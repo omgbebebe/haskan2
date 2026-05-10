@@ -379,13 +379,11 @@ primitiveToVertices prim =
       defaultUV = V2 0 0
       defaultColor = V3 1 1 1
       defaultTangent = V4 1 0 0 1
-      -- Flip V coordinate to match Vulkan convention (glTF V=0 is bottom-left, Vulkan V=0 is top-left)
-      flipV (V2 u v) = V2 u (1 - v)
       
       -- Compute tangents from geometry
       n = length positions
       paddedNormals = take n (normals ++ repeat defaultNormal)
-      paddedUVs = take n (map flipV texCoords ++ repeat defaultUV)
+      paddedUVs = take n (texCoords ++ repeat defaultUV)
       tangents = if length idxs >= 3
         then Vector.toList $ computeTangents
                (Vector.fromList positions)
@@ -409,7 +407,7 @@ primitiveToVertices prim =
         )
         positions
         (normals ++ repeat defaultNormal)
-        (map flipV texCoords ++ repeat defaultUV)
+        (texCoords ++ repeat defaultUV)
         tangents
   where
     zipWith4 f (a:as) (b:bs) (c:cs) (d:ds) = f a b c d : zipWith4 f as bs cs ds

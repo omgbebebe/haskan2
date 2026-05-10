@@ -7,6 +7,22 @@
 - `3rdparty/gltf-loader/src/Text/GLTF/Loader/Gltf.hs` — MR/normal/occlusion texture fields
 - `3rdparty/gltf-loader/src/Text/GLTF/Loader/Internal/Adapter.hs` — adapter for new PBR fields
 
+## glTF V-Flip Fix (2025-05-10)
+
+### Bug
+The glTF loader was incorrectly applying `flipV (V2 u v) = V2 u (1 - v)` to all UV coordinates. This was based on the assumption that glTF uses OpenGL convention (V=0 bottom-left), but the glTF 2.0 spec states UV (0,0) is top-left — matching Vulkan's convention.
+
+### Fix
+Removed `flipV` from `primitiveToVertices` in `src/Graphics/Haskan/Scene/GLTF.hs`. glTF UVs are now passed through unchanged.
+
+### Verification
+- Blender-generated `uvCube.gltf` (with proper UVs) renders correctly
+- Vision model audit: no upside-down text, no mirroring, standard cube unwrap
+- Procedural `unitCube` and `uvSphere` regression tested — no issues
+
+### File Changed
+- `src/Graphics/Haskan/Scene/GLTF.hs` — removed `flipV` function and its usages
+
 ## BRDF LUT Fix (2025-05-10)
 
 ### Bug
