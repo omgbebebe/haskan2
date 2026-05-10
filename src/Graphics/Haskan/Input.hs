@@ -82,6 +82,7 @@ defaultBindings =
       (([], SDL.KeycodeF10), SaveScreenshot),
       (([], SDL.KeycodeF11), SaveAllStages),
       (([LShift], SDL.KeycodeF11), SaveSwapchainScreenshot),
+      (([LShift], SDL.KeycodeF12), DebugMode 12),  -- raw skybox
       (([LCtrl], SDL.KeycodeM), ToggleMouseCapture)
     ]
 

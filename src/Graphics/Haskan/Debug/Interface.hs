@@ -113,6 +113,7 @@ debugEventToAction (KeyPress keyName pressed) =
     "f10" -> Just (SaveScreenshot, pressed, False)
     "f11" -> Just (SaveAllStages, pressed, False)
     "shift+f11" -> Just (SaveSwapchainScreenshot, pressed, False)
+    "shift+f12" -> Just (DebugMode 12, pressed, False)
     "f12" -> Just (FrameInspect, pressed, False)
     "escape" -> Just (Escape, pressed, False)
     _ -> Nothing

@@ -1371,13 +1371,13 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 -- Returns (ray0, ray1, ray2) matching the vertex shader's vertex index selection.
 computeSkyboxRays :: M44 Float -> M44 Float -> (V3 Float, V3 Float, V3 Float)
 computeSkyboxRays view proj =
-  let -- Extract camera rotation (view->world) from column-major view matrix.
-      -- view = transpose(unViewMatrix) where unViewMatrix is row-major world->view.
-      -- The transpose of the upper 3x3 is the view->world rotation.
+  let -- Extract columns of view matrix's upper 3x3.
+      -- linear stores M44 in row-major; columns are the view axes in world space.
+      -- For view->world transform, we need transpose(R), which is formed from columns.
       V4 (V4 v00 v01 v02 _) (V4 v10 v11 v12 _) (V4 v20 v21 v22 _) _ = view
-      worldRot = V3 (V3 v00 v01 v02) (V3 v10 v11 v12) (V3 v20 v21 v22)
+      worldRot = V3 (V3 v00 v10 v20) (V3 v01 v11 v21) (V3 v02 v12 v22)
 
-      -- Extract projection scale factors from column-major proj matrix.
+      -- Extract projection scale factors from row-major proj matrix.
       -- proj = transpose(yFlip !*! perspective) where perspective uses
       -- fx = 1/(aspect*tan(fov/2)), fy = 1/tan(fov/2).
       -- After transpose: proj[0][0] = fx, proj[1][1] = -fy.
@@ -1385,11 +1385,10 @@ computeSkyboxRays view proj =
 
       ndcToDir :: V4 Float -> V3 Float
       ndcToDir (V4 x y _z _w) =
-        let -- NDC -> view-space direction on the image plane at z=+1.
-            -- linear's lookAt uses left-handed view space where:
-            --   +X = left in world space, +Y = up, +Z = forward
-            -- So we negate x to get correct left/right, and use z=+1 for forward.
-            viewDir = V3 (-x / fx) (y / fy) 1
+        let -- NDC -> view-space direction on the image plane at z=-1 (forward).
+            -- linear's lookAt uses left-handed view space where +X=left in world space.
+            -- We negate x so screen left maps to view +X (left in world space).
+            viewDir = V3 (-x / fx) (y / fy) (-1)
         in normalize (worldRot !* viewDir)
 
       -- Vulkan NDC: Y down, Z forward into screen
