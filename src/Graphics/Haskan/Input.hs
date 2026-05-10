@@ -31,6 +31,8 @@ data Action
   | Escape
   | FrameInspect
   | ToggleWireframe
+  | ToggleAxisOverlay
+  | ToggleGroundPlane
   | DebugMode Int
   | SaveScreenshot
   | SaveAllStages
@@ -68,22 +70,29 @@ defaultBindings =
       (([], SDL.KeycodeA), StrafeLeft),
       (([], SDL.KeycodeD), StrafeRight),
       (([], SDL.KeycodeF12), FrameInspect),
-      (([], SDL.KeycodeF3), ToggleWireframe),
       (([LShift], SDL.KeycodeQ), Escape),
-      -- Debug modes
+      (([LShift], SDL.KeycodeF3), ToggleWireframe),
+      (([], SDL.KeycodeG), ToggleAxisOverlay),
+      (([LShift], SDL.KeycodeG), ToggleGroundPlane),
+      -- Debug modes F1-F9 (modes 1-9)
       (([], SDL.KeycodeF1), DebugMode 1),   -- albedo
       (([], SDL.KeycodeF2), DebugMode 2),   -- normals
-      (([], SDL.KeycodeF4), DebugMode 3),   -- roughness
-      (([], SDL.KeycodeF5), DebugMode 4),   -- metallic
-      (([], SDL.KeycodeF6), DebugMode 5),   -- position
-      (([], SDL.KeycodeF7), DebugMode 6),   -- emissive
-      (([], SDL.KeycodeF8), DebugMode 7),   -- AO
-      (([], SDL.KeycodeF9), DebugMode 0),   -- normal lit
+      (([], SDL.KeycodeF3), DebugMode 3),   -- roughness
+      (([], SDL.KeycodeF4), DebugMode 4),   -- metallic
+      (([], SDL.KeycodeF5), DebugMode 5),   -- position
+      (([], SDL.KeycodeF6), DebugMode 6),   -- emissive
+      (([], SDL.KeycodeF7), DebugMode 7),   -- AO
+      (([], SDL.KeycodeF8), DebugMode 8),   -- NdotL
+      (([], SDL.KeycodeF9), DebugMode 9),   -- irradiance
+      -- Screenshots
       (([], SDL.KeycodeF10), SaveScreenshot),
       (([], SDL.KeycodeF11), SaveAllStages),
       (([LShift], SDL.KeycodeF11), SaveSwapchainScreenshot),
-      (([LShift], SDL.KeycodeF12), DebugMode 12),  -- raw skybox
-      (([LCtrl], SDL.KeycodeM), ToggleMouseCapture)
+      -- Debug modes with modifiers
+      (([LCtrl], SDL.KeycodeF12), DebugMode 10),  -- specular IBL
+      (([LShift], SDL.KeycodeF12), DebugMode 11), -- Fresnel
+      (([LShift, LCtrl], SDL.KeycodeF12), DebugMode 12), -- raw skybox
+      (([], SDL.KeycodeM), ToggleMouseCapture)
     ]
 
 modifiersToList :: SDL.KeyModifier -> [KeyModifier]

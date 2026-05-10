@@ -89,7 +89,16 @@ Lighting shader now uses:
 2. Removed incorrect negation: `viewDir = V3 (x/fx) (y/fy) (-1)`
 
 ### Verification
-- Colored test cubemap (`+X=red`, `-X=blue`, `+Y=green`, `-Y=yellow`, `+Z=magenta`, `-Z=cyan`)
+- Colored test cubemap for skybox orientation verification:
+  | Face | Axis | Color |
+  |------|------|-------|
+  | +X | Right | Red (255, 0, 0) |
+  | -X | Left | Blue (0, 0, 255) |
+  | +Y | Up | Green (0, 255, 0) |
+  | -Y | Down | Yellow (255, 255, 0) |
+  | +Z | Backward | Light Gray (192, 192, 192) |
+  | -Z | Forward | Brown (128, 64, 0) |
+- `data/hdri/env_test/` — 6 solid-color PNGs (512x512 each)
 - Axis arrows at origin with matching 1x1 colored textures confirm alignment
 - No diagonal tilt; skybox perfectly straight with world axes
 

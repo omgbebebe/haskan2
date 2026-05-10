@@ -390,6 +390,8 @@ data GameState cam = GameState
     renderDebugState :: TVar (Maybe RenderDebugInfo),
     wireframeEnabled :: TVar Bool,
     debugMode :: TVar Word32,
+    axisOverlayEnabled :: TVar Float,
+    groundPlaneEnabled :: TVar Float,
     pendingScreenshot :: TVar Bool,
     pendingAllStages :: TVar Bool,
     pendingSwapchainScreenshot :: TVar Bool,
@@ -461,6 +463,8 @@ mainLoop meshName EngineConfig {..} = do
   tvRenderDebugState <- liftIO $ STM.newTVarIO Nothing
   tvWireframeEnabled <- liftIO $ STM.newTVarIO False
   tvDebugMode <- liftIO $ STM.newTVarIO 0
+  tvAxisOverlayEnabled <- liftIO $ STM.newTVarIO 0.0
+  tvGroundPlaneEnabled <- liftIO $ STM.newTVarIO 0.0
   tvPendingScreenshot <- liftIO $ STM.newTVarIO False
   tvPendingAllStages <- liftIO $ STM.newTVarIO False
   tvPendingSwapchainScreenshot <- liftIO $ STM.newTVarIO False
@@ -479,6 +483,8 @@ mainLoop meshName EngineConfig {..} = do
           tvRenderDebugState
           tvWireframeEnabled
           tvDebugMode
+          tvAxisOverlayEnabled
+          tvGroundPlaneEnabled
           tvPendingScreenshot
           tvPendingAllStages
           tvPendingSwapchainScreenshot
@@ -574,12 +580,14 @@ renderFrameLoop ::
   IORef FrameStats ->
   ComputeCullResources ->
   STM.TVar Word32 ->
+  STM.TVar Float ->
+  STM.TVar Float ->
   STM.TVar Bool ->
   STM.TVar Bool ->
   STM.TVar Bool ->
   Vulkan.VkPhysicalDevice ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvDebugMode tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -714,6 +722,8 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                       }
                 wireframeEnabled' <- liftIO $ STM.readTVarIO tvWireframe
                 debugMode' <- liftIO $ STM.readTVarIO tvDebugMode
+                axisOverlay' <- liftIO $ STM.readTVarIO tvAxisOverlay
+                groundPlane' <- liftIO $ STM.readTVarIO tvGroundPlane
 
                 -- Build deferred render graph for this frame
                 let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
@@ -737,6 +747,8 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdCameraPos = realToFrac <$> Camera.cameraPosition camera
                         , dpdSkyboxRays = skyboxRays
                         , dpdDebugMode = debugMode'
+                        , dpdAxisOverlay = axisOverlay'
+                        , dpdGroundPlane = groundPlane'
                         , dpdGBufferImages = gBufferImagesForFrame
                         , dpdWireframePipeline = drWireframePipeline
                         , dpdWireframeLayout = drWireframePipelineLayout
@@ -884,6 +896,8 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         frameStatsRef
         ccr
         tvDebugMode
+        tvAxisOverlay
+        tvGroundPlane
         tvPendingScreenshot
         tvPendingAllStages
         tvPendingSwapchainScreenshot
@@ -1009,47 +1023,11 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
             (pixelData, tw, th) <- Texture.readImageFromFile uvCheckerPath
             Texture.createTextureFromData rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
           else do
-            let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
-            Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
-
-      -- Add axis arrows at origin with colored textures
-      let redTexData = Vector.fromList [255, 0, 0, 255] :: Vector.Vector Word8
-          greenTexData = Vector.fromList [0, 255, 0, 255] :: Vector.Vector Word8
-          blueTexData = Vector.fromList [0, 0, 255, 255] :: Vector.Vector Word8
-      redTexHandle <- Texture.createTextureFromData rm physicalDevice device 1 1 redTexData graphicsQueueHandler textureCommandBuffer
-      greenTexHandle <- Texture.createTextureFromData rm physicalDevice device 1 1 greenTexData graphicsQueueHandler textureCommandBuffer
-      blueTexHandle <- Texture.createTextureFromData rm physicalDevice device 1 1 blueTexData graphicsQueueHandler textureCommandBuffer
-
-      let xArrowMesh = Mesh.axisArrow (V3 1 0 0) (V3 1 0 0)
-          yArrowMesh = Mesh.axisArrow (V3 0 1 0) (V3 0 1 0)
-          zArrowMesh = Mesh.axisArrow (V3 0 0 1) (V3 0 0 1)
-      xArrowHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices xArrowMesh) (Mesh.indices xArrowMesh)
-      yArrowHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices yArrowMesh) (Mesh.indices yArrowMesh)
-      zArrowHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices zArrowMesh) (Mesh.indices zArrowMesh)
-
-      xEntity <- ECS.spawnEntity world
-      ECS.setTransform world xEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-      ECS.setMesh world xEntity xArrowHandle
-      ECS.setMaterial world xEntity redTexHandle
-      ECS.setMetallicFactor world xEntity 0.0
-      ECS.setRoughnessFactor world xEntity 0.0
-
-      yEntity <- ECS.spawnEntity world
-      ECS.setTransform world yEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-      ECS.setMesh world yEntity yArrowHandle
-      ECS.setMaterial world yEntity greenTexHandle
-      ECS.setMetallicFactor world yEntity 0.0
-      ECS.setRoughnessFactor world yEntity 0.0
-
-      zEntity <- ECS.spawnEntity world
-      ECS.setTransform world zEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-      ECS.setMesh world zEntity zArrowHandle
-      ECS.setMaterial world zEntity blueTexHandle
-      ECS.setMetallicFactor world zEntity 0.0
-      ECS.setRoughnessFactor world zEntity 0.0
+             let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
+             Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
 
       let sceneBbox = BBox (V3 (-1) (-1) (-1)) (V3 1 1 1)
-      pure (world, 3, sceneBbox, IntMap.empty)
+      pure (world, 0, sceneBbox, IntMap.empty)
 
     Nothing -> if isStressTest
     then do
@@ -1134,21 +1112,11 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       ECS.setMetallicFactor world groundEntity 0.0
       ECS.setRoughnessFactor world groundEntity 1.0
 
-      -- Add axis arrows at origin
-      let arrowsMesh = Mesh.axisArrows
-      arrowsMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices arrowsMesh) (Mesh.indices arrowsMesh)
-      arrowsEntity <- ECS.spawnEntity world
-      ECS.setTransform world arrowsEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-      ECS.setMesh world arrowsEntity arrowsMeshHandle
-      ECS.setMaterial world arrowsEntity checkerTexHandle
-      ECS.setMetallicFactor world arrowsEntity 0.0
-      ECS.setRoughnessFactor world arrowsEntity 0.0
-
       -- Compute world-space bounds from ECS entities (includes ground plane)
       sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
       logInfoIO LogGeneral $ "scene bounds: " <> showT sceneBbox
 
-      pure (world, 4, sceneBbox, IntMap.empty)  -- 3 cubes + ground plane
+      pure (world, 1, sceneBbox, IntMap.empty)  -- ground plane only
 
   -- Adjust camera based on scene bounds
   worldState <- liftIO $ STM.readTVarIO (world gameState)
@@ -1379,6 +1347,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       tvRenderDebug = renderDebugState gameState
       tvWireframe = wireframeEnabled gameState
       tvDebugMode = debugMode gameState
+      tvAxisOverlay = axisOverlayEnabled gameState
+      tvGroundPlane = groundPlaneEnabled gameState
       tvPendingScreenshot = pendingScreenshot gameState
       tvPendingAllStages = pendingAllStages gameState
       tvPendingSwapchainScreenshot = pendingSwapchainScreenshot gameState
@@ -1390,7 +1360,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           else do
              renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
                 with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView mBrdfView lightingSampler) $ \dr ->
-                 renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice
+                 renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice
              outerLoop renderFrameLoopFinished
 
 
@@ -1545,6 +1515,18 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                   SDL.Mouse.setMouseLocationMode (if newState then SDL.Mouse.RelativeLocation else SDL.Mouse.AbsoluteLocation)
                   logInfoIO LogGeneral $ "mouse capture toggled: " <> showT newState
                 (ToggleMouseCapture, False, _) -> pure ()
+                (ToggleAxisOverlay, True, _) -> do
+                  current <- STM.readTVarIO (axisOverlayEnabled gameState)
+                  let newState = if current == 1.0 then 0.0 else 1.0
+                  STM.atomically $ STM.writeTVar (axisOverlayEnabled gameState) newState
+                  logInfoIO LogGeneral $ "axis overlay toggled: " <> showT newState
+                (ToggleAxisOverlay, False, _) -> pure ()
+                (ToggleGroundPlane, True, _) -> do
+                  current <- STM.readTVarIO (groundPlaneEnabled gameState)
+                  let newState = if current == 1.0 then 0.0 else 1.0
+                  STM.atomically $ STM.writeTVar (groundPlaneEnabled gameState) newState
+                  logInfoIO LogGeneral $ "ground plane toggled: " <> showT newState
+                (ToggleGroundPlane, False, _) -> pure ()
                 (DebugMode mode, True, _) -> do
                   STM.atomically $ STM.writeTVar (debugMode gameState) (fromIntegral mode)
                   logInfoIO LogGeneral $ "debug mode set to " <> showT mode

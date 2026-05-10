@@ -61,7 +61,11 @@ type CameraPushConstant = Struct
   '[ "cameraX" ':-> Float
    , "cameraY" ':-> Float
    , "cameraZ" ':-> Float
-   , "debugMode" ':-> Word32
+   , "debugMode" ':-> Float
+   , "axisOverlay" ':-> Float
+   , "groundPlane" ':-> Float
+   , "pad0" ':-> Float
+   , "pad1" ':-> Float
    , "ray0" ':-> V 3 Float
    , "ray1" ':-> V 3 Float
    , "ray2" ':-> V 3 Float
@@ -107,25 +111,26 @@ type FragmentDefs =
        "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
      ]
 
--- Debug mode values
--- 0 = normal lit
--- 1 = albedo
--- 2 = normals (world-space)
--- 3 = roughness
--- 4 = metallic
--- 5 = position
--- 6 = emissive
--- 7 = AO
--- 8 = NdotL
--- 9 = irradiance
--- 10 = specular IBL
--- 11 = Fresnel
--- 12 = skybox (raw env_map sample, all pixels)
+-- Debug mode values (all Float type, passed as push constant)
+-- 0  = normal lit (default)
+-- 1  = albedo          (F1)
+-- 2  = normals (world-space) (F2)
+-- 3  = roughness       (F3)
+-- 4  = metallic        (F4)
+-- 5  = position        (F5)
+-- 6  = emissive        (F6)
+-- 7  = AO              (F7)
+-- 8  = NdotL           (F8)
+-- 9  = irradiance      (F9)
+-- 10 = specular IBL    (Ctrl+F12)
+-- 11 = Fresnel         (Shift+F12)
+-- 12 = skybox (raw env_map sample, all pixels) (Shift+Ctrl+F12)
 
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do
   uv <- get @"in_uv"
   rayDir <- get @"in_ray"
+  let (Vec3 rayDirX rayDirY rayDirZ) = rayDir
   -- Sample g-buffer with lazy pattern matching to avoid view constraint issues
   ~(Vec4 posX posY posZ metallic) <- use @(ImageTexel "gbuf_position") NilOps uv
   ~(Vec4 normX_raw normY_raw normZ_raw roughness) <- use @(ImageTexel "gbuf_normal") NilOps uv
@@ -159,6 +164,8 @@ fragment = shader do
       camY = view @(Name "cameraY") cameraPos
       camZ = view @(Name "cameraZ") cameraPos
       debugMode = view @(Name "debugMode") cameraPos
+      axisOverlay = view @(Name "axisOverlay") cameraPos
+      groundPlane = view @(Name "groundPlane") cameraPos
 
   let -- View direction (from fragment to camera)
       vdx = camX - posX
@@ -293,10 +300,10 @@ fragment = shader do
       finaly = if hasGeometry then gamy else skyG
       finalz = if hasGeometry then gamz else skyB
 
-      -- Debug mode 12: raw skybox for ALL pixels
-      dbgSkyR = if debugMode == 12 then skyR else finalx
-      dbgSkyG = if debugMode == 12 then skyG else finaly
-      dbgSkyB = if debugMode == 12 then skyB else finalz
+      -- Debug mode 12.0: raw skybox for ALL pixels
+      dbgSkyR = if debugMode == 12.0 then skyR else finalx
+      dbgSkyG = if debugMode == 12.0 then skyG else finaly
+      dbgSkyB = if debugMode == 12.0 then skyB else finalz
 
       -- Debug visualization helpers
       -- Normals: map [-1,1] to [0,1]
@@ -324,48 +331,93 @@ fragment = shader do
       dbgFresY = fresIBLy
       dbgFresZ = fresIBLz
 
-      -- Debug output selection
-      -- Compare against polymorphic literals resolved to Code Word32
-      outR = if debugMode == 1 then albR else
-             if debugMode == 2 then dbgNormX else
-             if debugMode == 3 then roughness else
-             if debugMode == 4 then metallic else
-             if debugMode == 5 then dbgPosX else
-             if debugMode == 6 then emissiveR else
-             if debugMode == 7 then ao else
-             if debugMode == 8 then nDotL else
-             if debugMode == 9 then dbgIrrX else
-             if debugMode == 10 then dbgSpecX else
-             if debugMode == 11 then dbgFresX else
-             if debugMode == 12 then dbgSkyR else
+      -- Debug output selection (debugMode is Float, compare with float literals)
+      outR = if debugMode == 1.0 then albR else
+             if debugMode == 2.0 then dbgNormX else
+             if debugMode == 3.0 then roughness else
+             if debugMode == 4.0 then metallic else
+             if debugMode == 5.0 then dbgPosX else
+             if debugMode == 6.0 then emissiveR else
+             if debugMode == 7.0 then ao else
+             if debugMode == 8.0 then nDotL else
+             if debugMode == 9.0 then dbgIrrX else
+             if debugMode == 10.0 then dbgSpecX else
+             if debugMode == 11.0 then dbgFresX else
+             if debugMode == 12.0 then dbgSkyR else
              finalx
 
-      outG = if debugMode == 1 then albG else
-             if debugMode == 2 then dbgNormY else
-             if debugMode == 3 then roughness else
-             if debugMode == 4 then metallic else
-             if debugMode == 5 then dbgPosY else
-             if debugMode == 6 then emissiveG else
-             if debugMode == 7 then ao else
-             if debugMode == 8 then nDotL else
-             if debugMode == 9 then dbgIrrY else
-             if debugMode == 10 then dbgSpecY else
-             if debugMode == 11 then dbgFresY else
-             if debugMode == 12 then dbgSkyG else
+      outG = if debugMode == 1.0 then albG else
+             if debugMode == 2.0 then dbgNormY else
+             if debugMode == 3.0 then roughness else
+             if debugMode == 4.0 then metallic else
+             if debugMode == 5.0 then dbgPosY else
+             if debugMode == 6.0 then emissiveG else
+             if debugMode == 7.0 then ao else
+             if debugMode == 8.0 then nDotL else
+             if debugMode == 9.0 then dbgIrrY else
+             if debugMode == 10.0 then dbgSpecY else
+             if debugMode == 11.0 then dbgFresY else
+             if debugMode == 12.0 then dbgSkyG else
              finaly
 
-      outB = if debugMode == 1 then albB else
-             if debugMode == 2 then dbgNormZ else
-             if debugMode == 3 then roughness else
-             if debugMode == 4 then metallic else
-             if debugMode == 5 then dbgPosZ else
-             if debugMode == 6 then emissiveB else
-             if debugMode == 7 then ao else
-             if debugMode == 8 then nDotL else
-             if debugMode == 9 then dbgIrrZ else
-             if debugMode == 10 then dbgSpecZ else
-             if debugMode == 11 then dbgFresZ else
-             if debugMode == 12 then dbgSkyB else
+      outB = if debugMode == 1.0 then albB else
+             if debugMode == 2.0 then dbgNormZ else
+             if debugMode == 3.0 then roughness else
+             if debugMode == 4.0 then metallic else
+             if debugMode == 5.0 then dbgPosZ else
+             if debugMode == 6.0 then emissiveB else
+             if debugMode == 7.0 then ao else
+             if debugMode == 8.0 then nDotL else
+             if debugMode == 9.0 then dbgIrrZ else
+             if debugMode == 10.0 then dbgSpecZ else
+             if debugMode == 11.0 then dbgFresZ else
+             if debugMode == 12.0 then dbgSkyB else
              finalz
 
-  put @"out_colour" (Vec4 outR outG outB 1)
+      -- Normalize ray direction for overlay computations
+      rayLen = sqrt (rayDirX * rayDirX + rayDirY * rayDirY + rayDirZ * rayDirZ + 0.0001)
+      rayNX = rayDirX / rayLen
+      rayNY = rayDirY / rayLen
+      rayNZ = rayDirZ / rayLen
+
+      -- World axes overlay (center-aligned, radiating from screen center)
+      -- Check if ray is close to world axes (both positive and negative directions)
+      axisThresh = 0.995  -- cos(5.7 degrees), ~10px thick line at center for 60deg FOV
+      onX = abs rayNX > axisThresh
+      onY = abs rayNY > axisThresh
+      onZ = abs rayNZ > axisThresh
+      isAxis = onX || onY || onZ
+
+      -- Axis colors: X=red, Y=green, Z=blue
+      axisR = if onX then 1.0 else if onY then 0.0 else if onZ then 0.0 else 0.0
+      axisG = if onX then 0.0 else if onY then 1.0 else if onZ then 0.0 else 0.0
+      axisB = if onX then 0.0 else if onY then 0.0 else if onZ then 1.0 else 0.0
+
+      -- Ground plane: intersect camera ray with Y=0
+      -- ray = cameraPos + t * rayDir, solve for Y=0: t = -camY / rayNY
+      tGround = (-camY) / (rayNY + 0.0001)
+      groundX = camX + rayNX * tGround
+      groundZ = camZ + rayNZ * tGround
+      groundDist = sqrt (groundX * groundX + groundZ * groundZ)
+
+      -- Fade with distance (max 50 units)
+      groundFade = max 0.0 (1.0 - groundDist / 50.0)
+
+      -- Ground plane color: solid dark gray
+      groundColR = 0.12 * groundFade
+      groundColG = 0.12 * groundFade
+      groundColB = 0.12 * groundFade
+
+      -- Ground plane visible only where there's no geometry and ray points below horizon
+      hasGround = tGround > 0.0 && not hasGeometry
+
+      -- Apply overlays
+      withGroundR = if hasGround && groundPlane == 1.0 then groundColR else outR
+      withGroundG = if hasGround && groundPlane == 1.0 then groundColG else outG
+      withGroundB = if hasGround && groundPlane == 1.0 then groundColB else outB
+
+      finalR = if isAxis && axisOverlay == 1.0 then axisR else withGroundR
+      finalG = if isAxis && axisOverlay == 1.0 then axisG else withGroundG
+      finalB = if isAxis && axisOverlay == 1.0 then axisB else withGroundB
+
+  put @"out_colour" (Vec4 finalR finalG finalB 1)
