@@ -98,7 +98,7 @@ createLightingDescriptorSetLayout dev = do
               &* set @"pImmutableSamplers" Vulkan.VK_NULL
               &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
           )
-      bindings = map mkSamplerBinding [0, 1, 2, 3, 4, 5]
+      bindings = map mkSamplerBinding [0, 1, 2, 3, 4, 5, 6]
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO

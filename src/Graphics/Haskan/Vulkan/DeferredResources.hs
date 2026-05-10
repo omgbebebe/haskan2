@@ -66,8 +66,9 @@ createDeferredResources ::
   Vulkan.VkShaderModule ->
   Maybe Vulkan.VkImageView -> -- ^ env cubemap view
   Maybe Vulkan.VkImageView -> -- ^ irradiance cubemap view
+  Maybe Vulkan.VkImageView -> -- ^ brdf lut view
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader mEnvMapView mIrradianceView = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader mEnvMapView mIrradianceView mBrdfView = do
   let extent = rcSurfaceExtent ctx
       gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT  -- position needs negative values
       gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM      -- normal, albedo, emissive
@@ -199,7 +200,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender $ "lighting framebuffers created: " <> showT (length lightingFramebuffers)
 
   -- Lighting descriptor pool and sets
-  lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages 6
+  lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages 7
   lightingDescriptorSets <- for [0..numSwapchainImages-1] $ \_ ->
     DescriptorSet.allocateDescriptorSet device lightingDescriptorPool [lightingDescriptorSetLayout]
   logDebugIO LogRender $ "lighting descriptor sets allocated: " <> showT (length lightingDescriptorSets)
@@ -208,11 +209,11 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   sampler <- createSampler device
   logDebugIO LogRender "lighting sampler created"
 
-  -- Update lighting descriptor sets with g-buffer views + cubemaps
+  -- Update lighting descriptor sets with g-buffer views + cubemaps + brdf lut
   liftIO $ for_ (zip lightingDescriptorSets gBufferImageViews) $ \(ds, views) -> do
-    let allViews = case (mEnvMapView, mIrradianceView) of
-                     (Just env, Just irr) -> views ++ [env, irr]
-                     _ -> views ++ (replicate 2 Vulkan.VK_NULL_HANDLE)
+    let allViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
+                     (Just env, Just irr, Just brdf) -> views ++ [env, irr, brdf]
+                     _ -> views ++ (replicate 3 Vulkan.VK_NULL_HANDLE)
     DescriptorSet.updateLightingDescriptorSets device ds sampler allViews
   logDebugIO LogRender "lighting descriptor sets updated"
 

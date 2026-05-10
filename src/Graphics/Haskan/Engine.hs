@@ -66,6 +66,7 @@ import Graphics.Haskan.BoundingBox (BBox (..), bboxCenter, bboxDiagonal, emptyBB
 import Graphics.Haskan.Resources (throwVkResult, allocaAndPeek)
 import Graphics.Haskan.Utils.ObjLoader qualified as ObjLoader
 import Graphics.Haskan.Vertex (Vertex (..))
+import Graphics.Haskan.Vulkan.BRDF qualified as BRDF
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.CommandPool qualified as CommandPool
@@ -935,6 +936,12 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   mIrradianceView <- Texture.textureImageView rm irradianceCubemap
   logInfoIO LogGeneral $ "IBL cubemaps loaded: radiance=" <> showT radSize <> "px irradiance=" <> showT irrSize <> "px"
 
+  -- Generate BRDF LUT
+  let brdfPixels = BRDF.generateBRDFLUT 256 256
+  brdfTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 brdfPixels graphicsQueueHandler textureCommandBuffer
+  mBrdfView <- Texture.textureImageView rm brdfTexHandle
+  logInfoIO LogGeneral "BRDF LUT generated"
+
   -- Initialize asset cache for texture preprocessing
   assetCache <- initCache ".haskan2-cache"
 
@@ -1305,7 +1312,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           then pure ()
           else do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-               with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView) $ \dr ->
+               with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView mBrdfView) $ \dr ->
                 renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvPendingScreenshot tvPendingAllStages physicalDevice
             outerLoop renderFrameLoopFinished
 

@@ -143,7 +143,7 @@ updateLightingDescriptorSets ::
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkSampler ->
-  [Vulkan.VkImageView] -> -- ^ 6 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive, env_cubemap, irradiance_cubemap
+  [Vulkan.VkImageView] -> -- ^ 7 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive, env_cubemap, irradiance_cubemap, brdf_lut
   m ()
 updateLightingDescriptorSets dev descriptorSet sampler imageViews = do
   let mkTextureInfo imageView =

@@ -67,10 +67,14 @@ type FragmentDefs =
         ':-> TextureCube
                '[Binding 4, DescriptorSet 0]
                (RGBA8 UNorm),
-       "irradiance_map"
-         ':-> TextureCube
-                '[Binding 5, DescriptorSet 0]
-                (RGBA8 UNorm),
+        "irradiance_map"
+          ':-> TextureCube
+                 '[Binding 5, DescriptorSet 0]
+                 (RGBA8 UNorm),
+        "brdf_lut"
+          ':-> Texture2D
+                 '[Binding 6, DescriptorSet 0]
+                 (RGBA8 UNorm),
        "cameraPos"
          ':-> PushConstant
                 '[]
@@ -223,6 +227,11 @@ fragment = shader do
       fresIBLy = f0y + (1 - f0y) * omvIBL5
       fresIBLz = f0z + (1 - f0z) * omvIBL5
 
+  -- Sample BRDF LUT for split-sum approximation
+  brdfSample <- use @(ImageTexel "brdf_lut") NilOps (Vec2 nDotV roughness)
+  let brdfScale = view @(Index 0) brdfSample
+      brdfBias = view @(Index 1) brdfSample
+
   -- Sample irradiance (diffuse IBL)
   irrSample <- use @(ImageTexel "irradiance_map") NilOps (Vec3 nx ny nz)
   let irrR = view @(Index 0) irrSample
@@ -238,16 +247,16 @@ fragment = shader do
       -- IBL intensity scale (bright outdoor HDRI)
       envIntensity = 0.3
 
-      -- Ambient = IBL only (no hack ambient term)
       -- Diffuse IBL (irradiance * albedo * (1-metallic) * AO)
       iblDiffx = irrR * albR * (1 - metallic) * ao * envIntensity
       iblDiffy = irrG * albG * (1 - metallic) * ao * envIntensity
       iblDiffz = irrB * albB * (1 - metallic) * ao * envIntensity
 
-      -- Specular IBL (environment * Fresnel * intensity)
-      iblSpecx = envR * fresIBLx * envIntensity
-      iblSpecy = envG * fresIBLy * envIntensity
-      iblSpecz = envB * fresIBLz * envIntensity
+      -- Specular IBL with BRDF LUT (split-sum approximation)
+      -- specular = envMap * (f0 * scale + bias)
+      iblSpecx = envR * (fresIBLx * brdfScale + brdfBias) * envIntensity
+      iblSpecy = envG * (fresIBLy * brdfScale + brdfBias) * envIntensity
+      iblSpecz = envB * (fresIBLz * brdfScale + brdfBias) * envIntensity
 
       -- Combine: direct light + emissive + IBL
       colx = litx + emissiveR + iblDiffx + iblSpecx

@@ -43,7 +43,8 @@ library
                        Graphics.Haskan.Utils.ObjLoader
                        Graphics.Haskan.Utils.PieLoader
                        Graphics.Haskan.Utils.TangentSpace
-                       Graphics.Haskan.Vulkan.Buffer
+                        Graphics.Haskan.Vulkan.BRDF
+                        Graphics.Haskan.Vulkan.Buffer
                        Graphics.Haskan.Vulkan.CommandBuffer
                        Graphics.Haskan.Vulkan.CommandPool
                        Graphics.Haskan.Vulkan.ComputePipeline
@@ -120,8 +121,9 @@ library
                       , network >=3.1 && <3.3
                        , half >=0.3 && <0.4
                        , optparse-applicative >=0.18 && <0.20
-                       , mtl >=2.3 && <2.4
-                       , gltf-loader >=0.3 && <0.4
+                        , mtl >=2.3 && <2.4
+                        , random >=1.2 && <1.4
+                        , gltf-loader >=0.3 && <0.4
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
