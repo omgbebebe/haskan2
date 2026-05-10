@@ -8,6 +8,7 @@ import Math.Linear
 
 type EntityData = Struct
   '[ "transform"     ':-> M 4 4 Float
+   , "normalMatrix"  ':-> M 4 4 Float
    , "aabbMin"       ':-> V 4 Float
    , "aabbMax"       ':-> V 4 Float
    , "materialIndex" ':-> Word32

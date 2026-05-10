@@ -73,7 +73,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   let extent = rcSurfaceExtent ctx
       gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT  -- position needs negative values
       gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM      -- normal, albedo, emissive
-      depthFormat = Vulkan.VK_FORMAT_D16_UNORM
+      depthFormat = Vulkan.VK_FORMAT_D32_SFLOAT
       numSwapchainImages = length (rcFramebuffers ctx)
 
   logInfoIO LogRender $ "creating deferred resources for " <> showT numSwapchainImages <> " swapchain images"

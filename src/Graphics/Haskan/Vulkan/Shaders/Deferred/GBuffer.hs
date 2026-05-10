@@ -65,12 +65,13 @@ vertex = shader do
 
   entityIdx <- get @"gl_InstanceIndex"
   model <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32 :.: Name "transform") entityIdx
+  normalMatrix <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32 :.: Name "normalMatrix") entityIdx
   matIdx <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32 :.: Name "materialIndex") entityIdx
 
   let mvp = (projection !*! view) !*! model
       worldPos = model !*^ Vec4 x y z 1
-      worldNorm = model !*^ Vec4 nx ny nz 0
-      worldTangent = model !*^ tangent
+      worldNorm = normalMatrix !*^ Vec4 nx ny nz 0
+      worldTangent = normalMatrix !*^ tangent
   pos <- def @"pos" @R (mvp !*^ Vec4 x y z 1)
   put @"out_position" worldPos
   put @"out_normal" worldNorm

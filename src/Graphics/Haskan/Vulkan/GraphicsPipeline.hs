@@ -112,7 +112,7 @@ createGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent verte
               &* set @"polygonMode" Vulkan.VK_POLYGON_MODE_FILL
               &* set @"lineWidth" 1.0
               &* set @"cullMode" Vulkan.VK_CULL_MODE_NONE
-              &* set @"frontFace" Vulkan.VK_FRONT_FACE_CLOCKWISE
+              &* set @"frontFace" Vulkan.VK_FRONT_FACE_COUNTER_CLOCKWISE
               &* set @"depthBiasEnable" Vulkan.VK_FALSE
               &* set @"depthBiasConstantFactor" 0.0
               &* set @"depthBiasClamp" 0.0
@@ -316,7 +316,7 @@ createFullscreenPipeline dev layout renderPass shaderProgram swapchainExtent = d
               &* set @"polygonMode" Vulkan.VK_POLYGON_MODE_FILL
               &* set @"lineWidth" 1.0
               &* set @"cullMode" Vulkan.VK_CULL_MODE_NONE
-              &* set @"frontFace" Vulkan.VK_FRONT_FACE_CLOCKWISE
+              &* set @"frontFace" Vulkan.VK_FRONT_FACE_COUNTER_CLOCKWISE
               &* set @"depthBiasEnable" Vulkan.VK_FALSE
               &* set @"depthBiasConstantFactor" 0.0
               &* set @"depthBiasClamp" 0.0

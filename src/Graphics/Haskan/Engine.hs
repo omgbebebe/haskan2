@@ -101,7 +101,7 @@ import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Linear (M44, V2 (..), V3 (..), V4 (..), (^+^), (^-^))
-import Linear.Matrix (identity, transpose, (!*), (!*!))
+import Linear.Matrix (identity, inv33, transpose, (!*), (!*!))
 import Linear.Projection qualified
 import Linear.Quaternion (Quaternion (..))
 import Linear.V3 (_x, _y, _z)
@@ -159,9 +159,10 @@ flushInputBuffer (InputBuffer eventsVar overflowVar) = do
   pure (toList events, overflow)
 
 -- | Compute culling entity data (matches shader EntityData, Base/std430 layout).
--- Array stride is 128 bytes.
+-- Array stride is 208 bytes.
 data ComputeEntityData = ComputeEntityData
   { ceTransform :: M44 Foreign.C.CFloat
+  , ceNormalMatrix :: M44 Foreign.C.CFloat
   , ceAabbMin :: V4 Foreign.C.CFloat
   , ceAabbMax :: V4 Foreign.C.CFloat
   , ceMaterialIndex :: Word32
@@ -178,38 +179,40 @@ data ComputeEntityData = ComputeEntityData
   } deriving (Show)
 
 instance Storable ComputeEntityData where
-  sizeOf _ = 144
+  sizeOf _ = 208
   alignment _ = 16
   peek ptr = ComputeEntityData
     <$> peekByteOff ptr 0
     <*> peekByteOff ptr 64
-    <*> peekByteOff ptr 80
-    <*> peekByteOff ptr 96
-    <*> peekByteOff ptr 100
-    <*> peekByteOff ptr 104
-    <*> peekByteOff ptr 108
-    <*> peekByteOff ptr 112
-    <*> peekByteOff ptr 116
-    <*> peekByteOff ptr 120
-    <*> peekByteOff ptr 124
     <*> peekByteOff ptr 128
-    <*> peekByteOff ptr 132
-    <*> peekByteOff ptr 136
-  poke ptr (ComputeEntityData t amin amax mat fi vo ic mri met rou ni oi os ei) = do
+    <*> peekByteOff ptr 144
+    <*> peekByteOff ptr 160
+    <*> peekByteOff ptr 164
+    <*> peekByteOff ptr 168
+    <*> peekByteOff ptr 172
+    <*> peekByteOff ptr 176
+    <*> peekByteOff ptr 180
+    <*> peekByteOff ptr 184
+    <*> peekByteOff ptr 188
+    <*> peekByteOff ptr 192
+    <*> peekByteOff ptr 196
+    <*> peekByteOff ptr 200
+  poke ptr (ComputeEntityData t nm amin amax mat fi vo ic mri met rou ni oi os ei) = do
     pokeByteOff ptr 0 t
-    pokeByteOff ptr 64 amin
-    pokeByteOff ptr 80 amax
-    pokeByteOff ptr 96 mat
-    pokeByteOff ptr 100 fi
-    pokeByteOff ptr 104 vo
-    pokeByteOff ptr 108 ic
-    pokeByteOff ptr 112 mri
-    pokeByteOff ptr 116 met
-    pokeByteOff ptr 120 rou
-    pokeByteOff ptr 124 ni
-    pokeByteOff ptr 128 oi
-    pokeByteOff ptr 132 os
-    pokeByteOff ptr 136 ei
+    pokeByteOff ptr 64 nm
+    pokeByteOff ptr 128 amin
+    pokeByteOff ptr 144 amax
+    pokeByteOff ptr 160 mat
+    pokeByteOff ptr 164 fi
+    pokeByteOff ptr 168 vo
+    pokeByteOff ptr 172 ic
+    pokeByteOff ptr 176 mri
+    pokeByteOff ptr 180 met
+    pokeByteOff ptr 184 rou
+    pokeByteOff ptr 188 ni
+    pokeByteOff ptr 192 oi
+    pokeByteOff ptr 196 os
+    pokeByteOff ptr 200 ei
 
 -- | Compute culling uniform data (matches shader CullData, Extended/std140 layout).
 data ComputeCullData = ComputeCullData
@@ -622,8 +625,18 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         let worldMat = dcWorldMatrix dc
             meshRes = dcMesh dc
             (wmin, wmax) = transformAABB worldMat (mrBounds meshRes)
+            -- Extract upper 3x3 and compute inverse-transpose for normal matrix
+            m33 = V3 (V3 (worldMat ^. _x . _x) (worldMat ^. _x . _y) (worldMat ^. _x . _z))
+                     (V3 (worldMat ^. _y . _x) (worldMat ^. _y . _y) (worldMat ^. _y . _z))
+                     (V3 (worldMat ^. _z . _x) (worldMat ^. _z . _y) (worldMat ^. _z . _z))
+            normalM33 = transpose (inv33 m33)
+            normalM44 = V4 (V4 (normalM33 ^. _x . _x) (normalM33 ^. _x . _y) (normalM33 ^. _x . _z) 0)
+                           (V4 (normalM33 ^. _y . _x) (normalM33 ^. _y . _y) (normalM33 ^. _y . _z) 0)
+                           (V4 (normalM33 ^. _z . _x) (normalM33 ^. _z . _y) (normalM33 ^. _z . _z) 0)
+                           (V4 0 0 0 1)
         pure ComputeEntityData
           { ceTransform = (realToFrac <$>) <$> Linear.Matrix.transpose worldMat
+          , ceNormalMatrix = (realToFrac <$>) <$> normalM44
           , ceAabbMin = V4 (realToFrac $ wmin ^. _x) (realToFrac $ wmin ^. _y) (realToFrac $ wmin ^. _z) 1
           , ceAabbMax = V4 (realToFrac $ wmax ^. _x) (realToFrac $ wmax ^. _y) (realToFrac $ wmax ^. _z) (1 :: Foreign.C.CFloat)
           , ceMaterialIndex = dcMaterialIndex dc
@@ -1149,6 +1162,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   let maxEntities = 16384 :: Int
       dummyEntityData = ComputeEntityData
         { ceTransform = identity
+        , ceNormalMatrix = identity
         , ceAabbMin = V4 (-1000) (-1000) (-1000) 1
         , ceAabbMax = V4 1000 1000 1000 1
         , ceMaterialIndex = 0
@@ -1353,13 +1367,17 @@ modelMatrix =
    in translate !*! rotate
 
 -- | Build a perspective projection matrix from surface dimensions.
+-- Uses Vulkan-native Y-down convention with explicit Y-flip.
 makeProjectionMatrix :: Float -> Float -> M44 Foreign.C.CFloat
 makeProjectionMatrix width height =
-  Linear.Projection.perspective
-    (pi / 12) -- FOV
-    (realToFrac width / realToFrac height) -- dynamic aspect ratio
-    0.1 -- near plane
-    10000.0 -- far plane
+  let proj = Linear.Projection.perspective
+        (pi / 12) -- FOV
+        (realToFrac width / realToFrac height) -- dynamic aspect ratio
+        0.1 -- near plane
+        10000.0 -- far plane
+      -- Vulkan NDC is Y-down; flip Y in projection to match OpenGL-style view
+      yFlip = V4 (V4 1 0 0 0) (V4 0 (-1) 0 0) (V4 0 0 1 0) (V4 0 0 0 1)
+  in yFlip !*! proj
 
 drawCallToSnapshot :: DrawCall -> RenderableSnapshot
 drawCallToSnapshot DrawCall {..} =
