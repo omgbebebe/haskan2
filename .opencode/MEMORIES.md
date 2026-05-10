@@ -71,3 +71,45 @@ Lighting shader now uses:
 ### Files Changed
 - `3rdparty/fir/src/FIR/Syntax/Synonyms.hs` — added `Texture2D'` synonym and export
 - `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Lighting.hs` — uses `Texture2D'` for position
+
+## Skybox Ray Math Fix (2025-05-11)
+
+### Bug 1: worldRot extracted columns instead of rows
+`computeSkyboxRays` received `transpose(V)` (not `V`) from `Camera.unViewMatrix`. Extracting columns of this transposed matrix gave `R` (world→view) instead of `R^T` (view→world). For non-axis-aligned cameras this produced a severe diagonal tilt.
+
+### Bug 2: Incorrect X-axis negation
+`viewDir = V3 (-x/fx) ...` was based on the false assumption that linear's `lookAt` produces left-handed view space. Mathematical analysis confirmed `lookAt` is right-handed: +X = world +X (right), +Y = world +Y (up), +Z = backward, -Z = forward. The `-x` negation inverted the horizontal axis.
+
+### Fix
+1. `worldRot` now extracts rows (not columns) from the transposed view matrix:
+   ```haskell
+   V4 (V4 v00 v01 v02 _) (V4 v10 v11 v12 _) (V4 v20 v21 v22 _) _ = view
+   worldRot = V3 (V3 v00 v01 v02) (V3 v10 v11 v12) (V3 v20 v21 v22)
+   ```
+2. Removed incorrect negation: `viewDir = V3 (x/fx) (y/fy) (-1)`
+
+### Verification
+- Colored test cubemap (`+X=red`, `-X=blue`, `+Y=green`, `-Y=yellow`, `+Z=magenta`, `-Z=cyan`)
+- Axis arrows at origin with matching 1x1 colored textures confirm alignment
+- No diagonal tilt; skybox perfectly straight with world axes
+
+### Files Changed
+- `src/Graphics/Haskan/Engine.hs` — `computeSkyboxRays` function
+- `.opencode/SKYBOX_MATH_AUDIT.tex` — mathematical analysis and verification
+
+## Axis Arrows Debug Visualization (2025-05-11)
+
+### Addition
+Added `axisArrow` and `axisArrows` mesh generators to `Mesh.hs` for world-axis visualization at origin. Each arrow is a thin colored box with:
+- `axisArrow axisDir color` — creates arrow along any axis direction
+- `axisArrows` — combines X/Y/Z arrows at origin
+
+### Implementation
+Since g-buffer fragment shader samples albedo textures (not vertex colors), 1x1 colored textures are created per arrow:
+- X arrow: red texture `(255, 0, 0, 255)`
+- Y arrow: green texture `(0, 255, 0, 255)`
+- Z arrow: blue texture `(0, 0, 255, 255)`
+
+### Files Changed
+- `src/Graphics/Haskan/Mesh.hs` — `axisArrow`, `axisArrows` functions
+- `src/Graphics/Haskan/Engine.hs` — creates colored textures and adds arrows to scene
