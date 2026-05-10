@@ -103,11 +103,14 @@ copyDataToDeviceMemory dev memory data' = liftIO $ do
                [] -> 0
                (x:_) -> fromIntegral (length data' * Foreign.sizeOf x)
   logDebugIO LogBuffer $ "copyDataToDeviceMemory size=" <> showT size
-  memPtr <-
-    allocaAndPeek (Vulkan.vkMapMemory dev memory 0 size Vulkan.VK_ZERO_FLAGS)
-  Foreign.Marshal.pokeArray (Foreign.castPtr memPtr) data'
-  Vulkan.vkUnmapMemory dev memory
-  logDebugIO LogBuffer "copyDataToDeviceMemory done"
+  if size == 0
+    then logDebugIO LogBuffer "copyDataToDeviceMemory skipping empty data"
+    else do
+      memPtr <-
+        allocaAndPeek (Vulkan.vkMapMemory dev memory 0 size Vulkan.VK_ZERO_FLAGS)
+      Foreign.Marshal.pokeArray (Foreign.castPtr memPtr) data'
+      Vulkan.vkUnmapMemory dev memory
+      logDebugIO LogBuffer "copyDataToDeviceMemory done"
 
 managedVertexBuffer :: (MonadManaged m) => Vulkan.VkPhysicalDevice -> Vulkan.VkDevice -> [Vertex] -> m Vulkan.VkBuffer
 managedVertexBuffer pdev dev vertices = do
@@ -154,20 +157,26 @@ managedUniformBuffer pdev dev values = do
 updateUniformBuffer :: (MonadIO m, Storable a) => Vulkan.VkDevice -> Vulkan.VkDeviceMemory -> [a] -> m ()
 updateUniformBuffer dev memory uniformData = do
   let size = fromIntegral (sum (map Foreign.sizeOf uniformData))
-  memPtr <-
-    allocaAndPeek (Vulkan.vkMapMemory dev memory 0 size Vulkan.VK_ZERO_FLAGS)
-  liftIO $ do
-    Foreign.pokeArray (Foreign.castPtr memPtr) uniformData
-    Vulkan.vkUnmapMemory dev memory
+  if size == 0
+    then pure ()
+    else do
+      memPtr <-
+        allocaAndPeek (Vulkan.vkMapMemory dev memory 0 size Vulkan.VK_ZERO_FLAGS)
+      liftIO $ do
+        Foreign.pokeArray (Foreign.castPtr memPtr) uniformData
+        Vulkan.vkUnmapMemory dev memory
 
 updateUniformBufferRegion :: (MonadIO m, Storable a) => Vulkan.VkDevice -> Vulkan.VkDeviceMemory -> Int -> [a] -> m ()
 updateUniformBufferRegion dev memory offset uniformData = do
   let size = fromIntegral (sum (map Foreign.sizeOf uniformData))
-  memPtr <-
-    allocaAndPeek (Vulkan.vkMapMemory dev memory (fromIntegral offset) size Vulkan.VK_ZERO_FLAGS)
-  liftIO $ do
-    Foreign.pokeArray (Foreign.castPtr memPtr) uniformData
-    Vulkan.vkUnmapMemory dev memory
+  if size == 0
+    then pure ()
+    else do
+      memPtr <-
+        allocaAndPeek (Vulkan.vkMapMemory dev memory (fromIntegral offset) size Vulkan.VK_ZERO_FLAGS)
+      liftIO $ do
+        Foreign.pokeArray (Foreign.castPtr memPtr) uniformData
+        Vulkan.vkUnmapMemory dev memory
 
 -- | Create a buffer resource with embedded cleanup (not registered in any manager).
 makeBufferResource ::
