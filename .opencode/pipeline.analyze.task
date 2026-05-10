@@ -1,0 +1,8 @@
+Need to analyze codebase in terms of proper shaders implementation.
+Key points:
+- consistancy among coordinate systems transformations: gltf loader -> model, uvs -> various shader spaces: world, model, tangent, screen
+- bugs in formulas of PBR, reflections, environment mapping etc.
+- proper type conversions, e.g. float -> int, float32 -> float16 etc. possible precesion loss
+- overall pipeline design, possible bottlenecks, areas of impovements etc.
+
+Trace whole pipeline from gltf loading subsystem to the end of pipeline pixel shader which produce pixels on the screen.

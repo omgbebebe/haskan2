@@ -12,17 +12,17 @@ data Mesh = Mesh
   }
   deriving (Eq, Show)
 
--- | Create a large ground plane mesh in the XY plane (Z=0).
+-- | Create a large ground plane mesh in the XZ plane (Y=0).
 -- Size is the half-extent; total plane is from (-size,-size) to (size,size).
 groundPlaneMesh :: Foreign.C.CFloat -> Mesh
 groundPlaneMesh size =
   let s = size
       t = V4 1 0 0 1
-      -- Four corners of the plane
-      v0 = Vertex (V3 (-s) (-s) 0) (V2 0 0) (V3 0 0 1) t (V3 1 1 1)
-      v1 = Vertex (V3 s (-s) 0) (V2 50 0) (V3 0 0 1) t (V3 1 1 1)
-      v2 = Vertex (V3 s s 0) (V2 50 50) (V3 0 0 1) t (V3 1 1 1)
-      v3 = Vertex (V3 (-s) s 0) (V2 0 50) (V3 0 0 1) t (V3 1 1 1)
+      -- Four corners of the plane (XZ plane, normal +Y)
+      v0 = Vertex (V3 (-s) 0 (-s)) (V2 0 0) (V3 0 1 0) t (V3 1 1 1)
+      v1 = Vertex (V3 s 0 (-s)) (V2 50 0) (V3 0 1 0) t (V3 1 1 1)
+      v2 = Vertex (V3 s 0 s) (V2 50 50) (V3 0 1 0) t (V3 1 1 1)
+      v3 = Vertex (V3 (-s) 0 s) (V2 0 50) (V3 0 1 0) t (V3 1 1 1)
    in Mesh
         { vertices = [v0, v1, v2, v3],
           indices = [0, 1, 2, 0, 2, 3]

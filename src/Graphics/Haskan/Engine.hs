@@ -107,6 +107,7 @@ import Linear.Quaternion (Quaternion (..))
 import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
 import SDL qualified
+import SDL.Input.Mouse qualified as SDL.Mouse
 import System.IO.Unsafe (unsafePerformIO)
 import System.Clock (Clock (..), getTime, toNanoSecs)
 import System.Directory (doesFileExist)
@@ -391,7 +392,8 @@ data GameState cam = GameState
     debugMode :: TVar Word32,
     pendingScreenshot :: TVar Bool,
     pendingAllStages :: TVar Bool,
-    pendingSwapchainScreenshot :: TVar Bool
+    pendingSwapchainScreenshot :: TVar Bool,
+    mouseCaptureEnabled :: TVar Bool
   }
 
 data RenderDebugInfo = RenderDebugInfo
@@ -462,6 +464,7 @@ mainLoop meshName EngineConfig {..} = do
   tvPendingScreenshot <- liftIO $ STM.newTVarIO False
   tvPendingAllStages <- liftIO $ STM.newTVarIO False
   tvPendingSwapchainScreenshot <- liftIO $ STM.newTVarIO False
+  tvMouseCaptureEnabled <- liftIO $ STM.newTVarIO False
 
   let gameState =
         GameState
@@ -479,6 +482,7 @@ mainLoop meshName EngineConfig {..} = do
           tvPendingScreenshot
           tvPendingAllStages
           tvPendingSwapchainScreenshot
+          tvMouseCaptureEnabled
 
   -- Start debug server if configured
   mDebugServer <- case debugSocketPath of
@@ -540,6 +544,7 @@ mainLoop meshName EngineConfig {..} = do
   liftIO $ for_ mDebugServer stopDebugServer
 
   logInfoIO LogGeneral "destroying SDL window"
+  SDL.Mouse.setMouseLocationMode SDL.Mouse.AbsoluteLocation
   SDL.destroyWindow window
   SDL.quit
   logInfoIO LogGeneral "mainLoop finished"
@@ -1066,7 +1071,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
     else do
       -- Load OBJ model (original behavior)
       world <- ECS.createWorld
-      (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj ("data/models/obj/" <> meshName)
+      (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj meshName
       meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
 
       -- Compute bounds from OBJ mesh
@@ -1098,7 +1103,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
       checkerTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
       groundEntity <- ECS.spawnEntity world
-      ECS.setTransform world groundEntity (Transform (V3 0 0 (-0.5)) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setTransform world groundEntity (Transform (V3 0 (-0.5) 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
       ECS.setMesh world groundEntity groundMeshHandle
       ECS.setMaterial world groundEntity checkerTexHandle
       ECS.setMetallicFactor world groundEntity 0.0
@@ -1120,7 +1125,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       -- Default camera position and orientation for ABeautifulGame.gltf
       inspectCam = case uvCheckMode of
         Just _ -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.0) 0.78 (realToFrac (pi / 6 :: Double))
-        Nothing -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.1999998) (-2.353876) (-0.22523575)
+        Nothing -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 8.0) (-2.353876) 0.5
   liftIO $ STM.atomically $ STM.writeTVar tvCamera inspectCam
   logInfoIO LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance inspectCam)
 
@@ -1366,16 +1371,25 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 -- Returns (ray0, ray1, ray2) matching the vertex shader's vertex index selection.
 computeSkyboxRays :: M44 Float -> M44 Float -> (V3 Float, V3 Float, V3 Float)
 computeSkyboxRays view proj =
-  let invProj = inv44 proj
-      -- Extract rotation from view: transpose of upper 3x3
-      -- view transforms world->view, so transpose transforms view->world
+  let -- Extract camera rotation (view->world) from column-major view matrix.
+      -- view = transpose(unViewMatrix) where unViewMatrix is row-major world->view.
+      -- The transpose of the upper 3x3 is the view->world rotation.
       V4 (V4 v00 v01 v02 _) (V4 v10 v11 v12 _) (V4 v20 v21 v22 _) _ = view
-      worldRot = V3 (V3 v00 v10 v20) (V3 v01 v11 v21) (V3 v02 v12 v22)
+      worldRot = V3 (V3 v00 v01 v02) (V3 v10 v11 v12) (V3 v20 v21 v22)
+
+      -- Extract projection scale factors from column-major proj matrix.
+      -- proj = transpose(yFlip !*! perspective) where perspective uses
+      -- fx = 1/(aspect*tan(fov/2)), fy = 1/tan(fov/2).
+      -- After transpose: proj[0][0] = fx, proj[1][1] = -fy.
+      V4 (V4 fx _ _ _) (V4 _ fy _ _) _ _ = proj
 
       ndcToDir :: V4 Float -> V3 Float
-      ndcToDir ndc =
-        let V4 vx vy vz vw = invProj !* ndc
-            viewDir = V3 (vx / vw) (vy / vw) (vz / vw)
+      ndcToDir (V4 x y _z _w) =
+        let -- NDC -> view-space direction on the image plane at z=+1.
+            -- linear's lookAt uses left-handed view space where:
+            --   +X = left in world space, +Y = up, +Z = forward
+            -- So we negate x to get correct left/right, and use z=+1 for forward.
+            viewDir = V3 (-x / fx) (y / fy) 1
         in normalize (worldRot !* viewDir)
 
       -- Vulkan NDC: Y down, Z forward into screen
@@ -1383,9 +1397,9 @@ computeSkyboxRays view proj =
       -- v0 at (-1,-1) -> top-left
       -- v1 at (3,-1)  -> interpolated to top-right at x=1
       -- v2 at (-1,3)  -> interpolated to bottom-left at y=1
-      topLeft     = ndcToDir (V4 (-1) (-1) 1 1)
-      topRight    = ndcToDir (V4 1    (-1) 1 1)
-      bottomLeft  = ndcToDir (V4 (-1) 1    1 1)
+      topLeft     = ndcToDir (V4 (-1) (-1) 0 1)
+      topRight    = ndcToDir (V4 1    (-1) 0 1)
+      bottomLeft  = ndcToDir (V4 (-1) 1    0 1)
 
       -- For fullscreen triangle interpolation:
       -- ray0 = topLeft
@@ -1407,7 +1421,7 @@ modelMatrix =
 makeProjectionMatrix :: Float -> Float -> M44 Foreign.C.CFloat
 makeProjectionMatrix width height =
   let proj = Linear.Projection.perspective
-        (pi / 12) -- FOV
+        (pi / 3) -- FOV 60 degrees
         (realToFrac width / realToFrac height) -- dynamic aspect ratio
         0.1 -- near plane
         10000.0 -- far plane
@@ -1453,6 +1467,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
             debugCmds <- STM.atomically $ TQueue.flushTQueue debugCmdQueue
             worldState <- STM.readTVarIO (world gameState)
             let camera = activeCamera worldState
+            mouseCaptured <- STM.readTVarIO (mouseCaptureEnabled gameState)
             for_ actions $ \action ->
               case action of
                 (MoveForward, b, _) -> STM.atomically $ STM.writeTVar (moveForward gameState) b
@@ -1460,7 +1475,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                 (StrafeLeft, b, _) -> STM.atomically $ STM.writeTVar (strafeLeft gameState) b
                 (StrafeRight, b, _) -> STM.atomically $ STM.writeTVar (strafeRight gameState) b
                 (MouseMove (V2 x y), _, isRepeated) ->
-                  unless isRepeated $ STM.atomically
+                  when mouseCaptured $ unless isRepeated $ STM.atomically
                     ( updateCamera
                         (activeCamera worldState)
                         [ Camera.Rotate
@@ -1482,6 +1497,13 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                   STM.atomically $ STM.writeTVar (wireframeEnabled gameState) (not current)
                   logInfoIO LogGeneral $ "wireframe toggled: " <> showT (not current)
                 (ToggleWireframe, False, _) -> pure ()
+                (ToggleMouseCapture, True, _) -> do
+                  current <- STM.readTVarIO (mouseCaptureEnabled gameState)
+                  let newState = not current
+                  STM.atomically $ STM.writeTVar (mouseCaptureEnabled gameState) newState
+                  SDL.Mouse.setMouseLocationMode (if newState then SDL.Mouse.RelativeLocation else SDL.Mouse.AbsoluteLocation)
+                  logInfoIO LogGeneral $ "mouse capture toggled: " <> showT newState
+                (ToggleMouseCapture, False, _) -> pure ()
                 (DebugMode mode, True, _) -> do
                   STM.atomically $ STM.writeTVar (debugMode gameState) (fromIntegral mode)
                   logInfoIO LogGeneral $ "debug mode set to " <> showT mode
@@ -1613,7 +1635,7 @@ adjustCameraForScene :: Camera a => BBox -> a -> a
 adjustCameraForScene bbox cam =
   let center = bboxCenter bbox
       diag = bboxDiagonal bbox
-      fov = pi / 12  -- 15 degrees vertical FOV
+      fov = pi / 3  -- 60 degrees vertical FOV
       padding = 1.5
       r = diag / 2
       -- Distance to fit bounding sphere in frustum

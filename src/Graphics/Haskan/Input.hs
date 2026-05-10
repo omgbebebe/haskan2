@@ -35,6 +35,7 @@ data Action
   | SaveScreenshot
   | SaveAllStages
   | SaveSwapchainScreenshot
+  | ToggleMouseCapture
   deriving (Eq, Show, Generic)
 
 type ActionEvent = (Action, Bool, Bool)  -- (action, pressed, isRepeated)
@@ -80,7 +81,8 @@ defaultBindings =
       (([], SDL.KeycodeF9), DebugMode 0),   -- normal lit
       (([], SDL.KeycodeF10), SaveScreenshot),
       (([], SDL.KeycodeF11), SaveAllStages),
-      (([LShift], SDL.KeycodeF11), SaveSwapchainScreenshot)
+      (([LShift], SDL.KeycodeF11), SaveSwapchainScreenshot),
+      (([LCtrl], SDL.KeycodeM), ToggleMouseCapture)
     ]
 
 modifiersToList :: SDL.KeyModifier -> [KeyModifier]

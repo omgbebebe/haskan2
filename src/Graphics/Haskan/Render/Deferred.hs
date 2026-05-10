@@ -7,6 +7,7 @@ module Graphics.Haskan.Render.Deferred
 
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Bits ((.|.))
 import Data.Foldable (for_)
 import Data.Maybe (isJust)
 import Data.Text (Text)
@@ -149,13 +150,14 @@ buildDeferredGraph DeferredPassData {..} = do
           -- Set camera position + debug mode + skybox rays push constant
           let (V3 camX camY camZ) = dpdCameraPos
               (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = dpdSkyboxRays
+              -- std430 layout: vec3 aligned to 16 bytes, need padding after each
               camPosData = [ realToFrac camX, realToFrac camY, realToFrac camZ, realToFrac dpdDebugMode
-                           , realToFrac r0x, realToFrac r0y, realToFrac r0z
-                           , realToFrac r1x, realToFrac r1y, realToFrac r1z
-                           , realToFrac r2x, realToFrac r2y, realToFrac r2z
+                           , realToFrac r0x, realToFrac r0y, realToFrac r0z, 0
+                           , realToFrac r1x, realToFrac r1y, realToFrac r1z, 0
+                           , realToFrac r2x, realToFrac r2y, realToFrac r2z, 0
                            ] :: [CFloat]
           Foreign.Marshal.Array.withArray camPosData $ \camPtr ->
-            Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT 0 64 (Foreign.castPtr camPtr)
+            Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 64 (Foreign.castPtr camPtr)
           -- Fullscreen triangle: 3 vertices, no indices
           Vulkan.vkCmdDraw commandBuffer 3 1 0 0
     }

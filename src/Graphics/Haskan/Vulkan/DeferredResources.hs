@@ -7,6 +7,7 @@ module Graphics.Haskan.Vulkan.DeferredResources
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
+import Data.Bits ((.|.))
 import Data.Foldable (for_)
 import Data.Traversable (for)
 import Foreign.Marshal.Array qualified
