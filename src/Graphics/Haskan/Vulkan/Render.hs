@@ -105,21 +105,22 @@ createRenderContext
 
     pure
       RenderContext
-        { device = device,
-          swapchain = swapchain,
-          graphicsCommandBuffers = graphicsCommandBuffers,
-          graphicsQueueHandler = graphicsQueueHandler,
-          presentQueueHandler = presentQueueHandler,
-          renderFinishedFences = renderFinishedFences,
-          renderFinishedSemaphores = renderFinishedSemaphores,
-          rcPipelineLayout = pipelineLayout,
-          rcGraphicsPipeline = graphicsPipeline,
-          rcRenderPass = renderPass,
-          rcFramebuffers = framebuffers,
-          rcDescriptorSets = descriptorSets,
-          rcSurfaceExtent = surfaceExtent,
-          rcGraphicsCommandPool = graphicsCommandPool
-        }
+          { device = device,
+            swapchain = swapchain,
+            swapchainImages = images,
+            graphicsCommandBuffers = graphicsCommandBuffers,
+            graphicsQueueHandler = graphicsQueueHandler,
+            presentQueueHandler = presentQueueHandler,
+            renderFinishedFences = renderFinishedFences,
+            renderFinishedSemaphores = renderFinishedSemaphores,
+            rcPipelineLayout = pipelineLayout,
+            rcGraphicsPipeline = graphicsPipeline,
+            rcRenderPass = renderPass,
+            rcFramebuffers = framebuffers,
+            rcDescriptorSets = descriptorSets,
+            rcSurfaceExtent = surfaceExtent,
+            rcGraphicsCommandPool = graphicsCommandPool
+          }
 
 drawFrame :: (MonadIO m) => RenderContext -> Vulkan.VkSemaphore -> Int -> (Vulkan.Word32 -> Int -> IO ()) -> m RenderResult
 drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex recordAction = do
@@ -138,7 +139,27 @@ drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex recordAction
   case vkResult of
     Vulkan.VK_SUCCESS -> FrameOk <$> renderImage ctx imageAvailableSemaphore fenceIndex imageIndex recordAction
     Vulkan.VK_SUBOPTIMAL_KHR -> pure $ FrameSuboptimal imageIndex
-    Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure FrameOutOfDate
+    Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> do
+      -- The acquire failed; the semaphore was never signaled.
+      -- Signal the fence with a no-op submit so the next frame
+      -- doesn't hang in vkWaitForFences.
+      liftIO $ do
+        let renderFinishedFence = renderFinishedFences !! fenceIndex
+            emptySubmitInfo =
+              Vulkan.createVk
+                ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SUBMIT_INFO
+                    &* set @"pNext" Vulkan.vkNullPtr
+                    &* set @"waitSemaphoreCount" 0
+                    &* set @"pWaitSemaphores" Vulkan.vkNullPtr
+                    &* set @"pWaitDstStageMask" Vulkan.vkNullPtr
+                    &* set @"commandBufferCount" 0
+                    &* set @"pCommandBuffers" Vulkan.vkNullPtr
+                    &* set @"signalSemaphoreCount" 0
+                    &* set @"pSignalSemaphores" Vulkan.vkNullPtr
+                )
+        withPtr emptySubmitInfo $ \siPtr ->
+          Vulkan.vkQueueSubmit graphicsQueueHandler 1 siPtr renderFinishedFence >>= throwVkResult
+      pure FrameOutOfDate
     _ -> pure $ FrameFailed (show vkResult)
 
 renderImage ::

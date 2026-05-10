@@ -42,9 +42,9 @@ data TextureConfig = TextureConfig
 
 defaultTextureConfig :: TextureConfig
 defaultTextureConfig = TextureConfig
-  { tcTargetWidth     = Just 256
-  , tcTargetHeight    = Just 256
-  , tcForcePowerOfTwo = True
+  { tcTargetWidth     = Nothing  -- keep original width
+  , tcTargetHeight    = Nothing  -- keep original height
+  , tcForcePowerOfTwo = False    -- don't resize to PoT
   , tcGenerateMips    = False
   , tcTargetFormat    = R8G8B8A8_UNORM
   }

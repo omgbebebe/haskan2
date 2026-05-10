@@ -387,7 +387,8 @@ data GameState cam = GameState
     wireframeEnabled :: TVar Bool,
     debugMode :: TVar Word32,
     pendingScreenshot :: TVar Bool,
-    pendingAllStages :: TVar Bool
+    pendingAllStages :: TVar Bool,
+    pendingSwapchainScreenshot :: TVar Bool
   }
 
 data RenderDebugInfo = RenderDebugInfo
@@ -457,6 +458,7 @@ mainLoop meshName EngineConfig {..} = do
   tvDebugMode <- liftIO $ STM.newTVarIO 0
   tvPendingScreenshot <- liftIO $ STM.newTVarIO False
   tvPendingAllStages <- liftIO $ STM.newTVarIO False
+  tvPendingSwapchainScreenshot <- liftIO $ STM.newTVarIO False
 
   let gameState =
         GameState
@@ -473,6 +475,7 @@ mainLoop meshName EngineConfig {..} = do
           tvDebugMode
           tvPendingScreenshot
           tvPendingAllStages
+          tvPendingSwapchainScreenshot
 
   -- Start debug server if configured
   mDebugServer <- case debugSocketPath of
@@ -565,9 +568,10 @@ renderFrameLoop ::
   STM.TVar Word32 ->
   STM.TVar Bool ->
   STM.TVar Bool ->
+  STM.TVar Bool ->
   Vulkan.VkPhysicalDevice ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvDebugMode tvPendingScreenshot tvPendingAllStages physicalDevice = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvDebugMode tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -581,8 +585,10 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
       liftIO $ do
         let camPos = realToFrac <$> Camera.cameraPosition camera
             camTarget = realToFrac <$> Camera.cameraTarget camera
+            w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
+            h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
             -- GPU reads matrices as column-major, so we transpose row-major Haskell matrices
-            projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> projectionMatrix :: M44 Float
+            projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> makeProjectionMatrix w h :: M44 Float
             viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
             sampleLocalVerts :: [V3 Float]
             sampleLocalVerts = [V3 (-0.5) (-0.5) (-0.5), V3 0.5 (-0.5) (-0.5), V3 0.5 0.5 (-0.5), V3 (-0.5) 0.5 (-0.5),
@@ -632,7 +638,9 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
           , ceOcclusionStrength = realToFrac (dcOcclusionStrength dc)
           , ceEmissiveIndex = dcEmissiveIndex dc
           }
-      let vp = (realToFrac <$>) <$> (projectionMatrix !*! Camera.unViewMatrix (Camera.toMatrix camera)) :: M44 Float
+      let w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
+          h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
+          vp = (realToFrac <$>) <$> (makeProjectionMatrix w h !*! Camera.unViewMatrix (Camera.toMatrix camera)) :: M44 Float
           planes = extractFrustumPlanes vp
           camPos = Camera.cameraPosition camera
           cullData = ComputeCullData
@@ -649,8 +657,10 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
       case drawList of
         [] -> pure (False, False)
         _ -> do
-          let view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
-              projection = Linear.Matrix.transpose projectionMatrix
+          let w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
+              h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
+              view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
+              projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
           -- Log camera position periodically for manual positioning
           when (frameNumber `mod` 60 == 0) $ do
             let cp = Camera.cameraPosition camera
@@ -764,7 +774,9 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                     for_ mInsp $ \insp -> do
                       startTime <- liftIO $ getTime Monotonic
                       let snapshots = map drawCallToSnapshot drawList
-                      snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> projectionMatrix) snapshots
+                          w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
+                          h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
+                      snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> makeProjectionMatrix w h) snapshots
                       liftIO $ insp snap
                   -- Check for screenshot requests
                   liftIO $ do
@@ -791,6 +803,16 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 3) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "emissive"
                       logInfoIO LogGeneral "all stages saved"
+                    shouldSwapchain <- STM.atomically $ do
+                      b <- STM.readTVar tvPendingSwapchainScreenshot
+                      when b $ STM.writeTVar tvPendingSwapchainScreenshot False
+                      pure b
+                    when shouldSwapchain $ do
+                      Vulkan.vkDeviceWaitIdle device >>= throwVkResult
+                      logInfoIO LogGeneral "capturing swapchain screenshot..."
+                      let swapchainImage = swapchainImages !! fromIntegral imageIndex
+                      Screenshot.saveSwapchainScreenshot device physicalDevice rcGraphicsCommandPool graphicsQueueHandler swapchainImage rcSurfaceExtent
+                      logInfoIO LogGeneral "swapchain screenshot saved"
                   pure (False, False)
                 Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
                 Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
@@ -844,6 +866,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         tvDebugMode
         tvPendingScreenshot
         tvPendingAllStages
+        tvPendingSwapchainScreenshot
         physicalDevice
 
 -- | Main rendering loop.
@@ -930,11 +953,16 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       (irrDatas, irrWidths, _) = unzip3 irradianceFaceDatas
       radSize = head radWidths
       irrSize = head irrWidths
-  radianceCubemap <- Texture.createCubemap rm physicalDevice device radSize radDatas graphicsQueueHandler textureCommandBuffer
+      radMipLevels = floor (logBase 2 (fromIntegral radSize :: Double)) + 1
+  radianceCubemap <- Texture.createCubemapMips rm physicalDevice device radSize radDatas graphicsQueueHandler textureCommandBuffer
   irradianceCubemap <- Texture.createCubemap rm physicalDevice device irrSize irrDatas graphicsQueueHandler textureCommandBuffer
   mRadianceView <- Texture.textureImageView rm radianceCubemap
   mIrradianceView <- Texture.textureImageView rm irradianceCubemap
-  logInfoIO LogGeneral $ "IBL cubemaps loaded: radiance=" <> showT radSize <> "px irradiance=" <> showT irrSize <> "px"
+  logInfoIO LogGeneral $ "IBL cubemaps loaded: radiance=" <> showT radSize <> "px irradiance=" <> showT irrSize <> "px mipLevels=" <> showT radMipLevels
+
+  -- Create lighting sampler with mip support for radiance cubemap
+  lightingSampler <- Texture.createSamplerWithLod device (fromIntegral radMipLevels - 1)
+  logInfoIO LogGeneral "lighting sampler created with mip support"
 
   -- Generate BRDF LUT
   let brdfPixels = BRDF.generateBRDFLUT 256 256
@@ -1074,10 +1102,10 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   let adjustedCam = if isStressTest
         then setDistance (setTarget currentCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) (150.0 :: Foreign.C.CFloat)
         else adjustCameraForScene sceneBounds currentCam
-      -- Default camera for UV check mode: slightly elevated, looking at origin
+      -- Default camera position and orientation for ABeautifulGame.gltf
       inspectCam = case uvCheckMode of
         Just _ -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.0) 0.78 (realToFrac (pi / 6 :: Double))
-        Nothing -> setAngles (setDistance adjustedCam 3.1) 2.3520544 (-0.39384797)
+        Nothing -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.1999998) (-2.353876) (-0.22523575)
   liftIO $ STM.atomically $ STM.writeTVar tvCamera inspectCam
   logInfoIO LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance inspectCam)
 
@@ -1110,7 +1138,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   -- Create per-frame uniform buffers for view+proj (static, no dynamic offsets)
   let viewProjUniformSize = 128 :: Int
-      initialViewProjData = [identity, projectionMatrix] :: [M44 Foreign.C.CFloat]
+      initialViewProjData = [identity, makeProjectionMatrix 16 9] :: [M44 Foreign.C.CFloat]
 
   logDebugIO LogBuffer $ "initialViewProjData length=" <> showT (length initialViewProjData) <> " size=" <> showT (length initialViewProjData * sizeOf (undefined :: M44 Foreign.C.CFloat))
   frameMvpBuffers <- replicateM Render.maxFramesInFlight $
@@ -1226,26 +1254,18 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       -- Create individual texture for each unique texture
       views <- forM uniqueTextures $ \texHandle -> do
         let hId = fromIntegral (unTextureHandle texHandle)
-        pixelData <- case IntMap.lookup hId texturePixelMap of
+        (tw, th, pixelData) <- case IntMap.lookup hId texturePixelMap of
           -- glTF path: decoded pixel data available
-          Just (tw, th, pixelData) ->
-            if tw == 256 && th == 256
-              then pure pixelData
-              else pure $ resizeImageBilinear pixelData tw th 256 256
+          Just (tw, th, pixelData) -> pure (tw, th, pixelData)
           -- OBJ path: read from GPU texture resource
           Nothing -> do
             mTexRes <- lookupTexture rm texHandle
             case mTexRes of
-              Nothing -> pure $ Texture.generateCheckerboardTexture 256 256 32
+              Nothing -> pure (256, 256, Texture.generateCheckerboardTexture 256 256 32)
               Just texRes -> case trPixelData texRes of
-                Nothing -> pure $ Texture.generateCheckerboardTexture 256 256 32
-                Just pixelData -> do
-                  let tw = trWidth texRes
-                      th = trHeight texRes
-                  if tw == 256 && th == 256
-                    then pure pixelData
-                    else pure $ resizeImageBilinear pixelData tw th 256 256
-        texHandle' <- Texture.createTextureFromData rm physicalDevice device 256 256 pixelData graphicsQueueHandler textureCommandBuffer
+                Nothing -> pure (256, 256, Texture.generateCheckerboardTexture 256 256 32)
+                Just pixelData -> pure (trWidth texRes, trHeight texRes, pixelData)
+        texHandle' <- Texture.createTextureFromData rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
         mView <- Texture.textureImageView rm texHandle'
         case mView of
           Just view -> pure view
@@ -1305,16 +1325,17 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       tvDebugMode = debugMode gameState
       tvPendingScreenshot = pendingScreenshot gameState
       tvPendingAllStages = pendingAllStages gameState
+      tvPendingSwapchainScreenshot = pendingSwapchainScreenshot gameState
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
         if exit
           then pure ()
           else do
-            renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-               with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView mBrdfView) $ \dr ->
-                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvPendingScreenshot tvPendingAllStages physicalDevice
-            outerLoop renderFrameLoopFinished
+             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
+                with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView mBrdfView lightingSampler) $ \dr ->
+                 renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice
+             outerLoop renderFrameLoopFinished
 
 
   logInfoIO LogGeneral "Starting render loop"
@@ -1331,11 +1352,12 @@ modelMatrix =
       translate = identity
    in translate !*! rotate
 
-projectionMatrix :: M44 Foreign.C.CFloat
-projectionMatrix =
+-- | Build a perspective projection matrix from surface dimensions.
+makeProjectionMatrix :: Float -> Float -> M44 Foreign.C.CFloat
+makeProjectionMatrix width height =
   Linear.Projection.perspective
     (pi / 12) -- FOV
-    (16 / 9) -- aspect ratio
+    (realToFrac width / realToFrac height) -- dynamic aspect ratio
     0.1 -- near plane
     10000.0 -- far plane
 
@@ -1418,6 +1440,10 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                   STM.atomically $ STM.writeTVar (pendingAllStages gameState) True
                   logInfoIO LogGeneral "save all stages requested"
                 (SaveAllStages, False, _) -> pure ()
+                (SaveSwapchainScreenshot, True, _) -> do
+                  STM.atomically $ STM.writeTVar (pendingSwapchainScreenshot gameState) True
+                  logInfoIO LogGeneral "swapchain screenshot requested"
+                (SaveSwapchainScreenshot, False, _) -> pure ()
             -- Handle debug commands with responses
             for_ debugCmds $ \(cmd, respVar) -> do
               case cmd of

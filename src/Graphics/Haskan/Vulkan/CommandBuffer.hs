@@ -7,7 +7,7 @@ import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, setListRef, (&*))
+import Graphics.Vulkan.Marshal.Create (set, setAt, setListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 createCommandBuffer ::
@@ -274,6 +274,88 @@ copyBuffer queue commandBuffer srcBuffer dstBuffer size = do
     commandBuffer
     (liftIO $ withPtr regionSize (\rsPtr -> Vulkan.vkCmdCopyBuffer commandBuffer srcBuffer dstBuffer 1 rsPtr))
 
+mipLayerTransition ::
+  MonadIO m =>
+  Vulkan.VkCommandBuffer ->
+  Vulkan.VkImage ->
+  Vulkan.VkImageLayout ->
+  Vulkan.VkImageLayout ->
+  Vulkan.Word32 -> -- ^ base mip level
+  Vulkan.Word32 -> -- ^ level count
+  Vulkan.Word32 -> -- ^ layer count
+  m ()
+mipLayerTransition commandBuffer image oldLayout newLayout baseMip levelCount layerCount = do
+  let (srcStage, srcAccessMask, dstStage, dstAccessMask) =
+        case (oldLayout, newLayout) of
+          _ | oldLayout == newLayout ->
+            ( Vulkan.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+              Vulkan.VK_ZERO_FLAGS,
+              Vulkan.VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+              Vulkan.VK_ZERO_FLAGS
+            )
+          (Vulkan.VK_IMAGE_LAYOUT_UNDEFINED, Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) ->
+            ( Vulkan.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+              Vulkan.VK_ZERO_FLAGS,
+              Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT,
+              Vulkan.VK_ACCESS_TRANSFER_WRITE_BIT
+            )
+          (Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) ->
+            ( Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT,
+              Vulkan.VK_ACCESS_TRANSFER_WRITE_BIT,
+              Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT,
+              Vulkan.VK_ACCESS_TRANSFER_READ_BIT
+            )
+          (Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) ->
+            ( Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT,
+              Vulkan.VK_ACCESS_TRANSFER_READ_BIT,
+              Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+              Vulkan.VK_ACCESS_SHADER_READ_BIT
+            )
+          (Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) ->
+            ( Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT,
+              Vulkan.VK_ACCESS_TRANSFER_WRITE_BIT,
+              Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+              Vulkan.VK_ACCESS_SHADER_READ_BIT
+            )
+
+      subresourceRange =
+        Vulkan.createVk
+          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+              &* set @"baseMipLevel" baseMip
+              &* set @"levelCount" levelCount
+              &* set @"baseArrayLayer" 0
+              &* set @"layerCount" layerCount
+          )
+      barrier =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"oldLayout" oldLayout
+              &* set @"newLayout" newLayout
+              &* set @"srcQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+              &* set @"dstQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+              &* set @"image" image
+              &* set @"subresourceRange" subresourceRange
+              &* set @"srcAccessMask" srcAccessMask
+              &* set @"dstAccessMask" dstAccessMask
+          )
+  liftIO $
+    withPtr
+      barrier
+      ( \bPtr ->
+          Vulkan.vkCmdPipelineBarrier
+            commandBuffer
+            srcStage
+            dstStage
+            Vulkan.VK_ZERO_FLAGS
+            0
+            Vulkan.vkNullPtr
+            0
+            Vulkan.vkNullPtr
+            1
+            bPtr
+      )
+
 layerTransition ::
   MonadIO m =>
   Vulkan.VkCommandBuffer ->
@@ -389,4 +471,56 @@ copyBufferToImage commandBuffer buffer image width height = do
             Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
             1
             rPtr
+      )
+
+cmdBlitImageCubemapMip ::
+  MonadIO m =>
+  Vulkan.VkCommandBuffer ->
+  Vulkan.VkImage ->
+  Word32 -> -- ^ src mip level
+  Word32 -> -- ^ dst mip level
+  Int32 -> -- ^ src size
+  Int32 -> -- ^ dst size
+  m ()
+cmdBlitImageCubemapMip commandBuffer image srcMip dstMip srcSize dstSize = do
+  let srcSubresource =
+        Vulkan.createVk
+          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+              &* set @"mipLevel" srcMip
+              &* set @"baseArrayLayer" 0
+              &* set @"layerCount" 6
+          )
+      dstSubresource =
+        Vulkan.createVk
+          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+              &* set @"mipLevel" dstMip
+              &* set @"baseArrayLayer" 0
+              &* set @"layerCount" 6
+          )
+      srcOffset0 = Vulkan.createVk (set @"x" 0 &* set @"y" 0 &* set @"z" 0)
+      srcOffset1 = Vulkan.createVk (set @"x" srcSize &* set @"y" srcSize &* set @"z" 1)
+      dstOffset0 = Vulkan.createVk (set @"x" 0 &* set @"y" 0 &* set @"z" 0)
+      dstOffset1 = Vulkan.createVk (set @"x" dstSize &* set @"y" dstSize &* set @"z" 1)
+      region =
+        Vulkan.createVk
+          ( set @"srcSubresource" srcSubresource
+              &* setAt @"srcOffsets" @0 srcOffset0
+              &* setAt @"srcOffsets" @1 srcOffset1
+              &* set @"dstSubresource" dstSubresource
+              &* setAt @"dstOffsets" @0 dstOffset0
+              &* setAt @"dstOffsets" @1 dstOffset1
+          )
+  liftIO $
+    withPtr
+      region
+      ( \rPtr ->
+          Vulkan.vkCmdBlitImage
+            commandBuffer
+            image
+            Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+            image
+            Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+            1
+            rPtr
+            Vulkan.VK_FILTER_LINEAR
       )

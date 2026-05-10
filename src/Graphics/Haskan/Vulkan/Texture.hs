@@ -5,6 +5,7 @@ module Graphics.Haskan.Vulkan.Texture
   , decodeImageBytes
   , managedTexture
   , managedSampler
+  , createSamplerWithLod
   , createTextureResource
   , textureImageView
   , generateGridTexture
@@ -15,6 +16,7 @@ module Graphics.Haskan.Vulkan.Texture
   , uploadTexture
   , createTexture2DArray
   , createCubemap
+  , createCubemapMips
   ) where
 import Codec.Picture
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -208,6 +210,34 @@ createSampler dev =
               &* set @"mipLodBias" 0.0
               &* set @"minLod" 0.0
               &* set @"maxLod" 0.0
+          )
+   in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateSampler dev ciPtr Vulkan.vkNullPtr))
+
+createSamplerWithLod ::
+  MonadIO m =>
+  Vulkan.VkDevice ->
+  Float -> -- ^ max LOD
+  m Vulkan.VkSampler
+createSamplerWithLod dev maxLod =
+  let createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"magFilter" Vulkan.VK_FILTER_LINEAR
+              &* set @"minFilter" Vulkan.VK_FILTER_LINEAR
+              &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"anisotropyEnable" Vulkan.VK_FALSE
+              &* set @"maxAnisotropy" 1.0
+              &* set @"borderColor" Vulkan.VK_BORDER_COLOR_INT_OPAQUE_BLACK
+              &* set @"unnormalizedCoordinates" Vulkan.VK_FALSE
+              &* set @"compareEnable" Vulkan.VK_FALSE
+              &* set @"compareOp" Vulkan.VK_COMPARE_OP_ALWAYS
+              &* set @"mipmapMode" Vulkan.VK_SAMPLER_MIPMAP_MODE_LINEAR
+              &* set @"mipLodBias" 0.0
+              &* set @"minLod" 0.0
+              &* set @"maxLod" maxLod
           )
    in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateSampler dev ciPtr Vulkan.vkNullPtr))
 
@@ -641,6 +671,178 @@ createCubemap rm pdev dev faceSize faces queue commandBuffer = do
     Vulkan.vkFreeMemory dev stagingMemory Vulkan.vkNullPtr
 
   imageView <- Haskan.createImageViewCube dev format image
+
+  texH <- TextureHandle <$> allocHandle (rmNextId rm)
+
+  let destroy = do
+        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
+        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
+        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+
+      resource =
+        TextureResource
+          { trHandle = texH
+          , trImage = image
+          , trImageView = imageView
+          , trMemory = imageMemory
+          , trWidth = faceSize
+          , trHeight = faceSize
+          , trPixelData = Nothing
+          , trDestroy = destroy
+          }
+
+  registerTexture rm resource
+  pure texH
+
+-- | Create a mipmapped cubemap texture from 6 RGBA8 face images.
+-- Faces must be square and all the same size.
+-- Order: +X, -X, +Y, -Y, +Z, -Z
+-- Generates mipmaps via vkCmdBlitImage.
+createCubemapMips ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Int -> -- ^ face width/height
+  [Data.Vector.Storable.Vector Word8] -> -- ^ 6 face pixel datas
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
+  let numFaces = length faces
+      facePixelCount = faceSize * faceSize * 4
+      allData = Vector.toList $ mconcat faces
+      mipLevels = floor (logBase 2 (fromIntegral faceSize :: Double)) + 1
+
+  -- Staging buffer (manual alloc, freed after upload)
+  (stagingBuffer, stagingMemoryRequirement) <-
+    Haskan.createBuffer dev allData Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+
+  stagingMemory <-
+    Haskan.createBufferMemory pdev dev stagingMemoryRequirement
+
+  liftIO $ do
+    Haskan.bindBufferMemory dev stagingBuffer stagingMemory allData
+    Haskan.copyDataToDeviceMemory dev stagingMemory allData
+
+  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      imageExtent =
+        Vulkan.createVk
+          ( set @"width" (fromIntegral faceSize)
+              &* set @"height" (fromIntegral faceSize)
+              &* set @"depth" 1
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
+              &* set @"extent" imageExtent
+              &* set @"mipLevels" (fromIntegral mipLevels)
+              &* set @"arrayLayers" 6
+              &* set @"format" format
+              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
+              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
+              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+              &* set @"flags" Vulkan.VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
+              &* set @"queueFamilyIndexCount" 0
+              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
+          )
+
+  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+
+  imageMemoryRequirements <-
+    allocaAndPeek_
+      (Vulkan.vkGetImageMemoryRequirements dev image)
+  logDebugIO LogTexture $ "cubemapMips image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " faceSize=" <> showT faceSize <> " mipLevels=" <> showT mipLevels
+
+  imageMemory <-
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+
+  liftIO $ bindImageMemory dev image imageMemory 0
+
+  Haskan.withCommandBufferOneTime queue commandBuffer $ do
+    -- Transition all layers of mip 0 to DST optimal
+    Haskan.mipLayerTransition
+      commandBuffer
+      image
+      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      0 1 6
+
+    -- Upload face data to mip 0
+    for_ (zip [0..] faces) $ \(faceIdx, _) -> do
+      let offset = fromIntegral (faceIdx * facePixelCount)
+      Haskan.copyBufferToImageLayer
+        commandBuffer
+        stagingBuffer
+        image
+        (fromIntegral faceSize)
+        (fromIntegral faceSize)
+        (fromIntegral faceIdx)
+        offset
+
+    -- Generate mipmaps
+    for_ [1 .. mipLevels - 1] $ \mip -> do
+      let srcMip = fromIntegral (mip - 1)
+          dstMip = fromIntegral mip
+          srcSize = faceSize `div` (2 ^ (mip - 1))
+          dstSize = faceSize `div` (2 ^ mip)
+          srcOldLayout = if mip == 1
+                           then Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+                           else Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+
+      -- Transition src mip to SRC optimal
+      Haskan.mipLayerTransition
+        commandBuffer
+        image
+        srcOldLayout
+        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        srcMip 1 6
+
+      -- Transition dst mip to DST optimal
+      Haskan.mipLayerTransition
+        commandBuffer
+        image
+        Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        dstMip 1 6
+
+      -- Blit all 6 faces
+      Haskan.cmdBlitImageCubemapMip
+        commandBuffer
+        image
+        srcMip
+        dstMip
+        (fromIntegral srcSize)
+        (fromIntegral dstSize)
+
+      -- Transition dst mip to SRC optimal for next iteration
+      Haskan.mipLayerTransition
+        commandBuffer
+        image
+        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        dstMip 1 6
+
+    -- Transition all mips to SHADER_READ_ONLY_OPTIMAL
+    Haskan.mipLayerTransition
+      commandBuffer
+      image
+      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      0 (fromIntegral mipLevels) 6
+
+  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+
+  -- Free staging resources
+  liftIO $ do
+    Vulkan.vkDestroyBuffer dev stagingBuffer Vulkan.vkNullPtr
+    Vulkan.vkFreeMemory dev stagingMemory Vulkan.vkNullPtr
+
+  imageView <- Haskan.createImageViewCubeMips dev format image (fromIntegral mipLevels)
 
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 

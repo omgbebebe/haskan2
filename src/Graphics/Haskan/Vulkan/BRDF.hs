@@ -62,9 +62,10 @@ integrateBRDF ndotv roughness samples =
           g1v = ndotv / (ndotv * (1 - k) + k)
           g1l = ndotl / (ndotl * (1 - k) + k)
           g = g1v * g1l
-          -- PDF
+          -- PDF (not needed for weight; G_Vis already cancels it)
           pdf = d * ndoth / (4 * vdoth)
-          -- Visibility term
+          -- Visibility term: G_Vis = G*VdotH/(NdotH*NdotV)
+          -- This already equals BRDF*NdotL/PDF, so no extra weight needed
           vis = if ndotl > 0 && ndotv > 0
                  then g * vdoth / (ndoth * ndotv)
                  else 0
@@ -72,7 +73,5 @@ integrateBRDF ndotv roughness samples =
           fc = (1 - vdoth) ^ (5 :: Int)
           scale' = vis * (1 - fc)
           bias' = vis * fc
-          -- Weight by PDF for Monte Carlo
-          weight = if pdf > 0.0001 then 1.0 / pdf else 0
-      in go (n - 1) (s + scale' * weight) (b + bias' * weight) rs
+       in go (n - 1) (s + scale') (b + bias') rs
     go _ _ _ _ = error "insufficient random numbers"

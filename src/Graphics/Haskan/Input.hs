@@ -34,6 +34,7 @@ data Action
   | DebugMode Int
   | SaveScreenshot
   | SaveAllStages
+  | SaveSwapchainScreenshot
   deriving (Eq, Show, Generic)
 
 type ActionEvent = (Action, Bool, Bool)  -- (action, pressed, isRepeated)
@@ -78,7 +79,8 @@ defaultBindings =
       (([], SDL.KeycodeF8), DebugMode 7),   -- AO
       (([], SDL.KeycodeF9), DebugMode 0),   -- normal lit
       (([], SDL.KeycodeF10), SaveScreenshot),
-      (([], SDL.KeycodeF11), SaveAllStages)
+      (([], SDL.KeycodeF11), SaveAllStages),
+      (([LShift], SDL.KeycodeF11), SaveSwapchainScreenshot)
     ]
 
 modifiersToList :: SDL.KeyModifier -> [KeyModifier]

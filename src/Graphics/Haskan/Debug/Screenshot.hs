@@ -335,7 +335,7 @@ saveSwapchainScreenshot
 saveSwapchainScreenshot device pdev commandPool queue image extent = do
   ensureScreenshotDir
   timestamp <- formatTime defaultTimeLocale "%Y%m%d_%H%M%S" <$> getCurrentTime
-  let path = screenshotDir </> ("screenshot_" ++ timestamp ++ ".png")
+  let path = screenshotDir </> (timestamp ++ "_screenshot.png")
   saveImageToPng device pdev commandPool queue image extent Vulkan.VK_FORMAT_B8G8R8A8_SRGB Vulkan.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR path
   pure path
 
@@ -353,6 +353,6 @@ saveGBufferStage
 saveGBufferStage device pdev commandPool queue image extent format name = do
   ensureScreenshotDir
   timestamp <- formatTime defaultTimeLocale "%Y%m%d_%H%M%S" <$> getCurrentTime
-  let path = screenshotDir </> (name ++ "_" ++ timestamp ++ ".png")
+  let path = screenshotDir </> (timestamp ++ "_" ++ name ++ ".png")
   saveImageToPng device pdev commandPool queue image extent format Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL path
   pure path

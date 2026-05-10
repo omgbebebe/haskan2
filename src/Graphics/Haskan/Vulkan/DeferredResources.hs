@@ -67,8 +67,9 @@ createDeferredResources ::
   Maybe Vulkan.VkImageView -> -- ^ env cubemap view
   Maybe Vulkan.VkImageView -> -- ^ irradiance cubemap view
   Maybe Vulkan.VkImageView -> -- ^ brdf lut view
+  Vulkan.VkSampler -> -- ^ lighting sampler
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader mEnvMapView mIrradianceView mBrdfView = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader mEnvMapView mIrradianceView mBrdfView sampler = do
   let extent = rcSurfaceExtent ctx
       gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT  -- position needs negative values
       gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM      -- normal, albedo, emissive
@@ -205,10 +206,6 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
     DescriptorSet.allocateDescriptorSet device lightingDescriptorPool [lightingDescriptorSetLayout]
   logDebugIO LogRender $ "lighting descriptor sets allocated: " <> showT (length lightingDescriptorSets)
 
-  -- Sampler for lighting pass
-  sampler <- createSampler device
-  logDebugIO LogRender "lighting sampler created"
-
   -- Update lighting descriptor sets with g-buffer views + cubemaps + brdf lut
   liftIO $ for_ (zip lightingDescriptorSets gBufferImageViews) $ \(ds, views) -> do
     let allViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
@@ -233,31 +230,4 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
     , drWireframePipeline = wireframePipeline
     , drWireframePipelineLayout = gBufferPipelineLayout
     }
-
-createSampler :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkSampler
-createSampler dev =
-  let createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"magFilter" Vulkan.VK_FILTER_LINEAR
-              &* set @"minFilter" Vulkan.VK_FILTER_LINEAR
-              &* set @"mipmapMode" Vulkan.VK_SAMPLER_MIPMAP_MODE_LINEAR
-              &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-              &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-              &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-              &* set @"mipLodBias" 0.0
-              &* set @"anisotropyEnable" Vulkan.VK_FALSE
-              &* set @"maxAnisotropy" 1.0
-              &* set @"compareEnable" Vulkan.VK_FALSE
-              &* set @"compareOp" Vulkan.VK_COMPARE_OP_ALWAYS
-              &* set @"minLod" 0.0
-              &* set @"maxLod" 0.0
-              &* set @"borderColor" Vulkan.VK_BORDER_COLOR_INT_OPAQUE_BLACK
-              &* set @"unnormalizedCoordinates" Vulkan.VK_FALSE
-          )
-   in alloc
-        "Sampler"
-        (liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateSampler dev ciPtr Vulkan.vkNullPtr)))
-        (\ptr -> Vulkan.vkDestroySampler dev ptr Vulkan.vkNullPtr)
 

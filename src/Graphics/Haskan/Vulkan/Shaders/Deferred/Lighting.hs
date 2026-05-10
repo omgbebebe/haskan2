@@ -47,10 +47,11 @@ type CameraPushConstant = Struct '[ "cameraX" ':-> Float, "cameraY" ':-> Float, 
 
 type FragmentDefs =
   '[ "in_uv" ':-> Input '[Location 0] (V 2 Float),
-     "gbuf_position"
-       ':-> Texture2D
-              '[Binding 0, DescriptorSet 0]
-              (RGBA8 UNorm),
+      "gbuf_position"
+        ':-> Texture2D'
+               '[Binding 0, DescriptorSet 0]
+               (RGBA32 F)
+               (RGBA16 F),
      "gbuf_normal"
        ':-> Texture2D
               '[Binding 1, DescriptorSet 0]
@@ -100,27 +101,15 @@ type FragmentDefs =
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do
   uv <- get @"in_uv"
-  -- Sample g-buffer
-  posSample <- use @(ImageTexel "gbuf_position") NilOps uv
-  normSample <- use @(ImageTexel "gbuf_normal") NilOps uv
-  albSample <- use @(ImageTexel "gbuf_albedo") NilOps uv
-  emissiveSample <- use @(ImageTexel "gbuf_emissive") NilOps uv
+  -- Sample g-buffer with lazy pattern matching to avoid view constraint issues
+  ~(Vec4 posX posY posZ metallic) <- use @(ImageTexel "gbuf_position") NilOps uv
+  ~(Vec4 normX_raw normY_raw normZ_raw roughness) <- use @(ImageTexel "gbuf_normal") NilOps uv
+  ~(Vec4 albR albG albB ao) <- use @(ImageTexel "gbuf_albedo") NilOps uv
+  ~(Vec4 emissiveR emissiveG emissiveB _) <- use @(ImageTexel "gbuf_emissive") NilOps uv
 
-  let posX = view @(Index 0) posSample
-      posY = view @(Index 1) posSample
-      posZ = view @(Index 2) posSample
-      normX = view @(Index 0) normSample * 2 - 1
-      normY = view @(Index 1) normSample * 2 - 1
-      normZ = view @(Index 2) normSample * 2 - 1
-      albR = view @(Index 0) albSample
-      albG = view @(Index 1) albSample
-      albB = view @(Index 2) albSample
-      metallic = view @(Index 3) posSample
-      roughness = view @(Index 3) normSample
-      ao = view @(Index 3) albSample
-      emissiveR = view @(Index 0) emissiveSample
-      emissiveG = view @(Index 1) emissiveSample
-      emissiveB = view @(Index 2) emissiveSample
+  let normX = normX_raw * 2 - 1
+      normY = normY_raw * 2 - 1
+      normZ = normZ_raw * 2 - 1
 
       -- Normalize normal
       normLen = sqrt (normX * normX + normY * normY + normZ * normZ + 0.0001)
@@ -228,23 +217,18 @@ fragment = shader do
       fresIBLz = f0z + (1 - f0z) * omvIBL5
 
   -- Sample BRDF LUT for split-sum approximation
-  brdfSample <- use @(ImageTexel "brdf_lut") NilOps (Vec2 nDotV roughness)
-  let brdfScale = view @(Index 0) brdfSample
-      brdfBias = view @(Index 1) brdfSample
+  ~(Vec4 brdfScale brdfBias _ _) <- use @(ImageTexel "brdf_lut") NilOps (Vec2 nDotV roughness)
 
   -- Sample irradiance (diffuse IBL)
-  irrSample <- use @(ImageTexel "irradiance_map") NilOps (Vec3 nx ny nz)
-  let irrR = view @(Index 0) irrSample
-      irrG = view @(Index 1) irrSample
-      irrB = view @(Index 2) irrSample
+  ~(Vec4 irrR irrG irrB _) <- use @(ImageTexel "irradiance_map") NilOps (Vec3 nx ny nz)
 
-  -- Sample environment map (specular IBL)
-  envSample <- use @(ImageTexel "env_map") NilOps (Vec3 rx ry rz)
-  let envR = view @(Index 0) envSample
-      envG = view @(Index 1) envSample
-      envB = view @(Index 2) envSample
+  -- Sample environment map (specular IBL) with roughness-based LOD
+  -- Radiance cubemap is 512px with 10 mip levels (0..9)
+  let maxMipF = 9.0 :: Code Float
+      lod = roughness * maxMipF
+  ~(Vec4 envR envG envB _) <- use @(ImageTexel "env_map") (LOD lod NilOps) (Vec3 rx ry rz)
 
-      -- IBL intensity scale (bright outdoor HDRI)
+  let -- IBL intensity scale (bright outdoor HDRI)
       envIntensity = 0.3
 
       -- Diffuse IBL (irradiance * albedo * (1-metallic) * AO)

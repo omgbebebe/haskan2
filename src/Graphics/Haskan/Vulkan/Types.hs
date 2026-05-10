@@ -17,6 +17,7 @@ data StaticRenderContext = StaticRenderContext
 data RenderContext = RenderContext
   { device :: Vulkan.VkDevice,
     swapchain :: Vulkan.VkSwapchainKHR,
+    swapchainImages :: [Vulkan.VkImage],
     graphicsCommandBuffers :: [Vulkan.VkCommandBuffer],
     graphicsQueueHandler :: Vulkan.VkQueue,
     presentQueueHandler :: Vulkan.VkQueue,
