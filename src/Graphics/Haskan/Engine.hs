@@ -1015,7 +1015,6 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
     Just mode -> do
       -- UV check mode: render primitive with UV checker texture
       world <- ECS.createWorld
-      -- Skip the test mesh, only show axis arrows for orientation debugging
       let uvCheckerPath = "data/textures/uv_checker.png"
       uvTexHandle <- liftIO (doesFileExist uvCheckerPath) >>= \exists ->
         if exists
@@ -1026,8 +1025,21 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
              let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
              Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
 
+      -- Create test mesh based on mode
+      let testMesh = case mode of
+            "cube"   -> Mesh.unitCube
+            "sphere" -> Mesh.uvSphere 32 16 1.0
+            _        -> Mesh.uvPlane 1.0
+      testMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices testMesh) (Mesh.indices testMesh)
+      testEntity <- ECS.spawnEntity world
+      ECS.setTransform world testEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setMesh world testEntity testMeshHandle
+      ECS.setMaterial world testEntity uvTexHandle
+      ECS.setMetallicFactor world testEntity 0.0
+      ECS.setRoughnessFactor world testEntity 0.5
+
       let sceneBbox = BBox (V3 (-1) (-1) (-1)) (V3 1 1 1)
-      pure (world, 0, sceneBbox, IntMap.empty)
+      pure (world, 1, sceneBbox, IntMap.empty)
 
     Nothing -> if isStressTest
     then do

@@ -380,41 +380,56 @@ fragment = shader do
       rayNY = rayDirY / rayLen
       rayNZ = rayDirZ / rayLen
 
-      -- World axes overlay (center-aligned, radiating from screen center)
-      -- Check if ray is close to world axes (both positive and negative directions)
-      axisThresh = 0.995  -- cos(5.7 degrees), ~10px thick line at center for 60deg FOV
-      onX = abs rayNX > axisThresh
-      onY = abs rayNY > axisThresh
-      onZ = abs rayNZ > axisThresh
-      isAxis = onX || onY || onZ
+      -- World axes overlay: draw thin lines radiating from screen center
+      -- A ray is on an axis line if it's close to the axis direction AND
+      -- in the plane spanned by the camera forward vector and the axis.
+      -- For simplicity, we use the forward vector (-ray at center, approximately)
+      -- and check perpendicular distance to the axis line.
+      
+      -- Forward direction is approximately -rayDir for center rays, but we use
+      -- a simpler approach: check angular distance from axis with tighter threshold
+      axisThresh = 0.9995  -- cos(1.8 degrees), much tighter for thin lines
+      
+      -- Only show positive axis directions (radiate outward from center)
+      onXp = rayNX > axisThresh
+      onXn = (-rayNX) > axisThresh
+      onYp = rayNY > axisThresh
+      onYn = (-rayNY) > axisThresh
+      onZp = rayNZ > axisThresh
+      onZn = (-rayNZ) > axisThresh
+      isAxis = onXp || onXn || onYp || onYn || onZp || onZn
 
-      -- Axis colors: X=red, Y=green, Z=blue
-      axisR = if onX then 1.0 else if onY then 0.0 else if onZ then 0.0 else 0.0
-      axisG = if onX then 0.0 else if onY then 1.0 else if onZ then 0.0 else 0.0
-      axisB = if onX then 0.0 else if onY then 0.0 else if onZ then 1.0 else 0.0
+      -- Axis colors: X=red, Y=green, Z=blue (both directions same color)
+      axisR = if onXp || onXn then 1.0 else if onYp || onYn then 0.0 else if onZp || onZn then 0.0 else 0.0
+      axisG = if onXp || onXn then 0.0 else if onYp || onYn then 1.0 else if onZp || onZn then 0.0 else 0.0
+      axisB = if onXp || onXn then 0.0 else if onYp || onYn then 0.0 else if onZp || onZn then 1.0 else 0.0
 
       -- Ground plane: intersect camera ray with Y=0
-      -- ray = cameraPos + t * rayDir, solve for Y=0: t = -camY / rayNY
       tGround = (-camY) / (rayNY + 0.0001)
       groundX = camX + rayNX * tGround
       groundZ = camZ + rayNZ * tGround
       groundDist = sqrt (groundX * groundX + groundZ * groundZ)
 
+      -- Simple origin crosshair for ground plane (no grid, just X=0 and Z=0 lines)
+      onOriginX = abs groundX < 0.05
+      onOriginZ = abs groundZ < 0.05
+      isGrid = onOriginX || onOriginZ
+
       -- Fade with distance (max 50 units)
       groundFade = max 0.0 (1.0 - groundDist / 50.0)
 
-      -- Ground plane color: solid dark gray
-      groundColR = 0.12 * groundFade
-      groundColG = 0.12 * groundFade
-      groundColB = 0.12 * groundFade
+      -- Grid: transparent cells with bright lines
+      gridR = if isGrid then 0.4 * groundFade else 0.0
+      gridG = if isGrid then 0.4 * groundFade else 0.0
+      gridB = if isGrid then 0.4 * groundFade else 0.0
 
       -- Ground plane visible only where there's no geometry and ray points below horizon
       hasGround = tGround > 0.0 && not hasGeometry
 
       -- Apply overlays
-      withGroundR = if hasGround && groundPlane == 1.0 then groundColR else outR
-      withGroundG = if hasGround && groundPlane == 1.0 then groundColG else outG
-      withGroundB = if hasGround && groundPlane == 1.0 then groundColB else outB
+      withGroundR = if hasGround && groundPlane == 1.0 then gridR else outR
+      withGroundG = if hasGround && groundPlane == 1.0 then gridG else outG
+      withGroundB = if hasGround && groundPlane == 1.0 then gridB else outB
 
       finalR = if isAxis && axisOverlay == 1.0 then axisR else withGroundR
       finalG = if isAxis && axisOverlay == 1.0 then axisG else withGroundG
