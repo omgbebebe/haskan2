@@ -49,6 +49,8 @@ data DeferredPassData = DeferredPassData
   , dpdLightingDescriptor  :: !Vulkan.VkDescriptorSet
     -- Camera position for lighting shader
   , dpdCameraPos          :: !(V3 Float)
+    -- Skybox ray directions (one per fullscreen triangle vertex)
+  , dpdSkyboxRays         :: !(V3 Float, V3 Float, V3 Float)
     -- Debug mode (0 = normal, 1-11 = debug views)
   , dpdDebugMode          :: !Word32
     -- G-buffer images for barrier
@@ -144,11 +146,16 @@ buildDeferredGraph DeferredPassData {..} = do
               dsPtr
               0
               Vulkan.vkNullPtr
-          -- Set camera position + debug mode push constant
+          -- Set camera position + debug mode + skybox rays push constant
           let (V3 camX camY camZ) = dpdCameraPos
-              camPosData = [realToFrac camX, realToFrac camY, realToFrac camZ, realToFrac dpdDebugMode] :: [CFloat]
+              (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = dpdSkyboxRays
+              camPosData = [ realToFrac camX, realToFrac camY, realToFrac camZ, realToFrac dpdDebugMode
+                           , realToFrac r0x, realToFrac r0y, realToFrac r0z
+                           , realToFrac r1x, realToFrac r1y, realToFrac r1z
+                           , realToFrac r2x, realToFrac r2y, realToFrac r2z
+                           ] :: [CFloat]
           Foreign.Marshal.Array.withArray camPosData $ \camPtr ->
-            Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT 0 16 (Foreign.castPtr camPtr)
+            Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT 0 64 (Foreign.castPtr camPtr)
           -- Fullscreen triangle: 3 vertices, no indices
           Vulkan.vkCmdDraw commandBuffer 3 1 0 0
     }

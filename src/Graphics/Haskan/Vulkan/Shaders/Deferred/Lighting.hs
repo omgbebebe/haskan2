@@ -16,6 +16,11 @@ import Math.Linear
 
 type VertexDefs =
   '[ "out_uv" ':-> Output '[Location 0] (V 2 Float),
+     "out_ray" ':-> Output '[Location 1] (V 3 Float),
+     "cameraPos"
+       ':-> PushConstant
+              '[]
+              CameraPushConstant,
      "main" ':-> EntryPoint '[] Vertex
    ]
 
@@ -35,7 +40,16 @@ vertex = shader do
       y = if fi == 0 then (-1) else if fi == 1 then (-1) else 3
       u = if fi == 0 then 0 else if fi == 1 then 2 else 0
       v = if fi == 0 then 1 else if fi == 1 then 1 else (-1)
+
+  -- Select ray direction for this vertex from push constant
+  cameraPush <- get @"cameraPos"
+  let ray0 = view @(Name "ray0") cameraPush
+      ray1 = view @(Name "ray1") cameraPush
+      ray2 = view @(Name "ray2") cameraPush
+      rayDir = if fi == 0 then ray0 else if fi == 1 then ray1 else ray2
+
   put @"out_uv" (Vec2 u v)
+  put @"out_ray" rayDir
   put @"gl_Position" (Vec4 x y 0 1)
 
 ------------------------------------------------
@@ -43,10 +57,19 @@ vertex = shader do
 -- Samples g-buffer and computes PBR directional light
 -- All math done with scalars to avoid FIR vector-scalar inference issues
 
-type CameraPushConstant = Struct '[ "cameraX" ':-> Float, "cameraY" ':-> Float, "cameraZ" ':-> Float, "debugMode" ':-> Word32 ]
+type CameraPushConstant = Struct
+  '[ "cameraX" ':-> Float
+   , "cameraY" ':-> Float
+   , "cameraZ" ':-> Float
+   , "debugMode" ':-> Word32
+   , "ray0" ':-> V 3 Float
+   , "ray1" ':-> V 3 Float
+   , "ray2" ':-> V 3 Float
+   ]
 
 type FragmentDefs =
   '[ "in_uv" ':-> Input '[Location 0] (V 2 Float),
+     "in_ray" ':-> Input '[Location 1] (V 3 Float),
       "gbuf_position"
         ':-> Texture2D'
                '[Binding 0, DescriptorSet 0]
@@ -101,11 +124,18 @@ type FragmentDefs =
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do
   uv <- get @"in_uv"
+  rayDir <- get @"in_ray"
   -- Sample g-buffer with lazy pattern matching to avoid view constraint issues
   ~(Vec4 posX posY posZ metallic) <- use @(ImageTexel "gbuf_position") NilOps uv
   ~(Vec4 normX_raw normY_raw normZ_raw roughness) <- use @(ImageTexel "gbuf_normal") NilOps uv
   ~(Vec4 albR albG albB ao) <- use @(ImageTexel "gbuf_albedo") NilOps uv
   ~(Vec4 emissiveR emissiveG emissiveB _) <- use @(ImageTexel "gbuf_emissive") NilOps uv
+
+  -- Check if background (no geometry written to g-buffer)
+  let hasGeometry = abs posX + abs posY + abs posZ > 0.001
+
+  -- Sample skybox for background
+  ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps rayDir
 
   let normX = normX_raw * 2 - 1
       normY = normY_raw * 2 - 1
@@ -257,6 +287,11 @@ fragment = shader do
       gamy = sqrt mapy
       gamz = sqrt mapz
 
+      -- Skybox for background pixels (no geometry)
+      finalx = if hasGeometry then gamx else skyR
+      finaly = if hasGeometry then gamy else skyG
+      finalz = if hasGeometry then gamz else skyB
+
       -- Debug visualization helpers
       -- Normals: map [-1,1] to [0,1]
       dbgNormX = nx * 0.5 + 0.5
@@ -296,7 +331,7 @@ fragment = shader do
              if debugMode == 9 then dbgIrrX else
              if debugMode == 10 then dbgSpecX else
              if debugMode == 11 then dbgFresX else
-             gamx
+             finalx
 
       outG = if debugMode == 1 then albG else
              if debugMode == 2 then dbgNormY else
@@ -309,7 +344,7 @@ fragment = shader do
              if debugMode == 9 then dbgIrrY else
              if debugMode == 10 then dbgSpecY else
              if debugMode == 11 then dbgFresY else
-             gamy
+             finaly
 
       outB = if debugMode == 1 then albB else
              if debugMode == 2 then dbgNormZ else
@@ -322,6 +357,6 @@ fragment = shader do
              if debugMode == 9 then dbgIrrZ else
              if debugMode == 10 then dbgSpecZ else
              if debugMode == 11 then dbgFresZ else
-             gamz
+             finalz
 
   put @"out_colour" (Vec4 outR outG outB 1)

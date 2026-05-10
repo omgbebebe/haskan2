@@ -100,8 +100,8 @@ import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
-import Linear (M44, V2 (..), V3 (..), V4 (..), (^+^), (^-^))
-import Linear.Matrix (identity, inv33, transpose, (!*), (!*!))
+import Linear (M44, V2 (..), V3 (..), V4 (..), (*^), (^+^), (^-^), normalize)
+import Linear.Matrix (identity, inv33, inv44, transpose, (!*), (!*!))
 import Linear.Projection qualified
 import Linear.Quaternion (Quaternion (..))
 import Linear.V3 (_x, _y, _z)
@@ -674,6 +674,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
               h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
               view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
               projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
+              skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
           -- Log camera position periodically for manual positioning
           when (frameNumber `mod` 60 == 0) $ do
             let cp = Camera.cameraPosition camera
@@ -729,6 +730,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdLightingLayout = drLightingPipelineLayout
                         , dpdLightingDescriptor = lightingDescriptorSet
                         , dpdCameraPos = realToFrac <$> Camera.cameraPosition camera
+                        , dpdSkyboxRays = skyboxRays
                         , dpdDebugMode = debugMode'
                         , dpdGBufferImages = gBufferImagesForFrame
                         , dpdWireframePipeline = drWireframePipeline
@@ -1359,6 +1361,40 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   -- Destroy resource-manager resources before managed scope exits
   destroyAllResources rm
   liftIO $ putMVar finishedSemaphore ()
+
+-- | Compute skybox ray directions for fullscreen triangle vertices.
+-- Returns (ray0, ray1, ray2) matching the vertex shader's vertex index selection.
+computeSkyboxRays :: M44 Float -> M44 Float -> (V3 Float, V3 Float, V3 Float)
+computeSkyboxRays view proj =
+  let invProj = inv44 proj
+      -- Extract rotation from view: transpose of upper 3x3
+      -- view transforms world->view, so transpose transforms view->world
+      V4 (V4 v00 v01 v02 _) (V4 v10 v11 v12 _) (V4 v20 v21 v22 _) _ = view
+      worldRot = V3 (V3 v00 v10 v20) (V3 v01 v11 v21) (V3 v02 v12 v22)
+
+      ndcToDir :: V4 Float -> V3 Float
+      ndcToDir ndc =
+        let V4 vx vy vz vw = invProj !* ndc
+            viewDir = V3 (vx / vw) (vy / vw) (vz / vw)
+        in normalize (worldRot !* viewDir)
+
+      -- Vulkan NDC: Y down, Z forward into screen
+      -- Fullscreen triangle vertex mapping:
+      -- v0 at (-1,-1) -> top-left
+      -- v1 at (3,-1)  -> interpolated to top-right at x=1
+      -- v2 at (-1,3)  -> interpolated to bottom-left at y=1
+      topLeft     = ndcToDir (V4 (-1) (-1) 1 1)
+      topRight    = ndcToDir (V4 1    (-1) 1 1)
+      bottomLeft  = ndcToDir (V4 (-1) 1    1 1)
+
+      -- For fullscreen triangle interpolation:
+      -- ray0 = topLeft
+      -- ray1 = 2*topRight - topLeft (so at x=1, interpolated = topRight)
+      -- ray2 = 2*bottomLeft - topLeft (so at y=1, interpolated = bottomLeft)
+      ray0 = topLeft
+      ray1 = 2 *^ topRight ^-^ topLeft
+      ray2 = 2 *^ bottomLeft ^-^ topLeft
+  in (ray0, ray1, ray2)
 
 modelMatrix :: M44 Foreign.C.CFloat
 modelMatrix =

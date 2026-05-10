@@ -151,9 +151,9 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   lightingDescriptorSetLayout <- DescriptorSetLayout.managedLightingDescriptorSetLayout device
   let cameraPushConstantRange =
         Vulkan.createVk
-          ( set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+          ( set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
               &* set @"offset" 0
-              &* set @"size" 16
+              &* set @"size" 64
           )
   lightingPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [lightingDescriptorSetLayout] [cameraPushConstantRange]
   logDebugIO LogRender "lighting pipeline layout created"
