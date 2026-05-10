@@ -1,733 +1,269 @@
-\documentclass[11pt,a4paper]{article}
-\usepackage[utf8]{inputenc}
-\usepackage{amsmath,amssymb,amsthm}
-\usepackage{mathtools}
-\usepackage{bm}
-\usepackage{booktabs}
-\usepackage{array}
+\documentclass{article}
+\usepackage{amsmath, amssymb, amsfonts}
 \usepackage{geometry}
-\usepackage{hyperref}
-\usepackage{listings}
-\usepackage{xcolor}
-
-\geometry{margin=2.5cm}
-
-\title{Haskan2 Rendering Pipeline: Mathematical Reference}
-\author{Generated from Source Code Analysis}
-\date{2026-05-10}
-
-\newcommand{\vv}[1]{\mathbf{#1}}
-\newcommand{\mM}[1]{\mathbf{#1}}
-\DeclareMathOperator{\clamp}{clamp}
-\DeclareMathOperator{\lerp}{lerp}
-\DeclareMathOperator{\sign}{sign}
-\DeclareMathOperator{\normalize}{normalize}
+\geometry{margin=1in}
+\title{Haskan2 Rendering Pipeline Mathematical Trace}
+\author{Auto-generated for debugging}
+\date{\today}
 
 \begin{document}
 \maketitle
-\tableofcontents
-\newpage
 
-%=============================================================================
-\section{Notation and Conventions}
-%=============================================================================
+\section{Coordinate Systems}
 
+\subsection{World Space}
 \begin{itemize}
-    \item Scalars: $a, b, \alpha, \theta$ (italic)
-    \item Vectors: $\vv{v}, \vv{n}, \vv{p}$ (bold, lowercase)
-    \item Matrices: $\mM{M}, \mM{V}, \mM{P}$ (bold, uppercase)
-    \item Homogeneous coordinates: $\vv{p}_h = (p_x, p_y, p_z, 1)^\top$
-    \item Direction vectors in homogeneous: $\vv{d}_h = (d_x, d_y, d_z, 0)^\top$
-    \item Quaternion: $\vv{q} = (w, x, y, z)$ with scalar part $w$
-    \item Column-vector convention: $\vv{v}' = \mM{M} \vv{v}$
-    \item Handedness: Right-handed throughout, except Vulkan NDC which is left-handed in $Y$
+\item Right-handed coordinate system
+\item +X = right, +Y = up, +Z = forward (toward viewer in default view)
+\item Confirmed by: camera at $(1.4, -0.7, 1.2)$ looking at origin
+\item View direction: $\mathbf{f} = \text{normalize}(\text{target} - \text{camera}) \approx (-0.66, 0.33, -0.57)$
 \end{itemize}
 
-%=============================================================================
-\section{Coordinate System Definitions}
-%=============================================================================
-
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}lllll@{}}
-\toprule
-\textbf{Space} & $\mathbf{Y}$ axis & $\mathbf{Z}$ axis & \textbf{Handedness} & \textbf{Notes} \\
-\midrule
-glTF asset      & Up    & ---   & Right & Source format \\
-World           & Up    & ---   & Right & Matches glTF \\
-View            & Up    & Into screen & Right & `linear` \texttt{lookAt} \\
-Clip (OpenGL)   & Up    & Into screen & ---   & `linear` \texttt{perspective} \\
-NDC (Vulkan)    & Down  & Into screen & Left  & Vulkan spec \\
-Screen          & Down  & ---   & ---   & $(0,0)$ top-left \\
-Tangent space   & ---   & ---   & Right & Per-vertex local frame \\
-\bottomrule
-\end{tabular}
-\caption{Coordinate spaces used in the pipeline}
-\label{tab:spaces}
-\end{table}
-
-\noindent
-\textbf{Critical inconsistency:} The projection matrix produces OpenGL-style clip space ($Y$ up, $Z \in [-1,1]$), but Vulkan NDC requires $Y$ down and $Z \in [0,1]$. There is no explicit $Y$-flip in the pipeline. The engine compensates by using \texttt{VK\_FRONT\_FACE\_CLOCKWISE} instead of the standard counter-clockwise winding.
-
-%=============================================================================
-\section{CPU-Side Transformations}
-%=============================================================================
-
-%-----------------------------------------------------------------------------
-\subsection{Model Matrix}
-%-----------------------------------------------------------------------------
-
-File: \texttt{src/Graphics/Haskan/Scene/Transform.hs:24--35}
-
-For an entity with position $\vv{t}$, rotation quaternion $\vv{q}$, and scale $\vv{s} = (s_x, s_y, s_z)$:
-\begin{align}
-    \mM{S} &= \begin{pmatrix}
-        s_x & 0   & 0   & 0 \\
-        0   & s_y & 0   & 0 \\
-        0   & 0   & s_z & 0 \\
-        0   & 0   & 0   & 1
-    \end{pmatrix} \\
-    \mM{R} &= \text{rotation matrix from } \vv{q} \\
-    \mM{T} &= \begin{pmatrix}
-        1 & 0 & 0 & t_x \\
-        0 & 1 & 0 & t_y \\
-        0 & 0 & 1 & t_z \\
-        0 & 0 & 0 & 1
-    \end{pmatrix} \\
-    \mM{model} &= \mM{T} \cdot \mM{R} \cdot \mM{S}
-\end{align}
-
-Hierarchy: for a child node with local transform $\mM{local}$ and parent world transform $\mM{parent}$:
-\begin{equation}
-    \mM{world} = \mM{local} \cdot \mM{parent}
-\end{equation}
-
-%-----------------------------------------------------------------------------
-\subsection{View Matrix}
-%-----------------------------------------------------------------------------
-
-File: \texttt{src/Graphics/Haskan/Camera.hs:93--96}
-
-Using \texttt{linear}'s \texttt{lookAt} with eye $\vv{e}$, center $\vv{c}$, up $\vv{u}$:
-\begin{align}
-    \vv{z} &= \normalize(\vv{c} - \vv{e}) \\
-    \vv{x} &= \normalize(\vv{z} \times \vv{u}) \\
-    \vv{y} &= \vv{x} \times \vv{z} \\
-    \mM{view} &= \begin{pmatrix}
-        x_x & x_y & x_z & -\vv{x} \cdot \vv{e} \\
-        y_x & y_y & y_z & -\vv{y} \cdot \vv{e} \\
-        -z_x & -z_y & -z_z & \vv{z} \cdot \vv{e} \\
-        0 & 0 & 0 & 1
-    \end{pmatrix}
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{Projection Matrix}
-%-----------------------------------------------------------------------------
-
-File: \texttt{src/Graphics/Haskan/Engine.hs:1355--1358}
-
-Using \texttt{linear}'s \texttt{perspective} with:
+\subsection{View Space (linear's lookAt)}
 \begin{itemize}
-    \item FOV$_y = \pi/12$ (15\degree)
-    \item Aspect $a = w/h$
-    \item Near $n = 0.1$, Far $f = 10000.0$
+\item \textbf{Left-handed} coordinate system (this is critical!)
+\item Forward: $+Z$ (points from camera toward scene)
+\item Right: $+X$ corresponds to \textbf{left} in world space (because $+X \times +Y = +Z$ in left-handed)
+\item Up: $+Y$
+\item View matrix $\mathbf{V}$ transforms world $\to$ view
+\item linear stores matrices in \textbf{row-major} order
 \end{itemize}
 
-\begin{equation}
-    \mM{proj} = \begin{pmatrix}
-        \dfrac{1}{a \tan(\text{FOV}_y/2)} & 0 & 0 & 0 \\
-        0 & \dfrac{1}{\tan(\text{FOV}_y/2)} & 0 & 0 \\
-        0 & 0 & -\dfrac{f+n}{f-n} & -\dfrac{2fn}{f-n} \\
-        0 & 0 & -1 & 0
-    \end{pmatrix}
-\end{equation}
+\subsection{Clip Space}
+\begin{itemize}
+\item After projection: $x, y, z, w$ in homogeneous coordinates
+\item Vulkan NDC: $x \in [-1, 1]$ (left to right), $y \in [-1, 1]$ \textbf{top to bottom}
+\item After perspective divide: $x_{ndc} = x/w$, $y_{ndc} = y/w$, $z_{ndc} = z/w$
+\end{itemize}
 
-\noindent
-\textbf{Note:} This is an OpenGL-style projection ($Z_{clip} \in [-1,1]$). FIR provides a Vulkan-native variant with $Z_{clip} \in [0,1]$ but it is unused.
+\subsection{Framebuffer Space}
+\begin{itemize}
+\item Origin $(0, 0)$ at \textbf{top-left}
+\item $y$ increases \textbf{downward}
+\item Viewport transform: $(x_{ndc}, y_{ndc}) \to (x_{screen}, y_{screen})$
+\item $x_{screen} = (x_{ndc} + 1) \cdot \frac{width}{2}$
+\item $y_{screen} = (y_{ndc} + 1) \cdot \frac{height}{2}$ (so $y_{ndc} = -1 \to y_{screen} = 0$ = top)
+\end{itemize}
 
-%-----------------------------------------------------------------------------
-\subsection{Matrix Upload Convention}
-%-----------------------------------------------------------------------------
+\section{Vertex Transformation Pipeline}
 
-File: \texttt{src/Graphics/Haskan/Engine.hs:591--592}
+\subsection{Step 1: Model to World}
+Model matrix $\mathbf{M}$ is identity for most objects.
+\[
+\mathbf{p}_{world} = \mathbf{M} \cdot \mathbf{p}_{model} = \mathbf{p}_{model}
+\]
 
-The \texttt{linear} package stores matrices in \textbf{row-major} order. The GPU (FIR/SPIR-V) expects \textbf{column-major}. An explicit transpose is performed before upload:
+\subsection{Step 2: World to View}
+View matrix $\mathbf{V}$ from linear's lookAt:
+\[
+\mathbf{p}_{view} = \mathbf{V} \cdot \mathbf{p}_{world}
+\]
+
+For linear's lookAt with eye at $\mathbf{e}$, center at $\mathbf{c}$, up at $\mathbf{u}$:
 \begin{align}
-    \mM{view}^{GPU}  &= (\mM{view}^{CPU})^\top \\
-    \mM{proj}^{GPU}  &= (\mM{proj}^{CPU})^\top \\
-    \mM{model}^{GPU} &= (\mM{model}^{CPU})^\top
+\mathbf{f} &= \text{normalize}(\mathbf{c} - \mathbf{e}) \quad \text{(forward, points toward scene)} \\
+\mathbf{s} &= \text{normalize}(\mathbf{f} \times \mathbf{u}) \quad \text{(right, but actually points LEFT in world)} \\
+\mathbf{u'} &= \mathbf{s} \times \mathbf{f} \quad \text{(true up)}
 \end{align}
 
-%=============================================================================
-\section{Vertex Shader (G-Buffer Pass)}
-%=============================================================================
-
-File: \texttt{src/Graphics/Haskan/Vulkan/Shaders/Deferred/GBuffer.hs:56--83}
-
-%-----------------------------------------------------------------------------
-\subsection{Input Attributes}
-%-----------------------------------------------------------------------------
-
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}llll@{}}
-\toprule
-\textbf{Location} & \textbf{Name} & \textbf{Type} & \textbf{Size} \\
-\midrule
-0 & in\_position & $\vv{p} = (p_x, p_y, p_z)$ & 12 bytes \\
-1 & in\_uv      & $\vv{uv} = (u, v)$        & 8 bytes \\
-2 & in\_normal  & $\vv{n} = (n_x, n_y, n_z)$ & 12 bytes \\
-3 & in\_tangent & $\vv{t}_h = (t_x, t_y, t_z, w)$ & 16 bytes \\
-4 & in\_colour  & $\vv{c} = (c_r, c_g, c_b)$ & 12 bytes \\
-\bottomrule
-\end{tabular}
-\caption{Vertex input layout (stride = 60 bytes)}
-\end{table}
-
-%-----------------------------------------------------------------------------
-\subsection{Per-Instance Data Fetch}
-%-----------------------------------------------------------------------------
-
-Entity data is fetched from an SSBO indexed by \texttt{gl\_InstanceIndex}:
-\begin{align}
-    \mM{model}_i &= \text{entities}[\text{gl\_InstanceIndex}].\text{transform} \\
-    m_i &= \text{entities}[\text{gl\_InstanceIndex}].\text{materialIndex}
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{Vertex Transformations}
-%-----------------------------------------------------------------------------
-
-\begin{align}
-    \vv{p}_{world} &= \mM{model}_i \cdot \begin{pmatrix} p_x \\ p_y \\ p_z \\ 1 \end{pmatrix} \\
-    \vv{n}_{world} &= \mM{model}_i \cdot \begin{pmatrix} n_x \\ n_y \\ n_z \\ 0 \end{pmatrix} \\
-    \vv{t}_{world} &= \mM{model}_i \cdot \begin{pmatrix} t_x \\ t_y \\ t_z \\ w \end{pmatrix} \\
-    \vv{p}_{clip}  &= \mM{proj} \cdot \mM{view} \cdot \vv{p}_{world}
-\end{align}
-
-\noindent
-\textbf{Bug:} Normals and tangents are transformed by the raw model matrix. For non-uniform scale, the correct transform is:
-\begin{equation}
-    \vv{n}_{world} = (\mM{model}^{-1})^\top \cdot \vv{n}
-    \quad \text{(inverse-transpose of upper-left 3$\times$3)}
-\end{equation}
-
-%-----------------------------------------------------------------------------
-\subsection{Vertex Shader Outputs}
-%-----------------------------------------------------------------------------
-
-\begin{align}
-    \text{out\_position} &= \vv{p}_{world} \\
-    \text{out\_normal}   &= \vv{n}_{world} \\
-    \text{out\_albedo}   &= (c_r, c_g, c_b, 1) \\
-    \text{out\_uv}       &= \vv{uv} \\
-    \text{out\_materialIndex} &= m_i \\
-    \text{out\_entityIndex}   &= \text{gl\_InstanceIndex} \\
-    \text{out\_tangent}  &= \vv{t}_{world}
-\end{align}
-
-%=============================================================================
-\section{Tangent Space Computation (CPU)}
-%=============================================================================
-
-File: \texttt{src/Graphics/Haskan/Utils/TangentSpace.hs:16--106}
-
-%-----------------------------------------------------------------------------
-\subsection{Per-Triangle Tangent/Bitangent}
-%-----------------------------------------------------------------------------
-
-For a triangle with vertices $\vv{p}_0, \vv{p}_1, \vv{p}_2$ and UVs $(u_0,v_0), (u_1,v_1), (u_2,v_2)$:
-\begin{align}
-    \vv{e}_1 &= \vv{p}_1 - \vv{p}_0, \quad \vv{e}_2 = \vv{p}_2 - \vv{p}_0 \\
-    \Delta u_1 &= u_1 - u_0, \quad \Delta v_1 = v_1 - v_0 \\
-    \Delta u_2 &= u_2 - u_0, \quad \Delta v_2 = v_2 - v_0 \\
-    \det &= \Delta u_1 \Delta v_2 - \Delta u_2 \Delta v_1
-\end{align}
-
-If $|\det| < 10^{-6}$ (degenerate UVs), fallback to $\vv{T} = (1,0,0)$, $\vv{B} = (0,1,0)$. Otherwise:
-\begin{align}
-    f &= \frac{1}{\det} \\
-    T_x &= f(\Delta v_2 \cdot e_{1x} - \Delta v_1 \cdot e_{2x}) \\
-    T_y &= f(\Delta v_2 \cdot e_{1y} - \Delta v_1 \cdot e_{2y}) \\
-    T_z &= f(\Delta v_2 \cdot e_{1z} - \Delta v_1 \cdot e_{2z}) \\
-    B_x &= f(-\Delta u_2 \cdot e_{1x} + \Delta u_1 \cdot e_{2x}) \\
-    B_y &= f(-\Delta u_2 \cdot e_{1y} + \Delta u_1 \cdot e_{2y}) \\
-    B_z &= f(-\Delta u_2 \cdot e_{1z} + \Delta u_1 \cdot e_{2z})
-\end{align}
-
-Tangents/bitangents are accumulated per-vertex (sum over adjacent triangles).
-
-%-----------------------------------------------------------------------------
-\subsection{Per-Vertex Finalization}
-%-----------------------------------------------------------------------------
-
-Given accumulated $\vv{T}_{sum}$, $\vv{B}_{sum}$, and vertex normal $\vv{n}$:
-\begin{align}
-    t_{\text{dot}n} &= \vv{T}_{sum} \cdot \vv{n} \\
-    \vv{T}_{\perp} &= \vv{T}_{sum} - t_{\text{dot}n} \cdot \vv{n} \\
-    \vv{T}_{\text{final}} &= \normalize(\vv{T}_{\perp}) \\
-    \vv{B}_{\text{ref}} &= \vv{n} \times \vv{T}_{\text{final}} \\
-    w &= \begin{cases}
-        +1 & \text{if } \vv{B}_{sum} \cdot \vv{B}_{\text{ref}} > 0 \\
-        -1 & \text{otherwise}
-    \end{cases}
-\end{align}
-
-Output tangent: $\vv{t}_h = (T_x, T_y, T_z, w)$
-
-%=============================================================================
-\section{Fragment Shader (G-Buffer Pass)}
-%=============================================================================
-
-File: \texttt{src/Graphics/Haskan/Vulkan/Shaders/Deferred/GBuffer.hs:110--196}
-
-%-----------------------------------------------------------------------------
-\subsection{Texture Sampling}
-%-----------------------------------------------------------------------------
-
-Bindless texture array \texttt{tex} indexed by material index. Sample at interpolated UV:
-\begin{equation}
-    \vv{c}_{\text{albedo}} = \text{sample}(\text{tex}, m_i, \vv{uv})
-\end{equation}
-
-%-----------------------------------------------------------------------------
-\subsection{Metallic/Roughness}
-%-----------------------------------------------------------------------------
-
-\begin{align}
-    \text{useMrTex} &= [\text{mrIdx} \neq 0] \\
-    \vv{c}_{mr} &= \text{sample}(\text{tex}, \text{mrIdx}, \vv{uv}) \\
-    \text{metallic} &= \begin{cases}
-        c_{mr}.b & \text{if useMrTex} \\
-        \text{metallicFactor} & \text{otherwise}
-    \end{cases} \\
-    \text{roughness} &= \begin{cases}
-        c_{mr}.g & \text{if useMrTex} \\
-        \text{roughnessFactor} & \text{otherwise}
-    \end{cases}
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{TBN Construction}
-%-----------------------------------------------------------------------------
-
-\begin{align}
-    \vv{N} &= \normalize((n_x, n_y, n_z)) \\
-    \vv{T} &= \normalize((t_x, t_y, t_z)) \\
-    \vv{B}_{raw} &= \vv{N} \times \vv{T} \\
-    \vv{B} &= w \cdot \vv{B}_{raw}
-\end{align}
-
-No Gram-Schmidt re-orthogonalization in the shader.
-
-%-----------------------------------------------------------------------------
-\subsection{Normal Mapping}
-%-----------------------------------------------------------------------------
-
-\begin{align}
-    \text{useNormalTex} &= [\text{normalIdx} \neq 0] \\
-    \vv{n}_{raw} &= \text{sample}(\text{tex}, \text{normalIdx}, \vv{uv}) \\
-    \vv{n}_{tan} &= 2 \cdot \vv{n}_{raw} - (1, 1, 1) \quad \text{(decode [0,1] to [-1,1])} \\
-    \vv{N}_{world} &= \begin{cases}
-        n_x \cdot \vv{T} + n_y \cdot \vv{B} + n_z \cdot \vv{N} & \text{if useNormalTex} \\
-        \vv{N} & \text{otherwise}
-    \end{cases}
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{Occlusion}
-%-----------------------------------------------------------------------------
-
-\begin{align}
-    \text{useOcclTex} &= [\text{occlusionIdx} \neq 0] \\
-    o_{raw} &= \text{sample}(\text{tex}, \text{occlusionIdx}, \vv{uv}).r \\
-    \text{AO} &= \begin{cases}
-        1.0 - \text{occlusionStrength} \cdot (1.0 - o_{raw}) & \text{if useOcclTex} \\
-        1.0 & \text{otherwise}
-    \end{cases}
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{Emissive}
-%-----------------------------------------------------------------------------
-
-\begin{align}
-    \text{useEmissiveTex} &= [\text{emissiveIdx} \neq 0] \\
-    \vv{e} &= \begin{cases}
-        \text{sample}(\text{tex}, \text{emissiveIdx}, \vv{uv}).rgb & \text{if useEmissiveTex} \\
-        (0, 0, 0) & \text{otherwise}
-    \end{cases}
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{G-Buffer Output Encoding}
-%-----------------------------------------------------------------------------
-
-\begin{align}
-    \text{out\_position} &= (p_{wx}, p_{wy}, p_{wz}, \text{metallic}) \\
-    \text{out\_normal}   &= \left(\frac{N_x}{2} + 0.5, \frac{N_y}{2} + 0.5, \frac{N_z}{2} + 0.5, \text{roughness}\right) \\
-    \text{out\_albedo}   &= (c_r, c_g, c_b, \text{AO}) \\
-    \text{out\_emissive} &= (e_r, e_g, e_b, 1.0)
-\end{align}
-
-Normal is encoded from $[-1,1]$ to $[0,1]$ for \texttt{RGBA8\_UNORM} storage.
-
-%=============================================================================
-\section{Deferred Lighting Pass}
-%=============================================================================
-
-File: \texttt{src/Graphics/Haskan/Vulkan/Shaders/Deferred/Lighting.hs:22--327}
-
-%-----------------------------------------------------------------------------
-\subsection{Fullscreen Triangle Vertex Generation}
-%-----------------------------------------------------------------------------
-
-No vertex input. Positions and UVs generated from \texttt{gl\_VertexIndex}:
-\begin{align}
-    i &= \text{gl\_VertexIndex} \in \{0, 1, 2\} \\
-    (x, y) &= \begin{cases}
-        (-1, -1) & i = 0 \\
-        (3, -1)  & i = 1 \\
-        (-1, 3)  & i = 2
-    \end{cases} \\
-    (u, v) &= \begin{cases}
-        (0, 1)  & i = 0 \\
-        (2, 1)  & i = 1 \\
-        (0, -1) & i = 2
-    \end{cases}
-\end{align}
-
-The triangle $(-1,-1), (3,-1), (-1,3)$ covers the entire clip-space viewport. UV $v$ is flipped so that screen top maps to texture top (Vulkan convention).
-
-%-----------------------------------------------------------------------------
-\subsection{G-Buffer Decoding}
-%-----------------------------------------------------------------------------
-
-Sample at interpolated UV $\vv{uv}$:
-\begin{align}
-    (p_x, p_y, p_z, \text{metallic}) &= \text{sample}(\text{gbuf\_position}, \vv{uv}) \\
-    (n'_x, n'_y, n'_z, \text{roughness}) &= \text{sample}(\text{gbuf\_normal}, \vv{uv}) \\
-    (a_r, a_g, a_b, \text{AO}) &= \text{sample}(\text{gbuf\_albedo}, \vv{uv}) \\
-    (e_r, e_g, e_b, \_) &= \text{sample}(\text{gbuf\_emissive}, \vv{uv})
-\end{align}
-
-Normal decode (UNORM $[0,1]$ back to $[-1,1]$):
-\begin{align}
-    n_x &= 2 n'_x - 1 \\
-    n_y &= 2 n'_y - 1 \\
-    n_z &= 2 n'_z - 1 \\
-    \vv{N} &= \normalize((n_x, n_y, n_z))
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{View Vector}
-%-----------------------------------------------------------------------------
-
-Camera position $\vv{c} = (c_x, c_y, c_z)$ from push constant:
-\begin{align}
-    \vv{V}_{raw} &= \vv{c} - \vv{p}_{world} \\
-    \vv{V} &= \normalize(\vv{V}_{raw})
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{Directional Light}
-%-----------------------------------------------------------------------------
-
-Hardcoded light direction (normalized):
-\begin{equation}
-    \vv{L} = \frac{1}{\sqrt{3}}(1, 1, 1)
-\end{equation}
-
-Dot products:
-\begin{align}
-    N \cdot L &= \max(0, \vv{N} \cdot \vv{L}) \\
-    N \cdot V &= \max(0, \vv{N} \cdot \vv{V})
-\end{align}
-
-Half vector:
-\begin{align}
-    \vv{H}_{raw} &= \vv{L} + \vv{V} \\
-    \vv{H} &= \normalize(\vv{H}_{raw}) \\
-    N \cdot H &= \max(0, \vv{N} \cdot \vv{H}) \\
-    V \cdot H &= \max(0, \vv{V} \cdot \vv{H})
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{PBR BRDF (Direct Lighting)}
-%-----------------------------------------------------------------------------
-
-Fresnel reflectance at normal incidence (Schlick approximation base):
-\begin{equation}
-    \vv{F}_0 = 0.04 \cdot (1 - \text{metallic}) + \vv{a}_{rgb} \cdot \text{metallic}
-\end{equation}
-
-Fresnel term (Schlick):
-\begin{equation}
-    \vv{F} = \vv{F}_0 + (1 - \vv{F}_0) \cdot (1 - V \cdot H)^5
-\end{equation}
-
-GGX Normal Distribution Function (Trowbridge-Reitz):
-\begin{align}
-    \alpha &= \text{roughness}^2 \\
-    D &= \frac{\alpha^2}{\pi \cdot \left((N \cdot H)^2 (\alpha^2 - 1) + 1\right)^2}
-\end{align}
-
-Geometry term (Schlick-Smith approximation of Smith GGX):
-\begin{align}
-    k &= \frac{(\alpha + 1)^2}{8} \\
-    G_1(L) &= \frac{N \cdot L}{N \cdot L \cdot (1 - k) + k} \\
-    G_1(V) &= \frac{N \cdot V}{N \cdot V \cdot (1 - k) + k} \\
-    G &= G_1(L) \cdot G_1(V)
-\end{align}
-
-Specular BRDF:
-\begin{equation}
-    \vv{f}_{spec} = \frac{D \cdot \vv{F} \cdot G}{4 \cdot (N \cdot L) \cdot (N \cdot V) + 0.001}
-\end{equation}
-
-Diffuse BRDF (Lambert):
-\begin{equation}
-    \vv{f}_{diff} = \frac{\vv{a}_{rgb} \cdot (1 - \text{metallic})}{\pi}
-\end{equation}
-
-Combined direct lighting:
-\begin{equation}
-    \vv{L}_{dir} = (\vv{f}_{diff} + \vv{f}_{spec}) \cdot (N \cdot L)
-\end{equation}
-
-%-----------------------------------------------------------------------------
-\subsection{Image-Based Lighting (IBL)}
-%-----------------------------------------------------------------------------
-
-Reflection vector:
-\begin{align}
-    R_{dotN} &= 2 (\vv{V} \cdot \vv{N}) \\
-    \vv{R} &= R_{dotN} \cdot \vv{N} - \vv{V}
-\end{align}
-
-Fresnel for IBL (uses $N \cdot V$ instead of $V \cdot H$ since there is no half-vector):
-\begin{equation}
-    \vv{F}_{IBL} = \vv{F}_0 + (1 - \vv{F}_0) \cdot (1 - N \cdot V)^5
-\end{equation}
-
-BRDF LUT sampling (split-sum approximation):
-\begin{equation}
-    (scale, bias) = \text{sample}(\text{brdf\_lut}, (N \cdot V, \text{roughness}))
-\end{equation}
-
-Irradiance (diffuse IBL):
-\begin{equation}
-    \vv{L}_{irr} = \text{sample}(\text{irradiance\_map}, \vv{N}) \cdot \vv{a}_{rgb} \cdot (1 - \text{metallic}) \cdot \text{AO} \cdot 0.3
-\end{equation}
-
-Radiance (specular IBL):
-\begin{align}
-    lod &= \text{roughness} \cdot 9.0 \quad \text{(9 mip levels on 512px cubemap)} \\
-    \vv{L}_{rad} &= \text{sample}(\text{env\_map}, \vv{R}, lod) \cdot (\vv{F}_{IBL} \cdot scale + bias) \cdot 0.3
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{Final Color Composition}
-%-----------------------------------------------------------------------------
-
-\begin{equation}
-    \vv{C}_{hdr} = \vv{L}_{dir} + \vv{e} + \vv{L}_{irr} + \vv{L}_{rad}
-\end{equation}
-
-Tone mapping (Reinhard):
-\begin{equation}
-    \vv{C}_{tm} = \frac{\vv{C}_{hdr}}{\vv{C}_{hdr} + 1}
-\end{equation}
-
-Gamma correction (approximate $\gamma = 2.0$):
-\begin{equation}
-    \vv{C}_{final} = \sqrt{\vv{C}_{tm}}
-\end{equation}
-
-%=============================================================================
-\section{Procedural Mesh Formulas}
-%=============================================================================
-
-File: \texttt{src/Graphics/Haskan/Mesh.hs}
-
-%-----------------------------------------------------------------------------
-\subsection{UV Sphere}
-%-----------------------------------------------------------------------------
-
-Parameters: latitude segments $N_{lat}$, longitude segments $N_{lon}$, radius $r$.
-
-For $i \in [0, N_{lat}]$, $j \in [0, N_{lon}]$:
-\begin{align}
-    \theta &= \pi \cdot \frac{i}{N_{lat}} \quad \text{(polar angle, 0 at north pole)} \\
-    \phi   &= 2\pi \cdot \frac{j}{N_{lon}} \quad \text{(azimuthal angle)} \\
-    p_x &= r \sin\theta \cos\phi \\
-    p_y &= r \cos\theta \\
-    p_z &= r \sin\theta \sin\phi \\
-    \vv{N} &= \normalize((p_x, p_y, p_z)) \\
-    u &= 1.0 - \frac{j}{N_{lon}} \quad \text{(flipped to prevent mirrored text)} \\
-    v &= \frac{i}{N_{lat}} \\
-    T_x &= \sin\phi \\
-    T_y &= 0 \\
-    T_z &= -\cos\phi \\
-    \vv{t}_h &= (T_x, T_y, T_z, 1)
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{Unit Cube}
-%-----------------------------------------------------------------------------
-
-Centered at origin, side length 1, half-extent $s = 0.5$. 24 vertices (4 per face $\times$ 6 faces).
-
-Front face ($+Z$, normal $(0,0,1)$):
-\begin{align}
-    \vv{p}_0 &= (-s, -s, +s), \quad \vv{uv}_0 = (0, 1) \\
-    \vv{p}_1 &= (+s, -s, +s), \quad \vv{uv}_1 = (1, 1) \\
-    \vv{p}_2 &= (+s, +s, +s), \quad \vv{uv}_2 = (1, 0) \\
-    \vv{p}_3 &= (-s, +s, +s), \quad \vv{uv}_3 = (0, 0) \\
-    \vv{t}_h &= (1, 0, 0, 1)
-\end{align}
-
-UV convention: $(0,0)$ = top-left (Vulkan). Winding: front/back/right use $(0,2,1,0,3,2)$; left/top/bottom use $(0,1,2,0,2,3)$.
-
-%=============================================================================
-\section{BRDF LUT Generation (CPU)}
-%=============================================================================
-
-File: \texttt{src/Graphics/Haskan/Vulkan/BRDF.hs}
-
-%-----------------------------------------------------------------------------
-\subsection{Integration Setup}
-%-----------------------------------------------------------------------------
-
-For each texel at integer coordinates $(x, y)$ in a $W \times H$ LUT:
-\begin{align}
-    u &= \frac{x + 0.5}{W} \quad (= N \cdot V) \\
-    v &= \frac{y + 0.5}{H} \quad (= \text{roughness})
-\end{align}
-
-Integration with $N = 128$ Monte Carlo samples:
-\begin{align}
-    (scale, bias) &= \text{integrateBRDF}(u, v, N) \\
-    \text{pixel} &= (\clamp_{01}(scale), \clamp_{01}(bias), 0, 1) \cdot 255
-\end{align}
-
-%-----------------------------------------------------------------------------
-\subsection{Monte Carlo Integration}
-%-----------------------------------------------------------------------------
-
-Given $N \cdot V = \cos\theta_v$ and roughness:
-\begin{align}
-    \vv{n} &= (0, 0, 1) \\
-    \vv{v} &= (\sqrt{1 - (N \cdot V)^2}, 0, N \cdot V) \\
-    \alpha &= \text{roughness}^2
-\end{align}
-
-For each sample with randoms $(r_1, r_2)$:
-\begin{align}
-    \phi &= 2\pi r_1 \\
-    \cos\theta_h &= \sqrt{\frac{1 - r_2}{1 + (\alpha^2 - 1) r_2}} \\
-    \sin\theta_h &= \sqrt{1 - \cos^2\theta_h} \\
-    \vv{h} &= \normalize((\sin\theta_h \cos\phi, \sin\theta_h \sin\phi, \cos\theta_h)) \\
-    \vv{l} &= \normalize(2 (\vv{v} \cdot \vv{h}) \vv{h} - \vv{v}) \\
-    N \cdot l &= \max(0, \vv{n} \cdot \vv{l}) \\
-    N \cdot h &= \max(0, \vv{n} \cdot \vv{h}) \\
-    V \cdot h &= \max(0, \vv{v} \cdot \vv{h})
-\end{align}
-
-GGX distribution:
-\begin{equation}
-    D = \frac{\alpha^2}{\pi \left((N \cdot h)^2 (\alpha^2 - 1) + 1\right)^2}
-\end{equation}
-
-Geometry:
-\begin{align}
-    k &= \frac{(\alpha + 1)^2}{8} \\
-    G_1(v) &= \frac{N \cdot V}{N \cdot V \cdot (1 - k) + k} \\
-    G_1(l) &= \frac{N \cdot l}{N \cdot l \cdot (1 - k) + k} \\
-    G &= G_1(v) \cdot G_1(l)
-\end{align}
-
-Visibility term (already cancels PDF in importance sampling):
-\begin{equation}
-    V_{is} = \begin{cases}
-        \dfrac{G \cdot (V \cdot h)}{(N \cdot h) \cdot (N \cdot V)} & \text{if } N \cdot l > 0 \text{ and } N \cdot V > 0 \\
-        0 & \text{otherwise}
-    \end{cases}
-\end{equation}
-
-Fresnel:
-\begin{equation}
-    F_c = (1 - V \cdot h)^5
-\end{equation}
-
-Accumulation:
-\begin{align}
-    scale' &= V_{is} \cdot (1 - F_c) \\
-    bias'  &= V_{is} \cdot F_c
-\end{align}
-
-Final averaging:
-\begin{equation}
-    scale = \frac{1}{N} \sum scale', \quad bias = \frac{1}{N} \sum bias'
-\end{equation}
-
-%=============================================================================
-\section{Coordinate Transform Summary}
-%=============================================================================
-
-The full vertex transformation chain:
-\begin{equation}
-    \vv{p}_{clip} = \mM{P} \cdot \mM{V} \cdot \mM{M} \cdot \vv{p}_{local}
-\end{equation}
+View matrix (row-major):
+\[
+\mathbf{V} = \begin{pmatrix}
+s_x & s_y & s_z & -\mathbf{s} \cdot \mathbf{e} \\
+u'_x & u'_y & u'_z & -\mathbf{u'} \cdot \mathbf{e} \\
+-f_x & -f_y & -f_z & \mathbf{f} \cdot \mathbf{e} \\
+0 & 0 & 0 & 1
+\end{pmatrix}
+\]
+
+\textbf{Key point}: The third row is $-\mathbf{f}$, not $+\mathbf{f}$. This is because linear uses a left-handed view space where $+Z$ is forward. In the view matrix, we need to negate to get the correct transformation.
+
+\subsection{Step 3: View to Clip}
+Projection matrix $\mathbf{P}$ (after Y-flip for Vulkan):
+\[
+\mathbf{P} = \mathbf{Y}_{flip} \cdot \mathbf{P}_{persp}
+\]
 
 Where:
-\begin{align}
-    \mM{M} &= \mM{T} \cdot \mM{R} \cdot \mM{S} \quad \text{(model matrix)} \\
-    \mM{V} &= \text{lookAt}(eye, center, up) \quad \text{(view matrix)} \\
-    \mM{P} &= \text{perspective}(fovy, aspect, near, far) \quad \text{(projection matrix)}
-\end{align}
+\[
+\mathbf{Y}_{flip} = \begin{pmatrix}
+1 & 0 & 0 & 0 \\
+0 & -1 & 0 & 0 \\
+0 & 0 & 1 & 0 \\
+0 & 0 & 0 & 1
+\end{pmatrix}
+\]
 
-Pipeline spaces:
-\begin{equation}
-    \vv{p}_{local} \xrightarrow{\mM{M}} \vv{p}_{world} \xrightarrow{\mM{V}} \vv{p}_{view} \xrightarrow{\mM{P}} \vv{p}_{clip} \xrightarrow{/w} \vv{p}_{NDC} \xrightarrow{\text{viewport}} \vv{p}_{screen}
-\end{equation}
+This flips Y in clip space so that:
+\begin{itemize}
+\item View $+Y$ (up) $\to$ Clip $-Y$ $\to$ Screen top (because $y_{ndc} = -1$ maps to screen $y = 0$)
+\item View $-Y$ (down) $\to$ Clip $+Y$ $\to$ Screen bottom
+\end{itemize}
 
-Viewport transform (Vulkan):
-\begin{align}
-    x_{screen} &= \frac{x_{NDC} + 1}{2} \cdot width \\
-    y_{screen} &= \frac{1 - y_{NDC}}{2} \cdot height \\
-    z_{depth}  &= z_{NDC} \quad \text{(with depth range [0,1])}
-\end{align}
+Without Y-flip, the image would be upside down.
 
-Note: Because the projection produces $Y_{NDC}$ up but Vulkan expects $Y_{NDC}$ down, the effective viewport $Y$ is inverted. The engine uses clockwise front-face winding to compensate.
+\subsection{Step 4: Perspective Divide}
+\[
+\mathbf{p}_{ndc} = \begin{pmatrix} x_{clip}/w_{clip} \\ y_{clip}/w_{clip} \\ z_{clip}/w_{clip} \end{pmatrix}
+\]
 
-%=============================================================================
-\section{Appendix: Debug Visualization Modes}
-%=============================================================================
+\subsection{Step 5: Viewport Transform}
+\[
+x_{screen} = \frac{x_{ndc} + 1}{2} \cdot width, \quad
+y_{screen} = \frac{y_{ndc} + 1}{2} \cdot height
+\]
 
-The lighting shader supports 12 debug modes selected via push constant:
+\section{Skybox Ray Computation}
 
-\begin{table}[h]
-\centering
-\begin{tabular}{@{}cll@{}}
-\toprule
-\textbf{Mode} & \textbf{Display} & \textbf{Formula} \\
-\midrule
-0 & Lit (default) & Full PBR + IBL \\
-1 & Albedo & $(a_r, a_g, a_b)$ \\
-2 & Normals & $(N_x, N_y, N_z) \cdot 0.5 + 0.5$ \\
-3 & Roughness & $(r, r, r)$ \\
-4 & Metallic & $(m, m, m)$ \\
-5 & Position & $(p_x, p_y, p_z) \cdot 0.1 + 0.5$ \\
-6 & Emissive & $(e_r, e_g, e_b)$ \\
-7 & AO & $(ao, ao, ao)$ \\
-8 & N$\cdot$L & $(N \cdot L, N \cdot L, N \cdot L)$ \\
-9 & Irradiance & $\text{irradiance\_map} \cdot 0.3$ \\
-10 & Specular IBL & $\vv{L}_{rad}$ \\
-11 & Fresnel & $\vv{F}_{IBL}$ \\
-\bottomrule
-\end{tabular}
-\end{table}
+\subsection{Current Implementation}
+\begin{verbatim}
+computeSkyboxRays view proj =
+  let V4 (V4 v00 v01 v02 _) (V4 v10 v11 v12 _) (V4 v20 v21 v22 _) _ = view
+      worldRot = V3 (V3 v00 v10 v20) (V3 v01 v11 v21) (V3 v02 v12 v22)
+      
+      V4 (V4 fx _ _ _) (V4 _ fy _ _) _ _ = proj
+      
+      ndcToDir (V4 x y _z _w) =
+        let viewDir = V3 (-x / fx) (y / fy) (-1)
+        in normalize (worldRot !* viewDir)
+\end{verbatim}
+
+\subsection{Analysis of worldRot}
+Since linear stores matrices in row-major, the view matrix columns are:
+\begin{itemize}
+\item Column 0: $(v_{00}, v_{10}, v_{20}) = \mathbf{s}$ (world-space right vector)
+\item Column 1: $(v_{01}, v_{11}, v_{21}) = \mathbf{u'}$ (world-space up vector)
+\item Column 2: $(v_{02}, v_{12}, v_{22}) = -\mathbf{f}$ (world-space forward vector)
+\end{itemize}
+
+So:
+\[
+\mathbf{worldRot} = \begin{pmatrix}
+| & | & | \\
+\mathbf{s} & \mathbf{u'} & -\mathbf{f} \\
+| & | & |
+\end{pmatrix}
+\]
+
+This transforms view-space directions to world-space directions.
+
+\subsection{Analysis of ndcToDir}
+For a pixel at NDC $(x, y)$:
+\[
+\mathbf{v}_{view} = \begin{pmatrix} -x/f_x \\ y/f_y \\ -1 \end{pmatrix}
+\]
+
+Then:
+\[
+\mathbf{v}_{world} = \text{normalize}(\mathbf{worldRot} \cdot \mathbf{v}_{view})
+\]
+
+\textbf{Why $-x/f_x$?}
+Because in linear's left-handed view space, $+X$ points to the \textbf{left} in world space. To make screen-left correspond to world-left (which is what we want for correct looking), we negate $x$.
+
+\textbf{Why $-1$ for Z?}
+In view space, $-Z$ points toward the scene (forward). We want the ray to point forward, so we use $-1$.
+
+\subsection{Verification}
+At screen center $(x, y) = (0, 0)$:
+\[
+\mathbf{v}_{view} = (0, 0, -1)
+\]
+\[
+\mathbf{v}_{world} = \text{normalize}(-\mathbf{f}) = \mathbf{f}
+\]
+This is correct: center of screen looks in the forward direction.
+
+At screen right $(x, y) = (1, 0)$:
+\[
+\mathbf{v}_{view} = (-1/f_x, 0, -1)
+\]
+\[
+\mathbf{v}_{world} = \text{normalize}(-\frac{1}{f_x}\mathbf{s} - \mathbf{f})
+\]
+
+Since $\mathbf{s}$ points to world-left (because linear's view $+X$ is world-left), $-\mathbf{s}$ points to world-right. So screen-right looks toward world-right. This is correct.
+
+\section{Cubemap Face Convention}
+
+\subsection{Vulkan Cubemap Faces}
+Faces are indexed 0--5:
+\begin{enumerate}
+\item[0] +X (right)
+\item[1] -X (left)
+\item[2] +Y (up)
+\item[3] -Y (down)
+\item[4] +Z (forward)
+\item[5] -Z (backward)
+\end{enumerate}
+
+\subsection{Face Orientation (Vulkan Spec)}
+For face +X (viewed from +X looking toward origin):
+\begin{itemize}
+\item Image $+U$ direction = $-Z$ (backward)
+\item Image $+V$ direction = $-Y$ (down)
+\end{itemize}
+
+For face -X (viewed from -X looking toward origin):
+\begin{itemize}
+\item Image $+U$ direction = $+Z$ (forward)
+\item Image $+V$ direction = $-Y$ (down)
+\end{itemize}
+
+For face +Y (viewed from +Y looking toward origin):
+\begin{itemize}
+\item Image $+U$ direction = $+X$ (right)
+\item Image $+V$ direction = $+Z$ (forward)
+\end{itemize}
+
+For face -Y (viewed from -Y looking toward origin):
+\begin{itemize}
+\item Image $+U$ direction = $+X$ (right)
+\item Image $+V$ direction = $-Z$ (backward)
+\end{itemize}
+
+For face +Z (viewed from +Z looking toward origin):
+\begin{itemize}
+\item Image $+U$ direction = $+X$ (right)
+\item Image $+V$ direction = $-Y$ (down)
+\end{itemize}
+
+For face -Z (viewed from -Z looking toward origin):
+\begin{itemize}
+\item Image $+U$ direction = $-X$ (left)
+\item Image $+V$ direction = $-Y$ (down)
+\end{itemize}
+
+\subsection{cmft Output Convention}
+cmft generates faces in the \textbf{OpenGL} convention by default. The OpenGL convention differs from Vulkan:
+
+\textbf{OpenGL vs Vulkan differences:}
+\begin{itemize}
+\item For +X and -X faces: OpenGL has $+U$ pointing in the \textbf{opposite} Z direction compared to Vulkan
+\item This means +X and -X faces need to be \textbf{horizontally flipped} when loading into Vulkan
+\item For +Y face: OpenGL has $+V$ pointing in a different direction than Vulkan
+\end{itemize}
+
+\section{Identified Issues}
+
+\subsection{Issue 1: Cubemap Face Orientation Mismatch}
+If cmft generates faces in OpenGL convention but we use them in Vulkan, the +X and -X faces are horizontally flipped relative to what Vulkan expects. This causes a seam at the edge between +X/+Z and +X/-Z faces.
+
+\subsection{Issue 2: Possible +Y/-Y Face Flip}
+The +Y and -Y faces may also have incorrect vertical orientation depending on cmft's output settings.
+
+\subsection{Issue 3: Screenshot Y-Flip (Fixed)}
+Previously, screenshot readback was doing Y-flip, which was correct for the old projection but wrong after the Y-flip fix. Removed in commit c97fa78.
+
+\section{Recommended Fixes}
+
+\subsection{Option A: Flip Faces During Loading}
+When loading cmft-generated cubemap faces into Vulkan, horizontally flip the +X and -X faces. This can be done by flipping the image data pixel-by-pixel.
+
+\subsection{Option B: Use Vulkan-Compatible cmft Output}
+Check if cmft has a ``vulkan'' or ``directx'' output mode that generates faces in the correct orientation.
+
+\subsection{Option C: Adjust Shader Sampling}
+Use texture coordinate adjustments in the shader to compensate for the face orientation mismatch. This is less desirable as it adds complexity.
 
 \end{document}

@@ -1,0 +1,183 @@
+\documentclass{article}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\geometry{margin=1in}
+\title{Skybox Ray Math Audit}
+\author{Rune}
+\date{2026-05-11}
+
+\begin{document}
+\maketitle
+
+\section{Executive Summary}
+
+The skybox ray computation in \texttt{Engine.hs:computeSkyboxRays} has two bugs
+that together cause incorrect sky orientation (diagonal tilt) relative to world
+geometry. The root cause is that the view matrix is \textbf{transposed} before
+being passed to the function, but the \texttt{worldRot} extraction pattern was
+designed for the non-transposed matrix. A secondary bug inverts the horizontal
+ray component.
+
+\section{Bug 1 (Root Cause): \texttt{worldRot} extracts $R$ instead of $R^{-1}$}
+
+\subsection{The transpose that breaks everything}
+
+At \texttt{Engine.hs:680}:
+\begin{verbatim}
+view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
+\end{verbatim}
+
+So \texttt{computeSkyboxRays} receives $V^T$, not $V$.
+
+\subsection{What the extraction actually produces}
+
+The extraction at line 1387:
+\begin{verbatim}
+worldRot = V3 (V3 v00 v10 v20) (V3 v01 v11 v21) (V3 v02 v12 v22)
+\end{verbatim}
+
+This takes columns of the input matrix and makes them \textbf{rows} of
+\texttt{worldRot}.
+
+For the \textbf{non-transposed} $V$ (what the original analysis assumes):
+
+Columns of $V$ are:
+\begin{itemize}
+\item Column 0: $(s_x,\; u'_x,\; -f_x)$
+\item Column 1: $(s_y,\; u'_y,\; -f_y)$
+\item Column 2: $(s_z,\; u'_z,\; -f_z)$
+\end{itemize}
+
+Placing these as rows gives:
+\[
+\mathbf{worldRot} = \begin{pmatrix}
+s_x  & u'_x & -f_x \\
+s_y  & u'_y & -f_y \\
+s_z  & u'_z & -f_z
+\end{pmatrix} = R^T = R^{-1} \quad \text{(view $\to$ world)} \quad \checkmark
+\]
+
+For the \textbf{transposed} $V^T$ (what the code actually receives):
+
+Columns of $V^T$ are the rows of $V$:
+\begin{itemize}
+\item Column 0: $(s_x,\; s_y,\; s_z) = \mathbf{s}$
+\item Column 1: $(u'_x,\; u'_y,\; u'_z) = \mathbf{u'}$
+\item Column 2: $(-f_x,\; -f_y,\; -f_z) = -\mathbf{f}$
+\end{itemize}
+
+Placing these as rows gives:
+\[
+\mathbf{worldRot} = \begin{pmatrix}
+s_x  & s_y  & s_z  \\
+u'_x & u'_y & u'_z \\
+-f_x & -f_y & -f_z
+\end{pmatrix} = R \quad \text{(world $\to$ view)} \quad \color{red}\boldsymbol{\times}
+\]
+
+The code applies the \textbf{world$\to$view} rotation to view-space directions,
+producing meaningless results. For general camera orientations, $R \ne R^{-1}$.
+
+\subsection{Numerical verification}
+
+Camera at $(1.4, -0.7, 1.2)$ looking at origin, up $= (0, 1, 0)$:
+\begin{align*}
+\mathbf{f} &\approx (-0.71,\; 0.35,\; -0.61) \\
+\mathbf{s} &\approx (0.65,\; 0,\; -0.76) \\
+\mathbf{u'} &\approx (0.27,\; 0.93,\; 0.23)
+\end{align*}
+
+With the current code ($R$ applied to center direction $(0, 0, -1)$):
+\[
+R \cdot (0, 0, -1)^T = (-s_z,\; -u'_z,\; f_z) = (0.76,\; -0.23,\; -0.61)
+\]
+
+Correct result (should be $\mathbf{f}$):
+\[
+(-0.71,\; 0.35,\; -0.61)
+\]
+
+The center ray is $\sim\!104°$ off from the correct forward direction.
+
+\subsection{Fix}
+
+Since the input is $V^T$, copy rows directly instead of transposing columns:
+
+\begin{verbatim}
+worldRot = V3 (V3 v00 v01 v02) (V3 v10 v11 v12) (V3 v20 v21 v22)
+\end{verbatim}
+
+\section{Bug 2: \texttt{ndcToDir} X component has wrong sign}
+
+\subsection{Current code}
+\begin{verbatim}
+viewDir = V3 (-x / fx) (y / fy) (-1)
+\end{verbatim}
+
+\subsection{Derivation of correct signs}
+
+The projection (with Y-flip) maps view$\to$clip:
+\begin{align*}
+x_\text{ndc} &= f_x \cdot x_\text{view} / (-z_\text{view}) \\
+y_\text{ndc} &= f_{y,\text{abs}} \cdot y_\text{view} / z_\text{view}
+\end{align*}
+
+At $z_\text{view} = -1$ (forward in right-handed view space):
+\begin{align*}
+x_\text{view} &= x_\text{ndc} / f_x \\
+y_\text{view} &= -y_\text{ndc} / f_{y,\text{abs}}
+\end{align*}
+
+The code reads $f_y$ from the transposed projection where $f_y = -f_{y,\text{abs}}$
+(negative, Y-flip baked in). So $y / f_y = -y / f_{y,\text{abs}}$ which is
+\textbf{correct} for Y. The double negative cancels.
+
+But $f_x$ is positive (no X-flip), so the X component should be $+x / f_x$:
+\begin{verbatim}
+viewDir = V3 (x / fx) (y / fy) (-1)
+\end{verbatim}
+
+\subsection{Why the original analysis got it wrong}
+
+The document claims $s$ ``actually points LEFT in world space.'' This is
+incorrect: $s = \text{normalize}(\mathbf{f} \times \mathbf{u})$ gives the
+\textbf{right} vector in right-handed coordinates. For the given camera,
+$s \approx (0.65, 0, -0.76)$ which points rightward. The erroneous claim
+about $s$'s direction was used to justify the $-x$ negation.
+
+\section{Doc Error: View Space Handedness}
+
+Section 2.2 of the original analysis claims linear's \texttt{lookAt} produces
+a \textbf{left-handed} view space. The third row being $-\mathbf{f}$ confirms
+\textbf{right-handed}: objects in front of the camera get negative $Z$
+(standard OpenGL convention). The claim ``$+X$ corresponds to left in world
+space'' is wrong --- $+X = \mathbf{s}$ = right.
+
+\section{Doc Error: Verification Circular}
+
+Section 3.4's ``screen-right $\to$ world-right'' verification relies on $s$
+being left. Since $s$ is right, the conclusion is invalid. With corrected
+$R^{-1}$ and $+x/f_x$, screen-right correctly maps to world-right via:
+\[
+\frac{1}{f_x}\mathbf{s} + \mathbf{f}
+\]
+
+\section{Complete Fix}
+
+Two changes in \texttt{src/Graphics/Haskan/Engine.hs}:
+
+\begin{enumerate}
+\item \textbf{Line 1387} --- fix \texttt{worldRot} extraction:
+\begin{verbatim}
+worldRot = V3 (V3 v00 v01 v02) (V3 v10 v11 v12) (V3 v20 v21 v22)
+\end{verbatim}
+
+\item \textbf{Line 1400} --- fix X sign:
+\begin{verbatim}
+viewDir = V3 (x / fx) (y / fy) (-1)
+\end{verbatim}
+\end{enumerate}
+
+\end{document}

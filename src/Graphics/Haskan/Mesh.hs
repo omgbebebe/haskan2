@@ -4,7 +4,7 @@ import Data.Word (Word32)
 import Foreign.C qualified
 import Graphics.Haskan.Face (Face (..))
 import Graphics.Haskan.Vertex (Vertex (..))
-import Linear (V2 (..), V3 (..), V4 (..))
+import Linear (V2 (..), V3 (..), V4 (..), cross, normalize, (*^))
 
 data Mesh = Mesh
   { vertices :: [Vertex],
@@ -172,3 +172,48 @@ groundPlaneMeshGrid subdivisions size =
           , i <- [0 .. n - 1]
           ]
    in Mesh {vertices = verts, indices = idxs}
+
+-- | Create a single axis arrow mesh.
+-- Takes the axis direction, color, and returns a thin box mesh.
+axisArrow :: V3 Foreign.C.CFloat -> V3 Foreign.C.CFloat -> Mesh
+axisArrow axisDir color =
+  let t = V4 1 0 0 1
+      r = 0.02 :: Foreign.C.CFloat
+      V3 ax ay az = axisDir
+      -- Create basis vectors perpendicular to axis
+      perp1 = if abs az < 0.9 then normalize (cross axisDir (V3 0 0 1)) else normalize (cross axisDir (V3 0 1 0))
+      perp2 = cross axisDir perp1
+      -- Box vertices
+      v0 = Vertex (V3 0 0 0 + (-r) *^ perp1 + (-r) *^ perp2) (V2 0 0) axisDir t color
+      v1 = Vertex (V3 0 0 0 + (-r) *^ perp1 + r *^ perp2) (V2 0 0) axisDir t color
+      v2 = Vertex (V3 0 0 0 + r *^ perp1 + r *^ perp2) (V2 0 0) axisDir t color
+      v3 = Vertex (V3 0 0 0 + r *^ perp1 + (-r) *^ perp2) (V2 0 0) axisDir t color
+      v4 = Vertex (axisDir + (-r) *^ perp1 + (-r) *^ perp2) (V2 0 0) axisDir t color
+      v5 = Vertex (axisDir + (-r) *^ perp1 + r *^ perp2) (V2 0 0) axisDir t color
+      v6 = Vertex (axisDir + r *^ perp1 + r *^ perp2) (V2 0 0) axisDir t color
+      v7 = Vertex (axisDir + r *^ perp1 + (-r) *^ perp2) (V2 0 0) axisDir t color
+      verts = [v0,v1,v2,v3,v4,v5,v6,v7]
+      idxs = [ 0,2,1,0,3,2
+             , 4,5,6,4,6,7
+             , 0,1,5,0,5,4
+             , 2,3,7,2,7,6
+             , 0,4,7,0,7,3
+             , 1,2,6,1,6,5 ]
+  in Mesh {vertices = verts, indices = idxs}
+
+-- | Create a unit-length axis arrow mesh.
+-- X arrow is red, Y arrow is green, Z arrow is blue.
+axisArrows :: Mesh
+axisArrows =
+  let xArrow = axisArrow (V3 1 0 0) (V3 1 0 0)
+      yArrow = axisArrow (V3 0 1 0) (V3 0 1 0)
+      zArrow = axisArrow (V3 0 0 1) (V3 0 0 1)
+      -- Combine all vertices with offset indices
+      xVerts = vertices xArrow
+      yVerts = vertices yArrow
+      zVerts = vertices zArrow
+      xIdxs = indices xArrow
+      yIdxs = map (+8) (indices yArrow)
+      zIdxs = map (+16) (indices zArrow)
+  in Mesh { vertices = xVerts ++ yVerts ++ zVerts
+          , indices = xIdxs ++ yIdxs ++ zIdxs }

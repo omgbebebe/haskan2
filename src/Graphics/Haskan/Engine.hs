@@ -33,7 +33,7 @@ import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Vector.Storable qualified as Vector
-import Data.Word (Word32, Word64)
+import Data.Word (Word8, Word32, Word64)
 import Data.Int (Int32)
 
 import FIR qualified
@@ -963,10 +963,10 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
   logDebugIO LogTexture "textureCommandBuffer created"
 
-  -- Load IBL cubemaps
-  let envDir = "data/hdri/env/"
-      radianceFacePaths = map (envDir ++) ["env+X.png", "env-X.png", "env+Y.png", "env-Y.png", "env+Z.png", "env-Z.png"]
-      irradianceFacePaths = map (envDir ++) ["irradiance_posx.png", "irradiance_negx.png", "irradiance_posy.png", "irradiance_negy.png", "irradiance_posz.png", "irradiance_negz.png"]
+  -- Load IBL cubemaps (using colored test faces for debugging)
+  let envDir = "data/hdri/env_test/"
+      radianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
+      irradianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
   radianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile radianceFacePaths
   irradianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile irradianceFacePaths
   let (radDatas, radWidths, _) = unzip3 radianceFaceDatas
@@ -1001,13 +1001,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
     Just mode -> do
       -- UV check mode: render primitive with UV checker texture
       world <- ECS.createWorld
-      let testMesh = case mode of
-            "cube" -> Mesh.unitCube
-            "sphere" -> Mesh.uvSphere 32 32 0.5
-            "plane" -> Mesh.uvPlane 0.5
-            _ -> Mesh.unitCube
-      meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices testMesh) (Mesh.indices testMesh)
-      -- Try to load UV checker texture, fallback to generated checkerboard
+      -- Skip the test mesh, only show axis arrows for orientation debugging
       let uvCheckerPath = "data/textures/uv_checker.png"
       uvTexHandle <- liftIO (doesFileExist uvCheckerPath) >>= \exists ->
         if exists
@@ -1017,14 +1011,45 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
           else do
             let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
             Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
-      entity <- ECS.spawnEntity world
-      ECS.setTransform world entity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-      ECS.setMesh world entity meshHandle
-      ECS.setMaterial world entity uvTexHandle
-      ECS.setMetallicFactor world entity 0.0
-      ECS.setRoughnessFactor world entity 0.5
+
+      -- Add axis arrows at origin with colored textures
+      let redTexData = Vector.fromList [255, 0, 0, 255] :: Vector.Vector Word8
+          greenTexData = Vector.fromList [0, 255, 0, 255] :: Vector.Vector Word8
+          blueTexData = Vector.fromList [0, 0, 255, 255] :: Vector.Vector Word8
+      redTexHandle <- Texture.createTextureFromData rm physicalDevice device 1 1 redTexData graphicsQueueHandler textureCommandBuffer
+      greenTexHandle <- Texture.createTextureFromData rm physicalDevice device 1 1 greenTexData graphicsQueueHandler textureCommandBuffer
+      blueTexHandle <- Texture.createTextureFromData rm physicalDevice device 1 1 blueTexData graphicsQueueHandler textureCommandBuffer
+
+      let xArrowMesh = Mesh.axisArrow (V3 1 0 0) (V3 1 0 0)
+          yArrowMesh = Mesh.axisArrow (V3 0 1 0) (V3 0 1 0)
+          zArrowMesh = Mesh.axisArrow (V3 0 0 1) (V3 0 0 1)
+      xArrowHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices xArrowMesh) (Mesh.indices xArrowMesh)
+      yArrowHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices yArrowMesh) (Mesh.indices yArrowMesh)
+      zArrowHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices zArrowMesh) (Mesh.indices zArrowMesh)
+
+      xEntity <- ECS.spawnEntity world
+      ECS.setTransform world xEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setMesh world xEntity xArrowHandle
+      ECS.setMaterial world xEntity redTexHandle
+      ECS.setMetallicFactor world xEntity 0.0
+      ECS.setRoughnessFactor world xEntity 0.0
+
+      yEntity <- ECS.spawnEntity world
+      ECS.setTransform world yEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setMesh world yEntity yArrowHandle
+      ECS.setMaterial world yEntity greenTexHandle
+      ECS.setMetallicFactor world yEntity 0.0
+      ECS.setRoughnessFactor world yEntity 0.0
+
+      zEntity <- ECS.spawnEntity world
+      ECS.setTransform world zEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setMesh world zEntity zArrowHandle
+      ECS.setMaterial world zEntity blueTexHandle
+      ECS.setMetallicFactor world zEntity 0.0
+      ECS.setRoughnessFactor world zEntity 0.0
+
       let sceneBbox = BBox (V3 (-1) (-1) (-1)) (V3 1 1 1)
-      pure (world, 1, sceneBbox, IntMap.empty)
+      pure (world, 3, sceneBbox, IntMap.empty)
 
     Nothing -> if isStressTest
     then do
@@ -1108,6 +1133,16 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       ECS.setMaterial world groundEntity checkerTexHandle
       ECS.setMetallicFactor world groundEntity 0.0
       ECS.setRoughnessFactor world groundEntity 1.0
+
+      -- Add axis arrows at origin
+      let arrowsMesh = Mesh.axisArrows
+      arrowsMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices arrowsMesh) (Mesh.indices arrowsMesh)
+      arrowsEntity <- ECS.spawnEntity world
+      ECS.setTransform world arrowsEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+      ECS.setMesh world arrowsEntity arrowsMeshHandle
+      ECS.setMaterial world arrowsEntity checkerTexHandle
+      ECS.setMetallicFactor world arrowsEntity 0.0
+      ECS.setRoughnessFactor world arrowsEntity 0.0
 
       -- Compute world-space bounds from ECS entities (includes ground plane)
       sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
@@ -1371,11 +1406,19 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 -- Returns (ray0, ray1, ray2) matching the vertex shader's vertex index selection.
 computeSkyboxRays :: M44 Float -> M44 Float -> (V3 Float, V3 Float, V3 Float)
 computeSkyboxRays view proj =
-  let -- Extract columns of view matrix's upper 3x3.
-      -- linear stores M44 in row-major; columns are the view axes in world space.
-      -- For view->world transform, we need transpose(R), which is formed from columns.
+  let -- view = transpose(V) where V is the view matrix from unViewMatrix.
+      -- unViewMatrix returns V with rows [s, u, -f, t] where s=right, u=up, -f=backward.
+      -- So view = V^T has columns [s, u, -f, t].
+      -- We need R^T = R^-1 (view->world), which has rows [s^T, u^T, -f^T].
+      -- These are the ROWS of V, which are the COLUMNS of V^T = view... wait.
+      -- Actually: V rows = [s, u, -f, t]. V columns = [s^T, u^T, -f^T, t^T].
+      -- V^T rows = V columns = [s^T, u^T, -f^T, t^T].
+      -- V^T columns = V rows = [s, u, -f, t].
+      -- We want R^T = [s^T, u^T, -f^T] which are the ROWS of V^T.
+      -- In linear's row-major pattern matching, V4 a b c d gives us the ROWS.
+      -- So worldRot should be formed from the rows of view (V^T).
       V4 (V4 v00 v01 v02 _) (V4 v10 v11 v12 _) (V4 v20 v21 v22 _) _ = view
-      worldRot = V3 (V3 v00 v10 v20) (V3 v01 v11 v21) (V3 v02 v12 v22)
+      worldRot = V3 (V3 v00 v01 v02) (V3 v10 v11 v12) (V3 v20 v21 v22)
 
       -- Extract projection scale factors from row-major proj matrix.
       -- proj = transpose(yFlip !*! perspective) where perspective uses
@@ -1386,9 +1429,8 @@ computeSkyboxRays view proj =
       ndcToDir :: V4 Float -> V3 Float
       ndcToDir (V4 x y _z _w) =
         let -- NDC -> view-space direction on the image plane at z=-1 (forward).
-            -- linear's lookAt uses left-handed view space where +X=left in world space.
-            -- We negate x so screen left maps to view +X (left in world space).
-            viewDir = V3 (-x / fx) (y / fy) (-1)
+            -- linear's lookAt produces right-handed view space where +X = right in world space.
+            viewDir = V3 (x / fx) (y / fy) (-1)
         in normalize (worldRot !* viewDir)
 
       -- Vulkan NDC: Y down, Z forward into screen

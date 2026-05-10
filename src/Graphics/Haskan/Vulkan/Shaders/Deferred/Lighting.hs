@@ -293,6 +293,11 @@ fragment = shader do
       finaly = if hasGeometry then gamy else skyG
       finalz = if hasGeometry then gamz else skyB
 
+      -- Debug mode 12: raw skybox for ALL pixels
+      dbgSkyR = if debugMode == 12 then skyR else finalx
+      dbgSkyG = if debugMode == 12 then skyG else finaly
+      dbgSkyB = if debugMode == 12 then skyB else finalz
+
       -- Debug visualization helpers
       -- Normals: map [-1,1] to [0,1]
       dbgNormX = nx * 0.5 + 0.5
@@ -332,7 +337,7 @@ fragment = shader do
              if debugMode == 9 then dbgIrrX else
              if debugMode == 10 then dbgSpecX else
              if debugMode == 11 then dbgFresX else
-             if debugMode == 12 then skyR else
+             if debugMode == 12 then dbgSkyR else
              finalx
 
       outG = if debugMode == 1 then albG else
@@ -346,7 +351,7 @@ fragment = shader do
              if debugMode == 9 then dbgIrrY else
              if debugMode == 10 then dbgSpecY else
              if debugMode == 11 then dbgFresY else
-             if debugMode == 12 then skyG else
+             if debugMode == 12 then dbgSkyG else
              finaly
 
       outB = if debugMode == 1 then albB else
@@ -360,7 +365,7 @@ fragment = shader do
              if debugMode == 9 then dbgIrrZ else
              if debugMode == 10 then dbgSpecZ else
              if debugMode == 11 then dbgFresZ else
-             if debugMode == 12 then skyB else
+             if debugMode == 12 then dbgSkyB else
              finalz
 
   put @"out_colour" (Vec4 outR outG outB 1)
