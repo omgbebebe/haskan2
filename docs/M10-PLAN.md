@@ -22,18 +22,29 @@ Move from single hardcoded light to production-ready lighting with atmospheric e
 
 ---
 
-## Phase 2: Skybox Background
+## Phase 2: Skybox Background ✅ COMPLETE
 **Goal:** Proper environment background instead of black clear color.
 
-### Tasks
-1. **Skybox render pass** — draw cubemap as background before/after lighting
-   - Option A: Fullscreen triangle with cubemap sampling (cheaper)
-   - Option B: Inverted cube mesh (classic, easier with depth)
-2. **Depth handling** — skybox at infinity (Z=1.0), no depth write
-3. **IBL integration** — ensure skybox matches irradiance/radiance cubemaps
+### Implementation
+- **Approach:** Fullscreen triangle with cubemap sampling in lighting shader (Option A)
+- **Rays:** Per-vertex frustum rays computed on CPU, passed via push constants
+- **Background detection:** `hasGeometry = abs(posX)+abs(posY)+abs(posZ) > 0.001`
+- **Depth handling:** No geometry = sample `env_map` with interpolated ray direction
+- **Debug mode 12:** Raw skybox rendering (no geometry) for verification
+
+### Key Fixes Applied
+1. **worldRot extraction** — matrix rows (not columns) from transposed view matrix
+2. **X-axis sign** — removed incorrect `-x` negation; `lookAt` is right-handed
+3. **Colored test cubemap** — 6 solid colors for face orientation verification
+4. **Axis arrows** — red/green/blue arrows at origin confirm skybox alignment
+
+### Verification
+- Skybox faces match world axes: +X=red, -X=blue, +Y=green, -Y=yellow, +Z=magenta, -Z=cyan
+- No diagonal tilt; perfectly aligned with axis arrows
+- Mathematical audit: `.opencode/SKYBOX_MATH_AUDIT.tex`
 
 ### Deliverable
-Scene renders with visible sky background. `--no-sky` flag to disable.
+Scene renders with visible sky background. `--no-sky` flag to disable. (Not yet implemented — toggle via debug mode 12 for now)
 
 ---
 
@@ -111,7 +122,7 @@ M10.4  Volumetric Clouds          (2 weeks)
 ## Success Criteria
 
 - [ ] 1000 lights benchmarked with <16ms frame time
-- [ ] Sky visible in all scenes
+- [x] Sky visible in all scenes (fullscreen triangle cubemap sampling in lighting shader)
 - [ ] Day/night cycle runs at 1hr/sec smoothly
 - [ ] Clouds render at 60fps (or configurable quality)
 
