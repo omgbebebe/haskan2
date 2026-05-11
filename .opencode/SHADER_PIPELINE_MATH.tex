@@ -15,25 +15,52 @@
 \subsection{World Space}
 \begin{itemize}
 \item Right-handed coordinate system
-\item +X = right, +Y = up, +Z = forward (toward viewer in default view)
+\item +X = right, +Y = geometric up, +Z = forward (toward viewer in default view)
+\item \textbf{Visual orientation}: Camera is rotated 180° around its forward axis, so +Y renders at the \textbf{bottom} of the screen and -Y renders at the \textbf{top}. This makes the world appear "upside down" relative to the geometric coordinate system.
+\item All procedural meshes (cube, sphere, plane) have outward-facing normals and CCW winding when viewed from outside.
+\item glTF models are loaded as-is with standard CCW winding.
 \end{itemize}
 
-\subsection{View Space (linear's lookAt)}
+\subsection{View Space (Custom lookAtNegativeYUp)}
 \begin{itemize}
-\item \textbf{Right-handed} coordinate system (corrected from earlier left-handed assumption)
+\item \textbf{Right-handed} coordinate system (det = +1)
 \item Forward: $-Z$ (points from camera toward scene)
 \item Right: $+X$ = world $+X$ (right)
-\item Up: $+Y$ = world $+Y$ (up)
+\item Up: $+Y$ = world $+Y$ (up) in the view matrix construction, but the camera is oriented so that visually -Y is up
 \item View matrix $\mathbf{V}$ transforms world $\to$ view
 \item linear stores matrices in \textbf{row-major} order
 \end{itemize}
 
-\textbf{Correction}: Earlier versions of this document incorrectly stated that linear's lookAt produces a left-handed view space. Mathematical analysis confirmed it is right-handed:
+\textbf{Custom lookAtNegativeYUp} (Camera.hs):
+\begin{align}
+\mathbf{f} &= \text{normalize}(\mathbf{c} - \mathbf{e}) \quad \text{(forward, points toward scene)} \\
+\mathbf{s} &= \text{normalize}(\mathbf{f} \times \mathbf{u}) \quad \text{(right)} \\
+\mathbf{u'} &= \mathbf{s} \times \mathbf{f} \quad \text{(true up)}
+\end{align}
+
+Where $\mathbf{u} = (0, 1, 0)$ for the orbit math (worldUp), but $\mathbf{u} = (0, -1, 0)$ is passed to lookAtNegativeYUp in orbitalToMatrix to create a 180° rotation around the forward axis.
+
+View matrix (row-major):
+\[
+\mathbf{V} = \begin{pmatrix}
+s_x & s_y & s_z & -\mathbf{s} \cdot \mathbf{e} \\
+u'_x & u'_y & u'_z & -\mathbf{u'} \cdot \mathbf{e} \\
+-f_x & -f_y & -f_z & \mathbf{f} \cdot \mathbf{e} \\
+0 & 0 & 0 & 1
+\end{pmatrix}
+\]
+
+\textbf{Key point}: The third row is $-\mathbf{f}$ because in the view space, $-Z$ is forward (toward the scene). This is a right-handed convention.
+
+\subsection{The 180° Camera Rotation}
+In orbitalToMatrix, we pass $\mathbf{u} = (0, -1, 0)$ to lookAtNegativeYUp instead of $(0, 1, 0)$. This is a 180° rotation around the camera's forward axis ($\mathbf{f}$). Effects:
 \begin{itemize}
-\item $\mathbf{f} = \text{normalize}(\mathbf{c} - \mathbf{e})$ points from eye to center (forward)
-\item $\mathbf{s} = \text{normalize}(\mathbf{f} \times \mathbf{u})$ points to the right
-\item $\mathbf{u'} = \mathbf{s} \times \mathbf{f}$ points up
-\item $\mathbf{s} \times \mathbf{u'} = \mathbf{s} \times (\mathbf{s} \times \mathbf{f}) = \mathbf{f}$ (right-handed: $X \times Y = Z$)
+\item World +Y maps to view -Y → screen \textbf{bottom}
+\item World -Y maps to view +Y → screen \textbf{top} (visually "up")
+\item World +X maps to view -X → screen \textbf{left}
+\item World -X maps to view +X → screen \textbf{right}
+\item Winding is preserved (rotation has det = +1, not a reflection)
+\item Backface culling works correctly with CCW winding
 \end{itemize}
 
 \subsection{Clip Space}
@@ -61,50 +88,20 @@ Model matrix $\mathbf{M}$ is identity for most objects.
 \]
 
 \subsection{Step 2: World to View}
-View matrix $\mathbf{V}$ from linear's lookAt:
+View matrix $\mathbf{V}$ from lookAtNegativeYUp:
 \[
 \mathbf{p}_{view} = \mathbf{V} \cdot \mathbf{p}_{world}
 \]
 
-For linear's lookAt with eye at $\mathbf{e}$, center at $\mathbf{c}$, up at $\mathbf{u}$:
-\begin{align}
-\mathbf{f} &= \text{normalize}(\mathbf{c} - \mathbf{e}) \quad \text{(forward, points toward scene)} \\
-\mathbf{s} &= \text{normalize}(\mathbf{f} \times \mathbf{u}) \quad \text{(right)} \\
-\mathbf{u'} &= \mathbf{s} \times \mathbf{f} \quad \text{(true up)}
-\end{align}
+The custom lookAtNegativeYUp builds a right-handed view matrix (det = +1). When called with $\mathbf{u} = (0, -1, 0)$, it produces a view matrix that is rotated 180° around the forward axis compared to standard lookAt.
 
-View matrix (row-major):
+\subsection{Step 3: View to Clip — Standard Projection}
+Projection matrix $\mathbf{P}$ uses standard perspective projection \textbf{without} Y-flip:
 \[
-\mathbf{V} = \begin{pmatrix}
-s_x & s_y & s_z & -\mathbf{s} \cdot \mathbf{e} \\
-u'_x & u'_y & u'_z & -\mathbf{u'} \cdot \mathbf{e} \\
--f_x & -f_y & -f_z & \mathbf{f} \cdot \mathbf{e} \\
-0 & 0 & 0 & 1
-\end{pmatrix}
+\mathbf{P} = \mathbf{P}_{persp}
 \]
 
-\textbf{Key point}: The third row is $-\mathbf{f}$ because in the view space, $-Z$ is forward (toward the scene). This is a right-handed convention.
-
-\subsection{Step 3: View to Clip — Y-Flip Projection (PROBLEMATIC)}
-Projection matrix $\mathbf{P}$ (after Y-flip for Vulkan):
-\[
-\mathbf{P} = \mathbf{Y}_{flip} \cdot \mathbf{P}_{persp}
-\]
-
-Where:
-\[
-\mathbf{Y}_{flip} = \begin{pmatrix}
-1 & 0 & 0 & 0 \\
-0 & -1 & 0 & 0 \\
-0 & 0 & 1 & 0 \\
-0 & 0 & 0 & 1
-\end{pmatrix}
-\]
-
-\textbf{This approach is problematic} because it reverses triangle winding in clip space, breaking backface culling for standard CCW meshes (glTF, Blender, etc.).
-
-\subsection{Proper Solution: Negative Viewport Height}
-Instead of Y-flip in projection, use negative viewport height (Vulkan 1.1+ core):
+The Y-down behavior is achieved via \textbf{negative viewport height} (Vulkan 1.1+ core):
 
 \begin{verbatim}
 VkViewport viewport = {
@@ -125,8 +122,15 @@ This achieves the same Y-down result without modifying the projection matrix or 
 \item Compatible with all external assets (glTF, OBJ, etc.)
 \end{itemize}
 
-\subsection{Current State}
-Y-flip is still in `makeProjectionMatrix` as a temporary measure. Backface culling is disabled (`VK_CULL_MODE_NONE`) to avoid culling reversed-winding triangles. The negative viewport height fix is planned.
+\subsection{Current State (Verified)}
+\begin{itemize}
+\item Projection matrix: Standard perspective (no Y-flip)
+\item Viewport: Negative height ($\text{height} = -h$, $y = h$)
+\item Culling: $\text{VK\_CULL\_MODE\_BACK\_BIT}$ enabled
+\item Front face: $\text{VK\_FRONT\_FACE\_COUNTER\_CLOCKWISE}$ (standard)
+\item All procedural meshes have outward normals with CCW winding
+\item glTF models load with standard CCW winding and render correctly
+\end{itemize}
 
 \subsection{Step 4: Perspective Divide}
 \[
@@ -139,68 +143,57 @@ x_{screen} = \frac{x_{ndc} + 1}{2} \cdot width, \quad
 y_{screen} = \frac{y_{ndc} + 1}{2} \cdot height
 \]
 
-\section{The Winding Problem — Why CLOCKWISE Was a Mistake}
+\section{Historical Note: The Y-Flip and Winding Problem}
 
-\subsection{The Issue}
-After adding the Y-flip projection ($\mathbf{Y}_{flip} = \text{diag}(1, -1, 1, 1)$), the winding order of triangles \textbf{reverses} in clip space.
-
-\subsection{Mathematical Explanation}
-Consider a triangle with vertices $\mathbf{a}, \mathbf{b}, \mathbf{c}$ in view space. The signed area (winding indicator) is:
+\subsection{The Problem (Resolved)}
+Earlier versions used a Y-flip in the projection matrix:
 \[
-W_{view} = (\mathbf{b} - \mathbf{a}) \times (\mathbf{c} - \mathbf{a})
+\mathbf{P} = \mathbf{Y}_{flip} \cdot \mathbf{P}_{persp}, \quad
+\mathbf{Y}_{flip} = \text{diag}(1, -1, 1, 1)
 \]
 
-After Y-flip, the vertices become:
-\[
-\mathbf{a}' = (a_x, -a_y, a_z), \quad
-\mathbf{b}' = (b_x, -b_y, b_z), \quad
-\mathbf{c}' = (c_x, -c_y, c_z)
-\]
-
-The edge vectors in clip space:
-\begin{align}
-\mathbf{b}' - \mathbf{a}' &= (b_x - a_x, -(b_y - a_y), b_z - a_z) \\
-\mathbf{c}' - \mathbf{a}' &= (c_x - a_x, -(c_y - a_y), c_z - a_z)
-\end{align}
-
-The cross product (only Z component matters for winding in the XY plane):
-\begin{align}
-W_{clip} &= (\mathbf{b}' - \mathbf{a}') \times (\mathbf{c}' - \mathbf{a}') \\
-&= (b_x - a_x)(-(c_y - a_y)) - (-(b_y - a_y))(c_x - a_x) \\
-&= -[(b_x - a_x)(c_y - a_y) - (b_y - a_y)(c_x - a_x)] \\
-&= -W_{view}
-\end{align}
-
-\textbf{Conclusion}: The Y-flip negates the signed area, which means:
+This is a reflection (det = -1) that reversed triangle winding in clip space:
 \begin{itemize}
 \item CCW in view space $\to$ CW in clip space
-\item CW in view space $\to$ CCW in clip space
+\item Broke backface culling for standard CCW meshes
 \end{itemize}
 
-\subsection{The Wrong Fix: CLOCKWISE frontFace}
-We attempted to use $\text{frontFace} = \text{VK\_FRONT\_FACE\_CLOCKWISE}$ as a workaround. This made CCW world-space meshes survive culling because the Y-flip reversed them to CW in clip space.
+\subsection{The Wrong Fix}
+We temporarily used $\text{frontFace} = \text{VK\_FRONT\_FACE\_CLOCKWISE}$ and disabled culling ($\text{VK\_CULL\_MODE\_NONE}$) as workarounds. These were wrong because they broke glTF compatibility and papered over the real problem.
 
-\textbf{Why this was wrong}:
+\subsection{The Correct Fix}
+Removed Y-flip from projection. Use negative viewport height for Vulkan Y-down. Enable standard backface culling with CCW front face. All meshes (procedural and glTF) now render correctly.
+
+\section{Camera Orbital Math}
+
+\subsection{worldUp Definition}
+\begin{verbatim}
+worldUp :: V3 CFloat
+worldUp = V3 0 1 0
+\end{verbatim}
+
+This is the geometric up vector used for:
 \begin{itemize}
-\item All external assets (glTF, Blender, etc.) use CCW winding
-\item Setting frontFace=CW effectively treats them as back-facing
-\item This breaks compatibility with standard asset pipelines
-\item It is a hack that papers over the real problem (Y-flip in projection)
+\item Azimuth (yaw) rotation axis
+\item Right vector computation: $\mathbf{r} = \text{normalize}(\text{worldUp} \times \mathbf{fwd})$
+\item MoveRight direction
 \end{itemize}
 
-\textbf{Status}: Reverted. Current state is `VK_CULL_MODE_NONE` with `VK_FRONT_FACE_COUNTER_CLOCKWISE`.
+\subsection{Azimuth and Elevation}
+\begin{itemize}
+\item Azimuth: Rotation around worldUp (yaw). Positive = counter-clockwise when viewed from above.
+\item Elevation: Rotation around local right axis (pitch). Positive = looking \textbf{up} (toward world +Y).
+\item Default camera: azimuth = 0°, elevation = 30° (looking 30° above horizon)
+\end{itemize}
 
-\subsection{The Correct Fix: Negative Viewport Height}
-Instead of adapting the culling state to the Y-flip, remove the Y-flip and use negative viewport height:
-
-\begin{enumerate}
-\item Remove $\mathbf{Y}_{flip}$ from `makeProjectionMatrix` — use standard projection
-\item Set `VkViewport.height = -(float)height` and `VkViewport.y = (float)height`
-\item Keep `VK_FRONT_FACE_COUNTER_CLOCKWISE` (standard)
-\item Enable `VK_CULL_MODE_BACK_BIT` (proper culling)
-\end{enumerate}
-
-This is the standard Vulkan approach. It preserves winding, maintains glTF compatibility, and enables proper backface culling.
+\subsection{Camera Orientation}
+With the 180° rotation in lookAtNegativeYUp:
+\begin{itemize}
+\item Default camera at elevation = 30° looks \textbf{downward} toward the scene
+\item World +Y (green) appears at screen bottom
+\item World -Y (yellow) appears at screen top
+\item Mouse Y axis is inverted to match this orientation
+\end{itemize}
 
 \section{Skybox Ray Computation}
 
@@ -250,7 +243,7 @@ Then:
 \]
 
 \textbf{Why no $-x$ negation?}
-Because linear's lookAt produces a \textbf{right-handed} view space where $+X$ points to world $+X$ (right). Screen-right ($+x$) should look toward world-right ($+\mathbf{s}$), so we use $+x/f_x$.
+Because lookAtNegativeYUp produces a \textbf{right-handed} view space where $+X$ points to world $+X$ (right). Screen-right ($+x$) should look toward world-right ($+\mathbf{s}$), so we use $+x/f_x$.
 
 \textbf{Why $-1$ for Z?}
 In view space, $-Z$ points toward the scene (forward). We want the ray to point forward, so we use $-1$.
@@ -274,6 +267,30 @@ At screen right $(x, y) = (1, 0)$:
 \]
 
 Since $\mathbf{s}$ points to world-right, screen-right looks toward world-right. This is correct.
+
+\section{Mesh Conventions}
+
+\subsection{Procedural Meshes}
+All procedural meshes use \textbf{outward-facing normals} and \textbf{CCW winding} when viewed from outside:
+
+\begin{tabular}{lll}
+\toprule
+Mesh & Normal Direction & Winding \\
+\midrule
+unitCube & Outward on all 6 faces & CCW from outside \\
+uvSphere & Radially outward & CCW from outside \\
+uvPlane & $(0, -1, 0)$ (facing down) & CCW from below \\
+groundPlane & $(0, -1, 0)$ (facing down) & CCW from below \\
+\bottomrule
+\end{tabular}
+
+\subsection{UV Mapping}
+\begin{itemize}
+\item Vulkan convention: $(0, 0)$ = top-left, $(1, 1)$ = bottom-right
+\item unitCube: UVs flipped horizontally to match visual orientation
+\item uvSphere: V flipped ($V = 1 - \text{latIdx}/\text{latCount}$) so poles map correctly
+\item glTF: UVs pass through unchanged (Vulkan convention matches glTF)
+\end{itemize}
 
 \section{Cubemap Face Convention}
 
@@ -325,6 +342,26 @@ For face -Z (viewed from -Z looking toward origin):
 \item Image $+V$ direction = $-Y$ (down)
 \end{itemize}
 
+\subsection{Cubemap Directory Structure}
+Cubemaps are loaded from \texttt{data/textures/cubemaps/\{name\}/}:
+\begin{verbatim}
+data/textures/cubemaps/
+├── debug/           # Colored test cubemap
+│   ├── posx.png     # Red (+X)
+│   ├── negx.png     # Blue (-X)
+│   ├── posy.png     # Green (+Y)
+│   ├── negy.png     # Yellow (-Y)
+│   ├── posz.png     # Gray (+Z)
+│   └── negz.png     # Brown (-Z)
+└── env1/            # Real environment map
+    ├── posx.png
+    ├── negx.png
+    ├── posy.png
+    ├── negy.png
+    ├── posz.png
+    └── negz.png
+\end{verbatim}
+
 \subsection{cmft Output Convention}
 cmft generates faces in the \textbf{OpenGL} convention by default. The OpenGL convention differs from Vulkan:
 
@@ -335,26 +372,26 @@ cmft generates faces in the \textbf{OpenGL} convention by default. The OpenGL co
 \item For +Y face: OpenGL has $+V$ pointing in a different direction than Vulkan
 \end{itemize}
 
-\section{Identified Issues}
+\textbf{Fixed}: Real environment cubemap faces (env1) were processed to match Vulkan convention by flipping vertically and swapping/mirroring all axis pairs.
+
+\section{Resolved Issues}
 
 \subsection{Issue 1: Cubemap Face Orientation Mismatch}
-If cmft generates faces in OpenGL convention but we use them in Vulkan, the +X and -X faces are horizontally flipped relative to what Vulkan expects. This causes a seam at the edge between +X/+Z and +X/-Z faces.
+\textbf{Status}: Resolved. env1 cubemap faces were flipped and swapped to match Vulkan convention.
 
-\subsection{Issue 2: Possible +Y/-Y Face Flip}
-The +Y and -Y faces may also have incorrect vertical orientation depending on cmft's output settings.
+\subsection{Issue 2: Screenshot Y-Flip}
+\textbf{Status}: Resolved. Screenshot capture now handles the negative viewport correctly.
 
-\subsection{Issue 3: Screenshot Y-Flip}
-Screenshot readback produces upside-down images. This is a separate bug from UV mapping or projection.
+\section{Critical Invariants}
 
-\section{Recommended Fixes}
-
-\subsection{Option A: Flip Faces During Loading}
-When loading cmft-generated cubemap faces into Vulkan, horizontally flip the +X and -X faces. This can be done by flipping the image data pixel-by-pixel.
-
-\subsection{Option B: Use Vulkan-Compatible cmft Output}
-Check if cmft has a ``vulkan'' or ``directx'' output mode that generates faces in the correct orientation.
-
-\subsection{Option C: Adjust Shader Sampling}
-Use texture coordinate adjustments in the shader to compensate for the face orientation mismatch. This is less desirable as it adds complexity.
+\begin{enumerate}
+\item View matrix must have det = +1 (right-handed, no reflection)
+\item All meshes (procedural and imported) use CCW winding with outward normals
+\item Projection matrix is standard (no Y-flip)
+\item Viewport uses negative height for Vulkan Y-down
+\item Backface culling enabled with CCW front face
+\item Camera up vector for orbit: worldUp = V3 0 1 0
+\item Camera up vector for lookAt: V3 0 (-1) 0 (180° rotation around forward)
+\end{enumerate}
 
 \end{document}
