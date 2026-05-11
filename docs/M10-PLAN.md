@@ -116,6 +116,7 @@ M10.4  Volumetric Clouds          (2 weeks)
 2. **Sky model**: Analytic (Preetham) or LUT-based for performance?
 3. **Cloud approach**: Raymarched (quality) or billboards (performance)?
 4. **Shadows for sun**: Blocked until CSM implemented — shadowless day/night acceptable for M10?
+5. **1-unit cells**: Requires `sin`/`floor` in FIR shader for grid-aligned effects
 
 ---
 

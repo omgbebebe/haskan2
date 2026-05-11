@@ -1,0 +1,213 @@
+\documentclass{article}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\geometry{margin=1in}
+\title{Orbital Camera Spec vs Implementation Audit}
+\author{Rune}
+\date{2026-05-11}
+
+\begin{document}
+\maketitle
+
+\section{Scope}
+
+Compare \texttt{.opencode/orbital\_camera.tex} (spec) against
+\texttt{src/Graphics/Haskan/Camera.hs} (implementation).
+
+\section{Bug 1 (Critical): Pitch rotates around world-X instead of local right axis}
+
+\subsection{Spec (Section 6)}
+
+The spec defines independent angular updates:
+\[
+\theta_{i+1} = \theta_i + \Delta x \cdot s, \quad
+\phi_{i+1} = \text{clip}(\phi_i + \Delta y \cdot s,\; \epsilon,\; \pi - \epsilon)
+\]
+
+In spherical coordinates, changing $\theta$ orbits horizontally around $Y$,
+and changing $\phi$ moves along the meridian (the great circle through the poles).
+The rotation axis for $\phi$ is always the local right vector
+$\vec{s} = \text{normalize}(\vec{f} \times \vec{up}_{world})$,
+which changes with $\theta$.
+
+\subsection{Implementation}
+
+\begin{verbatim}
+yawQ   = axisAngle (V3 0 1 0) yaw      -- world-Y
+pitchQ = axisAngle (V3 1 0 0) pitch     -- world-X  <-- WRONG
+deltaQ = pitchQ * yawQ
+\end{verbatim}
+
+Pitch always rotates around world-$X$, regardless of camera heading.
+
+\subsection{Consequence}
+
+At identity orientation (camera looking along $-Z$), world-$X$ happens to be
+the local right axis. Pitch works correctly.
+
+After 90° yaw (camera looking along $-X$), world-$X$ is now the camera's
+\textbf{forward} direction. Pitch around world-$X$ produces \textbf{roll}
+instead of vertical tilt.
+
+At arbitrary yaw angles, pitch produces a mix of tilt and roll — the apparent
+``diagonal inclination'' when the camera is rotated.
+
+\subsection{Fix}
+
+Compute the local right axis from the camera's current heading and yaw
+component, then pitch around that:
+
+\begin{verbatim}
+(Rotate (V3 yaw pitch _roll)) ->
+  let yawQ = axisAngle (V3 0 1 0) yaw
+      -- Apply yaw to current orientation to get heading
+      headingQ = yawQ * orientation
+      forward = normalize (rotate headingQ (V3 0 0 (-1)))
+      -- Local right = forward × world-up, in XZ plane
+      right = normalize (forward `cross` V3 0 1 0)
+      pitchQ = axisAngle right pitch
+      newOrientation = pitchQ * headingQ
+  in cam { orientation = newOrientation }
+\end{verbatim}
+
+\section{Bug 2: Elevation bounds never enforced}
+
+\subsection{Spec (Section 2)}
+
+\[
+\phi \in [\epsilon,\; \pi - \epsilon]
+\]
+
+\subsection{Implementation}
+
+The \texttt{elevationBounds} field exists but is \textbf{never checked} in
+\texttt{orbitalModify}. The \texttt{Rotate} handler applies unrestricted pitch:
+
+\begin{verbatim}
+newOrientation = deltaQ * orientation
+in cam {orientation = newOrientation}
+\end{verbatim}
+
+\subsection{Consequence}
+
+The camera can pass through the poles ($\phi = 0$ or $\phi = \pi$), where the
+forward vector becomes parallel to world-up. At that point, linear's
+\texttt{lookAt} produces a degenerate view matrix (the cross product
+$\vec{f} \times \vec{up}$ collapses to zero), causing the view to snap or
+flip.
+
+\subsection{Fix}
+
+After computing \texttt{newOrientation}, extract the elevation angle and clamp:
+
+\begin{verbatim}
+let newEl = quatToElevation newOrientation
+    (V2 elMin elMax) = fromMaybe (V2 0.01 (pi - 0.01)) elevationBounds
+    clampedEl = clamp newEl elMin elMax
+    -- Reconstruct orientation with clamped elevation
+    az = quatToAzimuth newOrientation
+    azQ = axisAngle (V3 0 1 0) az
+    elQ = axisAngle (V3 1 0 0) clampedEl
+    finalOrientation = elQ * azQ
+in cam { orientation = finalOrientation }
+\end{verbatim}
+
+Note: this re-decomposes into Euler angles for clamping, which re-introduces
+potential gimbal lock at the boundaries. The clamp bounds should be generous
+($\epsilon \approx 0.01$ rad) to keep the quaternion approach valid in the
+operating range.
+
+\section{Bug 3: Spec's projection matrix is internally inconsistent}
+
+\subsection{The problem}
+
+The spec defines two matrices:
+
+\textbf{View matrix (Section 4):} third row is $-\vec{f}$, producing
+right-handed view space where visible objects have $z_\text{view} < 0$.
+
+\textbf{Projection (Section 5):} has $[3][2] = 1$, meaning
+$w_\text{clip} = z_\text{view}$.
+
+For visible objects: $z_\text{view} < 0 \Rightarrow w_\text{clip} < 0$.
+Vulkan clips vertices with $w < 0$. \textbf{All geometry is clipped.}
+
+\subsection{Implementation}
+
+The implementation correctly uses linear's \texttt{perspective} which has
+$[3][2] = -1$, giving $w_\text{clip} = -z_\text{view} > 0$ for visible
+objects. The Y-flip is applied separately. This is correct.
+
+\subsection{Fix (spec only)}
+
+Change the spec's projection to:
+\[
+P = \begin{bmatrix}
+\frac{1}{a \cdot \tan(\frac{fov}{2})} & 0 & 0 & 0 \\
+0 & -\frac{1}{\tan(\frac{fov}{2})} & 0 & 0 \\
+0 & 0 & \frac{-(n+f)}{f-n} & \frac{2nf}{f-n} \\
+0 & 0 & -1 & 0
+\end{bmatrix}
+\]
+
+Or use the [0,1] depth formulation but with $[3][2] = -1$.
+
+\section{Non-Issue: Position parameterization}
+
+The spec uses spherical coordinates:
+\begin{align*}
+P_x &= r \sin\phi \cos\theta + T_x \\
+P_y &= r \cos\phi + T_y \\
+P_z &= r \sin\phi \sin\theta + T_z
+\end{align*}
+
+The implementation uses quaternion rotation of $(0, 0, r)$:
+\begin{verbatim}
+target + rotate orientation (V3 0 0 distance)
+\end{verbatim}
+
+These produce the same set of positions (the sphere of radius $r$ around $T$)
+with different parameterizations. The implementation's identity orientation
+$(0, 0, r)$ corresponds to the spec's $\theta = \pi/2, \phi = \pi/2$.
+Both are valid; the quaternion approach avoids gimbal lock.
+
+\section{Non-Issue: Forward direction}
+
+\begin{verbatim}
+orbitalCameraForward = normalize $ rotate orientation (V3 0 0 (-1))
+\end{verbatim}
+
+This equals $\text{normalize}(T - P)$ since:
+\[
+T - P = -\text{rotate}(q)(0, 0, r) = \text{rotate}(q)(0, 0, -r)
+\]
+\[
+\text{normalize}(T - P) = \text{rotate}(q)(0, 0, -1) \quad \checkmark
+\]
+
+\section{Non-Issue: View matrix}
+
+Uses linear's \texttt{lookAt} which produces the exact matrix from spec
+Section 4. $\checkmark$
+
+\section{Summary}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llp{5.5cm}}
+\toprule
+\textbf{\#} & \textbf{Severity} & \textbf{Issue} \\
+\midrule
+1 & Critical & Pitch around world-X instead of local right axis \\
+2 & Medium & Elevation bounds (\texttt{elevationBounds}) never enforced \\
+3 & Spec-only & Projection $[3][2]=1$ incompatible with right-handed view \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Bug 1 is the most likely cause of the ``diagonal inclination'' observed when
+the camera is rotated away from the default heading.
+
+\end{document}

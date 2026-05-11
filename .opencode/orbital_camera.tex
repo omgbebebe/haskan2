@@ -1,0 +1,37 @@
+% 1. Spherical to Cartesian Transformation
+\begin{cases} 
+P_x = r \sin \phi \cos \theta + T_x \\
+P_y = r \cos \phi + T_y \\
+P_z = r \sin \phi \sin \theta + T_z 
+\end{cases}
+\text{where } P = \text{camera position}, T = \text{target point}, r = \text{radius}, \phi = \text{polar angle}, \theta = \text{azimuth angle}
+
+% 2. Polar Angle Constraint
+\text{Note: To prevent gimbal lock or "sticking" at the poles, constrain } \phi \in [\epsilon, \pi - \epsilon]
+
+% 3. View Matrix Basis Vectors
+\vec{f} = \frac{T - P}{\|T - P\|}, \quad \vec{s} = \frac{\vec{f} \times \vec{up}_{world}}{\|\vec{f} \times \vec{up}_{world}\|}, \quad \vec{u} = \vec{s} \times \vec{f}
+
+% 4. View Matrix Construction
+V = \begin{bmatrix} 
+s_x & s_y & s_z & -\vec{s} \cdot P \\
+u_x & u_y & u_z & -\vec{u} \cdot P \\
+-f_x & -f_y & -f_z & \vec{f} \cdot P \\
+0 & 0 & 0 & 1 
+\end{bmatrix}
+
+% 5. Vulkan-Specific Perspective Projection Matrix
+P_{vulkan} = \begin{bmatrix} 
+\frac{1}{a \cdot \tan(\frac{fov}{2})} & 0 & 0 & 0 \\
+0 & -\frac{1}{\tan(\frac{fov}{2})} & 0 & 0 \\
+0 & 0 & \frac{f}{f - n} & \frac{-fn}{f - n} \\
+0 & 0 & 1 & 0 
+\end{bmatrix}
+\text{where } a = \text{aspect ratio}, fov = \text{field of view}, n = \text{near plane}, f = \text{far plane}
+
+% 6. Angular Delta Updates
+\theta_{i+1} = \theta_i + \Delta x \cdot s, \quad \phi_{i+1} = \text{clip}(\phi_i + \Delta y \cdot s, \epsilon, \pi - \epsilon)
+\text{where } s = \text{sensitivity}, \Delta x, \Delta y = \text{mouse delta}
+
+% 7. Final Vertex Transformation
+V_{clip} = P_{vulkan} \cdot V \cdot M \cdot V_{local}

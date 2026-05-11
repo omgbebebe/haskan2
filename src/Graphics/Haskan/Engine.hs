@@ -1611,6 +1611,8 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
             when (bwd) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveForward (-camMove)]
             when (sl) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight (-camMove)]
             when (sr) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight camMove]
+            -- Animate camera orientation each frame
+            STM.atomically $ STM.modifyTVar' (activeCamera worldState) (\cam -> Camera.animate cam dtSeconds)
             let targetDelayMicros = 1000000 `div` fromIntegral tFPS
             threadDelay (fromIntegral targetDelayMicros)
             when isRunning $ loop tFPS _gameState newTime
