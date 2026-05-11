@@ -1,3 +1,91 @@
+# Haskan2 — Critical Project Context (Survives Compaction)
+
+## Build & Run
+- **Build**: `nix develop --command cabal build all`
+- **Run**: `nix develop --command cabal run exe:haskan2 -- -t 5 MODEL`
+- **Debug socket**: `nix develop --command cabal run exe:haskan2 -- -t 60 --debug-socket /tmp/haskan2.sock MODEL`
+- **Debug client**: `python3 scripts/debug_client.py key f10 true`
+- **UV check**: `--uv-check-cube`, `--uv-check-sphere`, `--uv-check-plane`
+
+## Architecture
+- **GHC 9.14.1** via `haskell.compiler.ghc9141` from nixpkgs-unstable
+- **Cabal-only** for Haskell deps; system libs (Vulkan, SDL2) from nixpkgs
+- **FIR fork**: `git@github.com:omgbebebe/haskan2-fir.git` (origin), upstream `gitlab.com/sheaf/fir.git`
+- **Effects**: `effectful` over mtl; no IORef globals
+- **Logging**: production-ready with multiple backends, per-backend levels/formatters
+- **CLI**: `optparse-applicative` — `haskan2 MODEL [-t SECONDS] [-T TITLE] [--debug-socket PATH] [--log-file PATH] [--uv-check-*]`
+- **Window manager**: xmonad does NOT intercept F-keys (confirmed from `~/.xmonad/xmonad.hs`)
+
+## Current Status
+- **M9 COMPLETE**: PBR deferred rendering, normal mapping, AO, emissive, IBL split-sum with BRDF LUT
+- **M10 IN PROGRESS**: Phase 1 (multi-light), Phase 2 (skybox) complete, Phase 3 (day/night), Phase 4 (volumetric clouds)
+- **Milestone plan**: `docs/M10-PLAN.md`
+
+## Key Design Decisions
+1. **glTF UV convention**: Matches Vulkan (0,0 = top-left), NOT OpenGL. `flipV` was removed.
+2. **Skybox**: Rendered inside lighting shader (not separate pass) using per-vertex frustum rays + `env_map` sampling
+3. **Screen-space overlays**: Axis arrows + ground plane drawn in lighting shader fragment stage, not geometry mesh
+4. **linear's lookAt**: Creates **right-handed** view space: +X = world +X (right), +Y = world +Y (up), +Z = backward
+5. **Y-flip projection**: `makeProjectionMatrix` post-multiplies by `scale(1, -1, 1)`; reverted to `COUNTER_CLOCKWISE`
+6. **Depth precision**: `D16_UNORM` → `D32_SFLOAT`
+7. **Normal matrix**: Added to `EntityData` SSBO; computed per entity via `transpose . inv33`
+8. **Mesh merging**: All scene meshes concatenated into single buffers with per-entity `firstIndex`/`vertexOffset`
+9. **FIR `if-then-else` ambiguity**: Convert `gl_VertexIndex` to `Code Float` via `fromIntegral` first
+10. **BlockArguments**: Required for `liftIO $ do` nested blocks
+11. **Push constant**: 80 bytes — camera pos (12) + debugMode (4) + axisOverlay (4) + groundPlane (4) + pad0 (4) + ray0 (16) + ray1 (16) + ray2 (16)
+12. **Vertex stride**: 60 bytes (pos 12 + uv 8 + norm 12 + tangent 16 + col 12)
+13. **G-buffer shader**: Normal encoding `* 0.5 + 0.5`; lighting shader decodes via `* 2 - 1`
+14. **TBN**: `bitangent = cross(normal, tangent) * handedness`; normal map sampled via bindless array
+15. **PBR packed into g-buffer alpha**: position.a=metallic, normal.a=roughness, albedo.a=ao
+16. **Background detection**: `hasGeometry = abs posX + abs posY + abs posZ > 0.001`
+17. **Present mode**: `IMMEDIATE_KHR`
+18. **Shader texture format**: `Rgba8 UNorm`; view `VK_FORMAT_R8G8B8A8_UNORM`
+19. **JuicyPixels**: Loads row 0 at top; Vulkan stores row 0 at top. No V-flip needed in texture upload.
+20. **Vertex format**: `v3_s32float >*< v2_s32float >*< v3_s32float >*< v4_s32float >*< v3_s32float` matches g-buffer shader inputs at locations 0-4 exactly
+
+## Camera Defaults
+- **Distance**: 20.0 (default), min 0.1, max 20.0
+- **Animation**: Slerp interpolation, 0.1s duration by default
+- **Elevation bounds**: `(-pi/2 + 0.01, pi/2 - 0.01)` if unspecified
+- **setAngles**: Uses `orientationFromAzEl` which constructs quaternion from azimuth + elevation with local-right pitch axis
+- **Rotation handler**: Computes local right axis from current forward; clamps elevation after applying delta
+- **Per-frame animation**: `Camera.animate` called from `stateUpdateLoop` with `dtSeconds`
+
+## Open Issues
+1. **UV texturing of procedural cube/sphere**: `unitCube` and `uvSphere` UV orientation still incorrect. Vision model confirms upside-down text on all faces. Deferred to future session.
+2. **FIR shader missing `sin`/`floor`**: Needed for 1-unit grid cells effect. Marked in M10-PLAN.md technical decisions.
+3. **IBL dynamic sky**: Deferred to future milestone; currently using precomputed offline cubemaps (Variant A)
+4. **Shadows for sun**: Blocked until CSM implemented; shadowless day/night acceptable for M10
+
+## Critical Files
+- `src/Graphics/Haskan/Engine.hs` — main loop, ECS, deferred graph, `computeSkyboxRays`, UV check mode, axis/ground plane state, debug mode handling
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Lighting.hs` — lighting shader with skybox sampling, axis overlay, ground plane, debug modes 1-12
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/GBuffer.hs` — g-buffer vertex/fragment shaders; normal mapping with TBN
+- `src/Graphics/Haskan/Camera.hs` — `OrbitalCamera`, `InterpolationMethod`, `animateOrbital`, quaternion math
+- `src/Graphics/Haskan/Mesh.hs` — `unitCube`, `uvSphere`, `uvPlane`, `groundPlaneMesh`
+- `src/Graphics/Haskan/Vertex.hs` — `Vertex` type with Storable instance
+- `src/Graphics/Haskan/Render/Deferred.hs` — deferred graph builder; push constant upload 80 bytes
+- `src/Graphics/Haskan/Vulkan/DeferredResources.hs` — lighting push constant range 80 bytes, pipeline layouts
+- `src/Graphics/Haskan/Input.hs` — key bindings including `G` and `Shift+G` for overlays
+- `src/Graphics/Haskan/Debug/Interface.hs` — debug socket key mappings
+- `src/Graphics/Haskan/Debug/Screenshot.hs` — screenshot capture with zero-size guards
+- `src/Graphics/Haskan/Vulkan/Buffer.hs` — `vkMapMemory` guards for empty data
+- `src/Graphics/Haskan/Vulkan/Texture.hs` — `readImageFromFile` using JuicyPixels (top-down row order)
+- `docs/M10-PLAN.md` — milestone plan
+
+## Test Assets
+- `data/hdri/env_test/` — colored test cubemap: +X=red, -X=blue, +Y=green, -Y=yellow, +Z=gray, -Z=brown
+- `data/debug/models/uvCube.gltf` — Blender test cube (texture atlas UVs)
+- `data/textures/uv_checker.png` — UV checker texture (arrows point up)
+- Debug screenshots: `data/debug/screenshots/`
+
+## Environment
+- **OS**: NixOS, platform linux
+- **GPU**: NVIDIA GeForce RTX 4090
+- **Vulkan**: 1.4.312
+- **Descriptor indexing**: nonUniform=True, updateAfterBind=True, partiallyBound=True, runtimeArray=True
+
+## Previous Context Below
 - `src/Graphics/Haskan/Vulkan/DeferredResources.hs` — attachment count 3→4
 - `src/Graphics/Haskan/Vulkan/Device.hs` — `fragmentStoresAndAtomics` feature
 - `src/Graphics/Haskan/Scene/ECS.hs` — PBR component stores
