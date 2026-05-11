@@ -1,0 +1,171 @@
+\documentclass{article}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{geometry}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\geometry{margin=1in}
+\title{UV Check Mesh Audit}
+\author{Rune}
+\date{2026-05-11}
+
+\begin{document}
+\maketitle
+
+\section{Cube: 5 of 6 Faces Have Reversed Winding}
+
+Face normals computed from index winding (edge1 $\times$ edge2):
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lccc}
+\toprule
+\textbf{Face} & \textbf{Winding normal} & \textbf{Outward} & \textbf{Correct?} \\
+\midrule
+Front (+Z) & $-Z$ & $+Z$ & \color{red}\textbf{WRONG} \\
+Back  (-Z) & $+Z$ & $-Z$ & \color{red}\textbf{WRONG} \\
+Right (+X) & $-X$ & $+X$ & \color{red}\textbf{WRONG} \\
+Left  (-X) & $-X$ & $-X$ & \color{green}{OK} \\
+Top   (+Y) & $-Y$ & $+Y$ & \color{red}\textbf{WRONG} \\
+Bottom(-Y) & $+Y$ & $-Y$ & \color{red}\textbf{WRONG} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Only the Left face (indices in sequential order \texttt{12,13,14, 12,14,15}) has correct
+CCW-from-outside winding. All other faces swap the 2nd and 3rd vertices in each triangle,
+reversing the winding.
+
+With \texttt{VK\_CULL\_MODE\_NONE} this doesn't prevent rendering, but it means the
+rasterizer treats these triangles as \emph{back-facing}. Since the glTF loader and Blender
+produce CCW-wound meshes, the procedural cube is inconsistent.
+
+\textbf{Fix}: swap indices 2 and 3 in each triangle to match CCW convention:
+
+\begin{verbatim}
+  idxs =
+    [ -- Front:  was 0,2,1  0,3,2
+      0, 1, 2, 0, 2, 3,
+      -- Back:   was 4,6,5  4,7,6
+      4, 5, 6, 4, 6, 7,
+      -- Right:  was 8,10,9  8,11,10
+      8, 9, 10, 8, 10, 11,
+      -- Left:   already correct
+      12, 13, 14, 12, 14, 15,
+      -- Top:    was 16,17,18  16,18,19
+      16, 19, 18, 16, 18, 17,
+      -- Bottom: was 20,22,21  20,23,22
+      20, 21, 22, 20, 22, 23
+    ]
+\end{verbatim}
+
+\section{Cube: ``Upside-down on all faces'' --- Texture File Convention}
+
+The UVs in the code are mathematically correct for Vulkan convention
+($v{=}0$ at physical top of each face, $v{=}1$ at bottom). I verified each face
+by tracing camera $\to$ view $\to$ clip $\to$ NDC $\to$ texture coordinates.
+
+The 180° rotation on ALL faces (confirmed by vision model) most likely means
+\texttt{data/textures/uv\_checker.png} has its content oriented for OpenGL convention
+($v{=}0$ at bottom). When sampled with Vulkan convention ($v{=}0$ at top),
+every face shows the texture 180° rotated.
+
+\textbf{Evidence}: the glTF test cube works correctly, but it uses
+\emph{different textures} (embedded in the glTF file), not \texttt{uv\_checker.png}.
+So the ``glTF works, procedural doesn't'' comparison is texture-vs-texture,
+not UV-vs-UV.
+
+\textbf{Fix}: verify \texttt{uv\_checker.png} orientation in an image viewer.
+If text reads correctly top-to-bottom, the texture is fine and the issue is elsewhere.
+If text is stored bottom-to-top (OpenGL convention), regenerate the texture or
+flip V during loading.
+
+\section{Sphere: U Coordinate Inverted}
+
+\begin{verbatim}
+u = realToFrac (1.0 - fromIntegral lonIdx / fromIntegral lonCount)
+\end{verbatim}
+
+At $\phi = 0$ (direction $+X$ at equator): $u = 1.0$ (right edge of texture).
+At $\phi = \pi$ (direction $-X$): $u = 0.5$ (center).
+
+Standard convention maps $\phi = 0 \to u = 0$. The current code mirrors the
+texture horizontally.
+
+\textbf{Fix}:
+\begin{verbatim}
+u = realToFrac (fromIntegral lonIdx / fromIntegral lonCount)
+\end{verbatim}
+
+\section{Sphere: Tangent Needs Updating}
+
+The tangent is correct for the current (inverted) U mapping:
+\begin{verbatim}
+tx = realToFrac (sin phi)
+tz = realToFrac (-cos phi)
+\end{verbatim}
+
+This points in the direction of \emph{decreasing} $\phi$ (= increasing U with the
+inverted mapping). After fixing U, the tangent must point in the direction of
+\emph{increasing} $\phi$:
+
+\textbf{Fix}:
+\begin{verbatim}
+tx = realToFrac (-sin phi)
+tz = realToFrac (cos phi)
+\end{verbatim}
+
+Or equivalently, negate the tangent: \texttt{V4 (-tx) (-ty) (-tz) tw}.
+
+\section{Sphere: Reversed Winding (Same as Cube)}
+
+Triangle order \texttt{base, nextBase, nextBase+1} produces inward-pointing
+face normals (verified numerically at equator). The fix is to reverse the
+triangle order to \texttt{base, base+1, nextBase, base, nextBase, nextBase+1}:
+
+\begin{verbatim}
+    in [ fromIntegral base
+       , fromIntegral (base + 1)
+       , fromIntegral nextBase
+       , fromIntegral base
+       , fromIntegral nextBase
+       , fromIntegral (nextBase + 1)
+       ]
+\end{verbatim}
+
+\section{Sphere: ``Half Reflective, Half Non-Reflective''}
+
+This is most likely caused by the \textbf{environment cubemap orientation} combined
+with the \textbf{reversed winding}, not the sphere geometry itself.
+
+With inward-pointing face normals, the rasterizer marks these fragments as
+back-facing. While \texttt{CULL\_MODE\_NONE} still renders them, some GPU
+pipelines may handle back-facing fragments differently in subtle ways (e.g.,
+helper invocations, derivative computations for cubemap LOD selection).
+
+Additionally, the cubemap faces loaded from \texttt{data/hdri/env\_test/} may be
+in OpenGL convention (see \texttt{SHADER\_PIPELINE\_MATH.tex} Issue 1). If some
+faces are horizontally flipped, reflection sampling returns wrong texels for
+half the sphere directions, producing the visible hard seam.
+
+\textbf{Recommended debugging}: enable debug mode 12 (raw skybox, all pixels)
+and verify the cubemap renders correctly before investigating sphere reflections.
+
+\section{Summary of Fixes}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llp{5cm}}
+\toprule
+\textbf{\#} & \textbf{Priority} & \textbf{Fix} \\
+\midrule
+1 & High & Cube: fix 5 reversed-winding faces in \texttt{idxs} \\
+2 & High & Sphere: fix U to \texttt{lonIdx/lonCount} (remove inversion) \\
+3 & High & Sphere: fix tangent direction for corrected U \\
+4 & High & Sphere: reverse triangle winding \\
+5 & Medium & Verify \texttt{uv\_checker.png} orientation in image viewer \\
+6 & Low & Cubemap face orientation (OpenGL vs Vulkan, per existing doc) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}
