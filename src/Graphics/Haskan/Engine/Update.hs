@@ -179,7 +179,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
             when dnEnabled $ do
               currentTime <- STM.readTVarIO (gameTimeOfDay gameState)
               speed <- STM.readTVarIO (gameTimeSpeed gameState)
-              let newTime = fmod (currentTime + realToFrac dtSeconds * speed) 24.0
+              let newTime = fmod (currentTime + realToFrac dtSeconds * speed / 3600.0) 24.0
               STM.atomically $ STM.writeTVar (gameTimeOfDay gameState) newTime
               let sunState = computeSunState defaultDayNightConfig newTime
               when (floor newTime /= floor currentTime) $ do
