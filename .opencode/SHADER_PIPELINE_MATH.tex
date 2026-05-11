@@ -85,7 +85,7 @@ u'_x & u'_y & u'_z & -\mathbf{u'} \cdot \mathbf{e} \\
 
 \textbf{Key point}: The third row is $-\mathbf{f}$ because in the view space, $-Z$ is forward (toward the scene). This is a right-handed convention.
 
-\subsection{Step 3: View to Clip — Y-Flip Projection}
+\subsection{Step 3: View to Clip — Y-Flip Projection (PROBLEMATIC)}
 Projection matrix $\mathbf{P}$ (after Y-flip for Vulkan):
 \[
 \mathbf{P} = \mathbf{Y}_{flip} \cdot \mathbf{P}_{persp}
@@ -101,13 +101,32 @@ Where:
 \end{pmatrix}
 \]
 
-This flips Y in clip space so that:
+\textbf{This approach is problematic} because it reverses triangle winding in clip space, breaking backface culling for standard CCW meshes (glTF, Blender, etc.).
+
+\subsection{Proper Solution: Negative Viewport Height}
+Instead of Y-flip in projection, use negative viewport height (Vulkan 1.1+ core):
+
+\begin{verbatim}
+VkViewport viewport = {
+    .x = 0,
+    .y = height,           // Start from bottom
+    .width = width,
+    .height = -height,     // Negative height flips Y
+    .minDepth = 0.0,
+    .maxDepth = 1.0
+};
+\end{verbatim}
+
+This achieves the same Y-down result without modifying the projection matrix or reversing winding. Benefits:
 \begin{itemize}
-\item View $+Y$ (up) $\to$ Clip $-Y$ $\to$ Screen top (because $y_{ndc} = -1$ maps to screen $y = 0$)
-\item View $-Y$ (down) $\to$ Clip $+Y$ $\to$ Screen bottom
+\item Standard projection matrix (no Y-flip)
+\item CCW meshes remain CCW in clip space
+\item Backface culling works with $\text{frontFace} = \text{CCW}$
+\item Compatible with all external assets (glTF, OBJ, etc.)
 \end{itemize}
 
-Without Y-flip, the image would be upside down.
+\subsection{Current State}
+Y-flip is still in `makeProjectionMatrix` as a temporary measure. Backface culling is disabled (`VK_CULL_MODE_NONE`) to avoid culling reversed-winding triangles. The negative viewport height fix is planned.
 
 \subsection{Step 4: Perspective Divide}
 \[
@@ -120,7 +139,7 @@ x_{screen} = \frac{x_{ndc} + 1}{2} \cdot width, \quad
 y_{screen} = \frac{y_{ndc} + 1}{2} \cdot height
 \]
 
-\section{The Winding Problem — Why We Switched from CCW to CW}
+\section{The Winding Problem — Why CLOCKWISE Was a Mistake}
 
 \subsection{The Issue}
 After adding the Y-flip projection ($\mathbf{Y}_{flip} = \text{diag}(1, -1, 1, 1)$), the winding order of triangles \textbf{reverses} in clip space.
@@ -158,36 +177,30 @@ W_{clip} &= (\mathbf{b}' - \mathbf{a}') \times (\mathbf{c}' - \mathbf{a}') \\
 \item CW in view space $\to$ CCW in clip space
 \end{itemize}
 
-\subsection{Backface Culling Decision}
-With backface culling enabled (`VK_CULL_MODE_BACK_BIT`), Vulkan culls triangles based on their winding in clip space:
+\subsection{The Wrong Fix: CLOCKWISE frontFace}
+We attempted to use $\text{frontFace} = \text{VK\_FRONT\_FACE\_CLOCKWISE}$ as a workaround. This made CCW world-space meshes survive culling because the Y-flip reversed them to CW in clip space.
 
-\begin{table}[h]
-\centering
-\begin{tabular}{llll}
-\toprule
-\textbf{frontFace} & \textbf{Culls} & \textbf{Survives} & \textbf{World-space winding} \\
-\midrule
-CCW & CW clip-space & CCW clip-space & CW world-space \\
-CW & CCW clip-space & CW clip-space & CCW world-space \\
-\bottomrule
-\end{tabular}
-\end{table}
+\textbf{Why this was wrong}:
+\begin{itemize}
+\item All external assets (glTF, Blender, etc.) use CCW winding
+\item Setting frontFace=CW effectively treats them as back-facing
+\item This breaks compatibility with standard asset pipelines
+\item It is a hack that papers over the real problem (Y-flip in projection)
+\end{itemize}
 
-Since our meshes are constructed with CCW winding in world space (standard convention), and the Y-flip makes them CW in clip space, we need:
+\textbf{Status}: Reverted. Current state is `VK_CULL_MODE_NONE` with `VK_FRONT_FACE_COUNTER_CLOCKWISE`.
 
-\[
-\boxed{\text{frontFace} = \text{VK\_FRONT\_FACE\_CLOCKWISE}}
-\]
+\subsection{The Correct Fix: Negative Viewport Height}
+Instead of adapting the culling state to the Y-flip, remove the Y-flip and use negative viewport height:
 
-This ensures that CCW world-space triangles (our mesh convention) survive backface culling after the Y-flip projection.
-
-\subsection{Practical Impact}
-Before understanding this, we had `VK_CULL_MODE_NONE` (no culling). When we tried to enable culling with `CCW`, approximately half the faces disappeared because the Y-flip was reversing their winding. The fix was either:
 \begin{enumerate}
-\item Use `VK_FRONT_FACE_CLOCKWISE` (chosen)
-\item Reconstruct all meshes with CW winding (rejected — breaks glTF compatibility)
-\item Remove Y-flip and handle upside-down rendering differently (rejected — more complex)
+\item Remove $\mathbf{Y}_{flip}$ from `makeProjectionMatrix` — use standard projection
+\item Set `VkViewport.height = -(float)height` and `VkViewport.y = (float)height`
+\item Keep `VK_FRONT_FACE_COUNTER_CLOCKWISE` (standard)
+\item Enable `VK_CULL_MODE_BACK_BIT` (proper culling)
 \end{enumerate}
+
+This is the standard Vulkan approach. It preserves winding, maintains glTF compatibility, and enables proper backface culling.
 
 \section{Skybox Ray Computation}
 
