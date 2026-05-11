@@ -32,8 +32,10 @@ vertex = shader do
   --   1: ( 3, -1) -> UV (2, 1)
   --   2: (-1,  3) -> UV (0,-1)
   -- This covers the entire screen with a single large triangle.
-  -- V is flipped so screen Y aligns with Vulkan texture V
-  -- (screen top -> UV v=0 -> texture top).
+  -- Works with negative viewport height (Vulkan 1.1+):
+  --   clip y=-1 -> screen bottom -> UV v=1 (g-buffer bottom)
+  --   clip y=1  -> screen top    -> UV v=0 (g-buffer top)
+  -- Interpolation across the triangle gives correct UVs for all pixels.
   vertIdx <- get @"gl_VertexIndex"
   let fi = fromIntegral vertIdx :: Code Float
       x = if fi == 0 then (-1) else if fi == 1 then 3 else (-1)

@@ -1411,26 +1411,29 @@ computeSkyboxRays view proj =
       ndcToDir :: V4 Float -> V3 Float
       ndcToDir (V4 x y _z _w) =
         let -- NDC -> view-space direction on the image plane at z=-1 (forward).
-            -- With negative viewport height, NDC y=-1 is screen top = view +Y.
-            viewDir = V3 (x / fx) (-y / fy) (-1)
+            -- Standard projection: NDC y=1 is top, y=-1 is bottom.
+            -- View +Y (up) -> NDC +Y (top). View -Y (down) -> NDC -Y (bottom).
+            viewDir = V3 (x / fx) (y / fy) (-1)
         in normalize (worldRot !* viewDir)
 
-      -- Vulkan NDC: Y down, Z forward into screen
-      -- Fullscreen triangle vertex mapping:
-      -- v0 at (-1,-1) -> top-left
-      -- v1 at (3,-1)  -> interpolated to top-right at x=1
-      -- v2 at (-1,3)  -> interpolated to bottom-left at y=1
-      topLeft     = ndcToDir (V4 (-1) (-1) 0 1)
-      topRight    = ndcToDir (V4 1    (-1) 0 1)
-      bottomLeft  = ndcToDir (V4 (-1) 1    0 1)
+      -- With negative viewport height:
+      -- NDC y=-1 -> screen bottom
+      -- NDC y=1  -> screen top
+      -- Fullscreen triangle vertices:
+      -- v0 at (-1,-1) -> screen bottom-left
+      -- v1 at (3,-1)  -> screen bottom-right (interpolated at x=1)
+      -- v2 at (-1,3)  -> screen top-left (interpolated at y=1)
+      bottomLeft  = ndcToDir (V4 (-1) (-1) 0 1)
+      bottomRight = ndcToDir (V4 1    (-1) 0 1)
+      topLeft     = ndcToDir (V4 (-1) 1    0 1)
 
       -- For fullscreen triangle interpolation:
-      -- ray0 = topLeft
-      -- ray1 = 2*topRight - topLeft (so at x=1, interpolated = topRight)
-      -- ray2 = 2*bottomLeft - topLeft (so at y=1, interpolated = bottomLeft)
-      ray0 = topLeft
-      ray1 = 2 *^ topRight ^-^ topLeft
-      ray2 = 2 *^ bottomLeft ^-^ topLeft
+      -- ray0 = bottomLeft (v0 at screen bottom-left)
+      -- ray1 = 2*bottomRight - bottomLeft (so at x=1, interpolated = bottomRight)
+      -- ray2 = 2*topLeft - bottomLeft (so at y=1, interpolated = topLeft)
+      ray0 = bottomLeft
+      ray1 = 2 *^ bottomRight ^-^ bottomLeft
+      ray2 = 2 *^ topLeft ^-^ bottomLeft
   in (ray0, ray1, ray2)
 
 modelMatrix :: M44 Foreign.C.CFloat
