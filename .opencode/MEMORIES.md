@@ -122,3 +122,36 @@ Since g-buffer fragment shader samples albedo textures (not vertex colors), 1x1 
 ### Files Changed
 - `src/Graphics/Haskan/Mesh.hs` — `axisArrow`, `axisArrows` functions
 - `src/Graphics/Haskan/Engine.hs` — creates colored textures and adds arrows to scene
+
+## Orbital Camera Fix — Pitch Axis, Animation, Elevation Clamping (2025-05-11)
+
+### Bug 1: Pitch rotates around world-X instead of local right axis
+The `Rotate` handler in `orbitalModify` applied pitch as `axisAngle (V3 1 0 0) pitch` — always world-X. After any yaw rotation, this produced a mix of tilt and roll ("diagonal inclination"). At 90° yaw, pitch became pure roll.
+
+### Fix
+Pitch now computes the local right axis from the camera's current forward direction:
+```haskell
+currentForward = orbitalCameraForward cam
+right = normalize (currentForward `cross` V3 0 1 0)
+pitchQ = axisAngle right pitch
+```
+
+### Bug 2: Elevation bounds never enforced
+`elevationBounds` field existed but was never checked. Camera could pass through poles (φ = 0 or π), causing `lookAt` to degenerate.
+
+### Fix
+After computing the target orientation from yaw/pitch deltas, extract elevation from the resulting forward vector and clamp:
+```haskell
+rawForward = normalize (rotate rawTarget (V3 0 0 (-1)))
+rawEl = asin (rawForward ^. _y)
+clampedEl = max elMin (min elMax rawEl)
+```
+
+### Feature: Animated camera rotation
+New `InterpolationMethod` enum: `Instantaneous | Linear | Slerp`. Camera orientation animates from current to target over `animationSpeed` seconds (default 0.1s). `Camera.animate` is called each frame from `stateUpdateLoop` with `dtSeconds`.
+
+### Files Changed
+- `src/Graphics/Haskan/Camera.hs` — `orbitalModify`, `animateOrbital`, `orientationFromAzEl`, `nlerpQuaternion`, `InterpolationMethod`
+- `src/Graphics/Haskan/Engine.hs` — `Camera.animate` called per frame in `stateUpdateLoop`
+- `.opencode/orbital_camera.tex` — camera spec document
+- `.opencode/ORBITAL_CAMERA_AUDIT.tex` — audit report (3 issues found, 2 fixed, 1 spec-only)
