@@ -22,6 +22,7 @@ data CliOpts = CliOpts
   , optUVCheckCube :: !Bool
   , optUVCheckSphere :: !Bool
   , optUVCheckPlane :: !Bool
+  , optEnvDir :: !String
   }
 
 cliParser :: Parser CliOpts
@@ -68,6 +69,13 @@ cliParser =
       ( long "uv-check-plane"
      <> help "Render UV-checker plane"
       )
+    <*> strOption
+      ( long "env-dir"
+     <> metavar "NAME"
+     <> value "debug"
+     <> showDefault
+     <> help "Environment cubemap directory name (in data/textures/cubemaps/)"
+      )
 
 opts :: ParserInfo CliOpts
 opts = info (cliParser <**> helper)
@@ -94,3 +102,4 @@ main = do
     (optUVCheckCube cli)
     (optUVCheckSphere cli)
     (optUVCheckPlane cli)
+    (optEnvDir cli)

@@ -18,14 +18,14 @@ groundPlaneMesh :: Foreign.C.CFloat -> Mesh
 groundPlaneMesh size =
   let s = size
       t = V4 1 0 0 1
-      -- Four corners of the plane (XZ plane, normal +Y)
-      v0 = Vertex (V3 (-s) 0 (-s)) (V2 0 0) (V3 0 1 0) t (V3 1 1 1)
-      v1 = Vertex (V3 s 0 (-s)) (V2 50 0) (V3 0 1 0) t (V3 1 1 1)
-      v2 = Vertex (V3 s 0 s) (V2 50 50) (V3 0 1 0) t (V3 1 1 1)
-      v3 = Vertex (V3 (-s) 0 s) (V2 0 50) (V3 0 1 0) t (V3 1 1 1)
+      -- Four corners of the plane (XZ plane, normal -Y)
+      v0 = Vertex (V3 (-s) 0 (-s)) (V2 0 0) (V3 0 (-1) 0) t (V3 1 1 1)
+      v1 = Vertex (V3 s 0 (-s)) (V2 50 0) (V3 0 (-1) 0) t (V3 1 1 1)
+      v2 = Vertex (V3 s 0 s) (V2 50 50) (V3 0 (-1) 0) t (V3 1 1 1)
+      v3 = Vertex (V3 (-s) 0 s) (V2 0 50) (V3 0 (-1) 0) t (V3 1 1 1)
    in Mesh
         { vertices = [v0, v1, v2, v3],
-          indices = [0, 1, 2, 0, 2, 3]
+          indices = [0, 2, 1, 0, 3, 2]
         }
 
 -- | Create a unit cube centered at origin (side length = 1).
@@ -35,54 +35,51 @@ unitCube :: Mesh
 unitCube =
   let s = 0.5
       -- Front face (z = s, normal +Z, tangent +X)
-      -- When viewed from +Z: bottom-left -> bottom-right -> top-right -> top-left
-      -- Vulkan V=0=top, V=1=bottom. Top of face (y=s) gets V=1, bottom (y=-s) gets V=0.
-      vf0 = Vertex (V3 (-s) (-s) s) (V2 0 0) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
-      vf1 = Vertex (V3 s (-s) s) (V2 1 0) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
-      vf2 = Vertex (V3 s s s) (V2 1 1) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
-      vf3 = Vertex (V3 (-s) s s) (V2 0 1) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
+      vf0 = Vertex (V3 (-s) (-s) s) (V2 1 0) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
+      vf1 = Vertex (V3 s (-s) s) (V2 0 0) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
+      vf2 = Vertex (V3 s s s) (V2 0 1) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
+      vf3 = Vertex (V3 (-s) s s) (V2 1 1) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
       -- Back face (z = -s, normal -Z, tangent -X)
-      vb0 = Vertex (V3 s (-s) (-s)) (V2 0 0) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
-      vb1 = Vertex (V3 (-s) (-s) (-s)) (V2 1 0) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
-      vb2 = Vertex (V3 (-s) s (-s)) (V2 1 1) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
-      vb3 = Vertex (V3 s s (-s)) (V2 0 1) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
+      vb0 = Vertex (V3 s (-s) (-s)) (V2 1 0) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
+      vb1 = Vertex (V3 (-s) (-s) (-s)) (V2 0 0) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
+      vb2 = Vertex (V3 (-s) s (-s)) (V2 0 1) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
+      vb3 = Vertex (V3 s s (-s)) (V2 1 1) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
       -- Right face (x = s, normal +X, tangent -Z)
-      vr0 = Vertex (V3 s (-s) s) (V2 0 0) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
-      vr1 = Vertex (V3 s (-s) (-s)) (V2 1 0) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
-      vr2 = Vertex (V3 s s (-s)) (V2 1 1) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
-      vr3 = Vertex (V3 s s s) (V2 0 1) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
+      vr0 = Vertex (V3 s (-s) s) (V2 1 0) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
+      vr1 = Vertex (V3 s (-s) (-s)) (V2 0 0) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
+      vr2 = Vertex (V3 s s (-s)) (V2 0 1) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
+      vr3 = Vertex (V3 s s s) (V2 1 1) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
       -- Left face (x = -s, normal -X, tangent +Z)
-      vl0 = Vertex (V3 (-s) (-s) (-s)) (V2 0 0) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
-      vl1 = Vertex (V3 (-s) (-s) s) (V2 1 0) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
-      vl2 = Vertex (V3 (-s) s s) (V2 1 1) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
-      vl3 = Vertex (V3 (-s) s (-s)) (V2 0 1) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
+      vl0 = Vertex (V3 (-s) (-s) (-s)) (V2 1 0) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
+      vl1 = Vertex (V3 (-s) (-s) s) (V2 0 0) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
+      vl2 = Vertex (V3 (-s) s s) (V2 0 1) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
+      vl3 = Vertex (V3 (-s) s (-s)) (V2 1 1) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
       -- Top face (y = s, normal +Y, tangent +X)
-      -- When viewed from +Y: top-left -> top-right -> bottom-right -> bottom-left
-      vt0 = Vertex (V3 (-s) s (-s)) (V2 0 1) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
-      vt1 = Vertex (V3 s s (-s)) (V2 1 1) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
-      vt2 = Vertex (V3 s s s) (V2 1 0) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
-      vt3 = Vertex (V3 (-s) s s) (V2 0 0) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
+      vt0 = Vertex (V3 (-s) s (-s)) (V2 1 1) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
+      vt1 = Vertex (V3 s s (-s)) (V2 0 1) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
+      vt2 = Vertex (V3 s s s) (V2 0 0) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
+      vt3 = Vertex (V3 (-s) s s) (V2 1 0) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
       -- Bottom face (y = -s, normal -Y, tangent +X)
-      vbot0 = Vertex (V3 (-s) (-s) (-s)) (V2 0 0) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
-      vbot1 = Vertex (V3 s (-s) (-s)) (V2 1 0) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
-      vbot2 = Vertex (V3 s (-s) s) (V2 1 1) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
-      vbot3 = Vertex (V3 (-s) (-s) s) (V2 0 1) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
+      vbot0 = Vertex (V3 (-s) (-s) (-s)) (V2 1 0) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
+      vbot1 = Vertex (V3 s (-s) (-s)) (V2 0 0) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
+      vbot2 = Vertex (V3 s (-s) s) (V2 0 1) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
+      vbot3 = Vertex (V3 (-s) (-s) s) (V2 1 1) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
       verts = [vf0, vf1, vf2, vf3, vb0, vb1, vb2, vb3, vr0, vr1, vr2, vr3, vl0, vl1, vl2, vl3, vt0, vt1, vt2, vt3, vbot0, vbot1, vbot2, vbot3]
       idxs =
-        [ -- Front
-          0, 2, 1, 0, 3, 2,
-          -- Back
-          4, 6, 5, 4, 7, 6,
-          -- Right
+        [ -- Front (CCW from +Z)
+          0, 1, 2, 0, 2, 3,
+          -- Back (CCW from -Z)
+          4, 5, 6, 4, 6, 7,
+          -- Right (CCW from +X)
           8, 9, 10, 8, 10, 11,
-          -- Left
+          -- Left (CCW from -X)
           12, 13, 14, 12, 14, 15,
-          -- Top
-          16, 17, 18, 16, 18, 19,
-          -- Bottom
-          20, 22, 21, 20, 23, 22
+          -- Top (CCW from +Y)
+          16, 18, 17, 16, 19, 18,
+          -- Bottom (CCW from -Y)
+          20, 21, 22, 20, 22, 23
         ]
-   in Mesh {vertices = verts, indices = idxs}
+    in Mesh {vertices = verts, indices = idxs}
 
 -- | Create a UV-mapped sphere centered at origin.
 -- latSegments: number of latitude segments (excluding poles)
@@ -104,27 +101,28 @@ uvSphere latSegments lonSegments radius =
             ny = realToFrac (cos theta) :: Foreign.C.CFloat
             nz = realToFrac (sin theta * sin phi) :: Foreign.C.CFloat
             u = realToFrac (fromIntegral lonIdx / fromIntegral lonCount) :: Foreign.C.CFloat
-            v = realToFrac (fromIntegral latIdx / fromIntegral latCount) :: Foreign.C.CFloat
+            v = realToFrac (1.0 - fromIntegral latIdx / fromIntegral latCount) :: Foreign.C.CFloat
             tx = realToFrac (-sin phi) :: Foreign.C.CFloat
             ty = realToFrac (0 :: Float) :: Foreign.C.CFloat
             tz = realToFrac (cos phi) :: Foreign.C.CFloat
-        in Vertex (V3 x y z) (V2 u v) (V3 nx ny nz) (V4 tx ty tz 1) (V3 1 1 1)
+         in Vertex (V3 x y z) (V2 u v) (V3 nx ny nz) (V4 tx ty tz 1) (V3 1 1 1)
       -- Generate vertices: latCount+1 rows, lonCount+1 columns
       verts = [mkVert latIdx lonIdx | latIdx <- [0..latCount], lonIdx <- [0..lonCount]]
       -- Generate indices for quads (two triangles per quad)
+      -- CCW from outside: base -> nextBase+1 -> nextBase, base -> base+1 -> nextBase+1
       idxs = concat
          [ let base = latIdx * (lonCount + 1) + lonIdx
                nextBase = (latIdx + 1) * (lonCount + 1) + lonIdx
             in [ fromIntegral base
+               , fromIntegral (nextBase + 1)
                , fromIntegral nextBase
-               , fromIntegral (nextBase + 1)
                , fromIntegral base
-               , fromIntegral (nextBase + 1)
                , fromIntegral (base + 1)
+               , fromIntegral (nextBase + 1)
                ]
-        | latIdx <- [0..latCount-1]
-        , lonIdx <- [0..lonCount-1]
-        ]
+         | latIdx <- [0..latCount-1]
+         , lonIdx <- [0..lonCount-1]
+         ]
   in Mesh {vertices = verts, indices = idxs}
 
 -- | Create a UV-mapped plane in the XZ plane (Y=0) with UVs 0..1.
@@ -133,13 +131,13 @@ uvPlane :: Foreign.C.CFloat -> Mesh
 uvPlane size =
   let s = size
       t = V4 1 0 0 1
-      v0 = Vertex (V3 (-s) 0 (-s)) (V2 0 0) (V3 0 1 0) t (V3 1 1 1)
-      v1 = Vertex (V3 s 0 (-s)) (V2 1 0) (V3 0 1 0) t (V3 1 1 1)
-      v2 = Vertex (V3 s 0 s) (V2 1 1) (V3 0 1 0) t (V3 1 1 1)
-      v3 = Vertex (V3 (-s) 0 s) (V2 0 1) (V3 0 1 0) t (V3 1 1 1)
+      v0 = Vertex (V3 (-s) 0 (-s)) (V2 0 0) (V3 0 (-1) 0) t (V3 1 1 1)
+      v1 = Vertex (V3 s 0 (-s)) (V2 1 0) (V3 0 (-1) 0) t (V3 1 1 1)
+      v2 = Vertex (V3 s 0 s) (V2 1 1) (V3 0 (-1) 0) t (V3 1 1 1)
+      v3 = Vertex (V3 (-s) 0 s) (V2 0 1) (V3 0 (-1) 0) t (V3 1 1 1)
    in Mesh
         { vertices = [v0, v1, v2, v3],
-          indices = [0, 1, 2, 0, 2, 3]
+          indices = [0, 2, 1, 0, 3, 2]
         }
 groundPlaneMeshGrid subdivisions size =
   let n = subdivisions

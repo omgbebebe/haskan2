@@ -326,7 +326,8 @@ data EngineConfig = EngineConfig
     title :: !Text,
     debugSocketPath :: !(Maybe FilePath),
     timeoutSeconds :: !(Maybe Integer),
-    uvCheckMode :: !(Maybe String)
+    uvCheckMode :: !(Maybe String),
+    envMapDir :: !String
   }
   deriving (Show)
 
@@ -522,7 +523,7 @@ mainLoop meshName EngineConfig {..} = do
   Window.showWindow window
 
   renderLoopFinished <- liftIO $ newEmptyMVar
-  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished controlChannel meshName uvCheckMode
+  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished controlChannel meshName uvCheckMode envMapDir
 
   stateUpdateLoopFinished <- liftIO $ newEmptyMVar
   liftIO $ forkIOWithHandler "stateUpdateLoop" stateUpdateLoopFinished $ stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished inputBuffer debugCmdQueue controlChannel
@@ -918,8 +919,9 @@ renderLoop ::
   TChan ControlMessage ->
   String ->
   Maybe String ->
+  String ->
   m ()
-renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore controlChannel meshName uvCheckMode = do
+renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore controlChannel meshName uvCheckMode envMapDir = do
   control <- liftIO $ STM.atomically $ TChan.dupTChan controlChannel
 
   -- Create resource manager for mesh and texture
@@ -977,8 +979,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
   logDebugIO LogTexture "textureCommandBuffer created"
 
-  -- Load IBL cubemaps (using colored test faces for debugging)
-  let envDir = "data/hdri/env_test/"
+  -- Load IBL cubemaps
+  let envDir = "data/textures/cubemaps/" ++ envMapDir ++ "/"
       radianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
       irradianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
   radianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile radianceFacePaths

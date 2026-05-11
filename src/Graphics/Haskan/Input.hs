@@ -116,7 +116,7 @@ mouseWheelToAction :: SDL.MouseWheelEventData -> Maybe ActionEvent
 mouseWheelToAction (SDL.MouseWheelEventData _window _mouseDevice scroll _direction) =
   let (SDL.V2 _scrollX scrollY) = scroll
       -- Negative scrollY means scroll down (zoom out), positive means scroll up (zoom in)
-      zoomAmount = fromIntegral scrollY * (-0.1)  -- scale factor for zoom sensitivity
+      zoomAmount = fromIntegral scrollY * (-0.01)  -- scale factor for zoom sensitivity
    in Just (Zoom zoomAmount, True, False)
 
 mouseMotionToAction :: SDL.MouseMotionEventData -> Maybe ActionEvent
