@@ -1440,17 +1440,14 @@ modelMatrix =
    in translate !*! rotate
 
 -- | Build a perspective projection matrix from surface dimensions.
--- Uses Vulkan-native Y-down convention with explicit Y-flip.
+-- Standard projection without Y-flip; use negative viewport height for Vulkan Y-down.
 makeProjectionMatrix :: Float -> Float -> M44 Foreign.C.CFloat
 makeProjectionMatrix width height =
-  let proj = Linear.Projection.perspective
-        (pi / 3) -- FOV 60 degrees
-        (realToFrac width / realToFrac height) -- dynamic aspect ratio
-        0.1 -- near plane
-        10000.0 -- far plane
-      -- Vulkan NDC is Y-down; flip Y in projection to match OpenGL-style view
-      yFlip = V4 (V4 1 0 0 0) (V4 0 (-1) 0 0) (V4 0 0 1 0) (V4 0 0 0 1)
-  in yFlip !*! proj
+  Linear.Projection.perspective
+    (pi / 3) -- FOV 60 degrees
+    (realToFrac width / realToFrac height) -- dynamic aspect ratio
+    0.1 -- near plane
+    10000.0 -- far plane
 
 drawCallToSnapshot :: DrawCall -> RenderableSnapshot
 drawCallToSnapshot DrawCall {..} =

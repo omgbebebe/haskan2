@@ -75,14 +75,16 @@ createGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent verte
       tessellationState = Vulkan.VK_NULL
 
       viewport =
-        Vulkan.createVk
-          ( set @"x" 0
-              &* set @"y" 0
-              &* set @"width" (fromIntegral (Vulkan.getField @"width" swapchainExtent))
-              &* set @"height" (fromIntegral (Vulkan.getField @"height" swapchainExtent))
-              &* set @"minDepth" 0.0
-              &* set @"maxDepth" 1.0
-          )
+        let w = fromIntegral (Vulkan.getField @"width" swapchainExtent)
+            h = fromIntegral (Vulkan.getField @"height" swapchainExtent)
+         in Vulkan.createVk
+              ( set @"x" 0
+                  &* set @"y" h
+                  &* set @"width" w
+                  &* set @"height" (-h)
+                  &* set @"minDepth" 0.0
+                  &* set @"maxDepth" 1.0
+              )
       scissor =
         let offset =
               Vulkan.createVk
@@ -111,7 +113,7 @@ createGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent verte
               &* set @"rasterizerDiscardEnable" Vulkan.VK_FALSE
               &* set @"polygonMode" Vulkan.VK_POLYGON_MODE_FILL
               &* set @"lineWidth" 1.0
-              &* set @"cullMode" Vulkan.VK_CULL_MODE_NONE
+              &* set @"cullMode" Vulkan.VK_CULL_MODE_BACK_BIT
               &* set @"frontFace" Vulkan.VK_FRONT_FACE_COUNTER_CLOCKWISE
               &* set @"depthBiasEnable" Vulkan.VK_FALSE
               &* set @"depthBiasConstantFactor" 0.0
@@ -279,14 +281,16 @@ createFullscreenPipeline dev layout renderPass shaderProgram swapchainExtent = d
       tessellationState = Vulkan.VK_NULL
 
       viewport =
-        Vulkan.createVk
-          ( set @"x" 0
-              &* set @"y" 0
-              &* set @"width" (fromIntegral (Vulkan.getField @"width" swapchainExtent))
-              &* set @"height" (fromIntegral (Vulkan.getField @"height" swapchainExtent))
-              &* set @"minDepth" 0.0
-              &* set @"maxDepth" 1.0
-          )
+        let w = fromIntegral (Vulkan.getField @"width" swapchainExtent)
+            h = fromIntegral (Vulkan.getField @"height" swapchainExtent)
+         in Vulkan.createVk
+              ( set @"x" 0
+                  &* set @"y" h
+                  &* set @"width" w
+                  &* set @"height" (-h)
+                  &* set @"minDepth" 0.0
+                  &* set @"maxDepth" 1.0
+              )
       scissor =
         let offset =
               Vulkan.createVk
@@ -315,7 +319,7 @@ createFullscreenPipeline dev layout renderPass shaderProgram swapchainExtent = d
               &* set @"rasterizerDiscardEnable" Vulkan.VK_FALSE
               &* set @"polygonMode" Vulkan.VK_POLYGON_MODE_FILL
               &* set @"lineWidth" 1.0
-              &* set @"cullMode" Vulkan.VK_CULL_MODE_NONE
+              &* set @"cullMode" Vulkan.VK_CULL_MODE_BACK_BIT
               &* set @"frontFace" Vulkan.VK_FRONT_FACE_COUNTER_CLOCKWISE
               &* set @"depthBiasEnable" Vulkan.VK_FALSE
               &* set @"depthBiasConstantFactor" 0.0
