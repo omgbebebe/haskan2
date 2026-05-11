@@ -34,8 +34,8 @@ defaultDayNightConfig = DayNightConfig
   , dncDaySkyTint = V3 1.0 1.0 1.0
   , dncSunsetSkyTint = V3 1.0 0.7 0.4
   , dncNightSkyTint = V3 0.1 0.1 0.2
-  , dncDayIBLIntensity = 0.3
-  , dncNightIBLIntensity = 0.05
+  , dncDayIBLIntensity = 1.0
+  , dncNightIBLIntensity = 0.0
   }
 
 -- | Computed sun state for a given time
