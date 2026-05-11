@@ -1403,16 +1403,16 @@ computeSkyboxRays view proj =
       worldRot = V3 (V3 v00 v01 v02) (V3 v10 v11 v12) (V3 v20 v21 v22)
 
       -- Extract projection scale factors from row-major proj matrix.
-      -- proj = transpose(yFlip !*! perspective) where perspective uses
+      -- proj = transpose(perspective) where perspective uses
       -- fx = 1/(aspect*tan(fov/2)), fy = 1/tan(fov/2).
-      -- After transpose: proj[0][0] = fx, proj[1][1] = -fy.
+      -- After transpose: proj[0][0] = fx, proj[1][1] = fy.
       V4 (V4 fx _ _ _) (V4 _ fy _ _) _ _ = proj
 
       ndcToDir :: V4 Float -> V3 Float
       ndcToDir (V4 x y _z _w) =
         let -- NDC -> view-space direction on the image plane at z=-1 (forward).
-            -- linear's lookAt produces right-handed view space where +X = right in world space.
-            viewDir = V3 (x / fx) (y / fy) (-1)
+            -- With negative viewport height, NDC y=-1 is screen top = view +Y.
+            viewDir = V3 (x / fx) (-y / fy) (-1)
         in normalize (worldRot !* viewDir)
 
       -- Vulkan NDC: Y down, Z forward into screen
@@ -1446,8 +1446,8 @@ makeProjectionMatrix width height =
   Linear.Projection.perspective
     (pi / 3) -- FOV 60 degrees
     (realToFrac width / realToFrac height) -- dynamic aspect ratio
-    0.1 -- near plane
-    10000.0 -- far plane
+    0.01 -- near plane
+    1000.0 -- far plane
 
 drawCallToSnapshot :: DrawCall -> RenderableSnapshot
 drawCallToSnapshot DrawCall {..} =
