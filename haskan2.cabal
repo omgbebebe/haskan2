@@ -33,6 +33,10 @@ library
                        Graphics.Haskan.Debug.Server
                        Graphics.Haskan.Events
                        Graphics.Haskan.Engine
+                       Graphics.Haskan.Engine.Types
+                       Graphics.Haskan.Engine.Scene
+                       Graphics.Haskan.Engine.Update
+                       Graphics.Haskan.Engine.Render
                        Graphics.Haskan.Input
                        Graphics.Haskan.Resources
                        Graphics.Haskan.Vertex
