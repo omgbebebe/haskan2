@@ -26,8 +26,8 @@
 2. **Skybox**: Rendered inside lighting shader (not separate pass) using per-vertex frustum rays + `env_map` sampling
 3. **Screen-space overlays**: Axis arrows + ground plane drawn in lighting shader fragment stage, not geometry mesh
 4. **linear's lookAt**: Creates **right-handed** view space: +X = world +X (right), +Y = world +Y (up), +Z = backward
-5. **Y-flip projection**: `makeProjectionMatrix` post-multiplies by `scale(1, -1, 1)` — THIS IS WRONG. It reverses winding in clip space, breaking backface culling with CCW meshes.
-6. **Current workaround**: `VK_CULL_MODE_NONE` (no culling) to avoid the winding issue. **Proper fix**: Remove Y-flip from projection, use negative viewport height (Vulkan 1.1+ core feature) to handle Y-down convention.
+5. **Y-down handling**: Negative viewport height (`VkViewport.height = -h; y = h`) — Vulkan 1.1+ core. No Y-flip in projection matrix. Preserves CCW winding for backface culling.
+6. **Backface culling**: `VK_CULL_MODE_BACK_BIT` with `VK_FRONT_FACE_COUNTER_CLOCKWISE` (standard)
 7. **Normal matrix**: Added to `EntityData` SSBO; computed per entity via `transpose . inv33`
 8. **Mesh merging**: All scene meshes concatenated into single buffers with per-entity `firstIndex`/`vertexOffset`
 9. **FIR `if-then-else` ambiguity**: Convert `gl_VertexIndex` to `Code Float` via `fromIntegral` first
@@ -131,18 +131,14 @@ Specular IBL intensity is now physically correct — no more over-bright reflect
 
 ## UV Mapping Fixes (2025-05-11)
 
-### Current State (After Revert of CLOCKWISE Hack)
-- **Backface culling**: `VK_CULL_MODE_NONE` (disabled) — the Y-flip projection reverses winding, making CCW meshes appear CW in clip space
-- **frontFace**: `VK_FRONT_FACE_COUNTER_CLOCKWISE` (standard convention)
+### Y-Down Handling (Proper Implementation)
+- **No Y-flip in projection**: Standard `Linear.Projection.perspective` matrix
+- **Negative viewport height**: `VkViewport.height = -h; y = h` (Vulkan 1.1+ core)
+- **Backface culling**: `VK_CULL_MODE_BACK_BIT` with `VK_FRONT_FACE_COUNTER_CLOCKWISE`
+- **Result**: CCW world-space meshes remain CCW in clip space, fully compatible with glTF
 
 ### Previous Mistake
-Attempted to use `VK_FRONT_FACE_CLOCKWISE` as a workaround for the Y-flip reversing winding. This broke glTF compatibility (all external assets use CCW). **Reverted.**
-
-### Proper Fix Needed
-1. Remove Y-flip from `makeProjectionMatrix` (revert to standard projection)
-2. Use negative viewport height: `VkViewport.height = -(float)height; VkViewport.y = (float)height;`
-3. This is a Vulkan 1.1+ core feature (promoted from `VK_KHR_maintenance1`)
-4. Then re-enable `VK_CULL_MODE_BACK_BIT` with `VK_FRONT_FACE_COUNTER_CLOCKWISE`
+Y-flip matrix in projection (`scale(1, -1, 1)`) reversed winding in clip space. Attempted workaround (`CLOCKWISE` frontFace) broke glTF compatibility. Reverted and replaced with negative viewport height.
 
 ### Cube Fixes Applied
 1. **Side face V coordinates**: Swapped V on all 4 side faces. Y+ vertices get V=1, Y- vertices get V=0.
