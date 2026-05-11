@@ -655,11 +655,11 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   let adjustedCam = if isStressTest
         then setDistance (setTarget currentCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) (150.0 :: Foreign.C.CFloat)
         else adjustCameraForScene sceneBounds currentCam
-      inspectCam = case uvCheckMode of
+      finalCam = case uvCheckMode of
         Just _ -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.0) 0.78 (realToFrac (pi / 6 :: Double))
-        Nothing -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 8.0) (-2.353876) 0.5
-  liftIO $ STM.atomically $ STM.writeTVar tvCamera inspectCam
-  logInfoIO LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance inspectCam)
+        Nothing -> setAngles adjustedCam 0 (realToFrac (pi / 6 :: Double))
+  liftIO $ STM.atomically $ STM.writeTVar tvCamera finalCam
+  logInfoIO LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance finalCam)
 
   when isStressTest $ liftIO $ STM.atomically $ STM.writeTVar (wireframeEnabled gameState) False
 
