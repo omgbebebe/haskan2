@@ -60,6 +60,9 @@ data DeferredPassData = DeferredPassData
     -- Light data
   , dpdLightCount         :: !Word32
   , dpdLightBuffer        :: !Vulkan.VkBuffer
+    -- Day/night cycle
+  , dpdSkyTint            :: !(V3 Float)
+  , dpdIBLIntensity       :: !Float
     -- G-buffer images for barrier
   , dpdGBufferImages      :: ![Vulkan.VkImage]
     -- Wireframe overlay
@@ -156,16 +159,18 @@ buildDeferredGraph DeferredPassData {..} = do
           -- Set camera position + debug mode + overlays + skybox rays push constant
           let (V3 camX camY camZ) = dpdCameraPos
               (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = dpdSkyboxRays
+              (V3 tintR tintG tintB) = dpdSkyTint
               -- std430 layout: vec3 aligned to 16 bytes, need padding after each
-              -- Total: 20 floats * 4 = 80 bytes
+              -- Total: 24 floats * 4 = 96 bytes
               camPosData = [ realToFrac camX, realToFrac camY, realToFrac camZ, realToFrac dpdDebugMode
                            , realToFrac dpdAxisOverlay, realToFrac dpdGroundPlane, 0, realToFrac dpdLightCount
                            , realToFrac r0x, realToFrac r0y, realToFrac r0z, 0
                            , realToFrac r1x, realToFrac r1y, realToFrac r1z, 0
                            , realToFrac r2x, realToFrac r2y, realToFrac r2z, 0
+                           , realToFrac tintR, realToFrac tintG, realToFrac tintB, realToFrac dpdIBLIntensity
                            ] :: [CFloat]
-          Foreign.Marshal.Array.withArray camPosData $ \camPtr ->
-            Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 80 (Foreign.castPtr camPtr)
+           in Foreign.Marshal.Array.withArray camPosData $ \camPtr ->
+             Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 96 (Foreign.castPtr camPtr)
           -- Fullscreen triangle: 3 vertices, no indices
           Vulkan.vkCmdDraw commandBuffer 3 1 0 0
     }

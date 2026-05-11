@@ -21,9 +21,10 @@ import Data.Foldable (toList)
 import Foreign.C qualified
 import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
+import Graphics.Haskan.DayNight (defaultDayNightConfig, computeSunState, SunState(..))
 import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), DebugCameraSnapshot (..), debugMessageToActionEvent, parseDebugMessage, encodeDebugResponse)
 import Graphics.Haskan.Debug.Server (CommandQueue)
-import Graphics.Haskan.Engine.Types (GameState (..), WorldState (..), InputBuffer (..), ControlMessage (..), flushInputBuffer)
+import Graphics.Haskan.Engine.Types (GameState (..), WorldState (..), InputBuffer (..), ControlMessage (..), LightData (..), flushInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent)
 import Graphics.Haskan.Logger (logInfoIO, LogCategory(..), showT)
 import Linear (V2 (..), V3 (..))
@@ -172,6 +173,28 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
             when (sl) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight (-camMove)]
             when (sr) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight camMove]
             STM.atomically $ STM.modifyTVar' (activeCamera worldState) (\cam -> Camera.animate cam dtSeconds)
+            
+            -- Update day/night cycle
+            dnEnabled <- STM.readTVarIO (gameDayNightEnabled gameState)
+            when dnEnabled $ do
+              currentTime <- STM.readTVarIO (gameTimeOfDay gameState)
+              speed <- STM.readTVarIO (gameTimeSpeed gameState)
+              let newTime = fmod (currentTime + realToFrac dtSeconds * speed) 24.0
+              STM.atomically $ STM.writeTVar (gameTimeOfDay gameState) newTime
+              let sunState = computeSunState defaultDayNightConfig newTime
+              when (floor newTime /= floor currentTime) $ do
+                logInfoIO LogGeneral $ "time=" <> showT newTime <> " sunDir=" <> showT (ssDirection sunState) <> " intensity=" <> showT (ssIntensity sunState)
+              -- Update first light (the sun)
+              lightsList <- STM.readTVarIO (lights gameState)
+              let updatedLights = case lightsList of
+                    [] -> []
+                    (sun:rest) -> sun
+                      { ldDirection = realToFrac <$> ssDirection sunState
+                      , ldIntensity = realToFrac (ssIntensity sunState)
+                      , ldColor = realToFrac <$> ssColor sunState
+                      } : rest
+              STM.atomically $ STM.writeTVar (lights gameState) updatedLights
+            
             let targetDelayMicros = 1000000 `div` fromIntegral tFPS
             threadDelay (fromIntegral targetDelayMicros)
             when isRunning $ loop tFPS _gameState newTime
@@ -190,3 +213,6 @@ updateCamera ::
   [Camera.Modifier Foreign.C.CFloat] ->
   STM ()
 updateCamera tv mods = STM.modifyTVar' tv (Camera.update <*> pure mods)
+
+fmod :: Float -> Float -> Float
+fmod x y = x - y * fromIntegral (floor (x / y) :: Int)

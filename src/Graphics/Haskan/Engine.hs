@@ -36,6 +36,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
+import Graphics.Haskan.DayNight (defaultDayNightConfig, computeSunState)
 import Graphics.Haskan.Debug.FrameInspector (defaultInspector)
 import Graphics.Haskan.Debug.Interface (DebugMessage (..), debugMessageToActionEvent)
 import Graphics.Haskan.Debug.Server (startDebugServer, stopDebugServer)
@@ -105,6 +106,9 @@ mainLoop meshName EngineConfig {..} = do
       , LightData (V3 (-1) (-1) 1) 0.4 (V3 0.8 0.2 0.8) 0 (V3 1 1 (-1)) 0.0
       ]
     )
+  tvTimeOfDay <- liftIO $ STM.newTVarIO initialTimeOfDay
+  tvTimeSpeed <- liftIO $ STM.newTVarIO timeSpeed
+  tvDayNightEnabled <- liftIO $ STM.newTVarIO dayNightEnabled
 
   let gameState =
         GameState
@@ -126,6 +130,9 @@ mainLoop meshName EngineConfig {..} = do
           tvPendingSwapchainScreenshot
           tvMouseCaptureEnabled
           tvLights
+          tvTimeOfDay
+          tvTimeSpeed
+          tvDayNightEnabled
 
   mDebugServer <- case debugSocketPath of
     Just path -> do

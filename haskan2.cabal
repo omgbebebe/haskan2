@@ -29,8 +29,9 @@ library
                        Graphics.Haskan.Assets.TexturePreprocessor
                        Graphics.Haskan.BoundingBox
                        Graphics.Haskan.Logger
-                       Graphics.Haskan.Camera
-                       Graphics.Haskan.Debug.Server
+                        Graphics.Haskan.Camera
+                        Graphics.Haskan.DayNight
+                        Graphics.Haskan.Debug.Server
                        Graphics.Haskan.Events
                        Graphics.Haskan.Engine
                        Graphics.Haskan.Engine.Types

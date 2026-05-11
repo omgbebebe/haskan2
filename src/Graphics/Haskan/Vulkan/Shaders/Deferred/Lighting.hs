@@ -72,6 +72,10 @@ type CameraPushConstant = Struct
    , "ray0" ':-> V 3 Float
    , "ray1" ':-> V 3 Float
    , "ray2" ':-> V 3 Float
+   , "skyTintR" ':-> Float
+   , "skyTintG" ':-> Float
+   , "skyTintB" ':-> Float
+   , "iblIntensity" ':-> Float
    ]
 
 type FragmentDefs =
@@ -169,6 +173,10 @@ fragment = shader do
       axisOverlay = view @(Name "axisOverlay") cameraPos
       groundPlane = view @(Name "groundPlane") cameraPos
       lightCount = view @(Name "lightCount") cameraPos
+      skyTintR = view @(Name "skyTintR") cameraPos
+      skyTintG = view @(Name "skyTintG") cameraPos
+      skyTintB = view @(Name "skyTintB") cameraPos
+      iblIntensity = view @(Name "iblIntensity") cameraPos
 
   let -- View direction (from fragment to camera)
       vdx = camX - posX
@@ -411,8 +419,8 @@ fragment = shader do
       lod = roughness * maxMipF
   ~(Vec4 envR envG envB _) <- use @(ImageTexel "env_map") (LOD lod NilOps) (Vec3 rx ry rz)
 
-  let -- IBL intensity scale (bright outdoor HDRI)
-      envIntensity = 0.3
+  let -- IBL intensity from push constant (day/night cycle)
+      envIntensity = iblIntensity
 
       -- Diffuse IBL (irradiance * albedo * (1-metallic) * AO)
       iblDiffx = irrR * albR * (1 - metallic) * ao * envIntensity
@@ -440,15 +448,18 @@ fragment = shader do
       gamy = sqrt mapy
       gamz = sqrt mapz
 
-      -- Skybox for background pixels (no geometry)
-      finalx = if hasGeometry then gamx else skyR
-      finaly = if hasGeometry then gamy else skyG
-      finalz = if hasGeometry then gamz else skyB
+      -- Tinted skybox for background pixels (no geometry)
+      tintedSkyR = skyR * skyTintR
+      tintedSkyG = skyG * skyTintG
+      tintedSkyB = skyB * skyTintB
+      finalx = if hasGeometry then gamx else tintedSkyR
+      finaly = if hasGeometry then gamy else tintedSkyG
+      finalz = if hasGeometry then gamz else tintedSkyB
 
       -- Debug mode 12.0: raw skybox for ALL pixels
-      dbgSkyR = if debugMode == 12.0 then skyR else finalx
-      dbgSkyG = if debugMode == 12.0 then skyG else finaly
-      dbgSkyB = if debugMode == 12.0 then skyB else finalz
+      dbgSkyR = if debugMode == 12.0 then tintedSkyR else finalx
+      dbgSkyG = if debugMode == 12.0 then tintedSkyG else finaly
+      dbgSkyB = if debugMode == 12.0 then tintedSkyB else finalz
 
       -- Debug visualization helpers
       -- Normals: map [-1,1] to [0,1]

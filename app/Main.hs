@@ -24,6 +24,9 @@ data CliOpts = CliOpts
   , optUVCheckPlane :: !Bool
   , optEnvDir :: !String
   , optLights :: !Int
+  , optTimeOfDay :: !Float
+  , optTimeSpeed :: !Float
+  , optDayNight :: !Bool
   }
 
 cliParser :: Parser CliOpts
@@ -84,6 +87,24 @@ cliParser =
      <> showDefault
      <> help "Number of random lights to spawn"
        )
+    <*> option auto
+      ( long "time"
+     <> metavar "HOURS"
+     <> value 12.0
+     <> showDefault
+     <> help "Initial time of day (0-24 hours)"
+       )
+    <*> option auto
+      ( long "time-speed"
+     <> metavar "FACTOR"
+     <> value 1.0
+     <> showDefault
+     <> help "Time speed multiplier (0=paused, 1=real-time, 3600=1hr/sec)"
+       )
+    <*> switch
+      ( long "day-night"
+     <> help "Enable day/night cycle"
+       )
 
 opts :: ParserInfo CliOpts
 opts = info (cliParser <**> helper)
@@ -112,3 +133,6 @@ main = do
     (optUVCheckPlane cli)
     (optEnvDir cli)
     (optLights cli)
+    (optTimeOfDay cli)
+    (optTimeSpeed cli)
+    (optDayNight cli)

@@ -44,6 +44,8 @@ import Graphics.Haskan.Assets.Cache (initCache)
 import Graphics.Haskan.BoundingBox (BBox (..), bboxCenter, bboxDiagonal, emptyBBox, fromPoints, mergeBBox, mergePoint)
 import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
+import Graphics.Haskan.DayNight qualified as DayNight
+import Graphics.Haskan.DayNight (defaultDayNightConfig, computeSunState)
 import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot (..), defaultInspector, buildFrameSnapshot)
 import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), DebugCameraSnapshot (..), debugMessageToActionEvent, parseDebugMessage, encodeDebugResponse)
 import Graphics.Haskan.Debug.Screenshot qualified as Screenshot
@@ -143,8 +145,11 @@ renderFrameLoop ::
   Vulkan.VkBuffer ->
   Vulkan.VkDeviceMemory ->
   STM.TVar [LightData] ->
+  STM.TVar Float ->
+  STM.TVar Float ->
+  STM.TVar Bool ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights tvTimeOfDay tvTimeSpeed tvDayNightEnabled = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -279,6 +284,15 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                 debugMode' <- liftIO $ STM.readTVarIO tvDebugMode
                 axisOverlay' <- liftIO $ STM.readTVarIO tvAxisOverlay
                 groundPlane' <- liftIO $ STM.readTVarIO tvGroundPlane
+                
+                -- Read day/night state for sky tint and IBL intensity
+                currentTime <- liftIO $ STM.readTVarIO tvTimeOfDay
+                dnEnabled <- liftIO $ STM.readTVarIO tvDayNightEnabled
+                let sunState = if dnEnabled
+                               then computeSunState defaultDayNightConfig currentTime
+                               else DayNight.SunState (V3 (-1) (-1) (-1)) 1.0 (V3 1 1 1) (V3 1 1 1) 0.3
+                    skyTint = DayNight.ssSkyTint sunState
+                    iblInt = DayNight.ssIBLIntensity sunState
 
                 let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
                       buildDeferredGraph DeferredPassData
@@ -305,6 +319,8 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdGroundPlane = groundPlane'
                         , dpdLightCount = lightCount
                         , dpdLightBuffer = lightSsboBuffer
+                        , dpdSkyTint = skyTint
+                        , dpdIBLIntensity = iblInt
                         , dpdGBufferImages = gBufferImagesForFrame
                         , dpdWireframePipeline = drWireframePipeline
                         , dpdWireframeLayout = drWireframePipelineLayout
@@ -457,6 +473,9 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         lightSsboBuffer
         lightSsboMemory
         tvLights
+        tvTimeOfDay
+        tvTimeSpeed
+        tvDayNightEnabled
 
 renderLoop ::
   (Camera cam, MonadFail m, MonadManaged m, MonadIO m) =>
@@ -884,6 +903,9 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       tvPendingAllStages = pendingAllStages gameState
       tvPendingSwapchainScreenshot = pendingSwapchainScreenshot gameState
       tvLights = lights gameState
+      tvTimeOfDay = gameTimeOfDay gameState
+      tvTimeSpeed = gameTimeSpeed gameState
+      tvDayNightEnabled = gameDayNightEnabled gameState
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
@@ -895,7 +917,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
                    -- Update lighting descriptor sets with light SSBO
                    for_ (drLightingDescriptorSets dr) $ \ds ->
                      DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
-                   renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights
+                   renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights tvTimeOfDay tvTimeSpeed tvDayNightEnabled
               outerLoop renderFrameLoopFinished
 
 

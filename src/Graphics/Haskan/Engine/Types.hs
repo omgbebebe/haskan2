@@ -311,7 +311,10 @@ data EngineConfig = EngineConfig
     timeoutSeconds :: !(Maybe Integer),
     uvCheckMode :: !(Maybe String),
     envMapDir :: !String,
-    lightCount :: !Int
+    lightCount :: !Int,
+    initialTimeOfDay :: !Float,
+    timeSpeed :: !Float,
+    dayNightEnabled :: !Bool
   }
   deriving (Show)
 
@@ -379,7 +382,10 @@ data GameState cam = GameState
     pendingAllStages :: TVar Bool,
     pendingSwapchainScreenshot :: TVar Bool,
     mouseCaptureEnabled :: TVar Bool,
-    lights :: TVar [LightData]
+    lights :: TVar [LightData],
+    gameTimeOfDay :: TVar Float,
+    gameTimeSpeed :: TVar Float,
+    gameDayNightEnabled :: TVar Bool
   }
 
 data RenderDebugInfo = RenderDebugInfo
