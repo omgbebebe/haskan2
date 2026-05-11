@@ -26,8 +26,8 @@
 2. **Skybox**: Rendered inside lighting shader (not separate pass) using per-vertex frustum rays + `env_map` sampling
 3. **Screen-space overlays**: Axis arrows + ground plane drawn in lighting shader fragment stage, not geometry mesh
 4. **linear's lookAt**: Creates **right-handed** view space: +X = world +X (right), +Y = world +Y (up), +Z = backward
-5. **Y-flip projection**: `makeProjectionMatrix` post-multiplies by `scale(1, -1, 1)`; reverted to `COUNTER_CLOCKWISE`
-6. **Depth precision**: `D16_UNORM` → `D32_SFLOAT`
+5. **Y-flip projection**: `makeProjectionMatrix` post-multiplies by `scale(1, -1, 1)`; **frontFace = CLOCKWISE** (Y-flip reverses winding in clip space)
+6. **Backface culling**: `VK_CULL_MODE_BACK_BIT` enabled for all pipelines
 7. **Normal matrix**: Added to `EntityData` SSBO; computed per entity via `transpose . inv33`
 8. **Mesh merging**: All scene meshes concatenated into single buffers with per-entity `firstIndex`/`vertexOffset`
 9. **FIR `if-then-else` ambiguity**: Convert `gl_VertexIndex` to `Code Float` via `fromIntegral` first
@@ -129,16 +129,30 @@ Specular IBL intensity is now physically correct — no more over-bright reflect
 ### File Changed
 - `src/Graphics/Haskan/Vulkan/BRDF.hs` — removed `weight` multiplication from `integrateBRDF`
 
-## UV Mapping Fixes (2025-05-10)
+## UV Mapping Fixes (2025-05-11)
 
-### Bugs Fixed
-1. **UV sphere mirrored text**: `u` coordinate was not flipped; fixed to `u = 1.0 - lonIdx/lonCount`
-2. **Cube UVs upside-down**: All cube face UVs used `v=0` at bottom-left (OpenGL convention); flipped to `v=1` at top-left (Vulkan convention)
-3. **Cube face winding**: Front/right faces had reversed winding causing backface culling issues; fixed triangle order
-4. **Cube tangents**: Back/right face tangents pointed in wrong U direction after UV flip; corrected to match flipped UVs
+### Final State
+- **Backface culling enabled**: `VK_CULL_MODE_BACK_BIT` (was `VK_CULL_MODE_NONE`)
+- **Front face**: `VK_FRONT_FACE_CLOCKWISE` (was `COUNTER_CLOCKWISE`). The Y-flip projection (`scale(1,-1,1)`) reverses winding in clip space, so CW in clip space corresponds to CCW in world space. With `frontFace=CLOCKWISE`, triangles that are CCW in world space survive culling.
+
+### Cube Fixes
+1. **Side face V coordinates**: Swapped V on all 4 side faces (Front/Back/Right/Left). Y+ vertices get V=1, Y- vertices get V=0. This makes arrows point up on side faces.
+2. **Top/Bottom face V coordinates**: Swapped V on Top and Bottom faces. Top face Y+ gets V=1 (was V=0), Bottom face Y- gets V=0 (was V=1).
+3. **Left face winding**: Changed from `12,13,14, 12,14,15` to `12,15,14, 12,14,13`. The Left face was CW in world space (became CCW in clip space with Y-flip, hence culled). The fix makes it CCW in world space.
+
+### Sphere Fixes
+1. **U coordinate**: Removed inversion — `u = lonIdx/lonCount` (was `1.0 - lonIdx/lonCount`)
+2. **Tangent**: Negated — `(-sin φ, 0, cos φ)` (was `(sin φ, 0, -cos φ)`) to match corrected U
+3. **Winding**: Kept original `base, nextBase, nextBase+1, base, nextBase+1, base+1` which is CCW in world space
+
+### Known Issues
+- **Screenshots upside-down**: The screenshot capture in `Debug/Screenshot.hs` flips images vertically. This is a separate bug from UV mapping.
+- **uvCube.gltf Y-flip**: The glTF cube renders flipped vertically compared to Blender. This may be a projection or coordinate system issue, not UV-related.
 
 ### Files Changed
-- `src/Graphics/Haskan/Mesh.hs` — `unitCube` and `uvSphere` UV/tangent fixes
+- `src/Graphics/Haskan/Mesh.hs` — `unitCube` and `uvSphere` UV/tangent/winding fixes
+- `src/Graphics/Haskan/Vulkan/GraphicsPipeline.hs` — backface culling + CLOCKWISE front face
+- `.opencode/UV_CHECK_MESH_AUDIT.tex` — detailed mathematical analysis
 
 ## FIR Patch — Texture2D' (2025-05-10)
 
