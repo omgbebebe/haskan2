@@ -18,14 +18,14 @@ groundPlaneMesh :: Foreign.C.CFloat -> Mesh
 groundPlaneMesh size =
   let s = size
       t = V4 1 0 0 1
-      -- Four corners of the plane (XZ plane, normal -Y)
-      v0 = Vertex (V3 (-s) 0 (-s)) (V2 0 0) (V3 0 (-1) 0) t (V3 1 1 1)
-      v1 = Vertex (V3 s 0 (-s)) (V2 50 0) (V3 0 (-1) 0) t (V3 1 1 1)
-      v2 = Vertex (V3 s 0 s) (V2 50 50) (V3 0 (-1) 0) t (V3 1 1 1)
-      v3 = Vertex (V3 (-s) 0 s) (V2 0 50) (V3 0 (-1) 0) t (V3 1 1 1)
+      -- Four corners of the plane (XZ plane, normal +Y)
+      v0 = Vertex (V3 (-s) 0 (-s)) (V2 0 0) (V3 0 1 0) t (V3 1 1 1)
+      v1 = Vertex (V3 s 0 (-s)) (V2 50 0) (V3 0 1 0) t (V3 1 1 1)
+      v2 = Vertex (V3 s 0 s) (V2 50 50) (V3 0 1 0) t (V3 1 1 1)
+      v3 = Vertex (V3 (-s) 0 s) (V2 0 50) (V3 0 1 0) t (V3 1 1 1)
    in Mesh
         { vertices = [v0, v1, v2, v3],
-          indices = [0, 2, 1, 0, 3, 2]
+          indices = [0, 1, 2, 0, 2, 3]
         }
 
 -- | Create a unit cube centered at origin (side length = 1).
@@ -35,35 +35,41 @@ unitCube :: Mesh
 unitCube =
   let s = 0.5
       -- Front face (z = s, normal +Z, tangent +X)
-      vf0 = Vertex (V3 (-s) (-s) s) (V2 1 0) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
-      vf1 = Vertex (V3 s (-s) s) (V2 0 0) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
-      vf2 = Vertex (V3 s s s) (V2 0 1) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
-      vf3 = Vertex (V3 (-s) s s) (V2 1 1) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
+      -- Viewed from +Z: left(-X) right(+X), down(-Y) up(+Y)
+      -- Vulkan V: V=0 = texture top, V=1 = texture bottom
+      -- Bottom of face (Y=-s) gets V=1, top (Y=+s) gets V=0
+      vf0 = Vertex (V3 (-s) (-s) s) (V2 0 1) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
+      vf1 = Vertex (V3 s (-s) s) (V2 1 1) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
+      vf2 = Vertex (V3 s s s) (V2 1 0) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
+      vf3 = Vertex (V3 (-s) s s) (V2 0 0) (V3 0 0 1) (V4 1 0 0 1) (V3 1 1 1)
       -- Back face (z = -s, normal -Z, tangent -X)
-      vb0 = Vertex (V3 s (-s) (-s)) (V2 1 0) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
-      vb1 = Vertex (V3 (-s) (-s) (-s)) (V2 0 0) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
-      vb2 = Vertex (V3 (-s) s (-s)) (V2 0 1) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
-      vb3 = Vertex (V3 s s (-s)) (V2 1 1) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
+      -- Viewed from -Z: left(+X) right(-X), down(-Y) up(+Y)
+      vb0 = Vertex (V3 s (-s) (-s)) (V2 0 1) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
+      vb1 = Vertex (V3 (-s) (-s) (-s)) (V2 1 1) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
+      vb2 = Vertex (V3 (-s) s (-s)) (V2 1 0) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
+      vb3 = Vertex (V3 s s (-s)) (V2 0 0) (V3 0 0 (-1)) (V4 (-1) 0 0 1) (V3 1 1 1)
       -- Right face (x = s, normal +X, tangent -Z)
-      vr0 = Vertex (V3 s (-s) s) (V2 1 0) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
-      vr1 = Vertex (V3 s (-s) (-s)) (V2 0 0) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
-      vr2 = Vertex (V3 s s (-s)) (V2 0 1) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
-      vr3 = Vertex (V3 s s s) (V2 1 1) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
+      -- Viewed from +X: left(+Z) right(-Z), down(-Y) up(+Y)
+      vr0 = Vertex (V3 s (-s) s) (V2 0 1) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
+      vr1 = Vertex (V3 s (-s) (-s)) (V2 1 1) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
+      vr2 = Vertex (V3 s s (-s)) (V2 1 0) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
+      vr3 = Vertex (V3 s s s) (V2 0 0) (V3 1 0 0) (V4 0 0 (-1) 1) (V3 1 1 1)
       -- Left face (x = -s, normal -X, tangent +Z)
-      vl0 = Vertex (V3 (-s) (-s) (-s)) (V2 1 0) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
-      vl1 = Vertex (V3 (-s) (-s) s) (V2 0 0) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
-      vl2 = Vertex (V3 (-s) s s) (V2 0 1) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
-      vl3 = Vertex (V3 (-s) s (-s)) (V2 1 1) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
-      -- Top face (y = s, normal +Y, tangent +X)
-      vt0 = Vertex (V3 (-s) s (-s)) (V2 1 1) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
-      vt1 = Vertex (V3 s s (-s)) (V2 0 1) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
-      vt2 = Vertex (V3 s s s) (V2 0 0) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
-      vt3 = Vertex (V3 (-s) s s) (V2 1 0) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
+      -- Viewed from -X: left(-Z) right(+Z), down(-Y) up(+Y)
+      vl0 = Vertex (V3 (-s) (-s) (-s)) (V2 0 1) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
+      vl1 = Vertex (V3 (-s) (-s) s) (V2 1 1) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
+      vl2 = Vertex (V3 (-s) s s) (V2 1 0) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
+      vl3 = Vertex (V3 (-s) s (-s)) (V2 0 0) (V3 (-1) 0 0) (V4 0 0 1 1) (V3 1 1 1)
+      -- Top face (y = s, normal +Y, tangent +X) — unchanged, correct
+      vt0 = Vertex (V3 (-s) s (-s)) (V2 0 0) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
+      vt1 = Vertex (V3 s s (-s)) (V2 1 0) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
+      vt2 = Vertex (V3 s s s) (V2 1 1) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
+      vt3 = Vertex (V3 (-s) s s) (V2 0 1) (V3 0 1 0) (V4 1 0 0 1) (V3 1 1 1)
       -- Bottom face (y = -s, normal -Y, tangent +X)
-      vbot0 = Vertex (V3 (-s) (-s) (-s)) (V2 1 0) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
-      vbot1 = Vertex (V3 s (-s) (-s)) (V2 0 0) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
-      vbot2 = Vertex (V3 s (-s) s) (V2 0 1) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
-      vbot3 = Vertex (V3 (-s) (-s) s) (V2 1 1) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
+      vbot0 = Vertex (V3 (-s) (-s) s) (V2 0 0) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
+      vbot1 = Vertex (V3 s (-s) s) (V2 1 0) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
+      vbot2 = Vertex (V3 s (-s) (-s)) (V2 1 1) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
+      vbot3 = Vertex (V3 (-s) (-s) (-s)) (V2 0 1) (V3 0 (-1) 0) (V4 1 0 0 1) (V3 1 1 1)
       verts = [vf0, vf1, vf2, vf3, vb0, vb1, vb2, vb3, vr0, vr1, vr2, vr3, vl0, vl1, vl2, vl3, vt0, vt1, vt2, vt3, vbot0, vbot1, vbot2, vbot3]
       idxs =
         [ -- Front (CCW from +Z)
@@ -76,8 +82,8 @@ unitCube =
           12, 13, 14, 12, 14, 15,
           -- Top (CCW from +Y)
           16, 18, 17, 16, 19, 18,
-          -- Bottom (CCW from -Y)
-          20, 21, 22, 20, 22, 23
+          -- Bottom (CCW from -Y): reversed winding
+          20, 22, 21, 20, 23, 22
         ]
     in Mesh {vertices = verts, indices = idxs}
 
@@ -100,11 +106,11 @@ uvSphere latSegments lonSegments radius =
             nx = realToFrac (sin theta * cos phi) :: Foreign.C.CFloat
             ny = realToFrac (cos theta) :: Foreign.C.CFloat
             nz = realToFrac (sin theta * sin phi) :: Foreign.C.CFloat
-            u = realToFrac (fromIntegral lonIdx / fromIntegral lonCount) :: Foreign.C.CFloat
-            v = realToFrac (1.0 - fromIntegral latIdx / fromIntegral latCount) :: Foreign.C.CFloat
-            tx = realToFrac (-sin phi) :: Foreign.C.CFloat
+            u = realToFrac (1.0 - fromIntegral lonIdx / fromIntegral lonCount) :: Foreign.C.CFloat
+            v = realToFrac (fromIntegral latIdx / fromIntegral latCount) :: Foreign.C.CFloat
+            tx = realToFrac (sin phi) :: Foreign.C.CFloat
             ty = realToFrac (0 :: Float) :: Foreign.C.CFloat
-            tz = realToFrac (cos phi) :: Foreign.C.CFloat
+            tz = realToFrac (-cos phi) :: Foreign.C.CFloat
          in Vertex (V3 x y z) (V2 u v) (V3 nx ny nz) (V4 tx ty tz 1) (V3 1 1 1)
       -- Generate vertices: latCount+1 rows, lonCount+1 columns
       verts = [mkVert latIdx lonIdx | latIdx <- [0..latCount], lonIdx <- [0..lonCount]]
@@ -131,13 +137,13 @@ uvPlane :: Foreign.C.CFloat -> Mesh
 uvPlane size =
   let s = size
       t = V4 1 0 0 1
-      v0 = Vertex (V3 (-s) 0 (-s)) (V2 0 0) (V3 0 (-1) 0) t (V3 1 1 1)
-      v1 = Vertex (V3 s 0 (-s)) (V2 1 0) (V3 0 (-1) 0) t (V3 1 1 1)
-      v2 = Vertex (V3 s 0 s) (V2 1 1) (V3 0 (-1) 0) t (V3 1 1 1)
-      v3 = Vertex (V3 (-s) 0 s) (V2 0 1) (V3 0 (-1) 0) t (V3 1 1 1)
+      v0 = Vertex (V3 (-s) 0 (-s)) (V2 0 0) (V3 0 1 0) t (V3 1 1 1)
+      v1 = Vertex (V3 s 0 (-s)) (V2 1 0) (V3 0 1 0) t (V3 1 1 1)
+      v2 = Vertex (V3 s 0 s) (V2 1 1) (V3 0 1 0) t (V3 1 1 1)
+      v3 = Vertex (V3 (-s) 0 s) (V2 0 1) (V3 0 1 0) t (V3 1 1 1)
    in Mesh
         { vertices = [v0, v1, v2, v3],
-          indices = [0, 2, 1, 0, 3, 2]
+          indices = [0, 1, 2, 0, 2, 3]
         }
 groundPlaneMeshGrid subdivisions size =
   let n = subdivisions

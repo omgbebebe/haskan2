@@ -63,7 +63,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                     ( updateCamera
                         (activeCamera worldState)
                         [ Camera.Rotate
-                              ( V3 (fromIntegral x * 0.1 * dtSeconds) (-(fromIntegral y * 0.1 * dtSeconds)) 0.0
+                              ( V3 (fromIntegral x * 0.1 * dtSeconds) (fromIntegral y * 0.1 * dtSeconds) 0.0
                              )
                         ]
                     )

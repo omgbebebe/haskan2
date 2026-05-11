@@ -127,7 +127,7 @@ orbitalCameraForward OrbitalCamera{..} =
 orbitalToMatrix :: OrbitalCamera -> ViewMatrix
 orbitalToMatrix cam =
   let pos = orbitalCameraPosition cam
-      view = lookAtNegativeYUp pos (target cam) (V3 0 (-1) 0)
+      view = lookAtNegativeYUp pos (target cam) worldUp
    in ViewMatrix view
 
 orientationFromAzEl :: Foreign.C.CFloat -> Foreign.C.CFloat -> Quaternion Foreign.C.CFloat
