@@ -23,6 +23,7 @@ data CliOpts = CliOpts
   , optUVCheckSphere :: !Bool
   , optUVCheckPlane :: !Bool
   , optEnvDir :: !String
+  , optLights :: !Int
   }
 
 cliParser :: Parser CliOpts
@@ -75,7 +76,14 @@ cliParser =
      <> value "debug"
      <> showDefault
      <> help "Environment cubemap directory name (in data/textures/cubemaps/)"
-      )
+       )
+    <*> option auto
+      ( long "lights"
+     <> metavar "N"
+     <> value 3
+     <> showDefault
+     <> help "Number of random lights to spawn"
+       )
 
 opts :: ParserInfo CliOpts
 opts = info (cliParser <**> helper)
@@ -103,3 +111,4 @@ main = do
     (optUVCheckSphere cli)
     (optUVCheckPlane cli)
     (optEnvDir cli)
+    (optLights cli)

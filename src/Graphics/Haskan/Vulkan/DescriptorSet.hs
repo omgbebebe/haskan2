@@ -144,8 +144,9 @@ updateLightingDescriptorSets ::
   Vulkan.VkDescriptorSet ->
   Vulkan.VkSampler ->
   [Vulkan.VkImageView] -> -- ^ 7 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive, env_cubemap, irradiance_cubemap, brdf_lut
+  Maybe Vulkan.VkBuffer -> -- ^ light SSBO (optional)
   m ()
-updateLightingDescriptorSets dev descriptorSet sampler imageViews = do
+updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer = do
   let mkTextureInfo imageView =
         Vulkan.createVk
           ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -166,9 +167,62 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews = do
               &* set @"dstArrayElement" 0
           )
       writes = zipWith mkWrite [0..] imageViews
+      lightWrite = case mLightBuffer of
+        Nothing -> []
+        Just lightBuffer ->
+          let bufferInfo =
+                Vulkan.createVk
+                  ( set @"buffer" lightBuffer
+                      &* set @"offset" 0
+                      &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+                  )
+          in [Vulkan.createVk
+                ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+                    &* set @"pNext" Vulkan.VK_NULL
+                    &* set @"dstSet" descriptorSet
+                    &* set @"dstBinding" 7
+                    &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+                    &* set @"pTexelBufferView" Vulkan.VK_NULL
+                    &* set @"pImageInfo" Vulkan.VK_NULL
+                    &* setVkRef @"pBufferInfo" bufferInfo
+                    &* set @"descriptorCount" 1
+                    &* set @"dstArrayElement" 0
+                )]
+      allWrites = writes ++ lightWrite
   liftIO $
-    Foreign.Marshal.Array.withArray writes $ \writeUpdatePtr ->
-      Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length writes)) writeUpdatePtr 0 Vulkan.vkNullPtr
+    Foreign.Marshal.Array.withArray allWrites $ \writeUpdatePtr ->
+      Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writeUpdatePtr 0 Vulkan.vkNullPtr
+
+-- | Update only the light SSBO binding (binding 7) in a lighting descriptor set.
+updateLightingLightBuffer ::
+  MonadIO m =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkBuffer ->
+  m ()
+updateLightingLightBuffer dev descriptorSet lightBuffer = do
+  let bufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" lightBuffer
+              &* set @"offset" 0
+              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+          )
+      write =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 7
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pImageInfo" Vulkan.VK_NULL
+              &* setVkRef @"pBufferInfo" bufferInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+  liftIO $
+    Foreign.Marshal.Array.withArray [write] $ \writeUpdatePtr ->
+      Vulkan.vkUpdateDescriptorSets dev 1 writeUpdatePtr 0 Vulkan.vkNullPtr
 
 -- | Update UBO, bindless texture array, and entity SSBO in a descriptor set.
 updateDescriptorSetsBindless ::

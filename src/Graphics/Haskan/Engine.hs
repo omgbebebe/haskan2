@@ -48,6 +48,7 @@ import Graphics.Haskan.Engine.Types
   , WorldState (..)
   , InputBuffer (..)
   , ControlMessage (..)
+  , LightData (..)
   , emptyFrameStats
   , updateFrameStats
   , forkIOWithHandler
@@ -92,6 +93,18 @@ mainLoop meshName EngineConfig {..} = do
   tvPendingAllStages <- liftIO $ STM.newTVarIO False
   tvPendingSwapchainScreenshot <- liftIO $ STM.newTVarIO False
   tvMouseCaptureEnabled <- liftIO $ STM.newTVarIO False
+  tvLights <- liftIO $ STM.newTVarIO
+    ( take lightCount
+      [ LightData (V3 1 1 1) 1.0 (V3 1 1 1) 0 (V3 (-1) (-1) (-1)) 0.0
+      , LightData (V3 (-1) 1 (-1)) 0.5 (V3 1 0.8 0.6) 0 (V3 1 (-1) 1) 0.0
+      , LightData (V3 0 (-1) 0) 0.3 (V3 0.4 0.4 0.6) 0 (V3 0 1 0) 0.0
+      , LightData (V3 1 0 0) 0.7 (V3 0.9 0.2 0.2) 0 (V3 (-1) 0 0) 0.0
+      , LightData (V3 0 1 0) 0.4 (V3 0.2 0.9 0.2) 0 (V3 0 (-1) 0) 0.0
+      , LightData (V3 0 0 1) 0.6 (V3 0.2 0.2 0.9) 0 (V3 0 0 (-1)) 0.0
+      , LightData (V3 1 1 (-1)) 0.5 (V3 0.8 0.8 0.2) 0 (V3 (-1) (-1) 1) 0.0
+      , LightData (V3 (-1) (-1) 1) 0.4 (V3 0.8 0.2 0.8) 0 (V3 1 1 (-1)) 0.0
+      ]
+    )
 
   let gameState =
         GameState
@@ -112,6 +125,7 @@ mainLoop meshName EngineConfig {..} = do
           tvPendingAllStages
           tvPendingSwapchainScreenshot
           tvMouseCaptureEnabled
+          tvLights
 
   mDebugServer <- case debugSocketPath of
     Just path -> do

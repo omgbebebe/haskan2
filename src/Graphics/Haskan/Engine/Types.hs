@@ -9,6 +9,8 @@ module Graphics.Haskan.Engine.Types
   , newInputBuffer
   , writeInputBuffer
   , flushInputBuffer
+  , LightType(..)
+  , LightData(..)
   , ComputeEntityData(..)
   , ComputeCullData(..)
   , DrawIndexedIndirectCommand(..)
@@ -119,6 +121,36 @@ flushInputBuffer (InputBuffer eventsVar overflowVar) = do
   STM.writeTVar eventsVar Seq.empty
   STM.writeTVar overflowVar 0
   pure (toList events, overflow)
+
+data LightType = LightDirectional | LightPoint | LightSpot
+  deriving (Show, Eq, Enum)
+
+data LightData = LightData
+  { ldPosition :: V3 Foreign.C.CFloat
+  , ldIntensity :: Foreign.C.CFloat
+  , ldColor :: V3 Foreign.C.CFloat
+  , ldType :: Word32
+  , ldDirection :: V3 Foreign.C.CFloat
+  , ldRange :: Foreign.C.CFloat
+  } deriving (Show)
+
+instance Storable LightData where
+  sizeOf _ = 48
+  alignment _ = 16
+  peek ptr = LightData
+    <$> peekByteOff ptr 0
+    <*> peekByteOff ptr 12
+    <*> peekByteOff ptr 16
+    <*> peekByteOff ptr 28
+    <*> peekByteOff ptr 32
+    <*> peekByteOff ptr 44
+  poke ptr (LightData pos int col typ dir rng) = do
+    pokeByteOff ptr 0 pos
+    pokeByteOff ptr 12 int
+    pokeByteOff ptr 16 col
+    pokeByteOff ptr 28 typ
+    pokeByteOff ptr 32 dir
+    pokeByteOff ptr 44 rng
 
 data ComputeEntityData = ComputeEntityData
   { ceTransform :: M44 Foreign.C.CFloat
@@ -278,7 +310,8 @@ data EngineConfig = EngineConfig
     debugSocketPath :: !(Maybe FilePath),
     timeoutSeconds :: !(Maybe Integer),
     uvCheckMode :: !(Maybe String),
-    envMapDir :: !String
+    envMapDir :: !String,
+    lightCount :: !Int
   }
   deriving (Show)
 
@@ -345,7 +378,8 @@ data GameState cam = GameState
     pendingScreenshot :: TVar Bool,
     pendingAllStages :: TVar Bool,
     pendingSwapchainScreenshot :: TVar Bool,
-    mouseCaptureEnabled :: TVar Bool
+    mouseCaptureEnabled :: TVar Bool,
+    lights :: TVar [LightData]
   }
 
 data RenderDebugInfo = RenderDebugInfo

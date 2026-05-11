@@ -212,7 +212,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
     let allViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
                      (Just env, Just irr, Just brdf) -> views ++ [env, irr, brdf]
                      _ -> views ++ (replicate 3 Vulkan.VK_NULL_HANDLE)
-    DescriptorSet.updateLightingDescriptorSets device ds sampler allViews
+    DescriptorSet.updateLightingDescriptorSets device ds sampler allViews Nothing
   logDebugIO LogRender "lighting descriptor sets updated"
 
   pure DeferredResources

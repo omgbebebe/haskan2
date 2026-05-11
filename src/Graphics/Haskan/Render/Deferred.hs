@@ -57,6 +57,9 @@ data DeferredPassData = DeferredPassData
     -- Overlay controls
   , dpdAxisOverlay        :: !Float
   , dpdGroundPlane        :: !Float
+    -- Light data
+  , dpdLightCount         :: !Word32
+  , dpdLightBuffer        :: !Vulkan.VkBuffer
     -- G-buffer images for barrier
   , dpdGBufferImages      :: ![Vulkan.VkImage]
     -- Wireframe overlay
@@ -156,7 +159,7 @@ buildDeferredGraph DeferredPassData {..} = do
               -- std430 layout: vec3 aligned to 16 bytes, need padding after each
               -- Total: 20 floats * 4 = 80 bytes
               camPosData = [ realToFrac camX, realToFrac camY, realToFrac camZ, realToFrac dpdDebugMode
-                           , realToFrac dpdAxisOverlay, realToFrac dpdGroundPlane, 0, 0
+                           , realToFrac dpdAxisOverlay, realToFrac dpdGroundPlane, 0, realToFrac dpdLightCount
                            , realToFrac r0x, realToFrac r0y, realToFrac r0z, 0
                            , realToFrac r1x, realToFrac r1y, realToFrac r1z, 0
                            , realToFrac r2x, realToFrac r2y, realToFrac r2z, 0

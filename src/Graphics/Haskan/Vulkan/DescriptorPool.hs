@@ -76,13 +76,18 @@ createLightingDescriptorPool dev numSets texturesPerSet = do
           ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
               &* set @"descriptorCount" (fromIntegral (numSets * texturesPerSet))
           )
+      ssboPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"descriptorCount" (fromIntegral numSets)
+          )
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"poolSizeCount" 1
-              &* setListRef @"pPoolSizes" [samplerPoolSize]
+              &* set @"poolSizeCount" 2
+              &* setListRef @"pPoolSizes" [samplerPoolSize, ssboPoolSize]
               &* set @"maxSets" (fromIntegral numSets)
           )
    in liftIO $

@@ -49,7 +49,7 @@ import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), De
 import Graphics.Haskan.Debug.Screenshot qualified as Screenshot
 import Graphics.Haskan.Debug.Server (DebugServerHandle, CommandQueue, startDebugServer, stopDebugServer)
 import Graphics.Haskan.Engine.Scene (computeSkyboxRays, makeProjectionMatrix, drawCallToSnapshot, computeMeshBounds, computeWorldSpaceBounds, computeSceneBounds, adjustCameraForScene)
-import Graphics.Haskan.Engine.Types (ComputeCullResources (..), ComputeEntityData (..), ComputeCullData (..), DrawIndexedIndirectCommand (..), EngineConfig (..), FrameStats (..), FrameTime (..), GameState (..), WorldState (..), InputBuffer (..), ControlMessage (..), RenderDebugInfo (..), EntityDebugInfo (..), toListOfV4, forkIOWithHandler, emptyFrameStats, updateFrameStats, transformAABB, extractFrustumPlanes, filterVisible, newInputBuffer, writeInputBuffer, flushInputBuffer)
+import Graphics.Haskan.Engine.Types (ComputeCullResources (..), ComputeEntityData (..), ComputeCullData (..), DrawIndexedIndirectCommand (..), EngineConfig (..), FrameStats (..), FrameTime (..), GameState (..), WorldState (..), InputBuffer (..), ControlMessage (..), RenderDebugInfo (..), EntityDebugInfo (..), LightData (..), toListOfV4, forkIOWithHandler, emptyFrameStats, updateFrameStats, transformAABB, extractFrustumPlanes, filterVisible, newInputBuffer, writeInputBuffer, flushInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (logInfoIO, logDebugIO, showT, LogCategory(..))
 import Graphics.Haskan.Mesh qualified as Mesh
@@ -140,8 +140,11 @@ renderFrameLoop ::
   STM.TVar Bool ->
   STM.TVar Bool ->
   Vulkan.VkPhysicalDevice ->
+  Vulkan.VkBuffer ->
+  Vulkan.VkDeviceMemory ->
+  STM.TVar [LightData] ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -230,6 +233,13 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
       liftIO $ Buffer.updateStorageBuffer device ccrEntityMemory 0 entityData
       liftIO $ Buffer.updateUniformBuffer device ccrCullDataMemory [cullData]
       logDebugIO LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
+      
+      -- Upload lights to SSBO
+      lights' <- liftIO $ STM.readTVarIO tvLights
+      let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
+      liftIO $ Buffer.updateStorageBuffer device lightSsboMemory 0 lightsToUpload
+      let lightCount = fromIntegral (length lights') :: Word32
+      logDebugIO LogRender $ "lights uploaded: " <> showT (length lights')
       case drawList of
         [] -> pure (False, False)
         _ -> do
@@ -293,6 +303,8 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdDebugMode = debugMode'
                         , dpdAxisOverlay = axisOverlay'
                         , dpdGroundPlane = groundPlane'
+                        , dpdLightCount = lightCount
+                        , dpdLightBuffer = lightSsboBuffer
                         , dpdGBufferImages = gBufferImagesForFrame
                         , dpdWireframePipeline = drWireframePipeline
                         , dpdWireframeLayout = drWireframePipelineLayout
@@ -442,6 +454,9 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         tvPendingAllStages
         tvPendingSwapchainScreenshot
         physicalDevice
+        lightSsboBuffer
+        lightSsboMemory
+        tvLights
 
 renderLoop ::
   (Camera cam, MonadFail m, MonadManaged m, MonadIO m) =>
@@ -723,6 +738,12 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   (entitySsboBuffer, entitySsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxEntities dummyEntityData) Vulkan.VK_ZERO_FLAGS
   (drawCommandsBuffer, drawCommandsMemory) <- Buffer.managedStorageBuffer physicalDevice device initialDrawCommands Vulkan.VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
   (cullDataBuffer, cullDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [dummyCullData]
+  
+  let maxLights = 256 :: Int
+      dummyLightData = LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0
+  (lightSsboBuffer, lightSsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxLights dummyLightData) Vulkan.VK_ZERO_FLAGS
+  logDebugIO LogBuffer $ "light SSBO created: " <> showT (maxLights * sizeOf (undefined :: LightData)) <> " bytes"
+
   logDebugIO LogBuffer $ "compute buffers created: entitySSBO=" <> showT (maxEntities * sizeOf (undefined :: ComputeEntityData)) <> " drawCommands=" <> showT (maxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)) <> " cullData=" <> showT (sizeOf (undefined :: ComputeCullData))
 
   DescriptorSet.updateComputeDescriptorSets device computeDescriptorSet entitySsboBuffer drawCommandsBuffer cullDataBuffer
@@ -862,16 +883,20 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
       tvPendingScreenshot = pendingScreenshot gameState
       tvPendingAllStages = pendingAllStages gameState
       tvPendingSwapchainScreenshot = pendingSwapchainScreenshot gameState
+      tvLights = lights gameState
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
         if exit
           then pure ()
           else do
-             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-                with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView mBrdfView lightingSampler) $ \dr ->
-                 renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice
-             outerLoop renderFrameLoopFinished
+              renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
+                 with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView mBrdfView lightingSampler) $ \dr -> do
+                   -- Update lighting descriptor sets with light SSBO
+                   for_ (drLightingDescriptorSets dr) $ \ds ->
+                     DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
+                   renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights
+              outerLoop renderFrameLoopFinished
 
 
   logInfoIO LogGeneral "Starting render loop"
