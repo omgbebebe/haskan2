@@ -1,9 +1,10 @@
 \documentclass{article}
 \usepackage{amsmath, amssymb, amsfonts}
 \usepackage{geometry}
+\usepackage{booktabs}
 \geometry{margin=1in}
 \title{Haskan2 Rendering Pipeline Mathematical Trace}
-\author{Auto-generated for debugging}
+\author{Rune}
 \date{\today}
 
 \begin{document}
@@ -15,18 +16,24 @@
 \begin{itemize}
 \item Right-handed coordinate system
 \item +X = right, +Y = up, +Z = forward (toward viewer in default view)
-\item Confirmed by: camera at $(1.4, -0.7, 1.2)$ looking at origin
-\item View direction: $\mathbf{f} = \text{normalize}(\text{target} - \text{camera}) \approx (-0.66, 0.33, -0.57)$
 \end{itemize}
 
 \subsection{View Space (linear's lookAt)}
 \begin{itemize}
-\item \textbf{Left-handed} coordinate system (this is critical!)
-\item Forward: $+Z$ (points from camera toward scene)
-\item Right: $+X$ corresponds to \textbf{left} in world space (because $+X \times +Y = +Z$ in left-handed)
-\item Up: $+Y$
+\item \textbf{Right-handed} coordinate system (corrected from earlier left-handed assumption)
+\item Forward: $-Z$ (points from camera toward scene)
+\item Right: $+X$ = world $+X$ (right)
+\item Up: $+Y$ = world $+Y$ (up)
 \item View matrix $\mathbf{V}$ transforms world $\to$ view
 \item linear stores matrices in \textbf{row-major} order
+\end{itemize}
+
+\textbf{Correction}: Earlier versions of this document incorrectly stated that linear's lookAt produces a left-handed view space. Mathematical analysis confirmed it is right-handed:
+\begin{itemize}
+\item $\mathbf{f} = \text{normalize}(\mathbf{c} - \mathbf{e})$ points from eye to center (forward)
+\item $\mathbf{s} = \text{normalize}(\mathbf{f} \times \mathbf{u})$ points to the right
+\item $\mathbf{u'} = \mathbf{s} \times \mathbf{f}$ points up
+\item $\mathbf{s} \times \mathbf{u'} = \mathbf{s} \times (\mathbf{s} \times \mathbf{f}) = \mathbf{f}$ (right-handed: $X \times Y = Z$)
 \end{itemize}
 
 \subsection{Clip Space}
@@ -62,7 +69,7 @@ View matrix $\mathbf{V}$ from linear's lookAt:
 For linear's lookAt with eye at $\mathbf{e}$, center at $\mathbf{c}$, up at $\mathbf{u}$:
 \begin{align}
 \mathbf{f} &= \text{normalize}(\mathbf{c} - \mathbf{e}) \quad \text{(forward, points toward scene)} \\
-\mathbf{s} &= \text{normalize}(\mathbf{f} \times \mathbf{u}) \quad \text{(right, but actually points LEFT in world)} \\
+\mathbf{s} &= \text{normalize}(\mathbf{f} \times \mathbf{u}) \quad \text{(right)} \\
 \mathbf{u'} &= \mathbf{s} \times \mathbf{f} \quad \text{(true up)}
 \end{align}
 
@@ -76,9 +83,9 @@ u'_x & u'_y & u'_z & -\mathbf{u'} \cdot \mathbf{e} \\
 \end{pmatrix}
 \]
 
-\textbf{Key point}: The third row is $-\mathbf{f}$, not $+\mathbf{f}$. This is because linear uses a left-handed view space where $+Z$ is forward. In the view matrix, we need to negate to get the correct transformation.
+\textbf{Key point}: The third row is $-\mathbf{f}$ because in the view space, $-Z$ is forward (toward the scene). This is a right-handed convention.
 
-\subsection{Step 3: View to Clip}
+\subsection{Step 3: View to Clip — Y-Flip Projection}
 Projection matrix $\mathbf{P}$ (after Y-flip for Vulkan):
 \[
 \mathbf{P} = \mathbf{Y}_{flip} \cdot \mathbf{P}_{persp}
@@ -113,27 +120,96 @@ x_{screen} = \frac{x_{ndc} + 1}{2} \cdot width, \quad
 y_{screen} = \frac{y_{ndc} + 1}{2} \cdot height
 \]
 
+\section{The Winding Problem — Why We Switched from CCW to CW}
+
+\subsection{The Issue}
+After adding the Y-flip projection ($\mathbf{Y}_{flip} = \text{diag}(1, -1, 1, 1)$), the winding order of triangles \textbf{reverses} in clip space.
+
+\subsection{Mathematical Explanation}
+Consider a triangle with vertices $\mathbf{a}, \mathbf{b}, \mathbf{c}$ in view space. The signed area (winding indicator) is:
+\[
+W_{view} = (\mathbf{b} - \mathbf{a}) \times (\mathbf{c} - \mathbf{a})
+\]
+
+After Y-flip, the vertices become:
+\[
+\mathbf{a}' = (a_x, -a_y, a_z), \quad
+\mathbf{b}' = (b_x, -b_y, b_z), \quad
+\mathbf{c}' = (c_x, -c_y, c_z)
+\]
+
+The edge vectors in clip space:
+\begin{align}
+\mathbf{b}' - \mathbf{a}' &= (b_x - a_x, -(b_y - a_y), b_z - a_z) \\
+\mathbf{c}' - \mathbf{a}' &= (c_x - a_x, -(c_y - a_y), c_z - a_z)
+\end{align}
+
+The cross product (only Z component matters for winding in the XY plane):
+\begin{align}
+W_{clip} &= (\mathbf{b}' - \mathbf{a}') \times (\mathbf{c}' - \mathbf{a}') \\
+&= (b_x - a_x)(-(c_y - a_y)) - (-(b_y - a_y))(c_x - a_x) \\
+&= -[(b_x - a_x)(c_y - a_y) - (b_y - a_y)(c_x - a_x)] \\
+&= -W_{view}
+\end{align}
+
+\textbf{Conclusion}: The Y-flip negates the signed area, which means:
+\begin{itemize}
+\item CCW in view space $\to$ CW in clip space
+\item CW in view space $\to$ CCW in clip space
+\end{itemize}
+
+\subsection{Backface Culling Decision}
+With backface culling enabled (`VK_CULL_MODE_BACK_BIT`), Vulkan culls triangles based on their winding in clip space:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{llll}
+\toprule
+\textbf{frontFace} & \textbf{Culls} & \textbf{Survives} & \textbf{World-space winding} \\
+\midrule
+CCW & CW clip-space & CCW clip-space & CW world-space \\
+CW & CCW clip-space & CW clip-space & CCW world-space \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Since our meshes are constructed with CCW winding in world space (standard convention), and the Y-flip makes them CW in clip space, we need:
+
+\[
+\boxed{\text{frontFace} = \text{VK\_FRONT\_FACE\_CLOCKWISE}}
+\]
+
+This ensures that CCW world-space triangles (our mesh convention) survive backface culling after the Y-flip projection.
+
+\subsection{Practical Impact}
+Before understanding this, we had `VK_CULL_MODE_NONE` (no culling). When we tried to enable culling with `CCW`, approximately half the faces disappeared because the Y-flip was reversing their winding. The fix was either:
+\begin{enumerate}
+\item Use `VK_FRONT_FACE_CLOCKWISE` (chosen)
+\item Reconstruct all meshes with CW winding (rejected — breaks glTF compatibility)
+\item Remove Y-flip and handle upside-down rendering differently (rejected — more complex)
+\end{enumerate}
+
 \section{Skybox Ray Computation}
 
 \subsection{Current Implementation}
 \begin{verbatim}
 computeSkyboxRays view proj =
   let V4 (V4 v00 v01 v02 _) (V4 v10 v11 v12 _) (V4 v20 v21 v22 _) _ = view
-      worldRot = V3 (V3 v00 v10 v20) (V3 v01 v11 v21) (V3 v02 v12 v22)
+      worldRot = V3 (V3 v00 v01 v02) (V3 v10 v11 v12) (V3 v20 v21 v22)
       
       V4 (V4 fx _ _ _) (V4 _ fy _ _) _ _ = proj
       
       ndcToDir (V4 x y _z _w) =
-        let viewDir = V3 (-x / fx) (y / fy) (-1)
+        let viewDir = V3 (x / fx) (y / fy) (-1)
         in normalize (worldRot !* viewDir)
 \end{verbatim}
 
 \subsection{Analysis of worldRot}
-Since linear stores matrices in row-major, the view matrix columns are:
+Since linear stores matrices in row-major, the view matrix rows are:
 \begin{itemize}
-\item Column 0: $(v_{00}, v_{10}, v_{20}) = \mathbf{s}$ (world-space right vector)
-\item Column 1: $(v_{01}, v_{11}, v_{21}) = \mathbf{u'}$ (world-space up vector)
-\item Column 2: $(v_{02}, v_{12}, v_{22}) = -\mathbf{f}$ (world-space forward vector)
+\item Row 0: $(v_{00}, v_{01}, v_{02}) = \mathbf{s}$ (world-space right vector)
+\item Row 1: $(v_{10}, v_{11}, v_{12}) = \mathbf{u'}$ (world-space up vector)
+\item Row 2: $(v_{20}, v_{21}, v_{22}) = -\mathbf{f}$ (world-space forward vector)
 \end{itemize}
 
 So:
@@ -147,10 +223,12 @@ So:
 
 This transforms view-space directions to world-space directions.
 
+\textbf{Correction}: Earlier versions extracted \textbf{columns} instead of rows, which gave $\mathbf{R}$ (world$\to$view) instead of $\mathbf{R}^T$ (view$\to$world). This caused a severe diagonal tilt for non-axis-aligned cameras.
+
 \subsection{Analysis of ndcToDir}
 For a pixel at NDC $(x, y)$:
 \[
-\mathbf{v}_{view} = \begin{pmatrix} -x/f_x \\ y/f_y \\ -1 \end{pmatrix}
+\mathbf{v}_{view} = \begin{pmatrix} x/f_x \\ y/f_y \\ -1 \end{pmatrix}
 \]
 
 Then:
@@ -158,8 +236,8 @@ Then:
 \mathbf{v}_{world} = \text{normalize}(\mathbf{worldRot} \cdot \mathbf{v}_{view})
 \]
 
-\textbf{Why $-x/f_x$?}
-Because in linear's left-handed view space, $+X$ points to the \textbf{left} in world space. To make screen-left correspond to world-left (which is what we want for correct looking), we negate $x$.
+\textbf{Why no $-x$ negation?}
+Because linear's lookAt produces a \textbf{right-handed} view space where $+X$ points to world $+X$ (right). Screen-right ($+x$) should look toward world-right ($+\mathbf{s}$), so we use $+x/f_x$.
 
 \textbf{Why $-1$ for Z?}
 In view space, $-Z$ points toward the scene (forward). We want the ray to point forward, so we use $-1$.
@@ -176,13 +254,13 @@ This is correct: center of screen looks in the forward direction.
 
 At screen right $(x, y) = (1, 0)$:
 \[
-\mathbf{v}_{view} = (-1/f_x, 0, -1)
+\mathbf{v}_{view} = (1/f_x, 0, -1)
 \]
 \[
-\mathbf{v}_{world} = \text{normalize}(-\frac{1}{f_x}\mathbf{s} - \mathbf{f})
+\mathbf{v}_{world} = \text{normalize}(\frac{1}{f_x}\mathbf{s} - \mathbf{f})
 \]
 
-Since $\mathbf{s}$ points to world-left (because linear's view $+X$ is world-left), $-\mathbf{s}$ points to world-right. So screen-right looks toward world-right. This is correct.
+Since $\mathbf{s}$ points to world-right, screen-right looks toward world-right. This is correct.
 
 \section{Cubemap Face Convention}
 
@@ -252,8 +330,8 @@ If cmft generates faces in OpenGL convention but we use them in Vulkan, the +X a
 \subsection{Issue 2: Possible +Y/-Y Face Flip}
 The +Y and -Y faces may also have incorrect vertical orientation depending on cmft's output settings.
 
-\subsection{Issue 3: Screenshot Y-Flip (Fixed)}
-Previously, screenshot readback was doing Y-flip, which was correct for the old projection but wrong after the Y-flip fix. Removed in commit c97fa78.
+\subsection{Issue 3: Screenshot Y-Flip}
+Screenshot readback produces upside-down images. This is a separate bug from UV mapping or projection.
 
 \section{Recommended Fixes}
 
