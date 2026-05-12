@@ -24,7 +24,7 @@
 
 ## Current Status
 - **M9 COMPLETE**: PBR deferred rendering, normal mapping, AO, emissive, IBL split-sum with BRDF LUT
-- **M10 IN PROGRESS**: Phase 1 (multi-light) DONE, Phase 2 (skybox) DONE, Phase 3 (day/night) DONE, Phase 4 (volumetric clouds) BLOCKED by FIR SPIR-V bloat
+- **M10 COMPLETE**: Phase 1 (multi-light) DONE, Phase 2 (skybox) DONE, Phase 3 (day/night) DONE, Phase 4 (volumetric clouds) DONE
 - **Milestone plan**: `docs/M10-PLAN.md`
 - **FIR optimization roadmap**: `3rdparty/fir/.opencode/roadmap/optimization/README.md`
 
@@ -120,17 +120,48 @@
 - `40306cd` — M10.4: procedural volumetric clouds (reverted due to SPIR-V bloat)
 - `26065eb` — Update MEMORIES.md
 
+### 2026-05-12 (later session): FIR Optimization + M10.4 Completion
+**FIR Phase 0 DONE**:
+- Added `Optimize` compiler flag to FIR
+- `compileTo` runs `spirv-opt -O` on generated `.spv` when flag is present
+- Graceful degradation when `spirv-opt` not available
+- All Haskan2 shader compilations updated to use `[SPIRV (Version 1 5), Optimize]`
+- FIR submodule commit: `e211a8a`
+- **Impact**: 10.9MB → 18.3KB raw lighting shader (596× reduction)
+
+**FIR Phase 1.3 DONE**:
+- Added `SanitiseVectorisation` instance for `SelectionF`/`IfF`
+- Vector conditionals emit single `OpSelect` instead of N independent codegen passes
+- FIR submodule commit: `e8fbb82`
+- **Impact**: Zero on current shader (all conditionals are scalar), forward-compatible for vector `fmap`/`\u003c*\u003e`
+
+**Phase 1.1/1.2 CANCELLED**:
+- Both require emitting raw SPIR-V loop CFG in monadic `CGMonad ()` code
+- Too complex, high bug risk in critical `assign` path
+- `spirv-opt` already eliminates unrolled stores via DCE/scalar-replacement
+- Haskan2 doesn't hit these paths (no large local arrays)
+- Full rationale in `.opencode/FIR_OPTIMIZATION_REPORT.md`
+
+**M10.4 Volumetric Clouds DONE**:
+- Restored cloud code from commit `40306cd`
+- Hash-based value noise, 3-octave fBm, spherical UV mapping
+- Animated drift via `sunAzimuth`, height mask, smoothstep density
+- Sun-based shading (bright at noon, darker at sunrise/set)
+- Blended over skybox before tinting, background pixels only
+- **With spirv-opt**: 21.8KB optimized SPIR-V (1073 instructions)
+- Main repo commit: `b9998b3`
+
 ## Open Issues
-1. **FIR SPIR-V Bloat — CRITICAL BLOCKER**: FIR generates 10.9MB SPIR-V (542k IDs) for the lighting fragment shader. Normal shader: 5-50KB. Root cause: no CSE, no DCE, full unrolling, no vectorization fallback. Driver fails to create pipeline. M10.4 clouds impossible until fixed.
-   - **Immediate fix**: Phase 0 — integrate `spirv-opt` into FIR `compileTo` (1 hour, 30-50% reduction)
-   - **Medium fix**: Phase 1.3 — vectorization whitelist (SelectionF/IfF, LetF, BindF) for Haskan2's heavy `V 3`/`V 4` usage
-   - **Long fix**: Phase 2 — CSE/DCE instruction-level passes
+1. **FIR SPIR-V Bloat — FIXED**: FIR generates 10.9MB raw SPIR-V (542k IDs) for the lighting fragment shader. **Phase 0 (spirv-opt) reduces this to ~22KB** (with clouds) / ~18KB (without). Driver pipeline creation now succeeds. M10.4 clouds unblocked.
+   - **Phase 0 DONE**: `spirv-opt -O` integrated into FIR `compileTo` via `Optimize` flag
+   - **Phase 1.3 DONE**: Vectorized `SelectionF`/`IfF` in applicative context (single `OpSelect`)
+   - **Phase 1.1/1.2 CANCELLED**: Loop-based stores/concatenation. Too complex for monadic `CGMonad`; spirv-opt already handles via DCE/scalar-replacement. See `.opencode/FIR_OPTIMIZATION_REPORT.md`.
    - **Roadmap**: `3rdparty/fir/.opencode/roadmap/optimization/README.md`
 2. **UV texturing of procedural cube/sphere**: `unitCube` and `uvSphere` UV orientation still incorrect. Vision model confirms upside-down text on all faces. Deferred to future session.
 3. **IBL dynamic sky**: Deferred until FIR math functions available. **NOW UNBLOCKED** — `sin`/`cos` available. **BUT** HDRI rotation looks weird with current env1 (sunset with sun at horizon). Need better HDRI or procedural sky.
 4. **Shadows for sun**: Blocked until CSM implemented; shadowless day/night acceptable for M10.
 5. **Day/night IBL cubemap rotation**: **FIXED** — `sunAzimuth` passed via push constant. Fragment shader rotates sampling directions around Y. Cubemap rotates with sun. **Limitation**: Current env1 HDRI has sun baked at horizon; rotating makes it orbit like lighthouse. Need better HDRI or separate cubemap sets for dawn/noon/dusk/night.
-6. **M10.4 Volumetric Clouds**: **BLOCKED** — Implemented in `Lighting.hs` (hash noise, spherical UV, smoothstep) but SPIR-V is 10.9MB/542k IDs. FIR generates massive SPIR-V with no optimization. Driver fails to create pipeline. Need FIR Phase 0 (spirv-opt) + Phase 1.3 (vectorization) before clouds are feasible. Reverted from `Lighting.hs` but kept in git history (`40306cd`).
+6. **M10.4 Volumetric Clouds**: **DONE** — Restored from commit `40306cd`. Procedural clouds in lighting shader: hash noise, value noise, 3-octave fBm, spherical UV, height mask, smoothstep density, sun-based shading. Optimized SPIR-V: 21.8KB (1073 instructions). Background pixels only.
 
 ## Critical Files
 - `src/Graphics/Haskan/Engine.hs` — main loop, ECS, deferred graph, `computeSkyboxRays`, UV check mode, axis/ground plane state, debug mode handling
