@@ -170,45 +170,59 @@ fragment = shader do
   ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps rayDirRotated
 
   -- Procedural volumetric clouds
-  let -- Hash function for pseudo-random grid values
-      hash2 (Vec2 x y) = fract (sin (x * 127.1 + y * 311.7) * 43758.5453)
+  let -- 3D hash function for pseudo-random grid values
+      hash3 (Vec3 x y z) = fract (sin (x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453)
 
-      -- Value noise: bilinear interpolation of hashed grid corners
-      valueNoise (Vec2 x y) =
+      -- 3D value noise: trilinear interpolation of hashed grid corners
+      valueNoise3D (Vec3 x y z) =
         let ix = floor x
             iy = floor y
+            iz = floor z
             fx = fract x
             fy = fract y
+            fz = fract z
             -- Smoothstep interpolation
             sx = fx * fx * (3 - 2 * fx)
             sy = fy * fy * (3 - 2 * fy)
-            -- Sample 4 corners
-            h00 = hash2 (Vec2 ix iy)
-            h10 = hash2 (Vec2 (ix + 1) iy)
-            h01 = hash2 (Vec2 ix (iy + 1))
-            h11 = hash2 (Vec2 (ix + 1) (iy + 1))
-            -- Bilinear interpolation
-            v0 = mix h00 h10 sx
-            v1 = mix h01 h11 sx
-        in mix v0 v1 sy
+            sz = fz * fz * (3 - 2 * fz)
+            -- Sample 8 corners
+            h000 = hash3 (Vec3 ix iy iz)
+            h100 = hash3 (Vec3 (ix + 1) iy iz)
+            h010 = hash3 (Vec3 ix (iy + 1) iz)
+            h110 = hash3 (Vec3 (ix + 1) (iy + 1) iz)
+            h001 = hash3 (Vec3 ix iy (iz + 1))
+            h101 = hash3 (Vec3 (ix + 1) iy (iz + 1))
+            h011 = hash3 (Vec3 ix (iy + 1) (iz + 1))
+            h111 = hash3 (Vec3 (ix + 1) (iy + 1) (iz + 1))
+            -- Trilinear interpolation
+            v00 = mix h000 h100 sx
+            v10 = mix h010 h110 sx
+            v01 = mix h001 h101 sx
+            v11 = mix h011 h111 sx
+            v0 = mix v00 v10 sy
+            v1 = mix v01 v11 sy
+        in mix v0 v1 sz
 
-      -- fBm: 3 octaves of layered noise, normalized to ~[0,1]
-      fbm (Vec2 x y) =
-        let n1 = valueNoise (Vec2 x y)
-            n2 = valueNoise (Vec2 (x * 2) (y * 2)) * 0.5
-            n3 = valueNoise (Vec2 (x * 4) (y * 4)) * 0.25
+      -- 3D fBm: 3 octaves of layered noise, normalized to ~[0,1]
+      fbm3D (Vec3 x y z) =
+        let n1 = valueNoise3D (Vec3 x y z)
+            n2 = valueNoise3D (Vec3 (x * 2) (y * 2) (z * 2)) * 0.5
+            n3 = valueNoise3D (Vec3 (x * 4) (y * 4) (z * 4)) * 0.25
         in (n1 + n2 + n3) / 1.75
 
-      -- Map ray direction to spherical UV (equirectangular projection)
+      -- Map ray direction to spherical V for height mask only
       -- sphereV: 0 = nadir (down), 0.5 = horizon, 1.0 = zenith (up)
-      sphereU = atan2 rayDirZ rayDirX / (2 * pi) + 0.5
       sphereV = asin (clamp rayDirY (-1.0) 1.0) / pi + 0.5
 
-      -- Animated cloud coordinates (slow drift with sun)
-      cloudU = sphereU + sunAzimuth * 0.003
-      cloudV = sphereV + sunAzimuth * 0.0015
+      -- 3D noise coordinates: ray direction with animated drift
+      -- No spherical mapping = no pole singularity
       cloudScale = 4.0
-      noiseVal = fbm (Vec2 (cloudU * cloudScale) (cloudV * cloudScale))
+      animX = sunAzimuth * 0.003
+      animY = sunAzimuth * 0.0015
+      animZ = sunAzimuth * 0.002
+      noiseVal = fbm3D (Vec3 ((rayDirX + animX) * cloudScale)
+                             ((rayDirY + animY) * cloudScale)
+                             ((rayDirZ + animZ) * cloudScale))
 
       -- Height mask: clouds only above horizon, fading toward zenith
       -- 0 below horizon, 1 just above horizon, 0 near zenith

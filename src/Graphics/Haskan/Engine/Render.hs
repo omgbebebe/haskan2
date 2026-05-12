@@ -487,12 +487,13 @@ renderLoop ::
   Integer ->
   GameState cam ->
   MVar () ->
+  MVar () ->
   TChan ControlMessage ->
   String ->
   Maybe String ->
   String ->
   m ()
-renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore controlChannel meshName uvCheckMode envMapDir = do
+renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir = do
   control <- liftIO $ STM.atomically $ TChan.dupTChan controlChannel
 
   rm <- newResourceManager
@@ -875,6 +876,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
   logInfoIO LogVulkan "frame descriptor sets updated"
 
   logInfoIO LogRender "all resources created, entering render loop"
+  liftIO $ putMVar readySemaphore ()
 
   let mkRenderContext =
         Render.createRenderContext
@@ -928,4 +930,3 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore c
 
   logInfoIO LogGeneral "renderLoop finished"
   destroyAllResources rm
-  liftIO $ putMVar finishedSemaphore ()

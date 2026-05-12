@@ -20,7 +20,7 @@ module Graphics.Haskan.Engine
   ) where
 
 import Control.Concurrent (forkIO, threadDelay)
-import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar)
+import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, tryTakeMVar)
 import Control.Concurrent.STM (STM)
 import Control.Concurrent.STM qualified as STM
 import Control.Concurrent.STM.TChan (TChan)
@@ -31,7 +31,7 @@ import Control.Concurrent.STM.TVar (TVar)
 import Control.Monad (forM_, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (runManaged, with)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Graphics.Haskan.Camera (Camera (..))
@@ -60,13 +60,15 @@ import Graphics.Haskan.Engine.Types
 import Graphics.Haskan.Engine.Update (stateUpdateLoop)
 import Graphics.Haskan.Engine.Render (renderLoop)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
-import Graphics.Haskan.Logger (logInfoIO, LogCategory(..), showT)
+import Graphics.Haskan.Logger (logDebugIO, logInfoIO, LogCategory(..), showT)
 import Graphics.Haskan.Vulkan.Instance qualified as Instance
 import Graphics.Haskan.Vulkan.PhysicalDevice qualified as PhysicalDevice
 import Graphics.Haskan.Window qualified as Window
 import Linear (V3 (..))
 import SDL qualified
 import SDL.Input.Mouse qualified as SDL.Mouse
+import System.Clock (Clock(..), getTime, toNanoSecs)
+import System.Timeout (timeout)
 
 mainLoop :: MonadIO m => String -> EngineConfig -> m ()
 mainLoop meshName EngineConfig {..} = do
@@ -141,16 +143,6 @@ mainLoop meshName EngineConfig {..} = do
       pure (Just h)
     Nothing -> pure Nothing
 
-  case timeoutSeconds of
-    Just seconds | seconds > 0 -> do
-      logInfoIO LogGeneral $ "timeout set to " <> showT seconds <> " seconds"
-      _ <- liftIO $ forkIO $ do
-        threadDelay (fromIntegral seconds * 1000000)
-        logInfoIO LogGeneral "timeout reached, sending Terminate"
-        STM.atomically $ TChan.writeTChan controlChannel Terminate
-      pure ()
-    _ -> pure ()
-
   SDL.initialize @[] [SDL.InitEvents]
 
   logInfoIO LogGeneral "Initialize base Render context"
@@ -164,29 +156,64 @@ mainLoop meshName EngineConfig {..} = do
   Window.showWindow window
 
   renderLoopFinished <- liftIO $ newEmptyMVar
-  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished controlChannel meshName uvCheckMode envMapDir
+  renderLoopReady <- liftIO $ newEmptyMVar
+  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished renderLoopReady controlChannel meshName uvCheckMode envMapDir
+
+  -- Wait for render loop to finish initialization before starting timeout
+  logInfoIO LogGeneral "waiting for render loop initialization..."
+  mbReady <- liftIO $ timeout (30 * 1000000) $ takeMVar renderLoopReady
+  renderLoopOk <- case mbReady of
+    Nothing -> do
+      logInfoIO LogGeneral "ERROR: render loop initialization timed out after 30s"
+      pure False
+    Just () -> do
+      logInfoIO LogGeneral "render loop initialized, starting timeout timer"
+      pure True
+
+  when renderLoopOk $ do
+    case timeoutSeconds of
+      Just seconds | seconds > 0 -> do
+        _ <- liftIO $ forkIO $ do
+          threadDelay (fromIntegral seconds * 1000000)
+          logInfoIO LogGeneral "timeout reached, sending Terminate"
+          STM.atomically $ TChan.writeTChan controlChannel Terminate
+        pure ()
+      _ -> pure ()
 
   stateUpdateLoopFinished <- liftIO $ newEmptyMVar
   liftIO $ forkIOWithHandler "stateUpdateLoop" stateUpdateLoopFinished $ stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished inputBuffer debugCmdQueue controlChannel
 
-  let inputLoop :: MonadIO m => m ()
-      inputLoop = do
-        events <- SDL.pollEvents
-        let actionEvents = catMaybes $ map (payloadToActionEvent . SDL.eventPayload) events
-            quitting = any (\(a, p, _) -> a == Escape && p) actionEvents
-        liftIO $ STM.atomically $ forM_ actionEvents $ writeInputBuffer inputBuffer
-        when (not (null actionEvents)) $ logInfoIO LogGeneral $ "input: " <> showT (length actionEvents) <> " events, first=" <> showT (head actionEvents)
-        running <- liftIO $ STM.readTVarIO isRunning
-        let inputDelayMicros = max 1 (1000000 `div` fromIntegral targetInputFPS)
-        liftIO $ threadDelay (fromIntegral inputDelayMicros)
-        unless (quitting || not running) inputLoop
+  when renderLoopOk $ do
+    let inputLoop :: MonadIO m => m ()
+        inputLoop = do
+          events <- SDL.pollEvents
+          let actionEvents = catMaybes $ map (payloadToActionEvent . SDL.eventPayload) events
+              quitting = any (\(a, p, _) -> a == Escape && p) actionEvents
+          liftIO $ STM.atomically $ forM_ actionEvents $ writeInputBuffer inputBuffer
+          when (not (null actionEvents)) $ logDebugIO LogInput $ "input: " <> showT (length actionEvents) <> " events, first=" <> showT (head actionEvents)
+          running <- liftIO $ STM.readTVarIO isRunning
+          let inputDelayMicros = max 1 (1000000 `div` fromIntegral targetInputFPS)
+          liftIO $ threadDelay (fromIntegral inputDelayMicros)
+          unless (quitting || not running) inputLoop
 
-  logInfoIO LogGeneral "inputLoop starting"
-  inputLoop
+    logInfoIO LogGeneral "inputLoop starting"
+    inputLoop
+
   logInfoIO LogGeneral "sending Terminate message"
   liftIO $ STM.atomically $ TChan.writeTChan controlChannel Terminate
-  logInfoIO LogGeneral "waiting for other threads finished"
-  liftIO $ mapM_ takeMVar [renderLoopFinished, stateUpdateLoopFinished]
+  logInfoIO LogGeneral "waiting for other threads to finish (timeout: 10s)..."
+
+  -- Wait for threads with timeout - if they don't finish in time, force quit
+  let shutdownTimeoutMicros = 10 * 1000000  -- 10 seconds
+  mbRenderDone <- liftIO $ timeout shutdownTimeoutMicros $ takeMVar renderLoopFinished
+  case mbRenderDone of
+    Nothing -> logInfoIO LogGeneral "WARNING: render loop shutdown timed out after 10s"
+    Just _  -> logInfoIO LogGeneral "render loop shut down cleanly"
+
+  mbStateDone <- liftIO $ timeout shutdownTimeoutMicros $ takeMVar stateUpdateLoopFinished
+  case mbStateDone of
+    Nothing -> logInfoIO LogGeneral "WARNING: state update loop shutdown timed out after 10s"
+    Just _  -> logInfoIO LogGeneral "state update loop shut down cleanly"
 
   liftIO $ forM_ mDebugServer stopDebugServer
 
