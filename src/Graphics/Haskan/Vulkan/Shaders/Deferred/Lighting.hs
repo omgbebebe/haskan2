@@ -189,29 +189,30 @@ fragment = shader do
             v1 = mix h01 h11 sx
         in mix v0 v1 sy
 
-      -- fBm: 3 octaves of layered noise
+      -- fBm: 3 octaves of layered noise, normalized to ~[0,1]
       fbm (Vec2 x y) =
         let n1 = valueNoise (Vec2 x y)
             n2 = valueNoise (Vec2 (x * 2) (y * 2)) * 0.5
             n3 = valueNoise (Vec2 (x * 4) (y * 4)) * 0.25
-        in n1 + n2 + n3
+        in (n1 + n2 + n3) / 1.75
 
       -- Map ray direction to spherical UV (equirectangular projection)
+      -- sphereV: 0 = nadir (down), 0.5 = horizon, 1.0 = zenith (up)
       sphereU = atan2 rayDirZ rayDirX / (2 * pi) + 0.5
       sphereV = asin (clamp rayDirY (-1.0) 1.0) / pi + 0.5
 
       -- Animated cloud coordinates (slow drift with sun)
       cloudU = sphereU + sunAzimuth * 0.003
       cloudV = sphereV + sunAzimuth * 0.0015
-      cloudScale = 5.0
+      cloudScale = 4.0
       noiseVal = fbm (Vec2 (cloudU * cloudScale) (cloudV * cloudScale))
 
-      -- Height mask: clouds form a band across the sky dome
-      -- More clouds in the middle band, fewer at horizon and zenith
-      heightMask = smoothstep 0.15 0.35 sphereV * smoothstep 0.85 0.65 sphereV
+      -- Height mask: clouds only above horizon, fading toward zenith
+      -- 0 below horizon, 1 just above horizon, 0 near zenith
+      heightMask = smoothstep 0.5 0.52 sphereV * (1.0 - smoothstep 0.7 0.9 sphereV)
 
-      -- Cloud coverage with threshold
-      cloudDensity = smoothstep 0.4 0.55 (noiseVal * heightMask)
+      -- Cloud coverage with soft threshold
+      cloudDensity = smoothstep 0.35 0.65 (noiseVal * heightMask)
 
       -- Simple sun-based cloud shading
       -- sunAzimuth*0.5 ranges 0->pi over 24h, sin peaks at noon
@@ -223,6 +224,13 @@ fragment = shader do
       cloudSkyR = mix skyR cloudBright cloudDensity
       cloudSkyG = mix skyG cloudBright cloudDensity
       cloudSkyB = mix skyB cloudShadow cloudDensity
+
+      -- Debug: raw cloud density (grayscale)
+      dbgCloud = cloudDensity
+      -- Debug: raw height mask (grayscale)
+      dbgHeight = heightMask
+      -- Debug: raw noise (grayscale)
+      dbgNoise = noiseVal
 
   let normX = normX_raw * 2 - 1
       normY = normY_raw * 2 - 1
@@ -569,6 +577,9 @@ fragment = shader do
              if debugMode == 10.0 then dbgSpecX else
              if debugMode == 11.0 then dbgFresX else
              if debugMode == 12.0 then dbgSkyR else
+             if debugMode == 13.0 then dbgCloud else
+             if debugMode == 14.0 then dbgHeight else
+             if debugMode == 15.0 then dbgNoise else
              finalx
 
       outG = if debugMode == 1.0 then albG else
@@ -583,6 +594,9 @@ fragment = shader do
              if debugMode == 10.0 then dbgSpecY else
              if debugMode == 11.0 then dbgFresY else
              if debugMode == 12.0 then dbgSkyG else
+             if debugMode == 13.0 then dbgCloud else
+             if debugMode == 14.0 then dbgHeight else
+             if debugMode == 15.0 then dbgNoise else
              finaly
 
       outB = if debugMode == 1.0 then albB else
@@ -597,6 +611,9 @@ fragment = shader do
              if debugMode == 10.0 then dbgSpecZ else
              if debugMode == 11.0 then dbgFresZ else
              if debugMode == 12.0 then dbgSkyB else
+             if debugMode == 13.0 then dbgCloud else
+             if debugMode == 14.0 then dbgHeight else
+             if debugMode == 15.0 then dbgNoise else
              finalz
 
       -- Normalize ray direction for overlay computations
