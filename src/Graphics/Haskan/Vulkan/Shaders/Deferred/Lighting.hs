@@ -76,6 +76,7 @@ type CameraPushConstant = Struct
    , "skyTintG" ':-> Float
    , "skyTintB" ':-> Float
    , "iblIntensity" ':-> Float
+   , "sunDir" ':-> V 3 Float
    ]
 
 type FragmentDefs =
@@ -159,6 +160,7 @@ fragment = shader do
       camX = view @(Name "cameraX") cameraPos
       camY = view @(Name "cameraY") cameraPos
       camZ = view @(Name "cameraZ") cameraPos
+      ~(Vec3 sunDirX sunDirY sunDirZ) = view @(Name "sunDir") cameraPos
 
   -- Precompute cubemap rotation from sun azimuth
   let cosAz = cos sunAzimuth
@@ -178,7 +180,7 @@ fragment = shader do
   let rayDirRotated = rotateY (Vec3 dirX dirY dirZ)
   ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps rayDirRotated
 
-  -- Procedural volumetric clouds (world-space sampling for parallax)
+  -- Procedural volumetric clouds (3-step ray marcher)
   let -- Integer-mix 3D hash (breaks axis-aligned artifacts of sin(x*C))
       hash3 (Vec3 x y z) =
         let x1 = fract (x * 0.1031)
@@ -198,11 +200,9 @@ fragment = shader do
             fx = fract x
             fy = fract y
             fz = fract z
-            -- Smoothstep interpolation
             sx = fx * fx * (3 - 2 * fx)
             sy = fy * fy * (3 - 2 * fy)
             sz = fz * fz * (3 - 2 * fz)
-            -- Sample 8 corners
             h000 = hash3 (Vec3 ix iy iz)
             h100 = hash3 (Vec3 (ix + 1) iy iz)
             h010 = hash3 (Vec3 ix (iy + 1) iz)
@@ -211,7 +211,6 @@ fragment = shader do
             h101 = hash3 (Vec3 (ix + 1) iy (iz + 1))
             h011 = hash3 (Vec3 ix (iy + 1) (iz + 1))
             h111 = hash3 (Vec3 (ix + 1) (iy + 1) (iz + 1))
-            -- Trilinear interpolation
             v00 = mix h000 h100 sx
             v10 = mix h010 h110 sx
             v01 = mix h001 h101 sx
@@ -227,53 +226,117 @@ fragment = shader do
             n3 = valueNoise3D (Vec3 (x * 4) (y * 4) (z * 4)) * 0.25
         in (n1 + n2 + n3) / 1.75
 
-      -- Height mask from vertical direction (seam-free, monotonic in Y)
-      sphereV = asin (clamp dirY (-1.0) 1.0) / pi + 0.5
+      -- Henyey-Greenstein phase function for forward scattering
+      -- g = 0.3 gives moderate forward scattering (silver lining)
+      hgPhase cosTheta g =
+        let g2 = g * g
+            denom = (1.0 + g2 - 2.0 * g * cosTheta) ** 1.5
+        in (1.0 - g2) / (4.0 * 3.14159265 * denom)
 
-      -- World-space cloud layer at fixed altitude above camera
-      -- Intersect view ray with horizontal plane at cloud altitude
-      cloudAltitude = 200.0
-      cloudHitT = cloudAltitude / max 0.01 dirY
-      cloudHitX = camX + dirX * cloudHitT
-      cloudHitY = camY + dirY * cloudHitT
-      cloudHitZ = camZ + dirZ * cloudHitT
+      -- Cloud layer bounds
+      cloudBottom = 150.0
+      cloudThickness = 100.0
+      cloudTop = cloudBottom + cloudThickness
+      stepSize = cloudThickness / 3.0
 
-      -- Noise scale: larger near horizon (clouds farther away),
-      -- smaller overhead (clouds closer)
-      cloudScale = 12.0 / max 0.1 dirY
+      -- Entry point: ray-plane intersection at cloudBottom
+      tEntry = (cloudBottom - camY) / max 0.01 dirY
+      entryX = camX + dirX * tEntry
+      entryY = cloudBottom
+      entryZ = camZ + dirZ * tEntry
 
-      -- Sample noise at world-space intersection point
-      noiseVal = fbm3D (Vec3 (cloudHitX * cloudScale * 0.01)
-                             (cloudHitY * cloudScale * 0.01)
-                             (cloudHitZ * cloudScale * 0.01))
+      -- Noise scale
+      cloudScale = 0.005
 
-      -- Height mask: wider, softer transition near horizon
-      -- 0 below horizon, 1 at low elevation, 0 near zenith
-      heightMask = smoothstep 0.45 0.55 sphereV * (1.0 - smoothstep 0.65 0.85 sphereV)
+      -- Light march: 2 steps toward sun, sample single-octave noise
+      lightMarchDensity posX_ posY_ posZ_ =
+        let lStep = 15.0
+            -- Sample at current position and one step toward sun
+            d0 = valueNoise3D (Vec3 (posX_ * cloudScale) (posY_ * cloudScale) (posZ_ * cloudScale))
+            d1 = valueNoise3D (Vec3 ((posX_ + sunDirX * lStep) * cloudScale)
+                                    ((posY_ + sunDirY * lStep) * cloudScale)
+                                    ((posZ_ + sunDirZ * lStep) * cloudScale))
+            -- Height attenuation for light march (denser lower in cloud)
+            h0 = smoothstep cloudBottom cloudTop posY_
+            h1 = smoothstep cloudBottom cloudTop (posY_ + sunDirY * lStep)
+        in (d0 * (1.0 - h0) + d1 * (1.0 - h1)) * 0.5
 
-      -- Cloud coverage with soft threshold
-      cloudDensity = smoothstep 0.35 0.65 (noiseVal * heightMask)
+      -- Ray step function: sample density, compute light, accumulate
+      -- Returns (newTransmittance, newAccR, newAccG, newAccB)
+      cloudStep stepIdx t_ accR_ accG_ accB_ =
+        let -- Sample position along ray
+            tOffset = stepSize * (stepIdx + 0.5)
+            sampleX = entryX + dirX * tOffset
+            sampleY = entryY + dirY * tOffset
+            sampleZ = entryZ + dirZ * tOffset
 
-      -- Sun-based cloud lighting (sunHeight approximates elevation)
-      sunHeight = clamp (sin (sunAzimuth * 0.5)) 0.0 1.0
-      cloudBright = mix 0.4 0.95 sunHeight
+            -- Height factor (more clouds in middle of layer)
+            heightFrac = (sampleY - cloudBottom) / cloudThickness
+            heightFactor = smoothstep 0.0 0.2 heightFrac * (1.0 - smoothstep 0.6 1.0 heightFrac)
 
-      -- Clouds inherit sky color influence for continuity
-      cloudColR = mix skyR cloudBright 0.7
-      cloudColG = mix skyG cloudBright 0.7
-      cloudColB = mix skyB cloudBright 0.7
+            -- Sample density
+            rawDensity = fbm3D (Vec3 (sampleX * cloudScale) (sampleY * cloudScale) (sampleZ * cloudScale))
+            density = max 0 (rawDensity * heightFactor - 0.3) * 2.0
+
+            -- Light transmittance from sun to this point
+            lightDensity = lightMarchDensity sampleX sampleY sampleZ
+            -- Modified Beer-Lambert (powder effect)
+            beer = exp (-lightDensity * 15.0)
+            powder = 0.7 * exp (-lightDensity * 0.25)
+            lightTransmittance = max beer powder
+
+            -- Phase function
+            cosTheta = dirX * sunDirX + dirY * sunDirY + dirZ * sunDirZ
+            phase = hgPhase cosTheta 0.3
+
+            -- Sun color (white, could sample from light buffer)
+            sunIntensity = 1.0
+            lightR = sunIntensity * lightTransmittance * phase
+            lightG = sunIntensity * lightTransmittance * phase
+            lightB = sunIntensity * lightTransmittance * phase
+
+            -- Cloud base color (white with slight blue tint)
+            cloudBaseR = 1.0
+            cloudBaseG = 0.98
+            cloudBaseB = 0.95
+
+            -- In-scattering
+            scatterR = cloudBaseR * lightR * density * stepSize
+            scatterG = cloudBaseG * lightG * density * stepSize
+            scatterB = cloudBaseB * lightB * density * stepSize
+
+            -- View transmittance
+            viewTransmittance = exp (-density * stepSize)
+
+            -- Accumulate (front-to-back compositing)
+            newAccR = accR_ + scatterR * t_
+            newAccG = accG_ + scatterG * t_
+            newAccB = accB_ + scatterB * t_
+            newT = t_ * viewTransmittance
+        in (newT, newAccR, newAccG, newAccB)
+
+      -- Execute 3 steps, threading transmittance and accumulated color
+      (t1, aR1, aG1, aB1) = cloudStep 0 1.0 0.0 0.0 0.0
+      (t2, aR2, aG2, aB2) = cloudStep 1 t1 aR1 aG1 aB1
+      (t3, aR3, aG3, aB3) = cloudStep 2 t2 aR2 aG2 aB2
+
+      -- Final cloud color and transmittance
+      cloudAccR = aR3
+      cloudAccG = aG3
+      cloudAccB = aB3
+      cloudTransmittance = t3
 
       -- Blend clouds over skybox
-      cloudSkyR = mix skyR cloudColR cloudDensity
-      cloudSkyG = mix skyG cloudColG cloudDensity
-      cloudSkyB = mix skyB cloudColB cloudDensity
+      cloudSkyR = skyR * cloudTransmittance + cloudAccR
+      cloudSkyG = skyG * cloudTransmittance + cloudAccG
+      cloudSkyB = skyB * cloudTransmittance + cloudAccB
 
-      -- Debug: raw cloud density (grayscale)
-      dbgCloud = cloudDensity
-      -- Debug: raw height mask (grayscale)
-      dbgHeight = heightMask
-      -- Debug: raw noise (grayscale)
-      dbgNoise = noiseVal
+      -- Debug: raw cloud density at step 1 (grayscale)
+      dbgCloud = aR3
+      -- Debug: transmittance (grayscale)
+      dbgHeight = cloudTransmittance
+      -- Debug: phase function value
+      dbgNoise = hgPhase (dirX * sunDirX + dirY * sunDirY + dirZ * sunDirZ) 0.3
 
   let normX = normX_raw * 2 - 1
       normY = normY_raw * 2 - 1

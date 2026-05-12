@@ -294,6 +294,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                     skyTint = DayNight.ssSkyTint sunState
                     iblInt = DayNight.ssIBLIntensity sunState
                     sunAzimuth = DayNight.ssAzimuth sunState
+                    sunDir = DayNight.ssDirection sunState
 
                 let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
                       buildDeferredGraph DeferredPassData
@@ -321,8 +322,9 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdLightCount = lightCount
                         , dpdLightBuffer = lightSsboBuffer
                         , dpdSkyTint = skyTint
-                         , dpdIBLIntensity = iblInt
-                         , dpdSunAzimuth = sunAzimuth
+                        , dpdIBLIntensity = iblInt
+                        , dpdSunAzimuth = sunAzimuth
+                        , dpdSunDir = sunDir
                         , dpdGBufferImages = gBufferImagesForFrame
                         , dpdWireframePipeline = drWireframePipeline
                         , dpdWireframeLayout = drWireframePipelineLayout
