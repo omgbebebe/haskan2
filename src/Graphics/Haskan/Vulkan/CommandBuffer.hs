@@ -473,6 +473,57 @@ copyBufferToImage commandBuffer buffer image width height = do
             rPtr
       )
 
+copyBufferToImage3D ::
+  MonadIO m =>
+  Vulkan.VkCommandBuffer ->
+  Vulkan.VkBuffer ->
+  Vulkan.VkImage ->
+  Vulkan.Word32 ->
+  Vulkan.Word32 ->
+  Vulkan.Word32 ->
+  m ()
+copyBufferToImage3D commandBuffer buffer image width height depth = do
+  let imageSubresource =
+        Vulkan.createVk
+          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+              &* set @"mipLevel" 0
+              &* set @"baseArrayLayer" 0
+              &* set @"layerCount" 1
+          )
+      imageExtent =
+        Vulkan.createVk
+          ( set @"width" width
+              &* set @"height" height
+              &* set @"depth" depth
+          )
+      imageOffset =
+        Vulkan.createVk
+          ( set @"x" 0
+              &* set @"y" 0
+              &* set @"z" 0
+          )
+      region =
+        Vulkan.createVk
+          ( set @"bufferOffset" 0
+              &* set @"bufferRowLength" 0
+              &* set @"bufferImageHeight" 0
+              &* set @"imageSubresource" imageSubresource
+              &* set @"imageOffset" imageOffset
+              &* set @"imageExtent" imageExtent
+          )
+  liftIO $
+    withPtr
+      region
+      ( \rPtr ->
+          Vulkan.vkCmdCopyBufferToImage
+            commandBuffer
+            buffer
+            image
+            Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+            1
+            rPtr
+      )
+
 cmdBlitImageCubemapMip ::
   MonadIO m =>
   Vulkan.VkCommandBuffer ->

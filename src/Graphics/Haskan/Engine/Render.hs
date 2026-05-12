@@ -591,6 +591,11 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
   mBrdfView <- Texture.textureImageView rm brdfTexHandle
   logInfoIO LogGeneral "BRDF LUT generated"
 
+  -- Load 3D cloud noise texture
+  logInfoIO LogGeneral "loading 3D cloud noise texture..."
+  cloudNoiseView <- Texture.managedTexture3D physicalDevice device "data/textures/cloud_noise/cloud_noise_128.raw" 128 128 128 graphicsQueueHandler textureCommandBuffer
+  logInfoIO LogGeneral "3D cloud noise texture loaded"
+
   assetCache <- initCache ".haskan2-cache"
 
   let isGLTF = ".gltf" `Text.isSuffixOf` Text.pack meshName || ".glb" `Text.isSuffixOf` Text.pack meshName
@@ -937,7 +942,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
           then pure ()
           else do
               renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-                 with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView mBrdfView lightingSampler) $ \dr -> do
+                  with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView mBrdfView lightingSampler cloudNoiseView) $ \dr -> do
                    -- Update lighting descriptor sets with light SSBO
                    for_ (drLightingDescriptorSets dr) $ \ds ->
                      DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer

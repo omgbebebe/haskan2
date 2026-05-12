@@ -4,6 +4,7 @@ module Graphics.Haskan.Vulkan.Texture
   ( readImageFromFile
   , decodeImageBytes
   , managedTexture
+  , managedTexture3D
   , managedSampler
   , createSamplerWithLod
   , createTextureResource
@@ -19,10 +20,12 @@ module Graphics.Haskan.Vulkan.Texture
   , createCubemapMips
   ) where
 import Codec.Picture
+import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits
 import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
 import Data.Foldable (for_)
 import Data.Vector.Storable qualified
 import Data.Vector.Storable qualified as Vector
@@ -162,6 +165,103 @@ managedTexture pdev dev filePath queue commandBuffer = do
 
   liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
   imageView <- Haskan.managedImageView dev format image
+  pure imageView
+
+-- | Load a 3D texture from raw binary RGBA8 data.
+-- Dimensions are width x height x depth, each pixel is 4 bytes (RGBA).
+managedTexture3D ::
+  (MonadManaged m) =>
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  FilePath -> -- ^ Path to raw binary file
+  Int -> -- ^ Width
+  Int -> -- ^ Height
+  Int -> -- ^ Depth
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m Vulkan.VkImageView
+managedTexture3D pdev dev filePath width height depth queue commandBuffer = do
+  imgData <- liftIO $ BS.readFile filePath
+  let dataList = BS.unpack imgData
+      expectedSize = width * height * depth * 4
+      actualSize = BS.length imgData
+  when (actualSize /= expectedSize) $
+    error $ "managedTexture3D: expected " ++ show expectedSize ++ " bytes, got " ++ show actualSize
+
+  (stagingBuffer, stagingMemoryRequirement) <-
+    Haskan.managedBuffer dev dataList Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+
+  stagingMemory <-
+    Haskan.managedBufferMemory pdev dev stagingMemoryRequirement
+
+  liftIO $ do
+    Haskan.bindBufferMemory dev stagingBuffer stagingMemory dataList
+    Haskan.copyDataToDeviceMemory dev stagingMemory dataList
+
+  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      imageExtent =
+        Vulkan.createVk
+          ( set @"width" (fromIntegral width)
+              &* set @"height" (fromIntegral height)
+              &* set @"depth" (fromIntegral depth)
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_3D
+              &* set @"extent" imageExtent
+              &* set @"mipLevels" 1
+              &* set @"arrayLayers" 1
+              &* set @"format" format
+              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
+              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
+              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"queueFamilyIndexCount" 0
+              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
+          )
+
+  image <-
+    alloc
+      "texture 3D image"
+      (withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr)))
+      (\ptr -> Vulkan.vkDestroyImage dev ptr Vulkan.vkNullPtr)
+
+  imageMemoryRequirements <-
+    allocaAndPeek_
+      (Vulkan.vkGetImageMemoryRequirements dev image)
+
+  imageMemory <-
+    Haskan.managedMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+
+  bindImageMemory dev image imageMemory 0
+
+  Haskan.withCommandBufferOneTime queue commandBuffer $ do
+    Haskan.layerTransition
+      commandBuffer
+      image
+      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+
+    Haskan.copyBufferToImage3D
+      commandBuffer
+      stagingBuffer
+      image
+      (fromIntegral width)
+      (fromIntegral height)
+      (fromIntegral depth)
+
+    Haskan.layerTransition
+      commandBuffer
+      image
+      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+
+  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+  imageView <- Haskan.managedImageView3D dev format image
   pure imageView
 
 bindImageMemory ::

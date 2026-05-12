@@ -145,8 +145,9 @@ updateLightingDescriptorSets ::
   Vulkan.VkSampler ->
   [Vulkan.VkImageView] -> -- ^ 7 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive, env_cubemap, irradiance_cubemap, brdf_lut
   Maybe Vulkan.VkBuffer -> -- ^ light SSBO (optional)
+  Maybe Vulkan.VkImageView -> -- ^ 3D cloud noise texture (optional)
   m ()
-updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer = do
+updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer mCloudNoiseView = do
   let mkTextureInfo imageView =
         Vulkan.createVk
           ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -188,7 +189,11 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer =
                     &* set @"descriptorCount" 1
                     &* set @"dstArrayElement" 0
                 )]
-      allWrites = writes ++ lightWrite
+      cloudNoiseWrite = case mCloudNoiseView of
+        Nothing -> []
+        Just cloudNoiseView ->
+          [mkWrite 8 cloudNoiseView]
+      allWrites = writes ++ lightWrite ++ cloudNoiseWrite
   liftIO $
     Foreign.Marshal.Array.withArray allWrites $ \writeUpdatePtr ->
       Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writeUpdatePtr 0 Vulkan.vkNullPtr

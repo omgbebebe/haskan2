@@ -69,8 +69,9 @@ createDeferredResources ::
   Maybe Vulkan.VkImageView -> -- ^ irradiance cubemap view
   Maybe Vulkan.VkImageView -> -- ^ brdf lut view
   Vulkan.VkSampler -> -- ^ lighting sampler
+  Vulkan.VkImageView -> -- ^ 3D cloud noise texture view
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader mEnvMapView mIrradianceView mBrdfView sampler = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader mEnvMapView mIrradianceView mBrdfView sampler cloudNoiseView = do
   let extent = rcSurfaceExtent ctx
       gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT  -- position needs negative values
       gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM      -- normal, albedo, emissive
@@ -212,7 +213,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
     let allViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
                      (Just env, Just irr, Just brdf) -> views ++ [env, irr, brdf]
                      _ -> views ++ (replicate 3 Vulkan.VK_NULL_HANDLE)
-    DescriptorSet.updateLightingDescriptorSets device ds sampler allViews Nothing
+    DescriptorSet.updateLightingDescriptorSets device ds sampler allViews Nothing (Just cloudNoiseView)
   logDebugIO LogRender "lighting descriptor sets updated"
 
   pure DeferredResources
