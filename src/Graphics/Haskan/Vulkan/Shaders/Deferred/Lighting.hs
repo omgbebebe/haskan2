@@ -146,6 +146,12 @@ fragment = shader do
   rayDir <- get @"in_ray"
   let (Vec3 rayDirX rayDirY rayDirZ) = rayDir
 
+  -- Normalize ray direction (interpolated varyings are not unit-length)
+  let rayLen = sqrt (rayDirX * rayDirX + rayDirY * rayDirY + rayDirZ * rayDirZ + 0.0001)
+      dirX = rayDirX / rayLen
+      dirY = rayDirY / rayLen
+      dirZ = rayDirZ / rayLen
+
   -- Read push constants early (needed for cubemap rotation)
   cameraPos <- get @"cameraPos"
   let sunAzimuth = view @(Name "sunAzimuth") cameraPos
@@ -166,12 +172,20 @@ fragment = shader do
   let hasGeometry = abs posX + abs posY + abs posZ > 0.001
 
   -- Sample skybox for background (rotate by sun azimuth)
-  let rayDirRotated = rotateY rayDir
+  let rayDirRotated = rotateY (Vec3 dirX dirY dirZ)
   ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps rayDirRotated
 
   -- Procedural volumetric clouds
-  let -- 3D hash function for pseudo-random grid values
-      hash3 (Vec3 x y z) = fract (sin (x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453)
+  let -- Integer-mix 3D hash (breaks axis-aligned artifacts of sin(x*C))
+      hash3 (Vec3 x y z) =
+        let x1 = fract (x * 0.1031)
+            y1 = fract (y * 0.1031)
+            z1 = fract (z * 0.1031)
+            dotP = x1 * (y1 + 33.33) + y1 * (z1 + 33.33) + z1 * (x1 + 33.33)
+            x2 = x1 + dotP
+            y2 = y1 + dotP
+            z2 = z1 + dotP
+        in fract ((x2 + y2) * z2)
 
       -- 3D value noise: trilinear interpolation of hashed grid corners
       valueNoise3D (Vec3 x y z) =
@@ -210,19 +224,19 @@ fragment = shader do
             n3 = valueNoise3D (Vec3 (x * 4) (y * 4) (z * 4)) * 0.25
         in (n1 + n2 + n3) / 1.75
 
-      -- Map ray direction to spherical V for height mask only
-      -- sphereV: 0 = nadir (down), 0.5 = horizon, 1.0 = zenith (up)
-      sphereV = asin (clamp rayDirY (-1.0) 1.0) / pi + 0.5
+      -- Height mask from vertical direction (seam-free, monotonic in Y)
+      sphereV = asin (clamp dirY (-1.0) 1.0) / pi + 0.5
 
-      -- 3D noise coordinates: ray direction with animated drift
-      -- No spherical mapping = no pole singularity
-      cloudScale = 4.0
-      animX = sunAzimuth * 0.003
-      animY = sunAzimuth * 0.0015
-      animZ = sunAzimuth * 0.002
-      noiseVal = fbm3D (Vec3 ((rayDirX + animX) * cloudScale)
-                             ((rayDirY + animY) * cloudScale)
-                             ((rayDirZ + animZ) * cloudScale))
+      -- 3D noise coordinates: rotate normalized direction for animated drift
+      -- Higher scale (12 vs 4) gives finer cloud puffs instead of huge islands
+      cosA = cos (sunAzimuth * 0.01)
+      sinA = sin (sunAzimuth * 0.01)
+      rotX = dirX * cosA - dirZ * sinA
+      rotZ = dirX * sinA + dirZ * cosA
+      cloudScale = 12.0
+      noiseVal = fbm3D (Vec3 (rotX * cloudScale)
+                             (dirY * cloudScale)
+                             (rotZ * cloudScale))
 
       -- Height mask: clouds only above horizon, fading toward zenith
       -- 0 below horizon, 1 just above horizon, 0 near zenith
@@ -633,29 +647,17 @@ fragment = shader do
              if debugMode == 15.0 then dbgNoise else
              finalz
 
-      -- Normalize ray direction for overlay computations
-      rayLen = sqrt (rayDirX * rayDirX + rayDirY * rayDirY + rayDirZ * rayDirZ + 0.0001)
-      rayNX = rayDirX / rayLen
-      rayNY = rayDirY / rayLen
-      rayNZ = rayDirZ / rayLen
-
       -- World axes overlay: draw thin lines radiating from screen center
-      -- A ray is on an axis line if it's close to the axis direction AND
-      -- in the plane spanned by the camera forward vector and the axis.
-      -- For simplicity, we use the forward vector (-ray at center, approximately)
-      -- and check perpendicular distance to the axis line.
-      
-      -- Forward direction is approximately -rayDir for center rays, but we use
-      -- a simpler approach: check angular distance from axis with tighter threshold
+      -- Use pre-normalized dirX/dirY/dirZ from early in the shader
       axisThresh = 0.9995  -- cos(1.8 degrees), much tighter for thin lines
       
       -- Only show positive axis directions (radiate outward from center)
-      onXp = rayNX > axisThresh
-      onXn = (-rayNX) > axisThresh
-      onYp = rayNY > axisThresh
-      onYn = (-rayNY) > axisThresh
-      onZp = rayNZ > axisThresh
-      onZn = (-rayNZ) > axisThresh
+      onXp = dirX > axisThresh
+      onXn = (-dirX) > axisThresh
+      onYp = dirY > axisThresh
+      onYn = (-dirY) > axisThresh
+      onZp = dirZ > axisThresh
+      onZn = (-dirZ) > axisThresh
       isAxis = onXp || onXn || onYp || onYn || onZp || onZn
 
       -- Axis colors: X=red, Y=green, Z=blue (both directions same color)
@@ -664,9 +666,9 @@ fragment = shader do
       axisB = if onXp || onXn then 0.0 else if onYp || onYn then 0.0 else if onZp || onZn then 1.0 else 0.0
 
       -- Ground plane: intersect camera ray with Y=0
-      tGround = (-camY) / (rayNY + 0.0001)
-      groundX = camX + rayNX * tGround
-      groundZ = camZ + rayNZ * tGround
+      tGround = (-camY) / (dirY + 0.0001)
+      groundX = camX + dirX * tGround
+      groundZ = camZ + dirZ * tGround
       groundDist = sqrt (groundX * groundX + groundZ * groundZ)
 
       -- Simple origin crosshair for ground plane (no grid, just X=0 and Z=0 lines)

@@ -161,10 +161,10 @@ mainLoop meshName EngineConfig {..} = do
 
   -- Wait for render loop to finish initialization before starting timeout
   logInfoIO LogGeneral "waiting for render loop initialization..."
-  mbReady <- liftIO $ timeout (30 * 1000000) $ takeMVar renderLoopReady
+  mbReady <- liftIO $ timeout (180 * 1000000) $ takeMVar renderLoopReady
   renderLoopOk <- case mbReady of
     Nothing -> do
-      logInfoIO LogGeneral "ERROR: render loop initialization timed out after 30s"
+      logInfoIO LogGeneral "ERROR: render loop initialization timed out after 180s"
       pure False
     Just () -> do
       logInfoIO LogGeneral "render loop initialized, starting timeout timer"
