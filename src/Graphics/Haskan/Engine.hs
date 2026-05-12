@@ -111,7 +111,7 @@ mainLoop meshName EngineConfig {..} = do
   tvTimeOfDay <- liftIO $ STM.newTVarIO initialTimeOfDay
   tvTimeSpeed <- liftIO $ STM.newTVarIO timeSpeed
   tvDayNightEnabled <- liftIO $ STM.newTVarIO dayNightEnabled
-  tvCloudHeight <- liftIO $ STM.newTVarIO 2000.0
+  tvCloudHeight <- liftIO $ STM.newTVarIO 3500.0
 
   let gameState =
         GameState

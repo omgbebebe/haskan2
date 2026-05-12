@@ -119,13 +119,13 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                 (SaveSwapchainScreenshot, False, _) -> pure ()
                 (CloudHeightUp, True, _) -> do
                   current <- STM.readTVarIO (cloudHeight gameState)
-                  let newHeight = current + 5000.0
+                  let newHeight = min 30000.0 (current + 100.0)
                   STM.atomically $ STM.writeTVar (cloudHeight gameState) newHeight
                   logInfoIO LogGeneral $ "cloud height: " <> showT newHeight
                 (CloudHeightUp, False, _) -> pure ()
                 (CloudHeightDown, True, _) -> do
                   current <- STM.readTVarIO (cloudHeight gameState)
-                  let newHeight = max 100.0 (current - 5000.0)
+                  let newHeight = max 500.0 (current - 100.0)
                   STM.atomically $ STM.writeTVar (cloudHeight gameState) newHeight
                   logInfoIO LogGeneral $ "cloud height: " <> showT newHeight
                 (CloudHeightDown, False, _) -> pure ()

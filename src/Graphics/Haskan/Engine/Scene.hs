@@ -67,8 +67,8 @@ makeProjectionMatrix width height =
   Linear.Projection.perspective
     (pi / 3)
     (realToFrac width / realToFrac height)
-    0.01
-    400000.0
+    1.0
+    50000.0
 
 drawCallToSnapshot :: DrawCall -> RenderableSnapshot
 drawCallToSnapshot DrawCall {..} =

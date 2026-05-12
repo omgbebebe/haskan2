@@ -248,8 +248,17 @@ fragment = shader do
       entryY = cloudBottom
       entryZ = camZ + dirZ * tEntry
 
-      -- Noise scale
-      cloudScale = 0.005
+      -- Noise scale: larger cells for billowy cumulus puffs
+      cloudScale = 0.001
+      warpScale = 0.0003
+
+      -- Domain warp: displace sample position with low-freq noise
+      -- to break up grid-aligned blob pattern
+      warp3D (Vec3 x y z) =
+        let wx = valueNoise3D (Vec3 (x * warpScale) (y * warpScale) (z * warpScale))
+            wy = valueNoise3D (Vec3 ((x + 100) * warpScale) (y * warpScale) (z * warpScale))
+            wz = valueNoise3D (Vec3 (x * warpScale) ((y + 100) * warpScale) (z * warpScale))
+        in Vec3 (x + wx * 800) (y + wy * 200) (z + wz * 800)
 
       -- Light march: 2 steps toward sun, sample single-octave noise
       lightMarchDensity posX_ posY_ posZ_ =
@@ -273,13 +282,16 @@ fragment = shader do
             sampleY = entryY + dirY * tOffset
             sampleZ = entryZ + dirZ * tOffset
 
-            -- Height factor (more clouds in middle of layer)
+            -- Height factor: flat bottom (0.0-0.3), fluffy middle (0.3-0.7), thin top (0.7-1.0)
             heightFrac = (sampleY - cloudBottom) / cloudThickness
-            heightFactor = smoothstep 0.0 0.2 heightFrac * (1.0 - smoothstep 0.6 1.0 heightFrac)
+            heightFactor = smoothstep 0.0 0.3 heightFrac * (1.0 - smoothstep 0.7 1.0 heightFrac)
 
-            -- Sample density
-            rawDensity = fbm3D (Vec3 (sampleX * cloudScale) (sampleY * cloudScale) (sampleZ * cloudScale))
-            density = max 0 (rawDensity * heightFactor - 0.3) * 2.0
+            -- Domain warp then sample density
+            Vec3 warpX warpY warpZ = warp3D (Vec3 sampleX sampleY sampleZ)
+            rawDensity = fbm3D (Vec3 (warpX * cloudScale) (warpY * cloudScale) (warpZ * cloudScale))
+            -- Sharper threshold: pow creates distinct cloud edges
+            shapedDensity = (smoothstep 0.35 0.65 rawDensity) ** 3.0
+            density = max 0 (shapedDensity * heightFactor - 0.1) * 3.0
 
             -- Light transmittance from sun to this point
             lightDensity = lightMarchDensity sampleX sampleY sampleZ
