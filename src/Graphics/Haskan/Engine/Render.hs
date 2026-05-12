@@ -290,9 +290,10 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                 dnEnabled <- liftIO $ STM.readTVarIO tvDayNightEnabled
                 let sunState = if dnEnabled
                                then computeSunState defaultDayNightConfig currentTime
-                               else DayNight.SunState (V3 (-1) (-1) (-1)) 1.0 (V3 1 1 1) (V3 1 1 1) 0.3
+                               else DayNight.SunState (V3 (-1) (-1) (-1)) 1.0 (V3 1 1 1) (V3 1 1 1) 0.3 0.0
                     skyTint = DayNight.ssSkyTint sunState
                     iblInt = DayNight.ssIBLIntensity sunState
+                    sunAzimuth = DayNight.ssAzimuth sunState
 
                 let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
                       buildDeferredGraph DeferredPassData
@@ -320,7 +321,8 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdLightCount = lightCount
                         , dpdLightBuffer = lightSsboBuffer
                         , dpdSkyTint = skyTint
-                        , dpdIBLIntensity = iblInt
+                         , dpdIBLIntensity = iblInt
+                         , dpdSunAzimuth = sunAzimuth
                         , dpdGBufferImages = gBufferImagesForFrame
                         , dpdWireframePipeline = drWireframePipeline
                         , dpdWireframeLayout = drWireframePipelineLayout

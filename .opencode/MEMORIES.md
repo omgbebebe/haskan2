@@ -1,11 +1,16 @@
 # Haskan2 — Critical Project Context (Survives Compaction)
 
+## Core Principle
+**NO WORKAROUNDS. EVER.** If a dependency is missing a feature, we implement it properly. If a tool is broken, we fix it. Never accept hacks, shortcuts, or "good enough" solutions. Every technical debt item must be tracked and resolved.
+
 ## Build & Run
 - **Build**: `nix develop --command cabal build all`
 - **Run**: `nix develop --command cabal run exe:haskan2 -- -t 5 MODEL`
 - **Debug socket**: `nix develop --command cabal run exe:haskan2 -- -t 60 --debug-socket /tmp/haskan2.sock MODEL`
 - **Debug client**: `python3 scripts/debug_client.py key f10 true`
 - **UV check**: `--uv-check-cube`, `--uv-check-sphere`, `--uv-check-plane`
+- **Lights**: `--lights N` (1-8, default 3)
+- **Day/Night**: `--day-night --time HOURS --time-speed FACTOR`
 
 ## Architecture
 - **GHC 9.14.1** via `haskell.compiler.ghc9141` from nixpkgs-unstable
@@ -32,7 +37,7 @@
 8. **Mesh merging**: All scene meshes concatenated into single buffers with per-entity `firstIndex`/`vertexOffset`
 9. **FIR `if-then-else` ambiguity**: Convert `gl_VertexIndex` to `Code Float` via `fromIntegral` first
 10. **BlockArguments**: Required for `liftIO $ do` nested blocks
-11. **Push constant**: 80 bytes — camera pos (12) + debugMode (4) + axisOverlay (4) + groundPlane (4) + pad0 (4) + ray0 (16) + ray1 (16) + ray2 (16)
+11. **Push constant**: 96 bytes — camera pos (12) + debugMode (4) + axisOverlay (4) + groundPlane (4) + pad0 (4) + lightCount (4) + ray0 (16) + ray1 (16) + ray2 (16) + skyTint (12) + iblIntensity (4)
 12. **Vertex stride**: 60 bytes (pos 12 + uv 8 + norm 12 + tangent 16 + col 12)
 13. **G-buffer shader**: Normal encoding `* 0.5 + 0.5`; lighting shader decodes via `* 2 - 1`
 14. **TBN**: `bitangent = cross(normal, tangent) * handedness`; normal map sampled via bindless array
@@ -51,11 +56,35 @@
 - **Rotation handler**: Computes local right axis from current forward; clamps elevation after applying delta
 - **Per-frame animation**: `Camera.animate` called from `stateUpdateLoop` with `dtSeconds`
 
+## Session History
+
+### 2025-05-12: M10.1 Multi-Light + M10.3 Day/Night
+**M10.1 Complete**: 
+- `LightData` SSBO with 256-light capacity (`src/Graphics/Haskan/Engine/Types.hs`)
+- Lighting shader unrolled for 4 directional lights with full PBR per light (`Lighting.hs`)
+- `--lights N` CLI option (1-8 predefined lights)
+- `scripts/benchmark_lights.sh` for frame time comparison
+- Push constant expanded from 80→96 bytes (added `skyTintR/G/B` + `iblIntensity`)
+
+**M10.3 Complete**:
+- `DayNight.hs` module with sun trajectory, intensity, color, sky tint, IBL modulation
+- `GameState` extended with `gameTimeOfDay`, `gameTimeSpeed`, `gameDayNightEnabled` TVars
+- `--day-night --time HOURS --time-speed FACTOR` CLI options
+- Time speed unit: game-hours per real-second (divide by 3600)
+- State update loop advances time and updates first light (the sun) each frame
+- Render thread reads time, computes `SunState`, passes `skyTint` and `iblIntensity` to shader
+- Bug fixed: time-speed was in wrong units (seconds instead of hours), causing flicker
+- IBL range increased from 0.05-0.3 to 0.0-1.0 for visible effect
+
+**Known M10.3 Limitation**: IBL cubemap is static. Objects reflect unchanged environment; only intensity scales. Dynamic cubemap rotation/blending requires FIR math extensions (see FIR Plan below).
+
 ## Open Issues
 1. **UV texturing of procedural cube/sphere**: `unitCube` and `uvSphere` UV orientation still incorrect. Vision model confirms upside-down text on all faces. Deferred to future session.
-2. **FIR shader missing `sin`/`floor`**: Needed for 1-unit grid cells effect. Marked in M10-PLAN.md technical decisions.
-3. **IBL dynamic sky**: Deferred to future milestone; currently using precomputed offline cubemaps (Variant A)
-4. **Shadows for sun**: Blocked until CSM implemented; shadowless day/night acceptable for M10
+2. **FIR shader missing `clamp`/`smoothstep`/`mix`/`step`/`fract`**: ~~Needed for grid cells, volumetric clouds, proper sky models, and cubemap rotation. See `.opencode/FIR_MATH_PLAN.md` for implementation plan. **Next session priority.**~~ **DONE** — Added `GLSLMath` typeclass with `clamp`, `mix`, `step`, `smoothstep`, `fract`. Already had `sin`/`cos`/`atan2`/`pow`/`floor`/`exp`/`signum`. All wired to GLSL.std.450 extended instructions. `sin`/`cos`/`atan2`/`pow`/`floor` were already present since before M10. Plan was outdated.
+3. **IBL dynamic sky**: Deferred until FIR math functions available. **NOW UNBLOCKED** — `sin`/`cos` available.
+4. **Shadows for sun**: Blocked until CSM implemented; shadowless day/night acceptable for M10.
+5. **Day/night IBL cubemap rotation**: ~~Skybox background gets tinted by `skyTint` push constant, but object IBL reflections sample the static cubemap unchanged. Only `iblIntensity` scales (0→1). Sun direction changes but reflected environment stays identical. Need cubemap rotation matrix push constant or separate day/night cubemap presets. Requires FIR `sin`/`cos`/`atan2` for spherical coordinate conversion.~~ **FIXED** — `sunAzimuth` passed via push constant (replaced `pad0`). Fragment shader computes `cos(sunAzimuth)` and `sin(sunAzimuth)` using FIR's `cos`/`sin`, rotates sampling directions around Y axis before sampling `env_map` (skybox background + specular IBL) and `irradiance_map` (diffuse IBL). Cubemap rotates with sun so reflections align with actual sun direction.
+6. **M10.4 Volumetric Clouds**: Blocked until FIR math functions available. **NOW UNBLOCKED** — `sin`/`cos`/`clamp`/`smoothstep`/`mix`/`step`/`fract`/`pow` all available.
 
 ## Critical Files
 - `src/Graphics/Haskan/Engine.hs` — main loop, ECS, deferred graph, `computeSkyboxRays`, UV check mode, axis/ground plane state, debug mode handling
@@ -64,14 +93,19 @@
 - `src/Graphics/Haskan/Camera.hs` — `OrbitalCamera`, `InterpolationMethod`, `animateOrbital`, quaternion math
 - `src/Graphics/Haskan/Mesh.hs` — `unitCube`, `uvSphere`, `uvPlane`, `groundPlaneMesh`
 - `src/Graphics/Haskan/Vertex.hs` — `Vertex` type with Storable instance
-- `src/Graphics/Haskan/Render/Deferred.hs` — deferred graph builder; push constant upload 80 bytes
-- `src/Graphics/Haskan/Vulkan/DeferredResources.hs` — lighting push constant range 80 bytes, pipeline layouts
+- `src/Graphics/Haskan/Render/Deferred.hs` — deferred graph builder; push constant upload 96 bytes
+- `src/Graphics/Haskan/Vulkan/DeferredResources.hs` — lighting push constant range 96 bytes, pipeline layouts
 - `src/Graphics/Haskan/Input.hs` — key bindings including `G` and `Shift+G` for overlays
 - `src/Graphics/Haskan/Debug/Interface.hs` — debug socket key mappings
 - `src/Graphics/Haskan/Debug/Screenshot.hs` — screenshot capture with zero-size guards
 - `src/Graphics/Haskan/Vulkan/Buffer.hs` — `vkMapMemory` guards for empty data
 - `src/Graphics/Haskan/Vulkan/Texture.hs` — `readImageFromFile` using JuicyPixels (top-down row order)
 - `docs/M10-PLAN.md` — milestone plan
+- `.opencode/FIR_MATH_PLAN.md` — FIR math extension implementation plan
+- `src/Graphics/Haskan/DayNight.hs` — sun trajectory, sky color, IBL intensity computation
+- `src/Graphics/Haskan/Vulkan/Shaders/LightData.hs` — FIR LightData struct for SSBO
+- `src/Graphics/Haskan/Engine/Types.hs` — GameState with lights, timeOfDay, dayNight fields
+- `scripts/benchmark_lights.sh` — multi-light benchmark harness
 
 ## Test Assets
 - `data/hdri/env_test/` — colored test cubemap: +X=red, -X=blue, +Y=green, -Y=yellow, +Z=gray, -Z=brown

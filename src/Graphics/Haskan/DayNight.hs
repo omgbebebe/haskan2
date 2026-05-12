@@ -45,6 +45,7 @@ data SunState = SunState
   , ssColor :: V3 Float
   , ssSkyTint :: V3 Float
   , ssIBLIntensity :: Float
+  , ssAzimuth :: Float
   }
   deriving (Show)
 
@@ -65,8 +66,12 @@ computeSunState config time =
       -- Elevation: sine of sun angle, peaking at noon
       elevation = sin sunAngle * dncMaxElevation config
       
-      -- Azimuth: rotates 180° from sunrise to sunset
+      -- Azimuth for sun direction: rotates 180° from sunrise to sunset
       azimuth = sunAngle
+      
+      -- Azimuth for cubemap rotation: continuous 360° over 24 hours
+      -- Sun makes a full apparent revolution every 24 hours
+      azimuth24h = (t / 24.0) * 2 * pi
       
       -- Direction (light comes FROM this direction)
       dirX = cos elevation * sin azimuth
@@ -105,6 +110,7 @@ computeSunState config time =
     , ssColor = color
     , ssSkyTint = skyTint
     , ssIBLIntensity = iblInt
+    , ssAzimuth = azimuth24h
     }
 
 -- Helpers

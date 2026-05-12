@@ -67,7 +67,7 @@ type CameraPushConstant = Struct
    , "debugMode" ':-> Float
    , "axisOverlay" ':-> Float
    , "groundPlane" ':-> Float
-   , "pad0" ':-> Float
+   , "sunAzimuth" ':-> Float
    , "lightCount" ':-> Float
    , "ray0" ':-> V 3 Float
    , "ray1" ':-> V 3 Float
@@ -142,6 +142,17 @@ fragment = shader do
   uv <- get @"in_uv"
   rayDir <- get @"in_ray"
   let (Vec3 rayDirX rayDirY rayDirZ) = rayDir
+
+  -- Read push constants early (needed for cubemap rotation)
+  cameraPos <- get @"cameraPos"
+  let sunAzimuth = view @(Name "sunAzimuth") cameraPos
+      iblIntensity = view @(Name "iblIntensity") cameraPos
+
+  -- Precompute cubemap rotation from sun azimuth
+  let cosAz = cos sunAzimuth
+      sinAz = sin sunAzimuth
+      rotateY (Vec3 rx ry rz) = Vec3 (rx * cosAz - rz * sinAz) ry (rx * sinAz + rz * cosAz)
+
   -- Sample g-buffer with lazy pattern matching to avoid view constraint issues
   ~(Vec4 posX posY posZ metallic) <- use @(ImageTexel "gbuf_position") NilOps uv
   ~(Vec4 normX_raw normY_raw normZ_raw roughness) <- use @(ImageTexel "gbuf_normal") NilOps uv
@@ -151,8 +162,9 @@ fragment = shader do
   -- Check if background (no geometry written to g-buffer)
   let hasGeometry = abs posX + abs posY + abs posZ > 0.001
 
-  -- Sample skybox for background
-  ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps rayDir
+  -- Sample skybox for background (rotate by sun azimuth)
+  let rayDirRotated = rotateY rayDir
+  ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps rayDirRotated
 
   let normX = normX_raw * 2 - 1
       normY = normY_raw * 2 - 1
@@ -164,8 +176,7 @@ fragment = shader do
       ny = normY / normLen
       nz = normZ / normLen
 
-  -- Camera position (push constant)
-  cameraPos <- get @"cameraPos"
+  -- Remaining push constants
   let camX = view @(Name "cameraX") cameraPos
       camY = view @(Name "cameraY") cameraPos
       camZ = view @(Name "cameraZ") cameraPos
@@ -176,7 +187,6 @@ fragment = shader do
       skyTintR = view @(Name "skyTintR") cameraPos
       skyTintG = view @(Name "skyTintG") cameraPos
       skyTintB = view @(Name "skyTintB") cameraPos
-      iblIntensity = view @(Name "iblIntensity") cameraPos
 
   let -- View direction (from fragment to camera)
       vdx = camX - posX
@@ -410,14 +420,14 @@ fragment = shader do
   -- Sample BRDF LUT for split-sum approximation
   ~(Vec4 brdfScale brdfBias _ _) <- use @(ImageTexel "brdf_lut") NilOps (Vec2 nDotV roughness)
 
-  -- Sample irradiance (diffuse IBL)
-  ~(Vec4 irrR irrG irrB _) <- use @(ImageTexel "irradiance_map") NilOps (Vec3 nx ny nz)
+  -- Sample irradiance (diffuse IBL) with rotated normal
+  ~(Vec4 irrR irrG irrB _) <- use @(ImageTexel "irradiance_map") NilOps (rotateY (Vec3 nx ny nz))
 
-  -- Sample environment map (specular IBL) with roughness-based LOD
+  -- Sample environment map (specular IBL) with rotated reflection vector
   -- Radiance cubemap is 512px with 10 mip levels (0..9)
   let maxMipF = 9.0 :: Code Float
       lod = roughness * maxMipF
-  ~(Vec4 envR envG envB _) <- use @(ImageTexel "env_map") (LOD lod NilOps) (Vec3 rx ry rz)
+  ~(Vec4 envR envG envB _) <- use @(ImageTexel "env_map") (LOD lod NilOps) (rotateY (Vec3 rx ry rz))
 
   let -- IBL intensity from push constant (day/night cycle)
       envIntensity = iblIntensity
