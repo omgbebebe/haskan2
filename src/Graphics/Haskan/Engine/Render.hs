@@ -503,19 +503,30 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
   graphicsQueueHandler <- Device.getDeviceQueueHandler device graphicsQueueFamilyIndex 0
   presentQueueHandler <- Device.getDeviceQueueHandler device presentQueueFamilyIndex 0
 
+  logInfoIO LogGeneral "compiling shaders..."
   liftIO $ FIR.compileTo "data/shaders/fir/vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Shaders.vertex
+  logInfoIO LogGeneral "  vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Shaders.fragment
+  logInfoIO LogGeneral "  frag.spv done"
 
   liftIO $ FIR.compileTo "data/shaders/fir/gbuf_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GBufferShaders.vertex
+  logInfoIO LogGeneral "  gbuf_vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/gbuf_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GBufferShaders.fragment
+  logInfoIO LogGeneral "  gbuf_frag.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/light_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] LightingShaders.vertex
+  logInfoIO LogGeneral "  light_vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/light_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] LightingShaders.fragment
+  logInfoIO LogGeneral "  light_frag.spv done"
 
   liftIO $ FIR.compileTo "data/shaders/fir/wire_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WireframeShaders.vertex
+  logInfoIO LogGeneral "  wire_vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/wire_geom.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WireframeShaders.geometry
+  logInfoIO LogGeneral "  wire_geom.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/wire_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WireframeShaders.fragment
+  logInfoIO LogGeneral "  wire_frag.spv done"
 
   liftIO $ FIR.compileTo "data/shaders/fir/cull_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CullShaders.program
+  logInfoIO LogGeneral "  cull_comp.spv done"
 
   vertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/vert.spv"
   fragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/frag.spv"
@@ -551,6 +562,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
   let envDir = "data/textures/cubemaps/" ++ envMapDir ++ "/"
       radianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
       irradianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
+  logInfoIO LogGeneral "loading IBL cubemaps..."
   radianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile radianceFacePaths
   irradianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile irradianceFacePaths
   let (radDatas, radWidths, _) = unzip3 radianceFaceDatas

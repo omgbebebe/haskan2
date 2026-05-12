@@ -27,6 +27,7 @@ mkShell {
     imagemagick
     feh
     (python3.withPackages (p: with p; [
+      sympy
       requests
       numpy
       pillow

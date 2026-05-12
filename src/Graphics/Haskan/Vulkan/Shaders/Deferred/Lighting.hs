@@ -156,6 +156,9 @@ fragment = shader do
   cameraPos <- get @"cameraPos"
   let sunAzimuth = view @(Name "sunAzimuth") cameraPos
       iblIntensity = view @(Name "iblIntensity") cameraPos
+      camX = view @(Name "cameraX") cameraPos
+      camY = view @(Name "cameraY") cameraPos
+      camZ = view @(Name "cameraZ") cameraPos
 
   -- Precompute cubemap rotation from sun azimuth
   let cosAz = cos sunAzimuth
@@ -175,7 +178,7 @@ fragment = shader do
   let rayDirRotated = rotateY (Vec3 dirX dirY dirZ)
   ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps rayDirRotated
 
-  -- Procedural volumetric clouds
+  -- Procedural volumetric clouds (world-space sampling for parallax)
   let -- Integer-mix 3D hash (breaks axis-aligned artifacts of sin(x*C))
       hash3 (Vec3 x y z) =
         let x1 = fract (x * 0.1031)
@@ -227,34 +230,43 @@ fragment = shader do
       -- Height mask from vertical direction (seam-free, monotonic in Y)
       sphereV = asin (clamp dirY (-1.0) 1.0) / pi + 0.5
 
-      -- 3D noise coordinates: rotate normalized direction for animated drift
-      -- Higher scale (12 vs 4) gives finer cloud puffs instead of huge islands
-      cosA = cos (sunAzimuth * 0.01)
-      sinA = sin (sunAzimuth * 0.01)
-      rotX = dirX * cosA - dirZ * sinA
-      rotZ = dirX * sinA + dirZ * cosA
-      cloudScale = 12.0
-      noiseVal = fbm3D (Vec3 (rotX * cloudScale)
-                             (dirY * cloudScale)
-                             (rotZ * cloudScale))
+      -- World-space cloud layer at fixed altitude above camera
+      -- Intersect view ray with horizontal plane at cloud altitude
+      cloudAltitude = 200.0
+      cloudHitT = cloudAltitude / max 0.01 dirY
+      cloudHitX = camX + dirX * cloudHitT
+      cloudHitY = camY + dirY * cloudHitT
+      cloudHitZ = camZ + dirZ * cloudHitT
 
-      -- Height mask: clouds only above horizon, fading toward zenith
-      -- 0 below horizon, 1 just above horizon, 0 near zenith
-      heightMask = smoothstep 0.5 0.52 sphereV * (1.0 - smoothstep 0.7 0.9 sphereV)
+      -- Noise scale: larger near horizon (clouds farther away),
+      -- smaller overhead (clouds closer)
+      cloudScale = 12.0 / max 0.1 dirY
+
+      -- Sample noise at world-space intersection point
+      noiseVal = fbm3D (Vec3 (cloudHitX * cloudScale * 0.01)
+                             (cloudHitY * cloudScale * 0.01)
+                             (cloudHitZ * cloudScale * 0.01))
+
+      -- Height mask: wider, softer transition near horizon
+      -- 0 below horizon, 1 at low elevation, 0 near zenith
+      heightMask = smoothstep 0.45 0.55 sphereV * (1.0 - smoothstep 0.65 0.85 sphereV)
 
       -- Cloud coverage with soft threshold
       cloudDensity = smoothstep 0.35 0.65 (noiseVal * heightMask)
 
-      -- Simple sun-based cloud shading
-      -- sunAzimuth*0.5 ranges 0->pi over 24h, sin peaks at noon
+      -- Sun-based cloud lighting (sunHeight approximates elevation)
       sunHeight = clamp (sin (sunAzimuth * 0.5)) 0.0 1.0
-      cloudBright = 0.95
-      cloudShadow = 0.5 + 0.3 * sunHeight
+      cloudBright = mix 0.4 0.95 sunHeight
+
+      -- Clouds inherit sky color influence for continuity
+      cloudColR = mix skyR cloudBright 0.7
+      cloudColG = mix skyG cloudBright 0.7
+      cloudColB = mix skyB cloudBright 0.7
 
       -- Blend clouds over skybox
-      cloudSkyR = mix skyR cloudBright cloudDensity
-      cloudSkyG = mix skyG cloudBright cloudDensity
-      cloudSkyB = mix skyB cloudShadow cloudDensity
+      cloudSkyR = mix skyR cloudColR cloudDensity
+      cloudSkyG = mix skyG cloudColG cloudDensity
+      cloudSkyB = mix skyB cloudColB cloudDensity
 
       -- Debug: raw cloud density (grayscale)
       dbgCloud = cloudDensity
@@ -274,10 +286,7 @@ fragment = shader do
       nz = normZ / normLen
 
   -- Remaining push constants
-  let camX = view @(Name "cameraX") cameraPos
-      camY = view @(Name "cameraY") cameraPos
-      camZ = view @(Name "cameraZ") cameraPos
-      debugMode = view @(Name "debugMode") cameraPos
+  let debugMode = view @(Name "debugMode") cameraPos
       axisOverlay = view @(Name "axisOverlay") cameraPos
       groundPlane = view @(Name "groundPlane") cameraPos
       lightCount = view @(Name "lightCount") cameraPos

@@ -70,7 +70,8 @@ defaultBindings =
       (([], SDL.KeycodeA), StrafeLeft),
       (([], SDL.KeycodeD), StrafeRight),
       (([], SDL.KeycodeF12), FrameInspect),
-      (([LShift], SDL.KeycodeQ), Escape),
+       (([LShift], SDL.KeycodeQ), Escape),
+       (([LShift], SDL.KeycodeEscape), DebugMode 0),  -- reset debug mode, render full pipeline
       (([LShift], SDL.KeycodeF3), ToggleWireframe),
       (([], SDL.KeycodeG), ToggleAxisOverlay),
       (([LShift], SDL.KeycodeG), ToggleGroundPlane),
