@@ -84,7 +84,7 @@
 3. **IBL dynamic sky**: Deferred until FIR math functions available. **NOW UNBLOCKED** — `sin`/`cos` available.
 4. **Shadows for sun**: Blocked until CSM implemented; shadowless day/night acceptable for M10.
 5. **Day/night IBL cubemap rotation**: ~~Skybox background gets tinted by `skyTint` push constant, but object IBL reflections sample the static cubemap unchanged. Only `iblIntensity` scales (0→1). Sun direction changes but reflected environment stays identical. Need cubemap rotation matrix push constant or separate day/night cubemap presets. Requires FIR `sin`/`cos`/`atan2` for spherical coordinate conversion.~~ **FIXED** — `sunAzimuth` passed via push constant (replaced `pad0`). Fragment shader computes `cos(sunAzimuth)` and `sin(sunAzimuth)` using FIR's `cos`/`sin`, rotates sampling directions around Y axis before sampling `env_map` (skybox background + specular IBL) and `irradiance_map` (diffuse IBL). Cubemap rotates with sun so reflections align with actual sun direction.
-6. **M10.4 Volumetric Clouds**: Blocked until FIR math functions available. **NOW UNBLOCKED** — `sin`/`cos`/`clamp`/`smoothstep`/`mix`/`step`/`fract`/`pow` all available.
+6. **M10.4 Volumetric Clouds**: ~~Blocked until FIR math functions available.~~ **DONE** — Procedural clouds in lighting shader using hash-based noise, fBm (3 octaves), spherical UV mapping, smoothstep density shaping, sun-based shading. Clouds animate with sunAzimuth drift. Applied to background pixels only. Uses new FIR math: sin, cos, fract, floor, mix, smoothstep, clamp, atan2, asin.
 
 ## Critical Files
 - `src/Graphics/Haskan/Engine.hs` — main loop, ECS, deferred graph, `computeSkyboxRays`, UV check mode, axis/ground plane state, debug mode handling
