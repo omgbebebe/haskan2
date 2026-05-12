@@ -164,7 +164,7 @@
 6. **M10.4 Volumetric Clouds**: **DONE** — Procedural clouds in lighting shader. Hash noise, value noise, 3-octave fBm, spherical UV, height mask, smoothstep density, sun-based shading. Optimized SPIR-V: ~22KB. Background pixels only.
    - **Bug fix**: Original code had `smoothstep 0.85 0.65` (reversed edges = undefined behavior in SPIR-V), causing clouds to appear at top/bottom instead of horizon band. Fixed to `smoothstep 0.5 0.52 * (1.0 - smoothstep 0.7 0.9)`.
    - **Tuning**: Normalized fBm to [0,1], widened density threshold to `smoothstep 0.35 0.65` for softer edges.
-   - **Debug modes**: 13.0=cloud density, 14.0=height mask, 15.0=raw noise.
+   - **Debug modes**: 13.0=cloud density (Shift+F1), 14.0=height mask (Shift+F2), 15.0=raw noise (Shift+F3).
 
 ## Critical Files
 - `src/Graphics/Haskan/Engine.hs` — main loop, ECS, deferred graph, `computeSkyboxRays`, UV check mode, axis/ground plane state, debug mode handling
@@ -175,7 +175,7 @@
 - `src/Graphics/Haskan/Vertex.hs` — `Vertex` type with Storable instance
 - `src/Graphics/Haskan/Render/Deferred.hs` — deferred graph builder; push constant upload 96 bytes
 - `src/Graphics/Haskan/Vulkan/DeferredResources.hs` — lighting push constant range 96 bytes, pipeline layouts
-- `src/Graphics/Haskan/Input.hs` — key bindings including `G` and `Shift+G` for overlays
+- `src/Graphics/Haskan/Input.hs` — key bindings including debug modes F1-F9, Shift+F1/F2/F3 (cloud debug), Ctrl/Shift+F12, G/Shift+G for overlays
 - `src/Graphics/Haskan/Debug/Interface.hs` — debug socket key mappings
 - `src/Graphics/Haskan/Debug/Screenshot.hs` — screenshot capture with zero-size guards
 - `src/Graphics/Haskan/Vulkan/Buffer.hs` — `vkMapMemory` guards for empty data
