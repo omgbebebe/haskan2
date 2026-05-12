@@ -136,6 +136,9 @@ type FragmentDefs =
 -- 10 = specular IBL    (Ctrl+F12)
 -- 11 = Fresnel         (Shift+F12)
 -- 12 = skybox (raw env_map sample, all pixels) (Shift+Ctrl+F12)
+-- 13 = cloud density   (Shift+F1)
+-- 14 = height mask     (Shift+F2)
+-- 15 = raw noise       (Shift+F3)
 
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do

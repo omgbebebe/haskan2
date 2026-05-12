@@ -92,6 +92,10 @@ defaultBindings =
       (([LCtrl], SDL.KeycodeF12), DebugMode 10),  -- specular IBL
       (([LShift], SDL.KeycodeF12), DebugMode 11), -- Fresnel
       (([LShift, LCtrl], SDL.KeycodeF12), DebugMode 12), -- raw skybox
+      -- Cloud debug modes (Shift+F1/F2/F3)
+      (([LShift], SDL.KeycodeF1), DebugMode 13),  -- cloud density
+      (([LShift], SDL.KeycodeF2), DebugMode 14),  -- height mask
+      (([LShift], SDL.KeycodeF3), DebugMode 15),  -- raw noise
       (([], SDL.KeycodeM), ToggleMouseCapture)
     ]
 
