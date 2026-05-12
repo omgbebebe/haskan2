@@ -30,6 +30,7 @@ mkShell {
       sympy
       requests
       numpy
+      scipy
       pillow
       openexr
     ]))
