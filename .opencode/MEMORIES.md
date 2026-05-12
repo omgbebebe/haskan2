@@ -161,11 +161,14 @@
 3. **IBL dynamic sky**: Deferred until FIR math functions available. **NOW UNBLOCKED** — `sin`/`cos` available. **BUT** HDRI rotation looks weird with current env1 (sunset with sun at horizon). Need better HDRI or procedural sky.
 4. **Shadows for sun**: Blocked until CSM implemented; shadowless day/night acceptable for M10.
 5. **Day/night IBL cubemap rotation**: **FIXED** — `sunAzimuth` passed via push constant. Fragment shader rotates sampling directions around Y. Cubemap rotates with sun. **Limitation**: Current env1 HDRI has sun baked at horizon; rotating makes it orbit like lighthouse. Need better HDRI or separate cubemap sets for dawn/noon/dusk/night.
-6. **M10.4 Volumetric Clouds**: **DONE** — Restored from commit `40306cd`. Procedural clouds in lighting shader: hash noise, value noise, 3-octave fBm, spherical UV, height mask, smoothstep density, sun-based shading. Optimized SPIR-V: 21.8KB (1073 instructions). Background pixels only.
+6. **M10.4 Volumetric Clouds**: **DONE** — Procedural clouds in lighting shader. Hash noise, value noise, 3-octave fBm, spherical UV, height mask, smoothstep density, sun-based shading. Optimized SPIR-V: ~22KB. Background pixels only.
+   - **Bug fix**: Original code had `smoothstep 0.85 0.65` (reversed edges = undefined behavior in SPIR-V), causing clouds to appear at top/bottom instead of horizon band. Fixed to `smoothstep 0.5 0.52 * (1.0 - smoothstep 0.7 0.9)`.
+   - **Tuning**: Normalized fBm to [0,1], widened density threshold to `smoothstep 0.35 0.65` for softer edges.
+   - **Debug modes**: 13.0=cloud density, 14.0=height mask, 15.0=raw noise.
 
 ## Critical Files
 - `src/Graphics/Haskan/Engine.hs` — main loop, ECS, deferred graph, `computeSkyboxRays`, UV check mode, axis/ground plane state, debug mode handling
-- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Lighting.hs` — lighting shader with skybox sampling, axis overlay, ground plane, debug modes 1-12
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Lighting.hs` — lighting shader with skybox sampling, axis overlay, ground plane, debug modes 1-15, procedural clouds
 - `src/Graphics/Haskan/Vulkan/Shaders/Deferred/GBuffer.hs` — g-buffer vertex/fragment shaders; normal mapping with TBN
 - `src/Graphics/Haskan/Camera.hs` — `OrbitalCamera`, `InterpolationMethod`, `animateOrbital`, quaternion math
 - `src/Graphics/Haskan/Mesh.hs` — `unitCube`, `uvSphere`, `uvPlane`, `groundPlaneMesh`
