@@ -10,9 +10,9 @@ Outputs:
 
 Noise model:
     - Worley noise (cellular): creates separated cloud puffs
+    - Domain warp: breaks regular grid for organic shapes
     - Perlin FBM: adds detail within puffs
     - Coverage mask: large-scale cloud region control
-    - Curl noise: optional domain warp for organic shapes
 """
 
 import os
@@ -28,16 +28,18 @@ CHANNELS = 4  # RGBA
 np.random.seed(42)
 
 
-def generate_worley_3d(size, num_points=32):
+def generate_worley_3d(size, num_points=96):
     """Generate 3D Worley (cellular) noise.
 
     Returns distance to nearest random point (normalized 0-1).
     Lower values = closer to cell center (cloud core).
     Higher values = cell boundary (gap between clouds).
+    
+    NO toroidal wrapping — each point is independent to avoid tiling artifacts.
     """
     print(f"  Generating Worley noise ({num_points} points)...")
 
-    # Random point positions
+    # Random point positions (no wrapping)
     points = np.random.rand(num_points, 3)
 
     # Grid coordinates
@@ -48,14 +50,13 @@ def generate_worley_3d(size, num_points=32):
 
     coords = np.stack([xx, yy, zz], axis=-1)  # (size, size, size, 3)
 
-    # Compute distance to nearest point (with toroidal wrapping)
-    min_dist = np.ones((size, size, size), dtype=np.float32)
+    # Compute distance to nearest point (NO wrapping)
+    min_dist = np.ones((size, size, size), dtype=np.float32) * 2.0
 
     for p in points:
-        # Toroidal distance (noise repeats)
-        dx = np.minimum(np.abs(coords[..., 0] - p[0]), 1 - np.abs(coords[..., 0] - p[0]))
-        dy = np.minimum(np.abs(coords[..., 1] - p[1]), 1 - np.abs(coords[..., 1] - p[1]))
-        dz = np.minimum(np.abs(coords[..., 2] - p[2]), 1 - np.abs(coords[..., 2] - p[2]))
+        dx = coords[..., 0] - p[0]
+        dy = coords[..., 1] - p[1]
+        dz = coords[..., 2] - p[2]
         dist = np.sqrt(dx**2 + dy**2 + dz**2)
         min_dist = np.minimum(min_dist, dist)
 
@@ -63,7 +64,7 @@ def generate_worley_3d(size, num_points=32):
     return min_dist / min_dist.max()
 
 
-def generate_perlin_3d(size, octaves=3):
+def generate_perlin_3d(size, octaves=4):
     """Generate 3D Perlin-like noise using numpy interpolation."""
     print(f"  Generating Perlin noise ({octaves} octaves)...")
 
@@ -95,20 +96,56 @@ def generate_perlin_3d(size, octaves=3):
     return result
 
 
+def generate_domain_warp_3d(size):
+    """Generate low-frequency domain warp vectors.
+    
+    Used to displace coordinates before Worley sampling, breaking the
+    regular grid and creating more organic cloud shapes.
+    """
+    print("  Generating domain warp field...")
+    
+    # Very low frequency (2x2x2 grid)
+    grid_size = 2
+    grid_x = np.random.randn(grid_size, grid_size, grid_size).astype(np.float32) * 0.15
+    grid_y = np.random.randn(grid_size, grid_size, grid_size).astype(np.float32) * 0.15
+    grid_z = np.random.randn(grid_size, grid_size, grid_size).astype(np.float32) * 0.15
+    
+    from scipy.ndimage import zoom
+    warp_x = zoom(grid_x, size / grid_size, order=1)
+    warp_y = zoom(grid_y, size / grid_size, order=1)
+    warp_z = zoom(grid_z, size / grid_size, order=1)
+    
+    # Crop to exact size
+    warp_x = warp_x[:size, :size, :size]
+    warp_y = warp_y[:size, :size, :size]
+    warp_z = warp_z[:size, :size, :size]
+    
+    return warp_x, warp_y, warp_z
+
+
 def generate_coverage_3d(size):
-    """Large-scale coverage mask (very low frequency)."""
+    """Large-scale coverage mask with multiple octaves for less periodicity."""
     print("  Generating coverage mask...")
 
-    grid_size = 4
-    grid = np.random.rand(grid_size, grid_size, grid_size).astype(np.float32)
-
+    result = np.zeros((size, size, size), dtype=np.float32)
+    amplitude = 1.0
+    frequency = 3  # Start with 3x3x3 base grid
+    
     from scipy.ndimage import zoom
-    coverage = zoom(grid, size / grid_size, order=1)
-    coverage = coverage[:size, :size, :size]
+    
+    for _ in range(3):  # 3 octaves
+        grid = np.random.rand(frequency, frequency, frequency).astype(np.float32)
+        layer = zoom(grid, size / frequency, order=1)
+        layer = layer[:size, :size, :size]
+        result += layer * amplitude
+        amplitude *= 0.5
+        frequency *= 2
 
-    # Smooth it
-    coverage = (coverage - coverage.min()) / (coverage.max() - coverage.min())
-    return coverage
+    # Normalize and apply contrast to create more distinct cloud regions
+    result = (result - result.min()) / (result.max() - result.min())
+    # Sharpen: push values toward 0 or 1 for more distinct cloud/sky regions
+    result = result ** 1.5
+    return result
 
 
 def save_slices(data, output_dir):
@@ -229,23 +266,55 @@ def save_ktx2(data, filepath):
 def main():
     print(f"Generating 3D cloud noise texture ({SIZE}³)...")
 
-    # 1. Worley noise — separated cell structures (cloud puffs)
-    worley = generate_worley_3d(SIZE, num_points=48)
+    # 1. Generate domain warp field (low-frequency displacement)
+    warp_x, warp_y, warp_z = generate_domain_warp_3d(SIZE)
+
+    # 2. Worley noise — separated cell structures (cloud puffs)
+    # Compute with domain-warped coordinates for organic shapes
+    print("  Computing domain-warped Worley noise...")
+    
+    # Grid coordinates
+    x = np.linspace(0, 1, SIZE, endpoint=False)
+    y = np.linspace(0, 1, SIZE, endpoint=False)
+    z = np.linspace(0, 1, SIZE, endpoint=False)
+    xx, yy, zz = np.meshgrid(x, y, z, indexing='ij')
+    
+    # Apply domain warp
+    warped_x = xx + warp_x
+    warped_y = yy + warp_y
+    warped_z = zz + warp_z
+    
+    # Generate Worley points
+    num_points = 96
+    points = np.random.rand(num_points, 3)
+    
+    # Compute distance to nearest point using warped coordinates
+    min_dist = np.ones((SIZE, SIZE, SIZE), dtype=np.float32) * 2.0
+    coords = np.stack([warped_x, warped_y, warped_z], axis=-1)
+    
+    for p in points:
+        dx = coords[..., 0] - p[0]
+        dy = coords[..., 1] - p[1]
+        dz = coords[..., 2] - p[2]
+        dist = np.sqrt(dx**2 + dy**2 + dz**2)
+        min_dist = np.minimum(min_dist, dist)
+    
+    worley = min_dist / min_dist.max()
     # Invert: cell centers are low distance = high density
     worley = 1.0 - worley
 
-    # 2. Perlin FBM — detail within puffs
-    perlin = generate_perlin_3d(SIZE, octaves=3)
+    # 3. Perlin FBM — detail within puffs
+    perlin = generate_perlin_3d(SIZE, octaves=4)
 
-    # 3. Coverage mask — large-scale cloud region control
+    # 4. Coverage mask — large-scale cloud region control
     coverage = generate_coverage_3d(SIZE)
 
-    # 4. Combine
+    # 5. Combine
     # Channel R: cloud density
     #   = Worley (puff shape) * Perlin (detail) * Coverage (region mask)
     # Channel G: coverage mask (for shader use)
     # Channel B: detail noise (for shader use)
-    # Channel A: unused / reserved
+    # Channel A: worley shape
     print("  Combining noise layers...")
 
     density = worley * perlin * coverage

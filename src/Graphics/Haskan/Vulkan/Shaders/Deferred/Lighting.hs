@@ -185,60 +185,8 @@ fragment = shader do
   -- Sample skybox for background (NO rotation — mountains/stars stay fixed)
   ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps (Vec3 dirX dirY dirZ)
 
-  -- Procedural volumetric clouds (3-step ray marcher)
-  let -- Integer-mix 3D hash (breaks axis-aligned artifacts of sin(x*C))
-      hash3 (Vec3 x y z) =
-        let x1 = fract (x * 0.1031)
-            y1 = fract (y * 0.1031)
-            z1 = fract (z * 0.1031)
-            dotP = x1 * (y1 + 33.33) + y1 * (z1 + 33.33) + z1 * (x1 + 33.33)
-            x2 = x1 + dotP
-            y2 = y1 + dotP
-            z2 = z1 + dotP
-        in fract ((x2 + y2) * z2)
-
-      -- 3D value noise: trilinear interpolation of hashed grid corners
-      valueNoise3D (Vec3 x y z) =
-        let ix = floor x
-            iy = floor y
-            iz = floor z
-            fx = fract x
-            fy = fract y
-            fz = fract z
-            sx = fx * fx * (3 - 2 * fx)
-            sy = fy * fy * (3 - 2 * fy)
-            sz = fz * fz * (3 - 2 * fz)
-            h000 = hash3 (Vec3 ix iy iz)
-            h100 = hash3 (Vec3 (ix + 1) iy iz)
-            h010 = hash3 (Vec3 ix (iy + 1) iz)
-            h110 = hash3 (Vec3 (ix + 1) (iy + 1) iz)
-            h001 = hash3 (Vec3 ix iy (iz + 1))
-            h101 = hash3 (Vec3 (ix + 1) iy (iz + 1))
-            h011 = hash3 (Vec3 ix (iy + 1) (iz + 1))
-            h111 = hash3 (Vec3 (ix + 1) (iy + 1) (iz + 1))
-            v00 = mix h000 h100 sx
-            v10 = mix h010 h110 sx
-            v01 = mix h001 h101 sx
-            v11 = mix h011 h111 sx
-            v0 = mix v00 v10 sy
-            v1 = mix v01 v11 sy
-        in mix v0 v1 sz
-
-      -- 3D fBm: 3 octaves of layered noise, normalized to ~[0,1]
-      fbm3D (Vec3 x y z) =
-        let n1 = valueNoise3D (Vec3 x y z)
-            n2 = valueNoise3D (Vec3 (x * 2) (y * 2) (z * 2)) * 0.5
-            n3 = valueNoise3D (Vec3 (x * 4) (y * 4) (z * 4)) * 0.25
-        in (n1 + n2 + n3) / 1.75
-
-      -- Henyey-Greenstein phase function for forward scattering
-      -- g = 0.3 gives moderate forward scattering (silver lining)
-      hgPhase cosTheta g =
-        let g2 = g * g
-            denom = (1.0 + g2 - 2.0 * g * cosTheta) ** 1.5
-        in (1.0 - g2) / (4.0 * 3.14159265 * denom)
-
-      -- Cloud layer bounds
+  -- Procedural volumetric clouds (6-step ray marcher with 3D texture)
+  let -- Cloud layer bounds
       cloudThickness = 800.0
       cloudTop = cloudBottom + cloudThickness
 
@@ -252,87 +200,193 @@ fragment = shader do
       entryY = cloudBottom
       entryZ = camZ + dirZ * tEntry
 
-      -- 3D noise texture: 128³ RGBA8, each channel = different noise layer
-      -- R=density, G=coverage, B=detail, A=worley shape
-      noiseScale = 0.001  -- world units per texel
+      -- Noise scale: 128³ texture covers 128 / 0.001 = 128,000 world units
+      noiseScale = 0.001
 
-      -- Light march: 2 steps toward sun, sample single-octave noise
-      lightMarchDensity posX_ posY_ posZ_ =
-        let lStep = 80.0
-            texCoord0 = Vec3 (posX_ * noiseScale) (posY_ * noiseScale) (posZ_ * noiseScale)
-            texCoord1 = Vec3 ((posX_ + sunDirX * lStep) * noiseScale)
-                             ((posY_ + sunDirY * lStep) * noiseScale)
-                             ((posZ_ + sunDirZ * lStep) * noiseScale)
-        in 0.5  -- TODO: sample 3D texture in monadic context
+      -- Domain warp: procedural displacement to break regular grid
+      warpFreq = 0.002
+      warpAmp = 500.0
 
-      -- Ray step function: sample density, compute light, accumulate
-      -- Returns (newTransmittance, newAccR, newAccG, newAccB)
-      cloudStep stepIdx t_ accR_ accG_ accB_ =
-        let -- Sample position along ray
-            tOffset = stepSize * (stepIdx + 0.5)
-            sampleX = entryX + dirX * tOffset
-            sampleY = entryY + dirY * tOffset
-            sampleZ = entryZ + dirZ * tOffset
+      -- Step 0 position and warp
+      p0x = entryX + dirX * (stepSize * 0.5)
+      p0y = entryY + dirY * (stepSize * 0.5)
+      p0z = entryZ + dirZ * (stepSize * 0.5)
+      w0x = sin (p0y * warpFreq) * warpAmp
+      w0y = cos (p0x * warpFreq) * warpAmp
+      w0z = sin (p0z * warpFreq * 0.7) * warpAmp
+      s0x = (p0x + w0x) * noiseScale
+      s0y = (p0y + w0y) * noiseScale
+      s0z = (p0z + w0z) * noiseScale
 
-            -- Height factor: wider soft middle, thin at top/bottom
-            heightFrac = (sampleY - cloudBottom) / cloudThickness
-            heightFactor = smoothstep 0.0 0.15 heightFrac * (1.0 - smoothstep 0.85 1.0 heightFrac)
+      -- Step 1 position and warp
+      p1x = entryX + dirX * (stepSize * 1.5)
+      p1y = entryY + dirY * (stepSize * 1.5)
+      p1z = entryZ + dirZ * (stepSize * 1.5)
+      w1x = sin (p1y * warpFreq) * warpAmp
+      w1y = cos (p1x * warpFreq) * warpAmp
+      w1z = sin (p1z * warpFreq * 0.7) * warpAmp
+      s1x = (p1x + w1x) * noiseScale
+      s1y = (p1y + w1y) * noiseScale
+      s1z = (p1z + w1z) * noiseScale
 
-            -- Combined density: coverage creates gaps between cloud groups
-            density = max 0 (heightFactor - 0.1) * 3.0
+      -- Step 2 position and warp
+      p2x = entryX + dirX * (stepSize * 2.5)
+      p2y = entryY + dirY * (stepSize * 2.5)
+      p2z = entryZ + dirZ * (stepSize * 2.5)
+      w2x = sin (p2y * warpFreq) * warpAmp
+      w2y = cos (p2x * warpFreq) * warpAmp
+      w2z = sin (p2z * warpFreq * 0.7) * warpAmp
+      s2x = (p2x + w2x) * noiseScale
+      s2y = (p2y + w2y) * noiseScale
+      s2z = (p2z + w2z) * noiseScale
 
-            -- Light transmittance from sun to this point
-            lightDensity = lightMarchDensity sampleX sampleY sampleZ
-            -- Modified Beer-Lambert (powder effect)
-            beer = exp (-lightDensity * 15.0)
-            powder = 0.7 * exp (-lightDensity * 0.25)
-            lightTransmittance = max beer powder
+      -- Step 3 position and warp
+      p3x = entryX + dirX * (stepSize * 3.5)
+      p3y = entryY + dirY * (stepSize * 3.5)
+      p3z = entryZ + dirZ * (stepSize * 3.5)
+      w3x = sin (p3y * warpFreq) * warpAmp
+      w3y = cos (p3x * warpFreq) * warpAmp
+      w3z = sin (p3z * warpFreq * 0.7) * warpAmp
+      s3x = (p3x + w3x) * noiseScale
+      s3y = (p3y + w3y) * noiseScale
+      s3z = (p3z + w3z) * noiseScale
 
-            -- Phase function
-            cosTheta = dirX * sunDirX + dirY * sunDirY + dirZ * sunDirZ
-            phase = hgPhase cosTheta 0.3
+      -- Step 4 position and warp
+      p4x = entryX + dirX * (stepSize * 4.5)
+      p4y = entryY + dirY * (stepSize * 4.5)
+      p4z = entryZ + dirZ * (stepSize * 4.5)
+      w4x = sin (p4y * warpFreq) * warpAmp
+      w4y = cos (p4x * warpFreq) * warpAmp
+      w4z = sin (p4z * warpFreq * 0.7) * warpAmp
+      s4x = (p4x + w4x) * noiseScale
+      s4y = (p4y + w4y) * noiseScale
+      s4z = (p4z + w4z) * noiseScale
 
-            -- Sun color (white, could sample from light buffer)
-            sunIntensity = 1.0
-            lightR = sunIntensity * lightTransmittance * phase
-            lightG = sunIntensity * lightTransmittance * phase
-            lightB = sunIntensity * lightTransmittance * phase
+      -- Step 5 position and warp
+      p5x = entryX + dirX * (stepSize * 5.5)
+      p5y = entryY + dirY * (stepSize * 5.5)
+      p5z = entryZ + dirZ * (stepSize * 5.5)
+      w5x = sin (p5y * warpFreq) * warpAmp
+      w5y = cos (p5x * warpFreq) * warpAmp
+      w5z = sin (p5z * warpFreq * 0.7) * warpAmp
+      s5x = (p5x + w5x) * noiseScale
+      s5y = (p5y + w5y) * noiseScale
+      s5z = (p5z + w5z) * noiseScale
 
-            -- Cloud base color (white with slight blue tint)
-            cloudBaseR = 1.0
-            cloudBaseG = 0.98
-            cloudBaseB = 0.95
+  -- Sample 3D cloud noise texture at all 6 warped positions (monadic)
+  ~(Vec4 n0r n0g n0b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s0x s0y s0z)
+  ~(Vec4 n1r n1g n1b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s1x s1y s1z)
+  ~(Vec4 n2r n2g n2b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s2x s2y s2z)
+  ~(Vec4 n3r n3g n3b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s3x s3y s3z)
+  ~(Vec4 n4r n4g n4b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s4x s4y s4z)
+  ~(Vec4 n5r n5g n5b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s5x s5y s5z)
 
-            -- In-scattering
-            scatterR = cloudBaseR * lightR * density * stepSize
-            scatterG = cloudBaseG * lightG * density * stepSize
-            scatterB = cloudBaseB * lightB * density * stepSize
+  let -- Height factor: wider soft middle, thin at top/bottom
+      heightF0 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 0.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 0.5) - cloudBottom) / cloudThickness))
+      heightF1 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 1.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 1.5) - cloudBottom) / cloudThickness))
+      heightF2 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 2.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 2.5) - cloudBottom) / cloudThickness))
+      heightF3 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 3.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 3.5) - cloudBottom) / cloudThickness))
+      heightF4 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 4.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 4.5) - cloudBottom) / cloudThickness))
+      heightF5 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 5.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 5.5) - cloudBottom) / cloudThickness))
 
-            -- View transmittance
-            viewTransmittance = exp (-density * stepSize)
+      -- Light march: simplified (single sample)
+      lightDensity = 0.3
 
-            -- Accumulate (front-to-back compositing)
-            newAccR = accR_ + scatterR * t_
-            newAccG = accG_ + scatterG * t_
-            newAccB = accB_ + scatterB * t_
-            newT = t_ * viewTransmittance
-        in (newT, newAccR, newAccG, newAccB)
+      -- Modified Beer-Lambert (powder effect)
+      beer = exp (-lightDensity * 15.0)
+      powder = 0.7 * exp (-lightDensity * 0.25)
+      lightTransmittance = max beer powder
 
-      -- Execute 6 steps, threading transmittance and accumulated color
-      (t1, aR1, aG1, aB1) = cloudStep 0 1.0 0.0 0.0 0.0
-      (t2, aR2, aG2, aB2) = cloudStep 1 t1 aR1 aG1 aB1
-      (t3, aR3, aG3, aB3) = cloudStep 2 t2 aR2 aG2 aB2
-      (t4, aR4, aG4, aB4) = cloudStep 3 t3 aR3 aG3 aB3
-      (t5, aR5, aG5, aB5) = cloudStep 4 t4 aR4 aG4 aB4
-      (t6, aR6, aG6, aB6) = cloudStep 5 t5 aR5 aG5 aB5
+      -- Phase function
+      cosTheta = dirX * sunDirX + dirY * sunDirY + dirZ * sunDirZ
+
+      hgPhase_ g =
+        let g2 = g * g
+            denom = (1.0 + g2 - 2.0 * g * cosTheta) ** 1.5
+        in (1.0 - g2) / (4.0 * 3.14159265 * denom)
+      phase = hgPhase_ 0.3
+
+      -- Sun color (white)
+      lightR = lightTransmittance * phase
+      lightG = lightTransmittance * phase
+      lightB = lightTransmittance * phase
+
+      -- Cloud base color (white with slight blue tint)
+      cloudBaseR = 1.0
+      cloudBaseG = 0.98
+      cloudBaseB = 0.95
+
+      -- Compute density for each step
+      -- n*r = density, n*g = coverage, n*b = detail
+      d0 = max 0 ((n0r * 0.8 + n0b * 0.2) * n0g * heightF0 - 0.1) * 3.0
+      d1 = max 0 ((n1r * 0.8 + n1b * 0.2) * n1g * heightF1 - 0.1) * 3.0
+      d2 = max 0 ((n2r * 0.8 + n2b * 0.2) * n2g * heightF2 - 0.1) * 3.0
+      d3 = max 0 ((n3r * 0.8 + n3b * 0.2) * n3g * heightF3 - 0.1) * 3.0
+      d4 = max 0 ((n4r * 0.8 + n4b * 0.2) * n4g * heightF4 - 0.1) * 3.0
+      d5 = max 0 ((n5r * 0.8 + n5b * 0.2) * n5g * heightF5 - 0.1) * 3.0
+
+      -- Front-to-back compositing
+      -- Step 0
+      s0r = cloudBaseR * lightR * d0 * stepSize
+      s0g = cloudBaseG * lightG * d0 * stepSize
+      s0b = cloudBaseB * lightB * d0 * stepSize
+      t0 = exp (-d0 * stepSize)
+      a0r = s0r
+      a0g = s0g
+      a0b = s0b
+
+      -- Step 1
+      s1r = cloudBaseR * lightR * d1 * stepSize
+      s1g = cloudBaseG * lightG * d1 * stepSize
+      s1b = cloudBaseB * lightB * d1 * stepSize
+      t1 = t0 * exp (-d1 * stepSize)
+      a1r = a0r + s1r * t0
+      a1g = a0g + s1g * t0
+      a1b = a0b + s1b * t0
+
+      -- Step 2
+      s2r = cloudBaseR * lightR * d2 * stepSize
+      s2g = cloudBaseG * lightG * d2 * stepSize
+      s2b = cloudBaseB * lightB * d2 * stepSize
+      t2 = t1 * exp (-d2 * stepSize)
+      a2r = a1r + s2r * t1
+      a2g = a1g + s2g * t1
+      a2b = a1b + s2b * t1
+
+      -- Step 3
+      s3r = cloudBaseR * lightR * d3 * stepSize
+      s3g = cloudBaseG * lightG * d3 * stepSize
+      s3b = cloudBaseB * lightB * d3 * stepSize
+      t3 = t2 * exp (-d3 * stepSize)
+      a3r = a2r + s3r * t2
+      a3g = a2g + s3g * t2
+      a3b = a2b + s3b * t2
+
+      -- Step 4
+      s4r = cloudBaseR * lightR * d4 * stepSize
+      s4g = cloudBaseG * lightG * d4 * stepSize
+      s4b = cloudBaseB * lightB * d4 * stepSize
+      t4 = t3 * exp (-d4 * stepSize)
+      a4r = a3r + s4r * t3
+      a4g = a3g + s4g * t3
+      a4b = a3b + s4b * t3
+
+      -- Step 5
+      s5r = cloudBaseR * lightR * d5 * stepSize
+      s5g = cloudBaseG * lightG * d5 * stepSize
+      s5b = cloudBaseB * lightB * d5 * stepSize
+      t5 = t4 * exp (-d5 * stepSize)
+      a5r = a4r + s5r * t4
+      a5g = a4g + s5g * t4
+      a5b = a4b + s5b * t4
 
       -- Final cloud color and transmittance
-      cloudAccR = aR6
-      cloudAccG = aG6
-      cloudAccB = aB6
-      cloudTransmittance = t6
+      cloudAccR = a5r
+      cloudAccG = a5g
+      cloudAccB = a5b
+      cloudTransmittance = t5
 
-      -- Skip clouds when looking downward (use step/mix instead of ifThenElse)
+      -- Skip clouds when looking downward
       cloudsMask = step 0.01 dirY
       finalCloudR = cloudAccR * cloudsMask
       finalCloudG = cloudAccG * cloudsMask
@@ -344,12 +398,10 @@ fragment = shader do
       cloudSkyG = skyG * finalTransmittance + finalCloudG
       cloudSkyB = skyB * finalTransmittance + finalCloudB
 
-      -- Debug: raw cloud density at step 1 (grayscale)
-      dbgCloud = aR3 * cloudsMask
-      -- Debug: transmittance (grayscale)
+      -- Debug outputs
+      dbgCloud = a2r * cloudsMask
       dbgHeight = mix 1.0 cloudTransmittance cloudsMask
-      -- Debug: phase function value
-      dbgNoise = hgPhase (dirX * sunDirX + dirY * sunDirY + dirZ * sunDirZ) 0.3 * cloudsMask
+      dbgNoise = hgPhase_ 0.3 * cloudsMask
 
   let normX = normX_raw * 2 - 1
       normY = normY_raw * 2 - 1
