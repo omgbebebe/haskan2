@@ -166,6 +166,64 @@ fragment = shader do
   let rayDirRotated = rotateY rayDir
   ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps rayDirRotated
 
+  -- Procedural volumetric clouds
+  let -- Hash function for pseudo-random grid values
+      hash2 (Vec2 x y) = fract (sin (x * 127.1 + y * 311.7) * 43758.5453)
+
+      -- Value noise: bilinear interpolation of hashed grid corners
+      valueNoise (Vec2 x y) =
+        let ix = floor x
+            iy = floor y
+            fx = fract x
+            fy = fract y
+            -- Smoothstep interpolation
+            sx = fx * fx * (3 - 2 * fx)
+            sy = fy * fy * (3 - 2 * fy)
+            -- Sample 4 corners
+            h00 = hash2 (Vec2 ix iy)
+            h10 = hash2 (Vec2 (ix + 1) iy)
+            h01 = hash2 (Vec2 ix (iy + 1))
+            h11 = hash2 (Vec2 (ix + 1) (iy + 1))
+            -- Bilinear interpolation
+            v0 = mix h00 h10 sx
+            v1 = mix h01 h11 sx
+        in mix v0 v1 sy
+
+      -- fBm: 3 octaves of layered noise
+      fbm (Vec2 x y) =
+        let n1 = valueNoise (Vec2 x y)
+            n2 = valueNoise (Vec2 (x * 2) (y * 2)) * 0.5
+            n3 = valueNoise (Vec2 (x * 4) (y * 4)) * 0.25
+        in n1 + n2 + n3
+
+      -- Map ray direction to spherical UV (equirectangular projection)
+      sphereU = atan2 rayDirZ rayDirX / (2 * pi) + 0.5
+      sphereV = asin (clamp rayDirY (-1.0) 1.0) / pi + 0.5
+
+      -- Animated cloud coordinates (slow drift with sun)
+      cloudU = sphereU + sunAzimuth * 0.003
+      cloudV = sphereV + sunAzimuth * 0.0015
+      cloudScale = 5.0
+      noiseVal = fbm (Vec2 (cloudU * cloudScale) (cloudV * cloudScale))
+
+      -- Height mask: clouds form a band across the sky dome
+      -- More clouds in the middle band, fewer at horizon and zenith
+      heightMask = smoothstep 0.15 0.35 sphereV * smoothstep 0.85 0.65 sphereV
+
+      -- Cloud coverage with threshold
+      cloudDensity = smoothstep 0.4 0.55 (noiseVal * heightMask)
+
+      -- Simple sun-based cloud shading
+      -- sunAzimuth*0.5 ranges 0->pi over 24h, sin peaks at noon
+      sunHeight = clamp (sin (sunAzimuth * 0.5)) 0.0 1.0
+      cloudBright = 0.95
+      cloudShadow = 0.5 + 0.3 * sunHeight
+
+      -- Blend clouds over skybox
+      cloudSkyR = mix skyR cloudBright cloudDensity
+      cloudSkyG = mix skyG cloudBright cloudDensity
+      cloudSkyB = mix skyB cloudShadow cloudDensity
+
   let normX = normX_raw * 2 - 1
       normY = normY_raw * 2 - 1
       normZ = normZ_raw * 2 - 1
@@ -459,9 +517,10 @@ fragment = shader do
       gamz = sqrt mapz
 
       -- Tinted skybox for background pixels (no geometry)
-      tintedSkyR = skyR * skyTintR
-      tintedSkyG = skyG * skyTintG
-      tintedSkyB = skyB * skyTintB
+      -- Use cloud-blended sky instead of raw skybox
+      tintedSkyR = cloudSkyR * skyTintR
+      tintedSkyG = cloudSkyG * skyTintG
+      tintedSkyB = cloudSkyB * skyTintB
       finalx = if hasGeometry then gamx else tintedSkyR
       finaly = if hasGeometry then gamy else tintedSkyG
       finalz = if hasGeometry then gamz else tintedSkyB
