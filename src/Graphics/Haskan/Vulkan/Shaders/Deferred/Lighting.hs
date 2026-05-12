@@ -164,7 +164,7 @@ fragment = shader do
       ~(Vec3 sunDirX sunDirY sunDirZ) = view @(Name "sunDir") cameraPos
       cloudBottom = view @(Name "cloudHeight") cameraPos
 
-  -- Precompute cubemap rotation from sun azimuth
+  -- Precompute cubemap rotation from sun azimuth (kept for potential future use)
   let cosAz = cos sunAzimuth
       sinAz = sin sunAzimuth
       rotateY (Vec3 rx ry rz) = Vec3 (rx * cosAz - rz * sinAz) ry (rx * sinAz + rz * cosAz)
@@ -178,9 +178,8 @@ fragment = shader do
   -- Check if background (no geometry written to g-buffer)
   let hasGeometry = abs posX + abs posY + abs posZ > 0.001
 
-  -- Sample skybox for background (rotate by sun azimuth)
-  let rayDirRotated = rotateY (Vec3 dirX dirY dirZ)
-  ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps rayDirRotated
+  -- Sample skybox for background (NO rotation — mountains/stars stay fixed)
+  ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps (Vec3 dirX dirY dirZ)
 
   -- Procedural volumetric clouds (3-step ray marcher)
   let -- Integer-mix 3D hash (breaks axis-aligned artifacts of sin(x*C))
@@ -238,7 +237,10 @@ fragment = shader do
       -- Cloud layer bounds
       cloudThickness = 100.0
       cloudTop = cloudBottom + cloudThickness
-      stepSize = cloudThickness / 3.0
+
+      -- Total ray length to traverse full vertical thickness
+      totalRayLength = cloudThickness / max 0.01 dirY
+      stepSize = totalRayLength / 3.0
 
       -- Entry point: ray-plane intersection at cloudBottom
       tEntry = (cloudBottom - camY) / max 0.01 dirY
@@ -327,17 +329,24 @@ fragment = shader do
       cloudAccB = aB3
       cloudTransmittance = t3
 
+      -- Skip clouds when looking downward (use step/mix instead of ifThenElse)
+      cloudsMask = step 0.01 dirY
+      finalCloudR = cloudAccR * cloudsMask
+      finalCloudG = cloudAccG * cloudsMask
+      finalCloudB = cloudAccB * cloudsMask
+      finalTransmittance = mix 1.0 cloudTransmittance cloudsMask
+
       -- Blend clouds over skybox
-      cloudSkyR = skyR * cloudTransmittance + cloudAccR
-      cloudSkyG = skyG * cloudTransmittance + cloudAccG
-      cloudSkyB = skyB * cloudTransmittance + cloudAccB
+      cloudSkyR = skyR * finalTransmittance + finalCloudR
+      cloudSkyG = skyG * finalTransmittance + finalCloudG
+      cloudSkyB = skyB * finalTransmittance + finalCloudB
 
       -- Debug: raw cloud density at step 1 (grayscale)
-      dbgCloud = aR3
+      dbgCloud = aR3 * cloudsMask
       -- Debug: transmittance (grayscale)
-      dbgHeight = cloudTransmittance
+      dbgHeight = mix 1.0 cloudTransmittance cloudsMask
       -- Debug: phase function value
-      dbgNoise = hgPhase (dirX * sunDirX + dirY * sunDirY + dirZ * sunDirZ) 0.3
+      dbgNoise = hgPhase (dirX * sunDirX + dirY * sunDirY + dirZ * sunDirZ) 0.3 * cloudsMask
 
   let normX = normX_raw * 2 - 1
       normY = normY_raw * 2 - 1
