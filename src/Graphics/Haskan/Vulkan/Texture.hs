@@ -295,9 +295,9 @@ createSampler dev =
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"magFilter" Vulkan.VK_FILTER_LINEAR
               &* set @"minFilter" Vulkan.VK_FILTER_LINEAR
-               &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-               &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-               &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+               &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+               &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+               &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
               --      &* set @"anisotropyEnable" Vulkan.VK_TRUE
               --      &* set @"maxAnisotropy" 16.0
               &* set @"anisotropyEnable" Vulkan.VK_FALSE
@@ -325,9 +325,9 @@ createSamplerWithLod dev maxLod =
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"magFilter" Vulkan.VK_FILTER_LINEAR
               &* set @"minFilter" Vulkan.VK_FILTER_LINEAR
-               &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-               &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
-               &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE
+               &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+               &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+               &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
               &* set @"anisotropyEnable" Vulkan.VK_FALSE
               &* set @"maxAnisotropy" 1.0
               &* set @"borderColor" Vulkan.VK_BORDER_COLOR_INT_OPAQUE_BLACK

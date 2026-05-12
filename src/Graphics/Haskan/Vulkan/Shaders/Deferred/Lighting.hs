@@ -214,9 +214,9 @@ fragment = shader do
       w0x = sin (p0y * warpFreq) * warpAmp
       w0y = cos (p0x * warpFreq) * warpAmp
       w0z = sin (p0z * warpFreq * 0.7) * warpAmp
-      s0x = (p0x + w0x) * noiseScale
-      s0y = (p0y + w0y) * noiseScale
-      s0z = (p0z + w0z) * noiseScale
+      s0x = fract ((p0x + w0x) * noiseScale)
+      s0y = fract ((p0y + w0y) * noiseScale)
+      s0z = fract ((p0z + w0z) * noiseScale)
 
       -- Step 1 position and warp
       p1x = entryX + dirX * (stepSize * 1.5)
@@ -225,9 +225,9 @@ fragment = shader do
       w1x = sin (p1y * warpFreq) * warpAmp
       w1y = cos (p1x * warpFreq) * warpAmp
       w1z = sin (p1z * warpFreq * 0.7) * warpAmp
-      s1x = (p1x + w1x) * noiseScale
-      s1y = (p1y + w1y) * noiseScale
-      s1z = (p1z + w1z) * noiseScale
+      s1x = fract ((p1x + w1x) * noiseScale)
+      s1y = fract ((p1y + w1y) * noiseScale)
+      s1z = fract ((p1z + w1z) * noiseScale)
 
       -- Step 2 position and warp
       p2x = entryX + dirX * (stepSize * 2.5)
@@ -236,9 +236,9 @@ fragment = shader do
       w2x = sin (p2y * warpFreq) * warpAmp
       w2y = cos (p2x * warpFreq) * warpAmp
       w2z = sin (p2z * warpFreq * 0.7) * warpAmp
-      s2x = (p2x + w2x) * noiseScale
-      s2y = (p2y + w2y) * noiseScale
-      s2z = (p2z + w2z) * noiseScale
+      s2x = fract ((p2x + w2x) * noiseScale)
+      s2y = fract ((p2y + w2y) * noiseScale)
+      s2z = fract ((p2z + w2z) * noiseScale)
 
       -- Step 3 position and warp
       p3x = entryX + dirX * (stepSize * 3.5)
@@ -247,9 +247,9 @@ fragment = shader do
       w3x = sin (p3y * warpFreq) * warpAmp
       w3y = cos (p3x * warpFreq) * warpAmp
       w3z = sin (p3z * warpFreq * 0.7) * warpAmp
-      s3x = (p3x + w3x) * noiseScale
-      s3y = (p3y + w3y) * noiseScale
-      s3z = (p3z + w3z) * noiseScale
+      s3x = fract ((p3x + w3x) * noiseScale)
+      s3y = fract ((p3y + w3y) * noiseScale)
+      s3z = fract ((p3z + w3z) * noiseScale)
 
       -- Step 4 position and warp
       p4x = entryX + dirX * (stepSize * 4.5)
@@ -258,9 +258,9 @@ fragment = shader do
       w4x = sin (p4y * warpFreq) * warpAmp
       w4y = cos (p4x * warpFreq) * warpAmp
       w4z = sin (p4z * warpFreq * 0.7) * warpAmp
-      s4x = (p4x + w4x) * noiseScale
-      s4y = (p4y + w4y) * noiseScale
-      s4z = (p4z + w4z) * noiseScale
+      s4x = fract ((p4x + w4x) * noiseScale)
+      s4y = fract ((p4y + w4y) * noiseScale)
+      s4z = fract ((p4z + w4z) * noiseScale)
 
       -- Step 5 position and warp
       p5x = entryX + dirX * (stepSize * 5.5)
@@ -269,9 +269,9 @@ fragment = shader do
       w5x = sin (p5y * warpFreq) * warpAmp
       w5y = cos (p5x * warpFreq) * warpAmp
       w5z = sin (p5z * warpFreq * 0.7) * warpAmp
-      s5x = (p5x + w5x) * noiseScale
-      s5y = (p5y + w5y) * noiseScale
-      s5z = (p5z + w5z) * noiseScale
+      s5x = fract ((p5x + w5x) * noiseScale)
+      s5y = fract ((p5y + w5y) * noiseScale)
+      s5z = fract ((p5z + w5z) * noiseScale)
 
   -- Sample 3D cloud noise texture at all 6 warped positions (monadic)
   ~(Vec4 n0r n0g n0b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s0x s0y s0z)
@@ -317,13 +317,14 @@ fragment = shader do
       cloudBaseB = 0.95
 
       -- Compute density for each step
-      -- n*r = density, n*g = coverage, n*b = detail
-      d0 = max 0 ((n0r * 0.8 + n0b * 0.2) * n0g * heightF0 - 0.1) * 3.0
-      d1 = max 0 ((n1r * 0.8 + n1b * 0.2) * n1g * heightF1 - 0.1) * 3.0
-      d2 = max 0 ((n2r * 0.8 + n2b * 0.2) * n2g * heightF2 - 0.1) * 3.0
-      d3 = max 0 ((n3r * 0.8 + n3b * 0.2) * n3g * heightF3 - 0.1) * 3.0
-      d4 = max 0 ((n4r * 0.8 + n4b * 0.2) * n4g * heightF4 - 0.1) * 3.0
-      d5 = max 0 ((n5r * 0.8 + n5b * 0.2) * n5g * heightF5 - 0.1) * 3.0
+      -- R=shape (low-freq Worley), G=med detail, B=fine detail, A=Perlin
+      -- density = shape - detail*erosion - threshold
+      d0 = max 0 (n0r - (n0g * 0.5 + n0b * 0.25) * 0.8 - 0.25) * heightF0 * 4.0
+      d1 = max 0 (n1r - (n1g * 0.5 + n1b * 0.25) * 0.8 - 0.25) * heightF1 * 4.0
+      d2 = max 0 (n2r - (n2g * 0.5 + n2b * 0.25) * 0.8 - 0.25) * heightF2 * 4.0
+      d3 = max 0 (n3r - (n3g * 0.5 + n3b * 0.25) * 0.8 - 0.25) * heightF3 * 4.0
+      d4 = max 0 (n4r - (n4g * 0.5 + n4b * 0.25) * 0.8 - 0.25) * heightF4 * 4.0
+      d5 = max 0 (n5r - (n5g * 0.5 + n5b * 0.25) * 0.8 - 0.25) * heightF5 * 4.0
 
       -- Front-to-back compositing
       -- Step 0

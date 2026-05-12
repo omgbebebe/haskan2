@@ -9,10 +9,10 @@ Outputs:
     data/textures/cloud_noise/slices/ — PNG slices for inspection
 
 Noise model:
-    - Worley noise (cellular): creates separated cloud puffs
-    - Domain warp: breaks regular grid for organic shapes
-    - Perlin FBM: adds detail within puffs
-    - Coverage mask: large-scale cloud region control
+    - 3 frequencies of tileable Worley (cellular): 4/8/16 cells per axis
+    - Tileable Perlin FBM: detail erosion
+    - All distances wrap toroidally for seamless tiling
+    - No coverage mask — shape comes from low-freq Worley directly
 """
 
 import os
@@ -28,64 +28,87 @@ CHANNELS = 4  # RGBA
 np.random.seed(42)
 
 
-def generate_worley_3d(size, num_points=96):
-    """Generate 3D Worley (cellular) noise.
+def generate_worley_3d_tileable(size, cells_per_axis):
+    """Generate tileable 3D Worley (cellular) noise.
 
-    Returns distance to nearest random point (normalized 0-1).
+    One random feature point per cell, arranged in a cells_per_axis³ grid.
+    Distance computed with toroidal wrapping for seamless tiling.
+    
+    Returns normalized distance to nearest point (0-1).
     Lower values = closer to cell center (cloud core).
     Higher values = cell boundary (gap between clouds).
-    
-    NO toroidal wrapping — each point is independent to avoid tiling artifacts.
     """
-    print(f"  Generating Worley noise ({num_points} points)...")
+    num_points = cells_per_axis ** 3
+    print(f"  Generating Worley noise ({cells_per_axis}³ = {num_points} points)...")
 
-    # Random point positions (no wrapping)
-    points = np.random.rand(num_points, 3)
+    # One random point per cell, jittered within cell bounds
+    cell_size = 1.0 / cells_per_axis
+    points = []
+    for cx in range(cells_per_axis):
+        for cy in range(cells_per_axis):
+            for cz in range(cells_per_axis):
+                px = (cx + np.random.rand()) * cell_size
+                py = (cy + np.random.rand()) * cell_size
+                pz = (cz + np.random.rand()) * cell_size
+                points.append([px, py, pz])
+    points = np.array(points, dtype=np.float32)
 
     # Grid coordinates
     x = np.linspace(0, 1, size, endpoint=False)
     y = np.linspace(0, 1, size, endpoint=False)
     z = np.linspace(0, 1, size, endpoint=False)
     xx, yy, zz = np.meshgrid(x, y, z, indexing='ij')
-
     coords = np.stack([xx, yy, zz], axis=-1)  # (size, size, size, 3)
 
-    # Compute distance to nearest point (NO wrapping)
+    # Compute toroidal distance to nearest point
     min_dist = np.ones((size, size, size), dtype=np.float32) * 2.0
 
     for p in points:
-        dx = coords[..., 0] - p[0]
-        dy = coords[..., 1] - p[1]
-        dz = coords[..., 2] - p[2]
+        dx = np.minimum(np.abs(coords[..., 0] - p[0]), 1.0 - np.abs(coords[..., 0] - p[0]))
+        dy = np.minimum(np.abs(coords[..., 1] - p[1]), 1.0 - np.abs(coords[..., 1] - p[1]))
+        dz = np.minimum(np.abs(coords[..., 2] - p[2]), 1.0 - np.abs(coords[..., 2] - p[2]))
         dist = np.sqrt(dx**2 + dy**2 + dz**2)
         min_dist = np.minimum(min_dist, dist)
 
-    # Normalize
-    return min_dist / min_dist.max()
+    # Normalize and invert: cell centers = high density
+    min_dist = min_dist / min_dist.max()
+    return 1.0 - min_dist
 
 
-def generate_perlin_3d(size, octaves=4):
-    """Generate 3D Perlin-like noise using numpy interpolation."""
-    print(f"  Generating Perlin noise ({octaves} octaves)...")
+def generate_perlin_3d_tileable(size, octaves=4):
+    """Generate tileable 3D Perlin-like noise using numpy interpolation."""
+    print(f"  Generating tileable Perlin noise ({octaves} octaves)...")
 
     result = np.zeros((size, size, size), dtype=np.float32)
     amplitude = 1.0
     frequency = 1.0
 
     for _ in range(octaves):
-        # Random grid
         grid_size = max(2, int(frequency))
         grid = np.random.randn(grid_size, grid_size, grid_size).astype(np.float32)
 
-        # Interpolate to full size
         from scipy.ndimage import zoom
-        interp = zoom(grid, size / grid_size, order=1)
-        # Crop or pad to exact size
+        # zoom with grid_size * 2 to create tileable texture via periodic boundary
+        # Actually for tileable, we need to handle wrapping. Simplest: use mode='wrap' in zoom
+        # But scipy zoom doesn't support mode. Instead, we tile the grid and crop.
+        
+        # Create periodic grid by tiling
+        tiled_grid = np.tile(grid, (2, 2, 2))
+        
+        # Zoom the tiled grid
+        zoom_factor = (size * 2) / (grid_size * 2)
+        interp = zoom(tiled_grid, zoom_factor, order=1)
+        
+        # Extract the center tileable region
+        start = size // 2
+        interp = interp[start:start+size, start:start+size, start:start+size]
+        
+        # Ensure exact size
         if interp.shape[0] > size:
             interp = interp[:size, :size, :size]
         elif interp.shape[0] < size:
             pad = size - interp.shape[0]
-            interp = np.pad(interp, ((0, pad), (0, pad), (0, pad)), mode='edge')
+            interp = np.pad(interp, ((0, pad), (0, pad), (0, pad)), mode='wrap')
 
         result += interp * amplitude
         amplitude *= 0.5
@@ -93,58 +116,6 @@ def generate_perlin_3d(size, octaves=4):
 
     # Normalize to 0-1
     result = (result - result.min()) / (result.max() - result.min())
-    return result
-
-
-def generate_domain_warp_3d(size):
-    """Generate low-frequency domain warp vectors.
-    
-    Used to displace coordinates before Worley sampling, breaking the
-    regular grid and creating more organic cloud shapes.
-    """
-    print("  Generating domain warp field...")
-    
-    # Very low frequency (2x2x2 grid)
-    grid_size = 2
-    grid_x = np.random.randn(grid_size, grid_size, grid_size).astype(np.float32) * 0.15
-    grid_y = np.random.randn(grid_size, grid_size, grid_size).astype(np.float32) * 0.15
-    grid_z = np.random.randn(grid_size, grid_size, grid_size).astype(np.float32) * 0.15
-    
-    from scipy.ndimage import zoom
-    warp_x = zoom(grid_x, size / grid_size, order=1)
-    warp_y = zoom(grid_y, size / grid_size, order=1)
-    warp_z = zoom(grid_z, size / grid_size, order=1)
-    
-    # Crop to exact size
-    warp_x = warp_x[:size, :size, :size]
-    warp_y = warp_y[:size, :size, :size]
-    warp_z = warp_z[:size, :size, :size]
-    
-    return warp_x, warp_y, warp_z
-
-
-def generate_coverage_3d(size):
-    """Large-scale coverage mask with multiple octaves for less periodicity."""
-    print("  Generating coverage mask...")
-
-    result = np.zeros((size, size, size), dtype=np.float32)
-    amplitude = 1.0
-    frequency = 3  # Start with 3x3x3 base grid
-    
-    from scipy.ndimage import zoom
-    
-    for _ in range(3):  # 3 octaves
-        grid = np.random.rand(frequency, frequency, frequency).astype(np.float32)
-        layer = zoom(grid, size / frequency, order=1)
-        layer = layer[:size, :size, :size]
-        result += layer * amplitude
-        amplitude *= 0.5
-        frequency *= 2
-
-    # Normalize and apply contrast to create more distinct cloud regions
-    result = (result - result.min()) / (result.max() - result.min())
-    # Sharpen: push values toward 0 or 1 for more distinct cloud/sky regions
-    result = result ** 1.5
     return result
 
 
@@ -174,43 +145,14 @@ def save_raw_binary(data, filepath):
 
 
 def save_ktx2(data, filepath):
-    """Save as minimal KTX2 file.
-
-    KTX2 header:
-    - identifier: 12 bytes (magic)
-    - vkFormat: 4 bytes (VK_FORMAT_R8G8B8A8_UNORM = 37)
-    - typeSize: 4 bytes (1 for 8-bit)
-    - pixelWidth: 4 bytes
-    - pixelHeight: 4 bytes
-    - pixelDepth: 4 bytes
-    - layerCount: 4 bytes
-    - faceCount: 4 bytes
-    - levelCount: 4 bytes
-    - supercompressionScheme: 4 bytes
-    - dfdByteOffset: 4 bytes
-    - dfdByteLength: 4 bytes
-    - kvdByteOffset: 4 bytes
-    - kvdByteLength: 4 bytes
-    - sgdByteOffset: 8 bytes
-    - sgdByteLength: 8 bytes
-    Total header: 80 bytes
-
-    Level index:
-    - For each mip level: byteOffset(8), byteLength(8), uncompressedByteLength(8)
-    For single level: 24 bytes
-
-    Then pixel data.
-    """
+    """Save as minimal KTX2 file."""
     print(f"  Saving KTX2: {filepath}")
 
     size = data.shape[0]
     data_uint8 = (data * 255).astype(np.uint8)
     pixel_data = data_uint8.tobytes()
 
-    # KTX2 magic identifier
     identifier = b'\xabKTX 20\xbb\r\n\x1a\n'
-
-    # Header fields
     vkFormat = 37  # VK_FORMAT_R8G8B8A8_UNORM
     typeSize = 1
     pixelWidth = size
@@ -227,17 +169,12 @@ def save_ktx2(data, filepath):
     sgdByteOffset = 0
     sgdByteLength = 0
 
-    # Level index (single level)
-    # Header is 80 bytes, level index is 24 bytes
-    # Data starts at 80 + 24 = 104
     levelByteOffset = 104
     levelByteLength = len(pixel_data)
     uncompressedByteLength = len(pixel_data)
 
     with open(filepath, 'wb') as f:
-        # Identifier
         f.write(identifier)
-        # Header
         f.write(struct.pack('<I', vkFormat))
         f.write(struct.pack('<I', typeSize))
         f.write(struct.pack('<I', pixelWidth))
@@ -253,11 +190,9 @@ def save_ktx2(data, filepath):
         f.write(struct.pack('<I', kvdByteLength))
         f.write(struct.pack('<Q', sgdByteOffset))
         f.write(struct.pack('<Q', sgdByteLength))
-        # Level index
         f.write(struct.pack('<Q', levelByteOffset))
         f.write(struct.pack('<Q', levelByteLength))
         f.write(struct.pack('<Q', uncompressedByteLength))
-        # Pixel data
         f.write(pixel_data)
 
     print(f"  Saved KTX2: {filepath} ({os.path.getsize(filepath)} bytes)")
@@ -266,75 +201,36 @@ def save_ktx2(data, filepath):
 def main():
     print(f"Generating 3D cloud noise texture ({SIZE}³)...")
 
-    # 1. Generate domain warp field (low-frequency displacement)
-    warp_x, warp_y, warp_z = generate_domain_warp_3d(SIZE)
+    # 1. Low-freq Worley: 4 cells per axis = cloud body / shape
+    worley_low = generate_worley_3d_tileable(SIZE, cells_per_axis=4)
 
-    # 2. Worley noise — separated cell structures (cloud puffs)
-    # Compute with domain-warped coordinates for organic shapes
-    print("  Computing domain-warped Worley noise...")
-    
-    # Grid coordinates
-    x = np.linspace(0, 1, SIZE, endpoint=False)
-    y = np.linspace(0, 1, SIZE, endpoint=False)
-    z = np.linspace(0, 1, SIZE, endpoint=False)
-    xx, yy, zz = np.meshgrid(x, y, z, indexing='ij')
-    
-    # Apply domain warp
-    warped_x = xx + warp_x
-    warped_y = yy + warp_y
-    warped_z = zz + warp_z
-    
-    # Generate Worley points
-    num_points = 96
-    points = np.random.rand(num_points, 3)
-    
-    # Compute distance to nearest point using warped coordinates
-    min_dist = np.ones((SIZE, SIZE, SIZE), dtype=np.float32) * 2.0
-    coords = np.stack([warped_x, warped_y, warped_z], axis=-1)
-    
-    for p in points:
-        dx = coords[..., 0] - p[0]
-        dy = coords[..., 1] - p[1]
-        dz = coords[..., 2] - p[2]
-        dist = np.sqrt(dx**2 + dy**2 + dz**2)
-        min_dist = np.minimum(min_dist, dist)
-    
-    worley = min_dist / min_dist.max()
-    # Invert: cell centers are low distance = high density
-    worley = 1.0 - worley
+    # 2. Mid-freq Worley: 8 cells per axis = detail layer 1
+    worley_mid = generate_worley_3d_tileable(SIZE, cells_per_axis=8)
 
-    # 3. Perlin FBM — detail within puffs
-    perlin = generate_perlin_3d(SIZE, octaves=4)
+    # 3. High-freq Worley: 16 cells per axis = detail layer 2
+    worley_high = generate_worley_3d_tileable(SIZE, cells_per_axis=16)
 
-    # 4. Coverage mask — large-scale cloud region control
-    coverage = generate_coverage_3d(SIZE)
+    # 4. Tileable Perlin FBM = detail layer 3
+    perlin = generate_perlin_3d_tileable(SIZE, octaves=4)
 
-    # 5. Combine
-    # Channel R: cloud density
-    #   = Worley (puff shape) * Perlin (detail) * Coverage (region mask)
-    # Channel G: coverage mask (for shader use)
-    # Channel B: detail noise (for shader use)
-    # Channel A: worley shape
-    print("  Combining noise layers...")
-
-    density = worley * perlin * coverage
-
-    # Normalize
-    density = (density - density.min()) / (density.max() - density.min())
+    print("  Packing channels...")
 
     # Create RGBA texture
+    # R = low-freq Worley (cloud body / shape)
+    # G = mid-freq Worley (detail 1)
+    # B = high-freq Worley (detail 2)
+    # A = Perlin (detail 3)
     texture = np.zeros((SIZE, SIZE, SIZE, CHANNELS), dtype=np.float32)
-    texture[..., 0] = density  # R: density
-    texture[..., 1] = coverage  # G: coverage
-    texture[..., 2] = perlin  # B: detail
-    texture[..., 3] = worley  # A: worley shape
+    texture[..., 0] = worley_low
+    texture[..., 1] = worley_mid
+    texture[..., 2] = worley_high
+    texture[..., 3] = perlin
 
     # Output paths
     out_dir = "data/textures/cloud_noise"
     os.makedirs(out_dir, exist_ok=True)
     os.makedirs(f"{out_dir}/slices", exist_ok=True)
 
-    # Save in multiple formats
     save_slices(texture, f"{out_dir}/slices")
     save_raw_binary(texture, f"{out_dir}/cloud_noise_{SIZE}.raw")
     save_ktx2(texture, f"{out_dir}/cloud_noise.ktx2")
@@ -344,10 +240,10 @@ def main():
     print(f"  - cloud_noise.ktx2: KTX2 format")
     print(f"  - slices/: PNG slices for inspection")
     print(f"\nNoise stats:")
-    print(f"  Worley range: [{worley.min():.3f}, {worley.max():.3f}]")
-    print(f"  Perlin range: [{perlin.min():.3f}, {perlin.max():.3f}]")
-    print(f"  Coverage range: [{coverage.min():.3f}, {coverage.max():.3f}]")
-    print(f"  Final density range: [{density.min():.3f}, {density.max():.3f}]")
+    print(f"  Worley low  (4³):  [{worley_low.min():.3f}, {worley_low.max():.3f}]")
+    print(f"  Worley mid  (8³):  [{worley_mid.min():.3f}, {worley_mid.max():.3f}]")
+    print(f"  Worley high (16³): [{worley_high.min():.3f}, {worley_high.max():.3f}]")
+    print(f"  Perlin:            [{perlin.min():.3f}, {perlin.max():.3f}]")
 
 
 if __name__ == "__main__":
