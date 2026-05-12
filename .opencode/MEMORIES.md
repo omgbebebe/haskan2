@@ -11,6 +11,7 @@
 - **UV check**: `--uv-check-cube`, `--uv-check-sphere`, `--uv-check-plane`
 - **Lights**: `--lights N` (1-8, default 3)
 - **Day/Night**: `--day-night --time HOURS --time-speed FACTOR`
+- **spirv-opt**: Available at `/nix/store/...-spirv-tools-1.4.341.0/bin/spirv-opt` — run `-O` on generated `.spv` for 30-50% size reduction (Phase 0 target)
 
 ## Architecture
 - **GHC 9.14.1** via `haskell.compiler.ghc9141` from nixpkgs-unstable
@@ -23,8 +24,9 @@
 
 ## Current Status
 - **M9 COMPLETE**: PBR deferred rendering, normal mapping, AO, emissive, IBL split-sum with BRDF LUT
-- **M10 IN PROGRESS**: Phase 1 (multi-light), Phase 2 (skybox) complete, Phase 3 (day/night), Phase 4 (volumetric clouds)
+- **M10 IN PROGRESS**: Phase 1 (multi-light) DONE, Phase 2 (skybox) DONE, Phase 3 (day/night) DONE, Phase 4 (volumetric clouds) BLOCKED by FIR SPIR-V bloat
 - **Milestone plan**: `docs/M10-PLAN.md`
+- **FIR optimization roadmap**: `3rdparty/fir/.opencode/roadmap/optimization/README.md`
 
 ## Key Design Decisions
 1. **glTF UV convention**: Matches Vulkan (0,0 = top-left), NOT OpenGL. `flipV` was removed.
@@ -37,7 +39,7 @@
 8. **Mesh merging**: All scene meshes concatenated into single buffers with per-entity `firstIndex`/`vertexOffset`
 9. **FIR `if-then-else` ambiguity**: Convert `gl_VertexIndex` to `Code Float` via `fromIntegral` first
 10. **BlockArguments**: Required for `liftIO $ do` nested blocks
-11. **Push constant**: 96 bytes — camera pos (12) + debugMode (4) + axisOverlay (4) + groundPlane (4) + pad0 (4) + lightCount (4) + ray0 (16) + ray1 (16) + ray2 (16) + skyTint (12) + iblIntensity (4)
+11. **Push constant**: 96 bytes — camera pos (12) + debugMode (4) + axisOverlay (4) + groundPlane (4) + sunAzimuth (4) + lightCount (4) + ray0 (16) + ray1 (16) + ray2 (16) + skyTint (12) + iblIntensity (4)
 12. **Vertex stride**: 60 bytes (pos 12 + uv 8 + norm 12 + tangent 16 + col 12)
 13. **G-buffer shader**: Normal encoding `* 0.5 + 0.5`; lighting shader decodes via `* 2 - 1`
 14. **TBN**: `bitangent = cross(normal, tangent) * handedness`; normal map sampled via bindless array
@@ -47,6 +49,8 @@
 18. **Shader texture format**: `Rgba8 UNorm`; view `VK_FORMAT_R8G8B8A8_UNORM`
 19. **JuicyPixels**: Loads row 0 at top; Vulkan stores row 0 at top. No V-flip needed in texture upload.
 20. **Vertex format**: `v3_s32float >*< v2_s32float >*< v3_s32float >*< v4_s32float >*< v3_s32float` matches g-buffer shader inputs at locations 0-4 exactly
+21. **NO WORKAROUNDS**: Project #1 principle. Missing dependencies implemented properly (e.g., FIR math extensions). Never accept hacks.
+22. **IBL intensity range**: 0.0-1.0 (was 0.05-0.3, imperceptible on bright HDR cubemaps)
 
 ## Camera Defaults
 - **Distance**: 20.0 (default), min 0.1, max 20.0
@@ -78,13 +82,55 @@
 
 **Known M10.3 Limitation**: IBL cubemap is static. Objects reflect unchanged environment; only intensity scales. Dynamic cubemap rotation/blending requires FIR math extensions (see FIR Plan below).
 
+### 2026-05-12: FIR Math + M10.3 IBL Rotation + M10.4 Clouds (Attempt)
+**FIR Math Extensions DONE**:
+- Added 5 missing functions to FIR: `clamp`, `mix` (lerp), `step`, `smoothstep`, `fract`
+- All wired to GLSL.std.450 extended instructions via `GLSLMath` typeclass
+- Files: `SPIRV/Operation.hs`, `SPIRV/PrimOp.hs`, `FIR/Prim/Op.hs`, `Math/Algebra/Class.hs`, `FIR/Syntax/AST.hs`, `FIR/Syntax/Program.hs`
+- Already had: `sin`, `cos`, `atan2`, `pow`, `floor`, `exp`, `signum` (plan was outdated)
+- FIR submodule commit: `0d8e55a`
+
+**M10.3 IBL Rotation DONE**:
+- Added `ssAzimuth` to `SunState` (continuous 24h, full 360°)
+- Passed `sunAzimuth` via push constant (replaced `pad0`, still 96 bytes)
+- Fragment shader rotates cubemap sampling directions around Y using FIR `sin`/`cos`
+- Applied to: skybox background, diffuse IBL (irradiance_map), specular IBL (env_map LOD)
+- Main repo commit: `c605193`
+- Note: Current HDRI (env1 sunset) has baked sun at horizon. Rotating it makes sun orbit like lighthouse. User wants to find better HDRI or render own cubemap set.
+
+**M10.4 Clouds — BLOCKED by SPIR-V Bloat**:
+- Implemented procedural clouds in lighting shader (hash noise + bilinear interpolation)
+- Build succeeded, but SPIR-V is 10.9MB with 542,910 IDs (normal shader: 5-50KB)
+- FIR inlines everything without CSE/DCE. 4 unrolled PBR lights already produce ~10MB baseline.
+- Adding any math pushes it over driver limit. Pipeline creation fails silently → black screen.
+- Attempted simplification (inline everything, no helper functions) — still 10.9MB.
+- **CONCLUSION**: M10.4 blocked until FIR optimization. Cannot add non-trivial math to lighting shader.
+
+**FIR Optimization Roadmap Found**:
+- Location: `3rdparty/fir/.opencode/roadmap/optimization/README.md`
+- Phase 0 (1 hour): `spirv-opt` integration → 30-50% size reduction
+- Phase 1.1 (1-2 weeks): `storeAtTypeThroughAccessChain` loop instead of unrolling
+- Phase 1.3 (1-2 weeks): vectorization whitelist (SelectionF/IfF, LetF, BindF) → biggest win for Haskan2
+- Phase 2 (1-2 months): CSE, DCE, peephole, inlining
+- Phase 0 is the immediate blocker for M10.4. Phase 1.3 is the enabler for non-trivial fragment shader math.
+
+**Commits**:
+- `0d8e55a` — FIR: add GLSL math functions
+- `c605193` — M10.3: dynamic IBL cubemap rotation
+- `40306cd` — M10.4: procedural volumetric clouds (reverted due to SPIR-V bloat)
+- `26065eb` — Update MEMORIES.md
+
 ## Open Issues
-1. **UV texturing of procedural cube/sphere**: `unitCube` and `uvSphere` UV orientation still incorrect. Vision model confirms upside-down text on all faces. Deferred to future session.
-2. **FIR shader missing `clamp`/`smoothstep`/`mix`/`step`/`fract`**: ~~Needed for grid cells, volumetric clouds, proper sky models, and cubemap rotation. See `.opencode/FIR_MATH_PLAN.md` for implementation plan. **Next session priority.**~~ **DONE** — Added `GLSLMath` typeclass with `clamp`, `mix`, `step`, `smoothstep`, `fract`. Already had `sin`/`cos`/`atan2`/`pow`/`floor`/`exp`/`signum`. All wired to GLSL.std.450 extended instructions. `sin`/`cos`/`atan2`/`pow`/`floor` were already present since before M10. Plan was outdated.
-3. **IBL dynamic sky**: Deferred until FIR math functions available. **NOW UNBLOCKED** — `sin`/`cos` available.
+1. **FIR SPIR-V Bloat — CRITICAL BLOCKER**: FIR generates 10.9MB SPIR-V (542k IDs) for the lighting fragment shader. Normal shader: 5-50KB. Root cause: no CSE, no DCE, full unrolling, no vectorization fallback. Driver fails to create pipeline. M10.4 clouds impossible until fixed.
+   - **Immediate fix**: Phase 0 — integrate `spirv-opt` into FIR `compileTo` (1 hour, 30-50% reduction)
+   - **Medium fix**: Phase 1.3 — vectorization whitelist (SelectionF/IfF, LetF, BindF) for Haskan2's heavy `V 3`/`V 4` usage
+   - **Long fix**: Phase 2 — CSE/DCE instruction-level passes
+   - **Roadmap**: `3rdparty/fir/.opencode/roadmap/optimization/README.md`
+2. **UV texturing of procedural cube/sphere**: `unitCube` and `uvSphere` UV orientation still incorrect. Vision model confirms upside-down text on all faces. Deferred to future session.
+3. **IBL dynamic sky**: Deferred until FIR math functions available. **NOW UNBLOCKED** — `sin`/`cos` available. **BUT** HDRI rotation looks weird with current env1 (sunset with sun at horizon). Need better HDRI or procedural sky.
 4. **Shadows for sun**: Blocked until CSM implemented; shadowless day/night acceptable for M10.
-5. **Day/night IBL cubemap rotation**: ~~Skybox background gets tinted by `skyTint` push constant, but object IBL reflections sample the static cubemap unchanged. Only `iblIntensity` scales (0→1). Sun direction changes but reflected environment stays identical. Need cubemap rotation matrix push constant or separate day/night cubemap presets. Requires FIR `sin`/`cos`/`atan2` for spherical coordinate conversion.~~ **FIXED** — `sunAzimuth` passed via push constant (replaced `pad0`). Fragment shader computes `cos(sunAzimuth)` and `sin(sunAzimuth)` using FIR's `cos`/`sin`, rotates sampling directions around Y axis before sampling `env_map` (skybox background + specular IBL) and `irradiance_map` (diffuse IBL). Cubemap rotates with sun so reflections align with actual sun direction.
-6. **M10.4 Volumetric Clouds**: ~~Blocked until FIR math functions available.~~ **DONE** — Procedural clouds in lighting shader using hash-based noise, fBm (3 octaves), spherical UV mapping, smoothstep density shaping, sun-based shading. Clouds animate with sunAzimuth drift. Applied to background pixels only. Uses new FIR math: sin, cos, fract, floor, mix, smoothstep, clamp, atan2, asin.
+5. **Day/night IBL cubemap rotation**: **FIXED** — `sunAzimuth` passed via push constant. Fragment shader rotates sampling directions around Y. Cubemap rotates with sun. **Limitation**: Current env1 HDRI has sun baked at horizon; rotating makes it orbit like lighthouse. Need better HDRI or separate cubemap sets for dawn/noon/dusk/night.
+6. **M10.4 Volumetric Clouds**: **BLOCKED** — Implemented in `Lighting.hs` (hash noise, spherical UV, smoothstep) but SPIR-V is 10.9MB/542k IDs. FIR generates massive SPIR-V with no optimization. Driver fails to create pipeline. Need FIR Phase 0 (spirv-opt) + Phase 1.3 (vectorization) before clouds are feasible. Reverted from `Lighting.hs` but kept in git history (`40306cd`).
 
 ## Critical Files
 - `src/Graphics/Haskan/Engine.hs` — main loop, ECS, deferred graph, `computeSkyboxRays`, UV check mode, axis/ground plane state, debug mode handling
@@ -101,11 +147,17 @@
 - `src/Graphics/Haskan/Vulkan/Buffer.hs` — `vkMapMemory` guards for empty data
 - `src/Graphics/Haskan/Vulkan/Texture.hs` — `readImageFromFile` using JuicyPixels (top-down row order)
 - `docs/M10-PLAN.md` — milestone plan
+- `docs/` — project documentation directory
 - `.opencode/FIR_MATH_PLAN.md` — FIR math extension implementation plan
 - `src/Graphics/Haskan/DayNight.hs` — sun trajectory, sky color, IBL intensity computation
 - `src/Graphics/Haskan/Vulkan/Shaders/LightData.hs` — FIR LightData struct for SSBO
 - `src/Graphics/Haskan/Engine/Types.hs` — GameState with lights, timeOfDay, dayNight fields
 - `scripts/benchmark_lights.sh` — multi-light benchmark harness
+- `3rdparty/fir/.opencode/roadmap/optimization/README.md` — FIR optimization roadmap (Phase 0-2)
+- `3rdparty/fir/src/FIR.hs` — `compileTo` function (Phase 0 target)
+- `3rdparty/fir/src/CodeGen/Applicative.hs` — vectorization whitelist (Phase 1.3 target)
+- `3rdparty/fir/src/CodeGen/Optics.hs` — `storeAtTypeThroughAccessChain` (Phase 1.1 target)
+- `3rdparty/fir/src/CodeGen/Binary.hs` — instruction emission (Phase 2 target)
 
 ## Test Assets
 - `data/hdri/env_test/` — colored test cubemap: +X=red, -X=blue, +Y=green, -Y=yellow, +Z=gray, -Z=brown
