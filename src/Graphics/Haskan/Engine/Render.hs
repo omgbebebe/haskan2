@@ -148,8 +148,9 @@ renderFrameLoop ::
   STM.TVar Float ->
   STM.TVar Float ->
   STM.TVar Bool ->
+  STM.TVar Float ->
   m Bool
-renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights tvTimeOfDay tvTimeSpeed tvDayNightEnabled = do
+renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef ccr@ComputeCullResources {..} tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights tvTimeOfDay tvTimeSpeed tvDayNightEnabled tvCloudHeight = do
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -296,6 +297,8 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                     sunAzimuth = DayNight.ssAzimuth sunState
                     sunDir = DayNight.ssDirection sunState
 
+                cloudHeight' <- liftIO $ STM.readTVarIO tvCloudHeight
+
                 let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
                       buildDeferredGraph DeferredPassData
                         { dpdExtent = rcSurfaceExtent
@@ -325,6 +328,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                         , dpdIBLIntensity = iblInt
                         , dpdSunAzimuth = sunAzimuth
                         , dpdSunDir = sunDir
+                        , dpdCloudHeight = cloudHeight'
                         , dpdGBufferImages = gBufferImagesForFrame
                         , dpdWireframePipeline = drWireframePipeline
                         , dpdWireframeLayout = drWireframePipelineLayout
@@ -480,6 +484,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         tvTimeOfDay
         tvTimeSpeed
         tvDayNightEnabled
+        tvCloudHeight
 
 renderLoop ::
   (Camera cam, MonadFail m, MonadManaged m, MonadIO m) =>
@@ -924,6 +929,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
       tvTimeOfDay = gameTimeOfDay gameState
       tvTimeSpeed = gameTimeSpeed gameState
       tvDayNightEnabled = gameDayNightEnabled gameState
+      tvCloudHeight = cloudHeight gameState
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
@@ -935,7 +941,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
                    -- Update lighting descriptor sets with light SSBO
                    for_ (drLightingDescriptorSets dr) $ \ds ->
                      DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
-                   renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights tvTimeOfDay tvTimeSpeed tvDayNightEnabled
+                   renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights tvTimeOfDay tvTimeSpeed tvDayNightEnabled tvCloudHeight
               outerLoop renderFrameLoopFinished
 
 

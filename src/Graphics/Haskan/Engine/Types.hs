@@ -385,7 +385,8 @@ data GameState cam = GameState
     lights :: TVar [LightData],
     gameTimeOfDay :: TVar Float,
     gameTimeSpeed :: TVar Float,
-    gameDayNightEnabled :: TVar Bool
+    gameDayNightEnabled :: TVar Bool,
+    cloudHeight :: TVar Float
   }
 
 data RenderDebugInfo = RenderDebugInfo

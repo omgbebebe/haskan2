@@ -77,6 +77,7 @@ type CameraPushConstant = Struct
    , "skyTintB" ':-> Float
    , "iblIntensity" ':-> Float
    , "sunDir" ':-> V 3 Float
+   , "cloudHeight" ':-> Float
    ]
 
 type FragmentDefs =
@@ -161,6 +162,7 @@ fragment = shader do
       camY = view @(Name "cameraY") cameraPos
       camZ = view @(Name "cameraZ") cameraPos
       ~(Vec3 sunDirX sunDirY sunDirZ) = view @(Name "sunDir") cameraPos
+      cloudBottom = view @(Name "cloudHeight") cameraPos
 
   -- Precompute cubemap rotation from sun azimuth
   let cosAz = cos sunAzimuth
@@ -234,7 +236,6 @@ fragment = shader do
         in (1.0 - g2) / (4.0 * 3.14159265 * denom)
 
       -- Cloud layer bounds
-      cloudBottom = 150.0
       cloudThickness = 100.0
       cloudTop = cloudBottom + cloudThickness
       stepSize = cloudThickness / 3.0

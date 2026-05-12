@@ -38,6 +38,8 @@ data Action
   | SaveAllStages
   | SaveSwapchainScreenshot
   | ToggleMouseCapture
+  | CloudHeightUp
+  | CloudHeightDown
   deriving (Eq, Show, Generic)
 
 type ActionEvent = (Action, Bool, Bool)  -- (action, pressed, isRepeated)
@@ -97,6 +99,9 @@ defaultBindings =
       (([LShift], SDL.KeycodeF1), DebugMode 13),  -- cloud density
       (([LShift], SDL.KeycodeF2), DebugMode 14),  -- height mask
       (([LShift], SDL.KeycodeF3), DebugMode 15),  -- raw noise
+      -- Cloud height adjustment
+      (([], SDL.KeycodeRightBracket), CloudHeightUp),
+      (([], SDL.KeycodeLeftBracket), CloudHeightDown),
       (([], SDL.KeycodeM), ToggleMouseCapture)
     ]
 

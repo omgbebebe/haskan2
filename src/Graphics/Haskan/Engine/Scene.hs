@@ -68,7 +68,7 @@ makeProjectionMatrix width height =
     (pi / 3)
     (realToFrac width / realToFrac height)
     0.01
-    1000.0
+    400000.0
 
 drawCallToSnapshot :: DrawCall -> RenderableSnapshot
 drawCallToSnapshot DrawCall {..} =

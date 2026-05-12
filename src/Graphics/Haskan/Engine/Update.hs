@@ -117,6 +117,18 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                   STM.atomically $ STM.writeTVar (pendingSwapchainScreenshot gameState) True
                   logInfoIO LogGeneral "swapchain screenshot requested"
                 (SaveSwapchainScreenshot, False, _) -> pure ()
+                (CloudHeightUp, True, _) -> do
+                  current <- STM.readTVarIO (cloudHeight gameState)
+                  let newHeight = current + 50.0
+                  STM.atomically $ STM.writeTVar (cloudHeight gameState) newHeight
+                  logInfoIO LogGeneral $ "cloud height: " <> showT newHeight
+                (CloudHeightUp, False, _) -> pure ()
+                (CloudHeightDown, True, _) -> do
+                  current <- STM.readTVarIO (cloudHeight gameState)
+                  let newHeight = max 50.0 (current - 50.0)
+                  STM.atomically $ STM.writeTVar (cloudHeight gameState) newHeight
+                  logInfoIO LogGeneral $ "cloud height: " <> showT newHeight
+                (CloudHeightDown, False, _) -> pure ()
             forM_ debugCmds $ \(cmd, respVar) -> do
               case cmd of
                 SetCameraDistance d -> do

@@ -111,6 +111,7 @@ mainLoop meshName EngineConfig {..} = do
   tvTimeOfDay <- liftIO $ STM.newTVarIO initialTimeOfDay
   tvTimeSpeed <- liftIO $ STM.newTVarIO timeSpeed
   tvDayNightEnabled <- liftIO $ STM.newTVarIO dayNightEnabled
+  tvCloudHeight <- liftIO $ STM.newTVarIO 150.0
 
   let gameState =
         GameState
@@ -135,6 +136,7 @@ mainLoop meshName EngineConfig {..} = do
           tvTimeOfDay
           tvTimeSpeed
           tvDayNightEnabled
+          tvCloudHeight
 
   mDebugServer <- case debugSocketPath of
     Just path -> do
