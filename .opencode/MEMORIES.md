@@ -377,4 +377,65 @@ New `InterpolationMethod` enum: `Instantaneous | Linear | Slerp`. Camera orienta
 - `src/Graphics/Haskan/Camera.hs` — `orbitalModify`, `animateOrbital`, `orientationFromAzEl`, `nlerpQuaternion`, `InterpolationMethod`
 - `src/Graphics/Haskan/Engine.hs` — `Camera.animate` called per frame in `stateUpdateLoop`
 - `.opencode/orbital_camera.tex` — camera spec document
-- `.opencode/ORBITAL_CAMERA_AUDIT.tex` — audit report (3 issues found, 2 fixed, 1 spec-only)
+---
+
+## Critical Bug: FIR Push Constant Layout Mismatch (std430 vs CPU packing)
+
+**Discovered**: 2026-05-13 during cloud height debugging — cloud height changes had no visual effect despite TVar updates and shader reads.
+
+**Root cause**: CPU-side push constant packing in `Render/Deferred.hs` added a `0` padding float after every `V 3 Float`, treating vec3 as vec4 (16 bytes). But FIR's `std430` layout for `V 3 Float` has size=12, alignment=16. No tail padding after vec3.
+
+**CPU layout (WRONG)** — every vec3 followed by explicit `0`:
+```haskell
+-- WRONG: padding after ray2 and sunDir
+camPosData = [ camX, camY, camZ, debugMode          -- offset 0
+             , axis, ground, sunAz, lightCount      -- offset 16
+             , r0x, r0y, r0z, 0                     -- offset 32 (vec3+pad=16)
+             , r1x, r1y, r1z, 0                     -- offset 48
+             , r2x, r2y, r2z, 0                     -- offset 64 (WRONG: no pad needed)
+             , tintR, tintG, tintB, iblInt          -- offset 80 (shifted by 4!)
+             , sunDirX, sunDirY, sunDirZ, 0         -- offset 96 (pad needed for 16-align)
+             , cloudHeight                          -- offset 112 (WRONG: should be 108)
+             ]
+```
+
+**FIR layout (CORRECT)** — `V 3 Float` = 12 bytes, alignment=16:
+```
+offset 0:   cameraX/Y/Z, debugMode              (16 bytes)
+offset 16:  axis, groundPlane, sunAzimuth, lightCount (16 bytes)
+offset 32:  ray0 (V3 Float)                      (12 bytes)
+offset 44:  ray1 (V3 Float)                      (12 bytes)
+offset 56:  ray2 (V3 Float)                      (12 bytes)
+offset 68:  skyTintR                            (4 bytes, aligned to 4)
+offset 72:  skyTintG                            (4 bytes)
+offset 76:  skyTintB                            (4 bytes)
+offset 80:  iblIntensity                        (4 bytes)
+offset 84:  [padding]                           (4 bytes to align sunDir to 16)
+offset 88:  sunDir (V3 Float)                    (12 bytes)
+offset 100: cloudHeight                         (4 bytes)
+```
+
+**Fields that were broken**:
+- `skyTintR/G/B` and `iblIntensity` — shifted by 4 bytes, reading wrong values
+- `cloudHeight` — always read `0.0` (the padding float after sunDir)
+
+**Fix**: Remove explicit `0` padding after `ray0`, `ray1`, `ray2`. Only add padding when needed for 16-byte alignment of the next vec3 field:
+```haskell
+-- CORRECT: no padding after ray2
+camPosData = [ camX, camY, camZ, realToFrac dpdDebugMode
+             , realToFrac dpdAxisOverlay, realToFrac dpdGroundPlane
+             , realToFrac dpdSunAzimuth, realToFrac dpdLightCount
+             , realToFrac r0x, realToFrac r0y, realToFrac r0z     -- ray0: 12 bytes
+             , realToFrac r1x, realToFrac r1y, realToFrac r1z     -- ray1: 12 bytes
+             , realToFrac r2x, realToFrac r2y, realToFrac r2z     -- ray2: 12 bytes
+             , realToFrac tintR, realToFrac tintG, realToFrac tintB, realToFrac dpdIBLIntensity  -- 16 bytes
+             , realToFrac sunDirX, realToFrac sunDirY, realToFrac sunDirZ, 0  -- sunDir + pad to 16-align
+             , realToFrac dpdCloudHeight                          -- 4 bytes
+             ]
+-- Total: 29 floats = 116 bytes
+```
+
+**Rule**: FIR `V 3 Float` in std430 = 12 bytes, alignment=16. Do NOT add tail padding. Only pad to reach 16-byte alignment for the NEXT field if it's also a vec3.
+
+**Files**: `src/Graphics/Haskan/Render/Deferred.hs` (push constant packing)
+

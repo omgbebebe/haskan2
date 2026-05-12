@@ -164,19 +164,23 @@ buildDeferredGraph DeferredPassData {..} = do
               (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = dpdSkyboxRays
               (V3 tintR tintG tintB) = dpdSkyTint
               (V3 sunDirX sunDirY sunDirZ) = dpdSunDir
-              -- std430 layout: vec3 aligned to 16 bytes, need padding after each
-              -- Total: 29 floats * 4 = 116 bytes
+              -- std430: vec3 has size 12 (NOT padded to 16). Pad only for next vec3 alignment.
+              -- After ray2(76) → skyTintR at 76 (scalar, no pad needed)
+              -- After iblInt(92) → sunDir needs 16-align → pad 1 float → sunDir at 96
+              -- After sunDir(108) → cloudHeight at 108 (scalar, no pad needed)
+              -- Total: 28 floats * 4 = 112 bytes
               camPosData = [ realToFrac camX, realToFrac camY, realToFrac camZ, realToFrac dpdDebugMode
                            , realToFrac dpdAxisOverlay, realToFrac dpdGroundPlane, realToFrac dpdSunAzimuth, realToFrac dpdLightCount
                            , realToFrac r0x, realToFrac r0y, realToFrac r0z, 0
                            , realToFrac r1x, realToFrac r1y, realToFrac r1z, 0
-                           , realToFrac r2x, realToFrac r2y, realToFrac r2z, 0
+                           , realToFrac r2x, realToFrac r2y, realToFrac r2z
                            , realToFrac tintR, realToFrac tintG, realToFrac tintB, realToFrac dpdIBLIntensity
-                           , realToFrac sunDirX, realToFrac sunDirY, realToFrac sunDirZ, 0
+                           , 0
+                           , realToFrac sunDirX, realToFrac sunDirY, realToFrac sunDirZ
                            , realToFrac dpdCloudHeight
                            ] :: [CFloat]
            in Foreign.Marshal.Array.withArray camPosData $ \camPtr ->
-             Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 116 (Foreign.castPtr camPtr)
+             Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 112 (Foreign.castPtr camPtr)
           -- Fullscreen triangle: 3 vertices, no indices
           Vulkan.vkCmdDraw commandBuffer 3 1 0 0
     }
