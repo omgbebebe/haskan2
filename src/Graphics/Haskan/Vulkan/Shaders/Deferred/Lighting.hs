@@ -235,12 +235,12 @@ fragment = shader do
         in (1.0 - g2) / (4.0 * 3.14159265 * denom)
 
       -- Cloud layer bounds
-      cloudThickness = 100.0
+      cloudThickness = 800.0
       cloudTop = cloudBottom + cloudThickness
 
       -- Total ray length to traverse full vertical thickness
       totalRayLength = cloudThickness / max 0.01 dirY
-      stepSize = totalRayLength / 3.0
+      stepSize = totalRayLength / 6.0
 
       -- Entry point: ray-plane intersection at cloudBottom
       tEntry = (cloudBottom - camY) / max 0.01 dirY
@@ -248,27 +248,32 @@ fragment = shader do
       entryY = cloudBottom
       entryZ = camZ + dirZ * tEntry
 
-      -- Noise scale: larger cells for billowy cumulus puffs
-      cloudScale = 0.001
-      warpScale = 0.0003
+      -- Noise scales
+      -- Coverage: very low freq (5000m cells), controls where clouds can exist
+      coverageScale = 0.0002
+      -- Shape: higher freq (300m cells), creates puff detail
+      shapeScale = 0.003
+      -- Warp: distorts shape noise for organic forms
+      warpScale = 0.0005
 
-      -- Domain warp: displace sample position with low-freq noise
-      -- to break up grid-aligned blob pattern
+      -- Domain warp: displace shape sample position with low-freq noise
       warp3D (Vec3 x y z) =
         let wx = valueNoise3D (Vec3 (x * warpScale) (y * warpScale) (z * warpScale))
             wy = valueNoise3D (Vec3 ((x + 100) * warpScale) (y * warpScale) (z * warpScale))
             wz = valueNoise3D (Vec3 (x * warpScale) ((y + 100) * warpScale) (z * warpScale))
-        in Vec3 (x + wx * 800) (y + wy * 200) (z + wz * 800)
+        in Vec3 (x + wx * 500) (y + wy * 100) (z + wz * 500)
+
+      -- Coverage mask: large regions where clouds can form (single octave)
+      coverageNoise posX_ posY_ posZ_ =
+        valueNoise3D (Vec3 (posX_ * coverageScale) (posY_ * coverageScale) (posZ_ * coverageScale))
 
       -- Light march: 2 steps toward sun, sample single-octave noise
       lightMarchDensity posX_ posY_ posZ_ =
-        let lStep = 15.0
-            -- Sample at current position and one step toward sun
-            d0 = valueNoise3D (Vec3 (posX_ * cloudScale) (posY_ * cloudScale) (posZ_ * cloudScale))
-            d1 = valueNoise3D (Vec3 ((posX_ + sunDirX * lStep) * cloudScale)
-                                    ((posY_ + sunDirY * lStep) * cloudScale)
-                                    ((posZ_ + sunDirZ * lStep) * cloudScale))
-            -- Height attenuation for light march (denser lower in cloud)
+        let lStep = 80.0
+            d0 = valueNoise3D (Vec3 (posX_ * shapeScale) (posY_ * shapeScale) (posZ_ * shapeScale))
+            d1 = valueNoise3D (Vec3 ((posX_ + sunDirX * lStep) * shapeScale)
+                                    ((posY_ + sunDirY * lStep) * shapeScale)
+                                    ((posZ_ + sunDirZ * lStep) * shapeScale))
             h0 = smoothstep cloudBottom cloudTop posY_
             h1 = smoothstep cloudBottom cloudTop (posY_ + sunDirY * lStep)
         in (d0 * (1.0 - h0) + d1 * (1.0 - h1)) * 0.5
@@ -282,16 +287,20 @@ fragment = shader do
             sampleY = entryY + dirY * tOffset
             sampleZ = entryZ + dirZ * tOffset
 
-            -- Height factor: flat bottom (0.0-0.3), fluffy middle (0.3-0.7), thin top (0.7-1.0)
+            -- Height factor: wider soft middle, thin at top/bottom
             heightFrac = (sampleY - cloudBottom) / cloudThickness
-            heightFactor = smoothstep 0.0 0.3 heightFrac * (1.0 - smoothstep 0.7 1.0 heightFrac)
+            heightFactor = smoothstep 0.0 0.15 heightFrac * (1.0 - smoothstep 0.85 1.0 heightFrac)
 
-            -- Domain warp then sample density
+            -- Coverage mask: large regions where clouds can exist
+            coverage = smoothstep 0.4 0.7 (coverageNoise sampleX sampleY sampleZ)
+
+            -- Domain warp then sample shape noise
             Vec3 warpX warpY warpZ = warp3D (Vec3 sampleX sampleY sampleZ)
-            rawDensity = fbm3D (Vec3 (warpX * cloudScale) (warpY * cloudScale) (warpZ * cloudScale))
-            -- Sharper threshold: pow creates distinct cloud edges
-            shapedDensity = (smoothstep 0.35 0.65 rawDensity) ** 3.0
-            density = max 0 (shapedDensity * heightFactor - 0.1) * 3.0
+            shapeRaw = fbm3D (Vec3 (warpX * shapeScale) (warpY * shapeScale) (warpZ * shapeScale))
+            shape = smoothstep 0.35 0.65 shapeRaw
+
+            -- Combined density: coverage creates gaps between cloud groups
+            density = max 0 (shape * coverage * heightFactor - 0.1) * 3.0
 
             -- Light transmittance from sun to this point
             lightDensity = lightMarchDensity sampleX sampleY sampleZ
@@ -330,16 +339,19 @@ fragment = shader do
             newT = t_ * viewTransmittance
         in (newT, newAccR, newAccG, newAccB)
 
-      -- Execute 3 steps, threading transmittance and accumulated color
+      -- Execute 6 steps, threading transmittance and accumulated color
       (t1, aR1, aG1, aB1) = cloudStep 0 1.0 0.0 0.0 0.0
       (t2, aR2, aG2, aB2) = cloudStep 1 t1 aR1 aG1 aB1
       (t3, aR3, aG3, aB3) = cloudStep 2 t2 aR2 aG2 aB2
+      (t4, aR4, aG4, aB4) = cloudStep 3 t3 aR3 aG3 aB3
+      (t5, aR5, aG5, aB5) = cloudStep 4 t4 aR4 aG4 aB4
+      (t6, aR6, aG6, aB6) = cloudStep 5 t5 aR5 aG5 aB5
 
       -- Final cloud color and transmittance
-      cloudAccR = aR3
-      cloudAccG = aG3
-      cloudAccB = aB3
-      cloudTransmittance = t3
+      cloudAccR = aR6
+      cloudAccG = aG6
+      cloudAccB = aB6
+      cloudTransmittance = t6
 
       -- Skip clouds when looking downward (use step/mix instead of ifThenElse)
       cloudsMask = step 0.01 dirY
