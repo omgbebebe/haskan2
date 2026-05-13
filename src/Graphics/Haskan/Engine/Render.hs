@@ -85,7 +85,7 @@ import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.Instance qualified as Instance
 import Graphics.Haskan.Vulkan.PhysicalDevice qualified as PhysicalDevice
 import Graphics.Haskan.Vulkan.PipelineLayout qualified as PipelineLayout
-import Graphics.Haskan.Vulkan.Render (drawFrame, presentFrame)
+import Graphics.Haskan.Vulkan.Render (drawFrame, presentFrame, runRenderM)
 import Graphics.Haskan.Vulkan.Render qualified as Render
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Resources
@@ -114,6 +114,44 @@ import SDL.Input.Mouse qualified as SDL.Mouse
 import System.Clock (Clock (..), getTime, toNanoSecs)
 import System.Directory (doesFileExist)
 import System.IO.Unsafe (unsafePerformIO)
+import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, runReaderT)
+
+type RenderLoopM m = ReaderT RenderEnv m
+
+data RenderEnv = RenderEnv
+  { reContext :: !RenderContext,
+    reDeferred :: !DeferredResources,
+    reTargetFPS :: !Integer,
+    reImageAvailableSemaphores :: ![Vulkan.VkSemaphore],
+    reControl :: !(TChan ControlMessage),
+    reFrameMvpMemories :: ![Vulkan.VkDeviceMemory],
+    reTvCamera :: !(TVar AnyCamera),
+    reTvInspect :: !(STM.TVar Bool),
+    reTvInsp :: !(STM.TVar (Maybe FrameInspector)),
+    reTvRenderDebug :: !(STM.TVar (Maybe RenderDebugInfo)),
+    reECSWorld :: !ECS.World,
+    reResourceManager :: !ResourceManager,
+    reTextureSampler :: !Vulkan.VkSampler,
+    reFrameDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    reTextureIndexMap :: !(IntMap Word32),
+    reTvWireframe :: !(STM.TVar Bool),
+    reFrameStatsRef :: !(IORef FrameStats),
+    reCullResources :: !ComputeCullResources,
+    reTvDebugMode :: !(STM.TVar Word32),
+    reTvAxisOverlay :: !(STM.TVar Float),
+    reTvGroundPlane :: !(STM.TVar Float),
+    reTvPendingScreenshot :: !(STM.TVar Bool),
+    reTvPendingAllStages :: !(STM.TVar Bool),
+    reTvPendingSwapchainScreenshot :: !(STM.TVar Bool),
+    rePhysicalDevice :: !Vulkan.VkPhysicalDevice,
+    reLightSsboBuffer :: !Vulkan.VkBuffer,
+    reLightSsboMemory :: !Vulkan.VkDeviceMemory,
+    reTvLights :: !(STM.TVar [LightData]),
+    reTvTimeOfDay :: !(STM.TVar Float),
+    reTvTimeSpeed :: !(STM.TVar Float),
+    reTvDayNightEnabled :: !(STM.TVar Bool),
+    reTvCloudHeight :: !(STM.TVar Float)
+  }
 
 renderFrameLoop ::
   (MonadFail m, MonadIO m) =>
@@ -398,10 +436,10 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                             passCtx = if rpName pass == "gbuffer" then gBufferPassCtx else lightingPassCtx
                         liftIO $ recordFn passCtx
 
-          res <- liftIO $ drawFrame ctx imageAvailableSemaphore frameNumber recordAction
+          res <- liftIO $ runRenderM ctx $ drawFrame imageAvailableSemaphore frameNumber recordAction
           case res of
             Render.FrameOk imageIndex -> do
-              presentResult <- liftIO $ presentFrame ctx imageIndex (renderFinishedSemaphores !! fromIntegral imageIndex)
+              presentResult <- liftIO $ runRenderM ctx $ presentFrame imageIndex (renderFinishedSemaphores !! fromIntegral imageIndex)
               case presentResult of
                 Vulkan.VK_SUCCESS -> do
                   shouldInspect <- liftIO $ STM.atomically $ do

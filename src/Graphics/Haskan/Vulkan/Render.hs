@@ -6,11 +6,14 @@ module Graphics.Haskan.Vulkan.Render
     presentFrame,
     createRenderContext,
     maxFramesInFlight,
+    RenderM,
+    runRenderM,
   )
 where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
+import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, runReaderT)
 import Data.Foldable (for_)
 import Data.Traversable (for)
 import Foreign.Marshal.Array qualified
@@ -33,6 +36,11 @@ import Graphics.Vulkan.Ext qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+
+type RenderM m = ReaderT RenderContext m
+
+runRenderM :: RenderContext -> RenderM m a -> m a
+runRenderM ctx action = runReaderT action ctx
 
 maxFramesInFlight :: Int
 maxFramesInFlight = 2
@@ -122,8 +130,9 @@ createRenderContext
           rcGraphicsCommandPool = graphicsCommandPool
         }
 
-drawFrame :: (MonadIO m) => RenderContext -> Vulkan.VkSemaphore -> Int -> (Vulkan.Word32 -> Int -> IO ()) -> m RenderResult
-drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex recordAction = do
+drawFrame :: (MonadIO m) => Vulkan.VkSemaphore -> Int -> (Vulkan.Word32 -> Int -> IO ()) -> RenderM m RenderResult
+drawFrame imageAvailableSemaphore fenceIndex recordAction = do
+  RenderContext {..} <- ask
   -- Wait for previous frame using this fence to complete before acquiring image
   liftIO $ do
     let renderFinishedFence = renderFinishedFences !! fenceIndex
@@ -137,7 +146,7 @@ drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex recordAction
         Vulkan.vkAcquireNextImageKHR device swapchain 100000000 imageAvailableSemaphore Vulkan.VK_NULL_HANDLE
 
   case vkResult of
-    Vulkan.VK_SUCCESS -> FrameOk <$> renderImage ctx imageAvailableSemaphore fenceIndex imageIndex recordAction
+    Vulkan.VK_SUCCESS -> FrameOk <$> renderImage imageAvailableSemaphore fenceIndex imageIndex recordAction
     Vulkan.VK_TIMEOUT -> pure FrameTimeout
     Vulkan.VK_SUBOPTIMAL_KHR -> pure $ FrameSuboptimal imageIndex
     Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> do
@@ -165,13 +174,13 @@ drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex recordAction
 
 renderImage ::
   (MonadIO m) =>
-  RenderContext ->
   Vulkan.VkSemaphore ->
   Int ->
   Vulkan.Word32 ->
   (Vulkan.Word32 -> Int -> IO ()) ->
-  m Vulkan.Word32
-renderImage RenderContext {..} imageAvailableSemaphore fenceIndex imageIndex recordAction = do
+  RenderM m Vulkan.Word32
+renderImage imageAvailableSemaphore fenceIndex imageIndex recordAction = do
+  RenderContext {..} <- ask
   let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIndex
       renderFinishedSemaphore = renderFinishedSemaphores !! fromIntegral imageIndex
       renderFinishedFence = renderFinishedFences !! fenceIndex
@@ -196,8 +205,9 @@ renderImage RenderContext {..} imageAvailableSemaphore fenceIndex imageIndex rec
       Vulkan.vkQueueSubmit graphicsQueueHandler 1 siPtr renderFinishedFence >>= throwVkResult
   pure imageIndex
 
-presentFrame :: (MonadIO m) => RenderContext -> Vulkan.Word32 -> Vulkan.VkSemaphore -> m Vulkan.VkResult
-presentFrame RenderContext {..} imageIndex renderFinishedSem = do
+presentFrame :: (MonadIO m) => Vulkan.Word32 -> Vulkan.VkSemaphore -> RenderM m Vulkan.VkResult
+presentFrame imageIndex renderFinishedSem = do
+  RenderContext {..} <- ask
   let presentInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR
