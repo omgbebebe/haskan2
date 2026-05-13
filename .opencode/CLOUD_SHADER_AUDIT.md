@@ -1,7 +1,56 @@
 # Cloud Shader Audit Report
 
-Date: 2026-05-13
-Reference: [Frostnova (CIS5650)](https://github.com/YueZhang1027/CIS5650-Final-Project-Frostnova)
+Date: 2026-05-14
+References:
+- [Frostnova (CIS5650)](https://github.com/YueZhang1027/CIS5650-Final-Project-Frostnova) — Nubis-based VDB clouds (C++, Vulkan)
+- [Sakmary CTU Thesis 2022](https://dcgi.fel.cvut.cz/wp-content/wpallimport-dist/theses/pdf/theses-2022-sakmamat-thesis.pdf) — Hillaire atmosphere + Schneider procedural clouds (C++, Vulkan)
+
+## Technique Comparison
+
+| Aspect | Haskan2 | Frostnova | Sakmary Thesis |
+|--------|---------|-----------|---------------|
+| **Atmosphere** | Static HDRI cubemap + rotation | Physical sky (Preetham) | Hillaire 2020 LUT-based (Transmittance + Multiscattering + SkyView + AerialPerspective) |
+| **Cloud density source** | 3D Worley noise RGBA (128³) | VDB voxel grids + 3D noise | Two 3D Worley textures (256³ base + 128³ detail), 4-channel each |
+| **Cloud geometry** | Flat layer at `cloudHeight` with thickness 800 | Atmosphere shell (sphere intersect) | Sphere-intersected atmosphere shell (planet surface + cloud bottom/top) |
+| **Primary ray march** | 6 uniform steps, unrolled | Adaptive (SDF-guided + sqrt(distance)) | Linear with `iter+0.3` offset for better exponential integration |
+| **Light march** | 1 sample toward sun | 6-sample cone + VDB light grid | Small secondary ray march toward sun |
+| **Phase function** | Dual-lobe HG (0.6, -0.3) | Dual-lobe HG + silver lining | Double HG (Mie, equation 2.28) |
+| **Transmittance** | Beer-Lambert `exp(-d*5)` + secondary `0.7*exp(-d*0.1)` | Beer-Lambert + powder `max(primary, secondary)` | Beer-Lambert + Powder effect `P = 1 - exp(-2τ)`, combined with atmosphere transmittance LUT |
+| **Density** | `R*A - erosion(G,B)*0.8 - threshold` × height × 4.0 | Profile from VDB × erosion from noise | Base texture (high-res Worley) - detail texture weighted by inverse base |
+| **Temporal** | Blend with history buffer (push constant `blendFactor`) | Temporal upscaling (near/far split) | N/A |
+| **Aerial perspective** | None | None | Pre-computed 3D LUT applied as post-pass |
+| **Output** | RGBA16F intermediate → lighting pass composites | Compute → tone.frag | HDR backbuffer with cloud alpha → aerial perspective → tonemap |
+| **Tonemapping** | Reinhard + gamma sqrt | Uncharted 2 + god rays + vignette | Adaptive luminance + Reinhard/ACES/Lottes/Uchimura |
+
+### Key Difference: Sakmary Uses a Fundamentally Different Atmosphere Pipeline
+
+Sakmary's thesis combines **Hillaire 2020** (precomputed atmospheric scattering LUTs) with **Schneider 2015** (procedural noise clouds). This is a **more physically grounded** approach than both Haskan2 and Frostnova:
+
+1. **Atmosphere is ray-marched from scratch** using Transmittance, Multiscattering, SkyView, and Aerial Perspective LUTs — not a static cubemap.
+2. **Cloud lighting includes atmosphere transmittance toward the sun** — sampled from the Transmittance LUT. This gives physically correct coloring (red clouds at sunset, etc.).
+3. **Aerial perspective is applied on top of everything** including clouds, giving distance-based atmospheric haze.
+4. **Powder effect** `P = 1 - exp(-2τ)` is explicitly modeled for cloud internal scattering — both Haskan2 and Frostnova use simplified approximations of this.
+
+### Key Difference: Frostnova Uses VDB Modeling Data
+
+Frostnova's unique contribution is using OpenVDB voxel grids (Nubis3 style) for cloud shape:
+- NVDF textures store dimensional profile, detail type, density scale, and SDF
+- Light voxel grid (256×256×32) pre-computes sun-density for O(1) light lookup
+- Near/far temporal upscaling split at 500m threshold
+
+This produces more realistic, art-directable cloud shapes than procedural noise alone.
+
+### Key Difference: Haskan2 Is Simplified Procedural
+
+Haskan2's approach is the simplest of the three:
+- No atmosphere LUTs (uses static HDRI cubemap)
+- No VDB modeling (procedural noise only)
+- No sphere intersection (flat cloud layer)
+- No powder effect
+- No aerial perspective
+- Single-sample light march
+
+The cloud rendering equation is the same core algorithm (ray march + Beer-Lambert + HG phase), but with fewer samples and no physical atmosphere coupling.
 
 ## 1. CRITICAL: Push Constant Layout Mismatch
 
