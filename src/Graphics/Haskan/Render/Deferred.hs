@@ -73,6 +73,7 @@ data DeferredPassData = DeferredPassData
     dpdCloudPipeline :: !Vulkan.VkPipeline,
     dpdCloudLayout :: !Vulkan.VkPipelineLayout,
     dpdCloudDescriptor :: !Vulkan.VkDescriptorSet,
+    dpdCloudExtent :: !Vulkan.VkExtent2D,
     -- G-buffer images for barrier
     dpdGBufferImages :: ![Vulkan.VkImage],
     -- Wireframe overlay
@@ -154,7 +155,7 @@ buildDeferredGraph DeferredPassData {..} = do
         rpOutputs = [],
         rpRecord = PassRecordFunc $ \ctx -> do
           let commandBuffer = pcCommandBuffer ctx
-          RenderPass.withCloudRenderPass commandBuffer dpdCloudRenderPass dpdCloudFramebuffer dpdExtent $ do
+          RenderPass.withCloudRenderPass commandBuffer dpdCloudRenderPass dpdCloudFramebuffer dpdCloudExtent $ do
             GraphicsPipeline.cmdBindPipeline commandBuffer dpdCloudPipeline
             Foreign.Marshal.Array.withArray [dpdCloudDescriptor] $ \dsPtr ->
               DescriptorSet.cmdBindDescriptorSets

@@ -52,6 +52,7 @@ data DeferredResources = DeferredResources
     drCloudDescriptorSets :: ![Vulkan.VkDescriptorSet],
     drCloudImages :: ![Vulkan.VkImage],
     drCloudImageViews :: ![Vulkan.VkImageView],
+    drCloudExtent :: !Vulkan.VkExtent2D,
     drGBufferImages :: ![[Vulkan.VkImage]],
     drGBufferImageViews :: ![[Vulkan.VkImageView]],
     drSampler :: !Vulkan.VkSampler,
@@ -83,6 +84,11 @@ createDeferredResources ::
   m DeferredResources
 createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView = do
   let extent = rcSurfaceExtent ctx
+      cloudExtent =
+        Vulkan.createVk
+          ( set @"width" (Vulkan.getField @"width" extent `div` 2)
+              &* set @"height" (Vulkan.getField @"height" extent `div` 2)
+          )
       gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
       gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
       depthFormat = Vulkan.VK_FORMAT_D32_SFLOAT
@@ -119,10 +125,10 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       gBufferImageViews = map snd gBufferImagesAndViews
   logDebugIO LogRender $ "g-buffer images created: " <> showT (length gBufferImages) <> " sets"
 
-  -- Create cloud images and views (RGBA16F, one per swapchain image)
+  -- Create cloud images and views (RGBA16F, quarter resolution)
   let cloudFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
   cloudImagesAndViews <- for [0 .. numSwapchainImages - 1] $ \_ -> do
-    cloudImage <- Swapchain.managedGBufferImage pdev device extent cloudFormat
+    cloudImage <- Swapchain.managedGBufferImage pdev device cloudExtent cloudFormat
     cloudView <- ImageView.managedImageView device cloudFormat cloudImage
     pure (cloudImage, cloudView)
   let cloudImages = map fst cloudImagesAndViews
@@ -150,9 +156,9 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
     Framebuffer.managedGBufferFramebuffer device gBufferRenderPass extent views depthView
   logDebugIO LogRender $ "g-buffer framebuffers created: " <> showT (length gBufferFramebuffers)
 
-  -- Cloud framebuffers (one per swapchain image)
+  -- Cloud framebuffers (one per swapchain image, quarter resolution)
   cloudFramebuffers <- for cloudImageViews $ \view ->
-    Framebuffer.managedLightingFramebuffer device cloudRenderPass extent view
+    Framebuffer.managedLightingFramebuffer device cloudRenderPass cloudExtent view
   logDebugIO LogRender $ "cloud framebuffers created: " <> showT (length cloudFramebuffers)
 
   -- G-buffer pipeline layout
@@ -228,7 +234,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
           spGeometry = Nothing,
           spFragment = cloudFragShader
         }
-      extent
+      cloudExtent
   logDebugIO LogRender "cloud pipeline created"
 
   -- Wireframe pipeline
@@ -299,6 +305,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         drCloudDescriptorSets = cloudDescriptorSets,
         drCloudImages = cloudImages,
         drCloudImageViews = cloudImageViews,
+        drCloudExtent = cloudExtent,
         drGBufferImages = gBufferImages,
         drGBufferImageViews = gBufferImageViews,
         drSampler = sampler,

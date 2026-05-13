@@ -128,7 +128,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
             pcDescriptorSet = cloudDescriptorSet,
             pcFramebuffer = cloudFramebuffer,
             pcRenderPass = drCloudRenderPass rcDeferred,
-            pcExtent = rcPassSurfaceExtent
+            pcExtent = drCloudExtent rcDeferred
           }
       lightingPassCtx =
         PassContext
@@ -179,6 +179,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdCloudPipeline = drCloudPipeline rcDeferred,
                 dpdCloudLayout = drCloudPipelineLayout rcDeferred,
                 dpdCloudDescriptor = cloudDescriptorSet,
+                dpdCloudExtent = drCloudExtent rcDeferred,
                 dpdGBufferImages = gBufferImagesForFrame,
                 dpdWireframePipeline = drWireframePipeline rcDeferred,
                 dpdWireframeLayout = drWireframePipelineLayout rcDeferred,
