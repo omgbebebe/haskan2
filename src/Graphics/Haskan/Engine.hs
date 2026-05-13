@@ -36,6 +36,8 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
+import Graphics.Haskan.Camera.Fly (defaultFlyCamera)
+import Graphics.Haskan.Camera.Orbital (defaultOrbitalCamera)
 import Graphics.Haskan.DayNight (defaultDayNightConfig, computeSunState)
 import Graphics.Haskan.Debug.FrameInspector (defaultInspector)
 import Graphics.Haskan.Debug.Interface (DebugMessage (..), debugMessageToActionEvent)
@@ -50,6 +52,7 @@ import Graphics.Haskan.Engine.Types
   , InputBuffer (..)
   , ControlMessage (..)
   , LightData (..)
+  , CameraMode (..)
   , emptyFrameStats
   , updateFrameStats
   , forkIOWithHandler
@@ -73,7 +76,8 @@ import System.Timeout (timeout)
 mainLoop :: MonadIO m => String -> EngineConfig -> m ()
 mainLoop meshName EngineConfig {..} = do
   logInfoIO LogGeneral "starting mainLoop"
-  camera <- liftIO $ STM.newTVarIO (Camera.defaultOrbitalCamera)
+  let initialCam = Camera.Orbital defaultOrbitalCamera
+  camera <- liftIO $ STM.newTVarIO initialCam
   isRunning <- liftIO $ STM.newTVarIO True
 
   controlChannel <- liftIO $ TChan.newBroadcastTChanIO
@@ -112,6 +116,9 @@ mainLoop meshName EngineConfig {..} = do
   tvTimeSpeed <- liftIO $ STM.newTVarIO timeSpeed
   tvDayNightEnabled <- liftIO $ STM.newTVarIO dayNightEnabled
   tvCloudHeight <- liftIO $ STM.newTVarIO 3500.0
+  tvCameraMode <- liftIO $ STM.newTVarIO CameraModeOrbital
+  tvOrbitalCamera <- liftIO $ STM.newTVarIO initialCam
+  tvFlyCamera <- liftIO $ STM.newTVarIO (Camera.Fly defaultFlyCamera)
 
   let gameState =
         GameState
@@ -137,6 +144,9 @@ mainLoop meshName EngineConfig {..} = do
           tvTimeSpeed
           tvDayNightEnabled
           tvCloudHeight
+          tvCameraMode
+          tvOrbitalCamera
+          tvFlyCamera
 
   mDebugServer <- case debugSocketPath of
     Just path -> do

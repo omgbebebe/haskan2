@@ -30,6 +30,7 @@ module Graphics.Haskan.Engine.Types
   , RenderDebugInfo(..)
   , EntityDebugInfo(..)
   , ControlMessage(..)
+  , CameraMode(..)
   ) where
 
 import Control.Concurrent (forkIO)
@@ -364,6 +365,9 @@ data WorldState cam = WorldState
   { activeCamera :: TVar cam
   }
 
+data CameraMode = CameraModeOrbital | CameraModeFly
+  deriving (Show, Eq)
+
 data GameState cam = GameState
   { world :: TVar (WorldState cam),
     isRunning :: TVar Bool,
@@ -386,7 +390,10 @@ data GameState cam = GameState
     gameTimeOfDay :: TVar Float,
     gameTimeSpeed :: TVar Float,
     gameDayNightEnabled :: TVar Bool,
-    cloudHeight :: TVar Float
+    cloudHeight :: TVar Float,
+    cameraMode :: TVar CameraMode,
+    orbitalCamera :: TVar cam,
+    flyCamera :: TVar cam
   }
 
 data RenderDebugInfo = RenderDebugInfo

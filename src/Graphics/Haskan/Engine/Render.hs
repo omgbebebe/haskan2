@@ -42,7 +42,7 @@ import Foreign.Storable (Storable (..), peekByteOff, pokeByteOff)
 import GHC.Generics
 import Graphics.Haskan.Assets.Cache (initCache)
 import Graphics.Haskan.BoundingBox (BBox (..), bboxCenter, bboxDiagonal, emptyBBox, fromPoints, mergeBBox, mergePoint)
-import Graphics.Haskan.Camera (Camera (..))
+import Graphics.Haskan.Camera (Camera (..), AnyCamera)
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.DayNight qualified as DayNight
 import Graphics.Haskan.DayNight (defaultDayNightConfig, computeSunState)
@@ -115,7 +115,7 @@ import System.Clock (Clock (..), getTime, toNanoSecs)
 import System.Directory (doesFileExist)
 
 renderFrameLoop ::
-  (MonadFail m, MonadIO m, Camera cam) =>
+  (MonadFail m, MonadIO m) =>
   RenderContext ->
   DeferredResources ->
   Int ->
@@ -123,7 +123,7 @@ renderFrameLoop ::
   [Vulkan.VkSemaphore] ->
   TChan ControlMessage ->
   [Vulkan.VkDeviceMemory] ->
-  TVar cam ->
+  TVar AnyCamera ->
   STM.TVar Bool ->
   STM.TVar (Maybe FrameInspector) ->
   STM.TVar (Maybe RenderDebugInfo) ->
@@ -487,12 +487,12 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         tvCloudHeight
 
 renderLoop ::
-  (Camera cam, MonadFail m, MonadManaged m, MonadIO m) =>
+  (MonadFail m, MonadManaged m, MonadIO m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
   [String] ->
   Integer ->
-  GameState cam ->
+  GameState AnyCamera ->
   MVar () ->
   MVar () ->
   TChan ControlMessage ->

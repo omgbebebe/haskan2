@@ -40,6 +40,7 @@ data Action
   | ToggleMouseCapture
   | CloudHeightUp
   | CloudHeightDown
+  | SwitchCameraMode
   deriving (Eq, Show, Generic)
 
 type ActionEvent = (Action, Bool, Bool)  -- (action, pressed, isRepeated)
@@ -102,6 +103,7 @@ defaultBindings =
       -- Cloud height adjustment
       (([], SDL.KeycodeRightBracket), CloudHeightUp),
       (([], SDL.KeycodeLeftBracket), CloudHeightDown),
+      (([], SDL.KeycodeC), SwitchCameraMode),
       (([], SDL.KeycodeM), ToggleMouseCapture)
     ]
 

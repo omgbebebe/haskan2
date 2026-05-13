@@ -19,12 +19,12 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Aeson (ToJSON (..))
 import Data.Foldable (toList)
 import Foreign.C qualified
-import Graphics.Haskan.Camera (Camera (..))
+import Graphics.Haskan.Camera (Camera (..), AnyCamera(..), toAnyCamera)
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.DayNight (defaultDayNightConfig, computeSunState, SunState(..))
 import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), DebugCameraSnapshot (..), debugMessageToActionEvent, parseDebugMessage, encodeDebugResponse)
 import Graphics.Haskan.Debug.Server (CommandQueue)
-import Graphics.Haskan.Engine.Types (GameState (..), WorldState (..), InputBuffer (..), ControlMessage (..), LightData (..), flushInputBuffer)
+import Graphics.Haskan.Engine.Types (GameState (..), WorldState (..), InputBuffer (..), ControlMessage (..), LightData (..), flushInputBuffer, CameraMode(..))
 import Graphics.Haskan.Input (Action (..), ActionEvent)
 import Graphics.Haskan.Logger (logInfoIO, LogCategory(..), showT)
 import Linear (V2 (..), V3 (..))
@@ -32,14 +32,14 @@ import SDL qualified
 import SDL.Input.Mouse qualified as SDL.Mouse
 import System.Clock (Clock (..), getTime, toNanoSecs)
 
-stateUpdateLoop :: (Camera cam, MonadIO m) => Integer -> GameState cam -> MVar () -> InputBuffer -> CommandQueue -> TChan ControlMessage -> m ()
+stateUpdateLoop :: MonadIO m => Integer -> GameState AnyCamera -> MVar () -> InputBuffer -> CommandQueue -> TChan ControlMessage -> m ()
 stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue controlChannel = liftIO $ do
   logInfoIO LogGeneral "stateUpdateLoop starting"
   control <- STM.atomically $ TChan.dupTChan controlChannel
 
   let camSpeed = 10.0 :: Foreign.C.CFloat
 
-  let loop :: (Camera cam, MonadIO m) => Integer -> GameState cam -> Integer -> m ()
+  let loop :: MonadIO m => Integer -> GameState AnyCamera -> Integer -> m ()
       loop tFPS _gameState prevTime = liftIO $ do
         maybeControlMessage <- STM.atomically $ TChan.tryReadTChan control
         case maybeControlMessage of
@@ -129,6 +129,19 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                   STM.atomically $ STM.writeTVar (cloudHeight gameState) newHeight
                   logInfoIO LogGeneral $ "cloud height: " <> showT newHeight
                 (CloudHeightDown, False, _) -> pure ()
+                (SwitchCameraMode, True, _) -> do
+                  currentMode <- STM.readTVarIO (cameraMode gameState)
+                  let newMode = case currentMode of
+                        CameraModeOrbital -> CameraModeFly
+                        CameraModeFly -> CameraModeOrbital
+                  worldState <- STM.readTVarIO (world gameState)
+                  currentCam <- STM.readTVarIO (activeCamera worldState)
+                  let newCam = toAnyCamera currentCam
+                  STM.atomically $ do
+                    STM.writeTVar (cameraMode gameState) newMode
+                    STM.writeTVar (activeCamera worldState) newCam
+                  logInfoIO LogGeneral $ "camera mode switched to " <> showT newMode
+                (SwitchCameraMode, False, _) -> pure ()
             forM_ debugCmds $ \(cmd, respVar) -> do
               case cmd of
                 SetCameraDistance d -> do
