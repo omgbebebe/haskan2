@@ -151,6 +151,19 @@
 - **With spirv-opt**: 21.8KB optimized SPIR-V (1073 instructions)
 - Main repo commit: `b9998b3`
 
+**FIR Future Work Phase B-D DONE**:
+- Vector comparisons (`lessThanV`, `greaterThanV`, `equalV`, `notEqualV`, `lessThanEqualV`, `greaterThanEqualV`) returning `V n Bool`
+- Scalar `fma` and vector `fmaV` (fused multiply-add)
+- `packUnorm4x8` / `unpackUnorm4x8` (GLSL ext-inst pack/unpack)
+- `findILsb`, `findSMsb`, `findUMsb` (bit find operations)
+- Interpolation ops (`interpolateAtCentroid`, `interpolateAtSample`, `interpolateAtOffset`) — **REMOVED**: require pointer operand, FIR `Code` represents values not pointers. Deferred until codegen supports input variable references.
+- FIR submodule commit: `3322e26`
+- Main repo commit: `9f1f0c6`
+
+**Commits**:
+- `3322e26` — FIR: vector comparisons, FMA, pack/unpack, bit find
+- `9f1f0c6` — Update FIR submodule
+
 ## Open Issues
 1. **FIR SPIR-V Bloat — FIXED**: FIR generates 10.9MB raw SPIR-V (542k IDs) for the lighting fragment shader. **Phase 0 (spirv-opt) reduces this to ~22KB** (with clouds) / ~18KB (without). Driver pipeline creation now succeeds. M10.4 clouds unblocked.
    - **Phase 0 DONE**: `spirv-opt -O` integrated into FIR `compileTo` via `Optimize` flag
