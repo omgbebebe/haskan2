@@ -53,6 +53,7 @@ import Graphics.Haskan.Debug.Server (CommandQueue, DebugServerHandle, startDebug
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
+import Graphics.Haskan.Engine.Capabilities.Graphics (MonadGraphics (..))
 import Graphics.Haskan.Engine.Capabilities.Clock (MonadClock (..))
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logDebug, logInfo)
 import Graphics.Haskan.Engine.Capabilities.StateReader (MonadStateReader (..), consumeTVar, readTVarIO)
@@ -187,15 +188,32 @@ instance (MonadIO m) => MonadStateReader (ReaderT RenderEnv m) where
   consumeAllStagesFlag = asks reTvPendingAllStages >>= consumeTVar
   consumeSwapchainScreenshotFlag = asks reTvPendingSwapchainScreenshot >>= consumeTVar
 
+instance (MonadIO m) => MonadGraphics (ReaderT RenderEnv m) where
+  uploadStorageBuffer mem offset dat = do
+    device <- asks (device . reContext)
+    liftIO $ Buffer.updateStorageBuffer device mem offset dat
+  uploadUniformBuffer mem offset dat = do
+    device <- asks (device . reContext)
+    liftIO $ Buffer.updateUniformBufferRegion device mem offset dat
+  deviceWaitIdle = do
+    device <- asks (device . reContext)
+    liftIO $ Vulkan.vkDeviceWaitIdle device >>= throwVkResult
+  drawFrameGraphics sem idx action = do
+    ctx <- asks reContext
+    liftIO $ Render.runRenderM ctx $ Render.drawFrame sem idx action
+  presentFrameGraphics idx sem = do
+    ctx <- asks reContext
+    liftIO $ Render.runRenderM ctx $ Render.presentFrame idx sem
+
 renderFrameLoop ::
-  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m) =>
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
   RenderEnv ->
   Int ->
   m Bool
 renderFrameLoop env frameNumber = runReaderT (renderFrameLoop' frameNumber) env
 
 renderFrameLoop' ::
-  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m) =>
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
   Int ->
   RenderLoopM m Bool
 renderFrameLoop' frameNumber = do
@@ -341,14 +359,14 @@ renderFrameLoop' frameNumber = do
                 ccLodDistance2 = 400.0,
                 ccPad3 = 0
               }
-      liftIO $ Buffer.updateStorageBuffer device ccrEntityMemory 0 entityData
-      liftIO $ Buffer.updateUniformBuffer device ccrCullDataMemory [cullData]
+      uploadStorageBuffer ccrEntityMemory 0 entityData
+      uploadUniformBuffer ccrCullDataMemory 0 [cullData]
       logDebug LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
 
       -- Upload lights to SSBO
       lights' <- readLights
       let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
-      liftIO $ Buffer.updateStorageBuffer device lightSsboMemory 0 lightsToUpload
+      uploadStorageBuffer lightSsboMemory 0 lightsToUpload
       let lightCount = fromIntegral (length lights') :: Word32
       logDebug LogRender $ "lights uploaded: " <> showT (length lights')
       case drawList of
@@ -359,7 +377,7 @@ renderFrameLoop' frameNumber = do
               view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
               projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
               skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
-          liftIO $ Buffer.updateUniformBufferRegion device mvpMemory 0 [view, projection]
+          uploadUniformBuffer mvpMemory 0 [view, projection]
 
           let recordAction imageIdx frameIdx = do
                 let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIdx
@@ -479,10 +497,10 @@ renderFrameLoop' frameNumber = do
                             passCtx = if rpName pass == "gbuffer" then gBufferPassCtx else lightingPassCtx
                         liftIO $ recordFn passCtx
 
-          res <- liftIO $ runRenderM ctx $ drawFrame imageAvailableSemaphore frameNumber recordAction
+          res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
           case res of
             Render.FrameOk imageIndex -> do
-              presentResult <- liftIO $ runRenderM ctx $ presentFrame imageIndex (renderFinishedSemaphores !! fromIntegral imageIndex)
+              presentResult <- presentFrameGraphics imageIndex (renderFinishedSemaphores !! fromIntegral imageIndex)
               case presentResult of
                 Vulkan.VK_SUCCESS -> do
                   shouldInspect <- consumeInspectFlag
@@ -498,15 +516,16 @@ renderFrameLoop' frameNumber = do
                   shouldScreenshot <- consumeScreenshotFlag
                   shouldAllStages <- consumeAllStagesFlag
                   shouldSwapchain <- consumeSwapchainScreenshotFlag
-                  liftIO $ do
-                    when shouldScreenshot $ do
-                      Vulkan.vkDeviceWaitIdle device >>= throwVkResult
+                  when shouldScreenshot $ do
+                    deviceWaitIdle
+                    liftIO $ do
                       let gbufferImages = drGBufferImages !! fromIntegral imageIndex
                       logInfo LogGeneral "capturing screenshot..."
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
                       logInfo LogGeneral "screenshot saved"
-                    when shouldAllStages $ do
-                      Vulkan.vkDeviceWaitIdle device >>= throwVkResult
+                  when shouldAllStages $ do
+                    deviceWaitIdle
+                    liftIO $ do
                       let gbufferImages = drGBufferImages !! fromIntegral imageIndex
                       logInfo LogGeneral "capturing all pipeline stages..."
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (head gbufferImages) rcSurfaceExtent Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT "position"
@@ -514,8 +533,9 @@ renderFrameLoop' frameNumber = do
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 3) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "emissive"
                       logInfo LogGeneral "all stages saved"
-                    when shouldSwapchain $ do
-                      Vulkan.vkDeviceWaitIdle device >>= throwVkResult
+                  when shouldSwapchain $ do
+                    deviceWaitIdle
+                    liftIO $ do
                       logInfo LogGeneral "capturing swapchain screenshot..."
                       let swapchainImage = swapchainImages !! fromIntegral imageIndex
                       Screenshot.saveSwapchainScreenshot device physicalDevice rcGraphicsCommandPool graphicsQueueHandler swapchainImage rcSurfaceExtent
@@ -539,10 +559,11 @@ renderFrameLoop' frameNumber = do
 
   frameEndTime <- getMonotonicTime
   if needRestart
-    then liftIO $ do
-      logInfo LogGeneral "waiting IDLE state for device"
-      Vulkan.vkDeviceWaitIdle device >>= throwVkResult
-      logInfo LogGeneral "terminating renderFrameLoop"
+    then do
+      deviceWaitIdle
+      liftIO $ do
+        logInfo LogGeneral "waiting IDLE state for device"
+        logInfo LogGeneral "terminating renderFrameLoop"
       pure terminating
     else do
       let renderTime = frameEndTime - frameStartTime
@@ -554,7 +575,7 @@ renderFrameLoop' frameNumber = do
       renderFrameLoop' ((frameNumber + 1) `mod` Render.maxFramesInFlight)
 
 renderLoop ::
-  (MonadFail m, MonadManaged m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m) =>
+  (MonadFail m, MonadManaged m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
   [String] ->
