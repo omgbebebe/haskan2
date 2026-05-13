@@ -446,3 +446,93 @@ withLightingRenderPass commandBuffer renderPass framebuffer extent action =
   let colorClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.0 &* setAt @"float32" @2 1.0 &* setAt @"float32" @3 1.0)
       clearValues = [Vulkan.createVk (set @"color" colorClear)]
    in withRenderPass commandBuffer renderPass framebuffer extent clearValues action
+
+-- ---------------------------------------------------------------------------
+-- Cloud render pass: single RGBA16F color attachment (intermediate texture)
+-- ---------------------------------------------------------------------------
+
+managedCloudRenderPass ::
+  (MonadManaged m) =>
+  Vulkan.VkDevice ->
+  m Vulkan.VkRenderPass
+managedCloudRenderPass dev =
+  alloc
+    "CloudRenderPass"
+    (createCloudRenderPass dev)
+    (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
+
+createCloudRenderPass ::
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  m Vulkan.VkRenderPass
+createCloudRenderPass dev =
+  let cloudFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
+      colorAttachment =
+        Vulkan.createVk
+          ( set @"format" cloudFormat
+              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_CLEAR
+              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
+              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
+              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          )
+      colorAttachmentRef =
+        Vulkan.createVk
+          ( set @"attachment" 0
+              &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+          )
+      subpass =
+        Vulkan.createVk
+          ( set @"pipelineBindPoint" Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+              &* set @"colorAttachmentCount" 1
+              &* setListRef @"pColorAttachments" [colorAttachmentRef]
+              &* set @"inputAttachmentCount" 0
+              &* setListRef @"pInputAttachments" []
+              &* set @"preserveAttachmentCount" 0
+              &* setListRef @"pPreserveAttachments" []
+          )
+      dependency =
+        Vulkan.createVk
+          ( set @"srcSubpass" Vulkan.VK_SUBPASS_EXTERNAL
+              &* set @"dstSubpass" 0
+              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+              &* set @"srcAccessMask" Vulkan.VK_ZERO_FLAGS
+              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+              &* set @"dstAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          )
+      dependencyToExternal =
+        Vulkan.createVk
+          ( set @"srcSubpass" 0
+              &* set @"dstSubpass" Vulkan.VK_SUBPASS_EXTERNAL
+              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+              &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+              &* set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
+          )
+      renderPassCI =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"attachmentCount" 1
+              &* setListRef @"pAttachments" [colorAttachment]
+              &* set @"subpassCount" 1
+              &* setListRef @"pSubpasses" [subpass]
+              &* set @"dependencyCount" 2
+              &* setListRef @"pDependencies" [dependency, dependencyToExternal]
+          )
+   in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
+
+withCloudRenderPass ::
+  (MonadIO m) =>
+  Vulkan.VkCommandBuffer ->
+  Vulkan.VkRenderPass ->
+  Vulkan.VkFramebuffer ->
+  Vulkan.VkExtent2D ->
+  m a ->
+  m a
+withCloudRenderPass commandBuffer renderPass framebuffer extent action =
+  let colorClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.0 &* setAt @"float32" @2 0.0 &* setAt @"float32" @3 0.0)
+      clearValues = [Vulkan.createVk (set @"color" colorClear)]
+   in withRenderPass commandBuffer renderPass framebuffer extent clearValues action

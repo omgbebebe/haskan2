@@ -45,6 +45,13 @@ data DeferredResources = DeferredResources
     drLightingPipelineLayout :: !Vulkan.VkPipelineLayout,
     drLightingFramebuffers :: ![Vulkan.VkFramebuffer],
     drLightingDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    drCloudRenderPass :: !Vulkan.VkRenderPass,
+    drCloudPipeline :: !Vulkan.VkPipeline,
+    drCloudPipelineLayout :: !Vulkan.VkPipelineLayout,
+    drCloudFramebuffers :: ![Vulkan.VkFramebuffer],
+    drCloudDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    drCloudImages :: ![Vulkan.VkImage],
+    drCloudImageViews :: ![Vulkan.VkImageView],
     drGBufferImages :: ![[Vulkan.VkImage]],
     drGBufferImageViews :: ![[Vulkan.VkImageView]],
     drSampler :: !Vulkan.VkSampler,
@@ -66,27 +73,24 @@ createDeferredResources ::
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
-  -- | env cubemap view
+  Vulkan.VkShaderModule ->
+  Vulkan.VkShaderModule ->
   Maybe Vulkan.VkImageView ->
-  -- | irradiance cubemap view
   Maybe Vulkan.VkImageView ->
-  -- | brdf lut view
   Maybe Vulkan.VkImageView ->
-  -- | lighting sampler
   Vulkan.VkSampler ->
-  -- | 3D cloud noise texture view
   Maybe Vulkan.VkImageView ->
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView = do
   let extent = rcSurfaceExtent ctx
-      gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT -- position needs negative values
-      gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM -- normal, albedo, emissive
+      gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
+      gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
       depthFormat = Vulkan.VK_FORMAT_D32_SFLOAT
       numSwapchainImages = length (rcFramebuffers ctx)
 
   logInfoIO LogRender $ "creating deferred resources for " <> showT numSwapchainImages <> " swapchain images"
 
-  -- G-buffer render pass (position=SFLOAT, others=UNORM)
+  -- G-buffer render pass
   gBufferRenderPass <- RenderPass.managedGBufferRenderPassEx device gbufPosFormat gbufColorFormat depthFormat
   logDebugIO LogRender "g-buffer render pass created"
 
@@ -95,7 +99,11 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   lightingRenderPass <- RenderPass.managedLightingRenderPass device surfaceFormat
   logDebugIO LogRender "lighting render pass created"
 
-  -- Create g-buffer images and views (4 per swapchain image: position=SFLOAT, normal=UNORM, albedo=UNORM, emissive=UNORM)
+  -- Cloud render pass (RGBA16F intermediate texture)
+  cloudRenderPass <- RenderPass.managedCloudRenderPass device
+  logDebugIO LogRender "cloud render pass created"
+
+  -- Create g-buffer images and views
   gBufferImagesAndViews <- for [0 .. numSwapchainImages - 1] $ \_ -> do
     posImage <- Swapchain.managedGBufferImage pdev device extent gbufPosFormat
     normImage <- Swapchain.managedGBufferImage pdev device extent gbufColorFormat
@@ -111,8 +119,17 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       gBufferImageViews = map snd gBufferImagesAndViews
   logDebugIO LogRender $ "g-buffer images created: " <> showT (length gBufferImages) <> " sets"
 
-  -- Initial layout transition: UNDEFINED → SHADER_READ_ONLY_OPTIMAL
-  -- so that initialLayout in g-buffer render pass matches actual layout.
+  -- Create cloud images and views (RGBA16F, one per swapchain image)
+  let cloudFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
+  cloudImagesAndViews <- for [0 .. numSwapchainImages - 1] $ \_ -> do
+    cloudImage <- Swapchain.managedGBufferImage pdev device extent cloudFormat
+    cloudView <- ImageView.managedImageView device cloudFormat cloudImage
+    pure (cloudImage, cloudView)
+  let cloudImages = map fst cloudImagesAndViews
+      cloudImageViews = map snd cloudImagesAndViews
+  logDebugIO LogRender $ "cloud images created: " <> showT (length cloudImages) <> " sets"
+
+  -- Initial layout transition for g-buffer images
   tempCmdBuf <- CommandBuffer.createCommandBuffer device (rcGraphicsCommandPool ctx)
   CommandBuffer.withCommandBufferOneTime
     (graphicsQueueHandler ctx)
@@ -133,7 +150,12 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
     Framebuffer.managedGBufferFramebuffer device gBufferRenderPass extent views depthView
   logDebugIO LogRender $ "g-buffer framebuffers created: " <> showT (length gBufferFramebuffers)
 
-  -- G-buffer pipeline layout (reuse existing descriptor set layout, with push constants)
+  -- Cloud framebuffers (one per swapchain image)
+  cloudFramebuffers <- for cloudImageViews $ \view ->
+    Framebuffer.managedLightingFramebuffer device cloudRenderPass extent view
+  logDebugIO LogRender $ "cloud framebuffers created: " <> showT (length cloudFramebuffers)
+
+  -- G-buffer pipeline layout
   gBufferPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [descriptorSetLayout] pushConstantRanges
   logDebugIO LogRender "g-buffer pipeline layout created"
 
@@ -155,18 +177,18 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       4
   logDebugIO LogRender "g-buffer pipeline created"
 
-  -- Lighting pipeline layout (6 texture bindings + camera push constant)
+  -- Lighting pipeline layout
   lightingDescriptorSetLayout <- DescriptorSetLayout.managedLightingDescriptorSetLayout device
   let cameraPushConstantRange =
         Vulkan.createVk
           ( set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
               &* set @"offset" 0
-              &* set @"size" 112
+              &* set @"size" 116
           )
   lightingPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [lightingDescriptorSetLayout] [cameraPushConstantRange]
   logDebugIO LogRender "lighting pipeline layout created"
 
-  -- Lighting pipeline (fullscreen triangle, no vertex input)
+  -- Lighting pipeline
   lightingPipeline <-
     GraphicsPipeline.managedFullscreenPipeline
       device
@@ -182,7 +204,34 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       extent
   logDebugIO LogRender "lighting pipeline created"
 
-  -- Wireframe pipeline (vertex + geometry + fragment)
+  -- Cloud pipeline layout
+  cloudDescriptorSetLayout <- DescriptorSetLayout.managedCloudDescriptorSetLayout device
+  let cloudPushConstantRange =
+        Vulkan.createVk
+          ( set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
+              &* set @"offset" 0
+              &* set @"size" 116
+          )
+  cloudPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [cloudDescriptorSetLayout] [cloudPushConstantRange]
+  logDebugIO LogRender "cloud pipeline layout created"
+
+  -- Cloud pipeline
+  cloudPipeline <-
+    GraphicsPipeline.managedFullscreenPipeline
+      device
+      cloudPipelineLayout
+      cloudRenderPass
+      ShaderProgram
+        { spVertex = cloudVertShader,
+          spTessControl = Nothing,
+          spTessEvaluation = Nothing,
+          spGeometry = Nothing,
+          spFragment = cloudFragShader
+        }
+      extent
+  logDebugIO LogRender "cloud pipeline created"
+
+  -- Wireframe pipeline
   wireframePipeline <-
     GraphicsPipeline.managedGraphicsPipeline
       device
@@ -200,7 +249,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       4
   logDebugIO LogRender "wireframe pipeline created"
 
-  -- Lighting framebuffers (one per swapchain image, using swapchain image views)
+  -- Lighting framebuffers
   swapchainImages <- Swapchain.getSwapchainImages device (swapchain ctx)
   let surfaceFormat' = Vulkan.getField @"format" surfaceFormat
   swapchainImageViews <- for swapchainImages (ImageView.managedImageView device surfaceFormat')
@@ -213,13 +262,25 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
     DescriptorSet.allocateDescriptorSet device lightingDescriptorPool [lightingDescriptorSetLayout]
   logDebugIO LogRender $ "lighting descriptor sets allocated: " <> showT (length lightingDescriptorSets)
 
-  -- Update lighting descriptor sets with g-buffer views + cubemaps + brdf lut
+  -- Update lighting descriptor sets
   liftIO $ for_ (zip lightingDescriptorSets gBufferImageViews) $ \(ds, views) -> do
     let allViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
           (Just env, Just irr, Just brdf) -> views ++ [env, irr, brdf]
           _ -> views ++ replicate 3 Vulkan.VK_NULL_HANDLE
-    DescriptorSet.updateLightingDescriptorSets device ds sampler allViews Nothing mCloudNoiseView
+        cloudResultView = if null cloudImageViews then Nothing else Just (cloudImageViews !! 0)
+    DescriptorSet.updateLightingDescriptorSets device ds sampler allViews Nothing cloudResultView
   logDebugIO LogRender "lighting descriptor sets updated"
+
+  -- Cloud descriptor pool and sets
+  cloudDescriptorPool <- DescriptorPool.managedCloudDescriptorPool device numSwapchainImages
+  cloudDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
+    DescriptorSet.allocateDescriptorSet device cloudDescriptorPool [cloudDescriptorSetLayout]
+  logDebugIO LogRender $ "cloud descriptor sets allocated: " <> showT (length cloudDescriptorSets)
+
+  -- Update cloud descriptor sets
+  liftIO $ for_ cloudDescriptorSets $ \ds ->
+    DescriptorSet.updateCloudDescriptorSets device ds sampler mEnvMapView mCloudNoiseView
+  logDebugIO LogRender "cloud descriptor sets updated"
 
   pure
     DeferredResources
@@ -232,6 +293,13 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         drLightingPipelineLayout = lightingPipelineLayout,
         drLightingFramebuffers = lightingFramebuffers,
         drLightingDescriptorSets = lightingDescriptorSets,
+        drCloudRenderPass = cloudRenderPass,
+        drCloudPipeline = cloudPipeline,
+        drCloudPipelineLayout = cloudPipelineLayout,
+        drCloudFramebuffers = cloudFramebuffers,
+        drCloudDescriptorSets = cloudDescriptorSets,
+        drCloudImages = cloudImages,
+        drCloudImageViews = cloudImageViews,
         drGBufferImages = gBufferImages,
         drGBufferImageViews = gBufferImageViews,
         drSampler = sampler,

@@ -108,6 +108,8 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
       frameDescriptorSet = rcFrameDescriptorSets !! frameIdx
       lightingDescriptorSet = drLightingDescriptorSets rcDeferred !! fromIntegral imageIdx
       gBufferImagesForFrame = drGBufferImages rcDeferred !! fromIntegral imageIdx
+      cloudFramebuffer = drCloudFramebuffers rcDeferred !! fromIntegral imageIdx
+      cloudDescriptorSet = drCloudDescriptorSets rcDeferred !! fromIntegral imageIdx
       gBufferPassCtx =
         PassContext
           { pcCommandBuffer = commandBuffer,
@@ -116,6 +118,16 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
             pcDescriptorSet = Vulkan.vkNullPtr,
             pcFramebuffer = gBufferFramebuffer,
             pcRenderPass = drGBufferRenderPass rcDeferred,
+            pcExtent = rcPassSurfaceExtent
+          }
+      cloudPassCtx =
+        PassContext
+          { pcCommandBuffer = commandBuffer,
+            pcPipeline = drCloudPipeline rcDeferred,
+            pcPipelineLayout = drCloudPipelineLayout rcDeferred,
+            pcDescriptorSet = cloudDescriptorSet,
+            pcFramebuffer = cloudFramebuffer,
+            pcRenderPass = drCloudRenderPass rcDeferred,
             pcExtent = rcPassSurfaceExtent
           }
       lightingPassCtx =
@@ -162,6 +174,11 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdSunDir = rcSunDir,
                 dpdCloudHeight = rcCloudHeight,
                 dpdTime = rcTime,
+                dpdCloudRenderPass = drCloudRenderPass rcDeferred,
+                dpdCloudFramebuffer = cloudFramebuffer,
+                dpdCloudPipeline = drCloudPipeline rcDeferred,
+                dpdCloudLayout = drCloudPipelineLayout rcDeferred,
+                dpdCloudDescriptor = cloudDescriptorSet,
                 dpdGBufferImages = gBufferImagesForFrame,
                 dpdWireframePipeline = drWireframePipeline rcDeferred,
                 dpdWireframeLayout = drWireframePipelineLayout rcDeferred,
@@ -199,5 +216,8 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
         for_ passes $ \cp -> do
           let pass = Graph.cpPass cp
               recordFn = unPassRecordFunc (Graph.rpRecord pass)
-              passCtx = if Graph.rpName pass == "gbuffer" then gBufferPassCtx else lightingPassCtx
+              passCtx = case Graph.rpName pass of
+                "gbuffer" -> gBufferPassCtx
+                "clouds" -> cloudPassCtx
+                _ -> lightingPassCtx
           liftIO $ recordFn passCtx

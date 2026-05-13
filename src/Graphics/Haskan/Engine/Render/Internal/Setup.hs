@@ -71,6 +71,7 @@ import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
+import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds qualified as CloudShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
@@ -116,6 +117,10 @@ compileAllShaders = do
   logInfo LogGeneral "  wire_frag.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/cull_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CullShaders.program
   logInfo LogGeneral "  cull_comp.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/cloud_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudShaders.cloudVertex
+  logInfo LogGeneral "  cloud_vert.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/cloud_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudShaders.cloudFragment
+  logInfo LogGeneral "  cloud_frag.spv done"
 
 -- | Create all shader modules from compiled SPIR-V
 createShaderModules ::
@@ -123,6 +128,8 @@ createShaderModules ::
   Vulkan.VkDevice ->
   m
     ( Vulkan.VkShaderModule,
+      Vulkan.VkShaderModule,
+      Vulkan.VkShaderModule,
       Vulkan.VkShaderModule,
       Vulkan.VkShaderModule,
       Vulkan.VkShaderModule,
@@ -144,7 +151,9 @@ createShaderModules device = do
   wireGeomShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_geom.spv"
   wireFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_frag.spv"
   cullShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cull_comp.spv"
-  pure (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader)
+  cloudVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_vert.spv"
+  cloudFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_frag.spv"
+  pure (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader)
 
 data IBLTextures = IBLTextures
   { iblRadianceCubemap :: !TextureHandle,

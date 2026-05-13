@@ -89,8 +89,9 @@ library
                         Graphics.Haskan.Vulkan.Shaders.Compute.Test
                        Graphics.Haskan.Vulkan.Shaders.Compute.Cull
                        Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer
-                       Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting
-                       Graphics.Haskan.Vulkan.Shaders.Wireframe
+                        Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting
+                        Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds
+                        Graphics.Haskan.Vulkan.Shaders.Wireframe
                        Graphics.Haskan.Vulkan.Semaphore
                        Graphics.Haskan.Vulkan.Swapchain
                        Graphics.Haskan.Vulkan.Texture

@@ -345,7 +345,7 @@ handleFrameResult env@RenderEnv {reContext = ctx, ..} frameNumber camera drawLis
     logInfo LogGeneral "resizing swapchain"
     pure (True, False)
   Render.FrameTimeout -> do
-    delayMicros 16000
+    delayMicros 100000
     pure (False, False)
   Render.FrameFailed err ->
     fail err
@@ -414,16 +414,13 @@ renderFrameLoop ::
   m Bool
 renderFrameLoop env frameNumber = runReaderT (renderFrameLoop' frameNumber) env
 
-renderFrameLoop' ::
-  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
-  Int ->
-  RenderLoopM m Bool
+renderFrameLoop' :: (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) => Int -> RenderLoopM m Bool
 renderFrameLoop' frameNumber = do
   env@RenderEnv {reWindow = window, reTargetFPS = targetFPS} <- ask
   windowVisible <- liftIO $ isWindowVisible window
   if not windowVisible
     then do
-      delayMicros 16000
+      delayMicros 100000
       renderFrameLoop' frameNumber
     else do
       frameStartTime <- getMonotonicTime
@@ -462,7 +459,7 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
 
   compileAllShaders
 
-  (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader) <-
+  (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader) <-
     createShaderModules device
 
   descriptorSetLayout <- DescriptorSetLayout.managedDescriptorSetLayout device
@@ -731,7 +728,7 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
       outerLoop exit = do
         unless exit $ do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-              with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView) $ \dr -> do
+              with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView) $ \dr -> do
                 -- Update lighting descriptor sets with light SSBO
                 for_ (drLightingDescriptorSets dr) $ \ds ->
                   DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer

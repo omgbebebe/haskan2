@@ -147,10 +147,10 @@ updateLightingDescriptorSets ::
   [Vulkan.VkImageView] ->
   -- | light SSBO (optional)
   Maybe Vulkan.VkBuffer ->
-  -- | 3D cloud noise texture (optional)
+  -- | cloud result texture (optional)
   Maybe Vulkan.VkImageView ->
   m ()
-updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer mCloudNoiseView = do
+updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer mCloudResultView = do
   let mkTextureInfo imageView =
         Vulkan.createVk
           ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -193,11 +193,11 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer m
                       &* set @"dstArrayElement" 0
                   )
               ]
-      cloudNoiseWrite = case mCloudNoiseView of
+      cloudResultWrite = case mCloudResultView of
         Nothing -> []
-        Just cloudNoiseView ->
-          [mkWrite 8 cloudNoiseView]
-      allWrites = writes ++ lightWrite ++ cloudNoiseWrite
+        Just cloudResultView ->
+          [mkWrite 8 cloudResultView]
+      allWrites = writes ++ lightWrite ++ cloudResultWrite
   liftIO $
     Foreign.Marshal.Array.withArray allWrites $ \writeUpdatePtr ->
       Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writeUpdatePtr 0 Vulkan.vkNullPtr
@@ -475,3 +475,43 @@ updateComputeDescriptorSets dev descriptorSet entitiesBuffer drawCommandsBuffer 
   liftIO $
     Foreign.Marshal.Array.withArray [writeEntities, writeDrawCommands, writeCullData] $ \writePtr ->
       Vulkan.vkUpdateDescriptorSets dev 3 writePtr 0 Vulkan.vkNullPtr
+
+-- | Update cloud descriptor set: env cubemap + 3D noise texture
+updateCloudDescriptorSets ::
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkSampler ->
+  Maybe Vulkan.VkImageView ->
+  Maybe Vulkan.VkImageView ->
+  m ()
+updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView = do
+  let mkTextureInfo imageView =
+        Vulkan.createVk
+          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+              &* set @"imageView" imageView
+              &* set @"sampler" sampler
+          )
+      mkWrite bindingIdx imageView =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" bindingIdx
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"pBufferInfo" Vulkan.VK_NULL
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* setVkRef @"pImageInfo" (mkTextureInfo imageView)
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+      envWrite = case mEnvMapView of
+        Just envView -> [mkWrite 0 envView]
+        Nothing -> []
+      noiseWrite = case mCloudNoiseView of
+        Just noiseView -> [mkWrite 1 noiseView]
+        Nothing -> []
+      allWrites = envWrite ++ noiseWrite
+  liftIO $
+    Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
+      Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr

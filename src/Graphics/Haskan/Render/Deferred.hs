@@ -67,6 +67,12 @@ data DeferredPassData = DeferredPassData
     dpdSunDir :: !(V3 Float),
     dpdCloudHeight :: !Float,
     dpdTime :: !Float,
+    -- Cloud pass
+    dpdCloudRenderPass :: !Vulkan.VkRenderPass,
+    dpdCloudFramebuffer :: !Vulkan.VkFramebuffer,
+    dpdCloudPipeline :: !Vulkan.VkPipeline,
+    dpdCloudLayout :: !Vulkan.VkPipelineLayout,
+    dpdCloudDescriptor :: !Vulkan.VkDescriptorSet,
     -- G-buffer images for barrier
     dpdGBufferImages :: ![Vulkan.VkImage],
     -- Wireframe overlay
@@ -138,6 +144,67 @@ buildDeferredGraph DeferredPassData {..} = do
               -- Single indirect draw for wireframe too
               when (dpdEntityCount > 0) $
                 CommandBuffer.cmdDrawIndexedIndirect commandBuffer dpdDrawCommandsBuffer dpdEntityCount 20
+      }
+
+  -- Cloud pass: fullscreen triangle ray marching
+  addPass
+    RenderPassNode
+      { rpName = "clouds",
+        rpInputs = [],
+        rpOutputs = [],
+        rpRecord = PassRecordFunc $ \ctx -> do
+          let commandBuffer = pcCommandBuffer ctx
+          RenderPass.withCloudRenderPass commandBuffer dpdCloudRenderPass dpdCloudFramebuffer dpdExtent $ do
+            GraphicsPipeline.cmdBindPipeline commandBuffer dpdCloudPipeline
+            Foreign.Marshal.Array.withArray [dpdCloudDescriptor] $ \dsPtr ->
+              DescriptorSet.cmdBindDescriptorSets
+                commandBuffer
+                Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+                dpdCloudLayout
+                0
+                1
+                dsPtr
+                0
+                Vulkan.vkNullPtr
+            -- Same push constants as lighting (shared layout size)
+            let (V3 camX camY camZ) = dpdCameraPos
+                (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = dpdSkyboxRays
+                (V3 tintR tintG tintB) = dpdSkyTint
+                (V3 sunDirX sunDirY sunDirZ) = dpdSunDir
+                camPosData =
+                  [ realToFrac camX,
+                    realToFrac camY,
+                    realToFrac camZ,
+                    realToFrac dpdDebugMode,
+                    realToFrac dpdAxisOverlay,
+                    realToFrac dpdGroundPlane,
+                    realToFrac dpdSunAzimuth,
+                    realToFrac dpdLightCount,
+                    realToFrac r0x,
+                    realToFrac r0y,
+                    realToFrac r0z,
+                    0,
+                    realToFrac r1x,
+                    realToFrac r1y,
+                    realToFrac r1z,
+                    0,
+                    realToFrac r2x,
+                    realToFrac r2y,
+                    realToFrac r2z,
+                    realToFrac tintR,
+                    realToFrac tintG,
+                    realToFrac tintB,
+                    realToFrac dpdIBLIntensity,
+                    0,
+                    realToFrac sunDirX,
+                    realToFrac sunDirY,
+                    realToFrac sunDirZ,
+                    realToFrac dpdCloudHeight,
+                    realToFrac dpdTime
+                  ] ::
+                    [CFloat]
+             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdCloudLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 116 . Foreign.castPtr
+            Vulkan.vkCmdDraw commandBuffer 3 1 0 0
       }
 
   -- Lighting pass: fullscreen triangle compositing
