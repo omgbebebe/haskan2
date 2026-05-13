@@ -55,6 +55,7 @@ import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources 
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Engine.Capabilities.Clock (MonadClock (..))
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logDebug, logInfo)
+import Graphics.Haskan.Engine.Capabilities.Telemetry (MonadTelemetry (..))
 import Graphics.Haskan.Logger (LogCategory (..), showT)
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
@@ -154,15 +155,29 @@ data RenderEnv = RenderEnv
     reTvCloudHeight :: !(STM.TVar Float)
   }
 
+instance (MonadIO m) => MonadTelemetry (ReaderT RenderEnv m) where
+  recordFrameTime rt = do
+    ref <- asks reFrameStatsRef
+    liftIO $ do
+      stats <- readIORef ref
+      let (newStats, _) = updateFrameStats stats rt
+      writeIORef ref newStats
+  getTelemetryMessage = do
+    ref <- asks reFrameStatsRef
+    liftIO $ do
+      stats <- readIORef ref
+      let (_, mMsg) = updateFrameStats stats 0
+      pure mMsg
+
 renderFrameLoop ::
-  (MonadFail m, MonadIO m, MonadLog m, MonadClock m) =>
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m) =>
   RenderEnv ->
   Int ->
   m Bool
 renderFrameLoop env frameNumber = runReaderT (renderFrameLoop' frameNumber) env
 
 renderFrameLoop' ::
-  (MonadFail m, MonadIO m, MonadLog m, MonadClock m) =>
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m) =>
   Int ->
   RenderLoopM m Bool
 renderFrameLoop' frameNumber = do
@@ -526,16 +541,14 @@ renderFrameLoop' frameNumber = do
     else do
       let renderTime = frameEndTime - frameStartTime
           delay = ((1000000000 `div` targetFPS) - renderTime) `div` 1000
-      liftIO $ do
-        stats <- readIORef frameStatsRef
-        let (newStats, mMsg) = updateFrameStats stats renderTime
-        writeIORef frameStatsRef newStats
-        for_ mMsg $ logInfo LogRender
+      recordFrameTime renderTime
+      mMsg <- getTelemetryMessage
+      for_ mMsg $ logInfo LogRender
       delayMicros (fromIntegral delay)
       renderFrameLoop' ((frameNumber + 1) `mod` Render.maxFramesInFlight)
 
 renderLoop ::
-  (MonadFail m, MonadManaged m, MonadIO m, MonadLog m, MonadClock m) =>
+  (MonadFail m, MonadManaged m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
   [String] ->
