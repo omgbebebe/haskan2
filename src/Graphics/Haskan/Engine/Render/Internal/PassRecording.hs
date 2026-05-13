@@ -13,20 +13,17 @@ import Data.Text qualified as Text
 import Data.Word (Word32)
 import Foreign.Marshal.Array qualified
 import Foreign.Storable (Storable (..))
-import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.Engine.Types (ComputeCullResources (..), DrawIndexedIndirectCommand (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
 import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
-import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), RenderPassNode)
+import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
-import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Ext qualified as Vulkan
-import Linear (V3 (..), V4 (..))
+import Linear (V3 (..))
 
 -- | All values pre-computed before creating the IO callback
 data RecordContext = RecordContext

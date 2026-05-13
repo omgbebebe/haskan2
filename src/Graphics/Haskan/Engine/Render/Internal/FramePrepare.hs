@@ -5,6 +5,7 @@ module Graphics.Haskan.Engine.Render.Internal.FramePrepare
     computeSkyParams,
     computeEntityDebugInfos,
     buildRenderDebugInfo,
+    surfaceExtentWH,
   )
 where
 
@@ -28,10 +29,19 @@ import Graphics.Haskan.Engine.Types
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.Scene.Transform (tPosition)
 import Graphics.Haskan.Vulkan.Resources (MeshResource (..))
+import Graphics.Vulkan qualified as Vulkan
+import Graphics.Vulkan qualified as Vulkan
+import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Linear (M44, V2 (..), V3 (..), V4 (..))
 import Linear.Matrix (inv33, transpose, (!*), (!*!))
 import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
+
+surfaceExtentWH :: Vulkan.VkExtent2D -> (Float, Float)
+surfaceExtentWH extent =
+  ( realToFrac $ Vulkan.getField @"width" extent :: Float,
+    realToFrac $ Vulkan.getField @"height" extent :: Float
+  )
 
 buildComputeEntityData :: DrawCall -> ComputeEntityData
 buildComputeEntityData dc =

@@ -27,9 +27,6 @@ import Data.Int (Int32)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
 import Data.List (nub, sort)
-import Data.Maybe (catMaybes)
-import Data.Sequence (Seq (..))
-import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Vector.Storable qualified as Vector
@@ -56,6 +53,11 @@ import Graphics.Haskan.Engine.Render.Internal.FramePrepare
     buildRenderDebugInfo,
     computeEntityDebugInfos,
     computeSkyParams,
+    surfaceExtentWH,
+  )
+import Graphics.Haskan.Engine.Render.Internal.FrameState
+  ( FrameState (..),
+    readFrameState,
   )
 import Graphics.Haskan.Engine.Render.Internal.PassRecording
   ( RecordContext (..),
@@ -230,8 +232,7 @@ handleInspector frameNumber drawList ctx camera rcSurfaceExtent = do
   for_ mInsp $ \insp -> do
     startTime <- getMonotonicTime
     let snapshots = map drawCallToSnapshot drawList
-        w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
-        h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
+        (w, h) = surfaceExtentWH rcSurfaceExtent
     snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> makeProjectionMatrix w h) snapshots
     liftIO $ insp snap
 
@@ -313,8 +314,7 @@ runFrame frameNumber = do
   logDebug LogRender $ "draw list: " <> showT (length drawList) <> " entities"
   let camPos = realToFrac <$> Camera.cameraPosition camera
       camTarget = realToFrac <$> Camera.cameraTarget camera
-      w = realToFrac $ Vulkan.getField @"width" (rcSurfaceExtent reContext) :: Float
-      h = realToFrac $ Vulkan.getField @"height" (rcSurfaceExtent reContext) :: Float
+      (w, h) = surfaceExtentWH (rcSurfaceExtent reContext)
       projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> makeProjectionMatrix w h :: M44 Float
       viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
       entityDebugInfos = computeEntityDebugInfos drawList projMat viewMat
@@ -350,21 +350,14 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   let ctx = reContext
       dr = reDeferred
       ccr = reCullResources
-      w = realToFrac $ Vulkan.getField @"width" (rcSurfaceExtent ctx) :: Float
-      h = realToFrac $ Vulkan.getField @"height" (rcSurfaceExtent ctx) :: Float
+      (w, h) = surfaceExtentWH (rcSurfaceExtent ctx)
       view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
       projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
       skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
   uploadUniformBuffer mvpMemory 0 [view, projection]
 
-  wireframeEnabled' <- readWireframe
-  debugMode' <- readDebugMode
-  axisOverlay' <- readAxisOverlay
-  groundPlane' <- readGroundPlane
-  currentTime <- readTimeOfDay
-  dnEnabled <- readDayNightEnabled
-  cloudHeight' <- readCloudHeight
-  let (sunState, skyTint, iblInt, sunAzimuth, sunDir) = computeSkyParams dnEnabled currentTime
+  frameState <- readFrameState
+  let (sunState, skyTint, iblInt, sunAzimuth, sunDir) = computeSkyParams (fsDayNightEnabled frameState) (fsTimeOfDay frameState)
 
   let recordCtx =
         RecordContext
@@ -375,16 +368,16 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
             rcDrawList = drawList,
             rcCameraPos = realToFrac <$> Camera.cameraPosition camera,
             rcSkyboxRays = skyboxRays,
-            rcDebugMode = debugMode',
-            rcAxisOverlay = axisOverlay',
-            rcGroundPlane = groundPlane',
+            rcDebugMode = fsDebugMode frameState,
+            rcAxisOverlay = fsAxisOverlay frameState,
+            rcGroundPlane = fsGroundPlane frameState,
             rcLightCount = lightCount,
             rcSkyTint = skyTint,
             rcIBLIntensity = iblInt,
             rcSunAzimuth = sunAzimuth,
             rcSunDir = sunDir,
-            rcCloudHeight = cloudHeight',
-            rcWireframeEnabled = wireframeEnabled',
+            rcCloudHeight = fsCloudHeight frameState,
+            rcWireframeEnabled = fsWireframe frameState,
             rcDeferred = dr,
             rcCullResources = ccr,
             prcDevice = device ctx,
