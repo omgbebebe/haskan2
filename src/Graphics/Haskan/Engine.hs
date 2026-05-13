@@ -173,7 +173,7 @@ mainLoop meshName EngineConfig {..} = do
 
   renderLoopFinished <- liftIO newEmptyMVar
   renderLoopReady <- liftIO newEmptyMVar
-  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished renderLoopReady controlChannel meshName uvCheckMode envMapDir
+  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop window physicalDevice surface layers targetRenderFPS gameState renderLoopFinished renderLoopReady controlChannel meshName uvCheckMode envMapDir
 
   -- Wait for render loop to finish initialization before starting timeout
   logInfoIO LogGeneral "waiting for render loop initialization..."

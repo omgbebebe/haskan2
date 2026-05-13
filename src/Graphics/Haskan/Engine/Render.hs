@@ -130,6 +130,7 @@ import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Haskan.Window qualified as Window
+import Graphics.Haskan.Window (isWindowVisible)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
@@ -150,7 +151,8 @@ import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, runReaderT)
 type RenderLoopM m = ReaderT RenderEnv m
 
 data RenderEnv = RenderEnv
-  { reContext :: !RenderContext,
+  { reWindow :: !SDL.Window,
+    reContext :: !RenderContext,
     reDeferred :: !DeferredResources,
     reTargetFPS :: !Integer,
     reImageAvailableSemaphores :: ![Vulkan.VkSemaphore],
@@ -414,18 +416,25 @@ renderFrameLoop' ::
   Int ->
   RenderLoopM m Bool
 renderFrameLoop' frameNumber = do
-  env@RenderEnv {reTargetFPS = targetFPS} <- ask
-  frameStartTime <- getMonotonicTime
-  maybeControlMessage <- readControl
+  env@RenderEnv {reWindow = window, reTargetFPS = targetFPS} <- ask
+  windowVisible <- liftIO $ isWindowVisible window
+  if not windowVisible
+    then do
+      delayMicros 16000
+      renderFrameLoop' frameNumber
+    else do
+      frameStartTime <- getMonotonicTime
+      maybeControlMessage <- readControl
 
-  (needRestart, terminating) <- case maybeControlMessage of
-    Just Terminate -> terminateFrame
-    Nothing -> runFrame frameNumber
+      (needRestart, terminating) <- case maybeControlMessage of
+        Just Terminate -> terminateFrame
+        Nothing -> runFrame frameNumber
 
-  handleFrameTiming frameStartTime needRestart terminating targetFPS frameNumber
+      handleFrameTiming frameStartTime needRestart terminating targetFPS frameNumber
 
 renderLoop ::
   (MonadFail m, MonadManaged m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
+  SDL.Window ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
   [String] ->
@@ -438,7 +447,7 @@ renderLoop ::
   Maybe String ->
   String ->
   m ()
-renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir = do
+renderLoop window physicalDevice surface layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir = do
   control <- liftIO $ STM.atomically $ TChan.dupTChan controlChannel
 
   rm <- newResourceManager
@@ -725,7 +734,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
                   DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
                 let renderEnv =
                       RenderEnv
-                        { reContext = context,
+                        { reWindow = window,
+                          reContext = context,
                           reDeferred = dr,
                           reTargetFPS = targetFPS,
                           reImageAvailableSemaphores = imageAvailableSemaphores,

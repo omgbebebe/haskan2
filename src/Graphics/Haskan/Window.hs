@@ -62,7 +62,7 @@ createWindow title (width, height) = do
             SDL.windowGraphicsContext = SDL.VulkanContext,
             SDL.windowResizable = True,
             SDL.windowHighDPI = True,
-            SDL.windowVisible = False
+            SDL.windowVisible = True
           }
       )
 
