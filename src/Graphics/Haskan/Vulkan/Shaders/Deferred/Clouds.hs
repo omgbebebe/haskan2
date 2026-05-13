@@ -98,12 +98,8 @@ cloudFragment = shader do
   uv <- get @"in_uv"
   let (Vec2 uvX uvY) = uv
   rayDir <- get @"in_ray"
-  let (Vec3 rayDirX rayDirY rayDirZ) = rayDir
-
-  let rayLen = sqrt (rayDirX * rayDirX + rayDirY * rayDirY + rayDirZ * rayDirZ + 0.0001)
-      dirX = rayDirX / rayLen
-      dirY = rayDirY / rayLen
-      dirZ = rayDirZ / rayLen
+  let dir = rayDir ^/ (norm rayDir + 0.0001)
+      ~(Vec3 dirX dirY dirZ) = dir
 
   cameraPos <- get @"cameraPos"
   let sunAzimuth = view @(Name "sunAzimuth") cameraPos
@@ -129,73 +125,66 @@ cloudFragment = shader do
       ditherOffset = ditherHash * stepSize
 
       tEntry = (cloudBottom - camY) / max 0.01 dirY + ditherOffset
-      entryX = camX + dirX * tEntry
+      entryPos = Vec3 (camX + dirX * tEntry) cloudBottom (camZ + dirZ * tEntry)
       entryY = cloudBottom
-      entryZ = camZ + dirZ * tEntry
 
-      noiseScale = 0.001
+      noiseScale = 0.003
       windSpeed = 0.05
       windOffset = time * windSpeed
       warpFreq = 0.002
-      warpAmp = 500.0
+      warpAmp = 170.0
 
       -- Step positions (unrolled)
-      p0x = entryX + dirX * (stepSize * 0.5)
-      p0y = entryY + dirY * (stepSize * 0.5)
-      p0z = entryZ + dirZ * (stepSize * 0.5)
-      w0x = sin (p0y * warpFreq) * warpAmp
-      w0y = cos (p0x * warpFreq) * warpAmp
-      w0z = sin (p0z * warpFreq * 0.7) * warpAmp
+      p0 = entryPos ^+^ dir ^* (stepSize * 0.5)
+      ~(Vec3 p0x p0y p0z) = p0
+      w0x = sin (p0y * warpFreq + p0z * warpFreq * 0.7) * warpAmp
+      w0y = cos (p0x * warpFreq + p0z * warpFreq * 0.5) * warpAmp
+      w0z = sin (p0z * warpFreq * 0.7 + p0x * warpFreq * 0.6) * warpAmp
       s0x = fract ((p0x + w0x) * noiseScale - windOffset)
       s0y = fract ((p0y + w0y) * noiseScale)
       s0z = fract ((p0z + w0z) * noiseScale)
 
-      p1x = entryX + dirX * (stepSize * 1.5)
-      p1y = entryY + dirY * (stepSize * 1.5)
-      p1z = entryZ + dirZ * (stepSize * 1.5)
-      w1x = sin (p1y * warpFreq) * warpAmp
-      w1y = cos (p1x * warpFreq) * warpAmp
-      w1z = sin (p1z * warpFreq * 0.7) * warpAmp
+      p1 = entryPos ^+^ dir ^* (stepSize * 1.5)
+      ~(Vec3 p1x p1y p1z) = p1
+      w1x = sin (p1y * warpFreq + p1z * warpFreq * 0.7) * warpAmp
+      w1y = cos (p1x * warpFreq + p1z * warpFreq * 0.5) * warpAmp
+      w1z = sin (p1z * warpFreq * 0.7 + p1x * warpFreq * 0.6) * warpAmp
       s1x = fract ((p1x + w1x) * noiseScale - windOffset)
       s1y = fract ((p1y + w1y) * noiseScale)
       s1z = fract ((p1z + w1z) * noiseScale)
 
-      p2x = entryX + dirX * (stepSize * 2.5)
-      p2y = entryY + dirY * (stepSize * 2.5)
-      p2z = entryZ + dirZ * (stepSize * 2.5)
-      w2x = sin (p2y * warpFreq) * warpAmp
-      w2y = cos (p2x * warpFreq) * warpAmp
-      w2z = sin (p2z * warpFreq * 0.7) * warpAmp
+      p2 = entryPos ^+^ dir ^* (stepSize * 2.5)
+      ~(Vec3 p2x p2y p2z) = p2
+      w2x = sin (p2y * warpFreq + p2z * warpFreq * 0.7) * warpAmp
+      w2y = cos (p2x * warpFreq + p2z * warpFreq * 0.5) * warpAmp
+      w2z = sin (p2z * warpFreq * 0.7 + p2x * warpFreq * 0.6) * warpAmp
       s2x = fract ((p2x + w2x) * noiseScale - windOffset)
       s2y = fract ((p2y + w2y) * noiseScale)
       s2z = fract ((p2z + w2z) * noiseScale)
 
-      p3x = entryX + dirX * (stepSize * 3.5)
-      p3y = entryY + dirY * (stepSize * 3.5)
-      p3z = entryZ + dirZ * (stepSize * 3.5)
-      w3x = sin (p3y * warpFreq) * warpAmp
-      w3y = cos (p3x * warpFreq) * warpAmp
-      w3z = sin (p3z * warpFreq * 0.7) * warpAmp
+      p3 = entryPos ^+^ dir ^* (stepSize * 3.5)
+      ~(Vec3 p3x p3y p3z) = p3
+      w3x = sin (p3y * warpFreq + p3z * warpFreq * 0.7) * warpAmp
+      w3y = cos (p3x * warpFreq + p3z * warpFreq * 0.5) * warpAmp
+      w3z = sin (p3z * warpFreq * 0.7 + p3x * warpFreq * 0.6) * warpAmp
       s3x = fract ((p3x + w3x) * noiseScale - windOffset)
       s3y = fract ((p3y + w3y) * noiseScale)
       s3z = fract ((p3z + w3z) * noiseScale)
 
-      p4x = entryX + dirX * (stepSize * 4.5)
-      p4y = entryY + dirY * (stepSize * 4.5)
-      p4z = entryZ + dirZ * (stepSize * 4.5)
-      w4x = sin (p4y * warpFreq) * warpAmp
-      w4y = cos (p4x * warpFreq) * warpAmp
-      w4z = sin (p4z * warpFreq * 0.7) * warpAmp
+      p4 = entryPos ^+^ dir ^* (stepSize * 4.5)
+      ~(Vec3 p4x p4y p4z) = p4
+      w4x = sin (p4y * warpFreq + p4z * warpFreq * 0.7) * warpAmp
+      w4y = cos (p4x * warpFreq + p4z * warpFreq * 0.5) * warpAmp
+      w4z = sin (p4z * warpFreq * 0.7 + p4x * warpFreq * 0.6) * warpAmp
       s4x = fract ((p4x + w4x) * noiseScale - windOffset)
       s4y = fract ((p4y + w4y) * noiseScale)
       s4z = fract ((p4z + w4z) * noiseScale)
 
-      p5x = entryX + dirX * (stepSize * 5.5)
-      p5y = entryY + dirY * (stepSize * 5.5)
-      p5z = entryZ + dirZ * (stepSize * 5.5)
-      w5x = sin (p5y * warpFreq) * warpAmp
-      w5y = cos (p5x * warpFreq) * warpAmp
-      w5z = sin (p5z * warpFreq * 0.7) * warpAmp
+      p5 = entryPos ^+^ dir ^* (stepSize * 5.5)
+      ~(Vec3 p5x p5y p5z) = p5
+      w5x = sin (p5y * warpFreq + p5z * warpFreq * 0.7) * warpAmp
+      w5y = cos (p5x * warpFreq + p5z * warpFreq * 0.5) * warpAmp
+      w5z = sin (p5z * warpFreq * 0.7 + p5x * warpFreq * 0.6) * warpAmp
       s5x = fract ((p5x + w5x) * noiseScale - windOffset)
       s5y = fract ((p5y + w5y) * noiseScale)
       s5z = fract ((p5z + w5z) * noiseScale)
@@ -255,19 +244,19 @@ cloudFragment = shader do
       cloudBaseG = 0.98
       cloudBaseB = 0.95
 
-      d0 = max 0 (n0r * n0a - (n0g * 0.5 + n0b * 0.25) * 0.8 - 0.25) * heightF0 * 4.0
-      d1 = max 0 (n1r * n1a - (n1g * 0.5 + n1b * 0.25) * 0.8 - 0.25) * heightF1 * 4.0
-      d2 = max 0 (n2r * n2a - (n2g * 0.5 + n2b * 0.25) * 0.8 - 0.25) * heightF2 * 4.0
-      d3 = max 0 (n3r * n3a - (n3g * 0.5 + n3b * 0.25) * 0.8 - 0.25) * heightF3 * 4.0
-      d4 = max 0 (n4r * n4a - (n4g * 0.5 + n4b * 0.25) * 0.8 - 0.25) * heightF4 * 4.0
-      d5 = max 0 (n5r * n5a - (n5g * 0.5 + n5b * 0.25) * 0.8 - 0.25) * heightF5 * 4.0
+      d0 = max 0 (n0r * (1.0 - (n0g * 0.3 + n0b * 0.15 + n0a * 0.075)) - 0.15) * heightF0 * 4.0
+      d1 = max 0 (n1r * (1.0 - (n1g * 0.3 + n1b * 0.15 + n1a * 0.075)) - 0.15) * heightF1 * 4.0
+      d2 = max 0 (n2r * (1.0 - (n2g * 0.3 + n2b * 0.15 + n2a * 0.075)) - 0.15) * heightF2 * 4.0
+      d3 = max 0 (n3r * (1.0 - (n3g * 0.3 + n3b * 0.15 + n3a * 0.075)) - 0.15) * heightF3 * 4.0
+      d4 = max 0 (n4r * (1.0 - (n4g * 0.3 + n4b * 0.15 + n4a * 0.075)) - 0.15) * heightF4 * 4.0
+      d5 = max 0 (n5r * (1.0 - (n5g * 0.3 + n5b * 0.15 + n5a * 0.075)) - 0.15) * heightF5 * 4.0
 
-      ld0 = max 0 (ln0r * ln0a - (ln0g * 0.5 + ln0b * 0.25) * 0.8 - 0.25) * heightF0 * 4.0
-      ld1 = max 0 (ln1r * ln1a - (ln1g * 0.5 + ln1b * 0.25) * 0.8 - 0.25) * heightF1 * 4.0
-      ld2 = max 0 (ln2r * ln2a - (ln2g * 0.5 + ln2b * 0.25) * 0.8 - 0.25) * heightF2 * 4.0
-      ld3 = max 0 (ln3r * ln3a - (ln3g * 0.5 + ln3b * 0.25) * 0.8 - 0.25) * heightF3 * 4.0
-      ld4 = max 0 (ln4r * ln4a - (ln4g * 0.5 + ln4b * 0.25) * 0.8 - 0.25) * heightF4 * 4.0
-      ld5 = max 0 (ln5r * ln5a - (ln5g * 0.5 + ln5b * 0.25) * 0.8 - 0.25) * heightF5 * 4.0
+      ld0 = max 0 (ln0r * (1.0 - (ln0g * 0.3 + ln0b * 0.15 + ln0a * 0.075)) - 0.15) * heightF0 * 4.0
+      ld1 = max 0 (ln1r * (1.0 - (ln1g * 0.3 + ln1b * 0.15 + ln1a * 0.075)) - 0.15) * heightF1 * 4.0
+      ld2 = max 0 (ln2r * (1.0 - (ln2g * 0.3 + ln2b * 0.15 + ln2a * 0.075)) - 0.15) * heightF2 * 4.0
+      ld3 = max 0 (ln3r * (1.0 - (ln3g * 0.3 + ln3b * 0.15 + ln3a * 0.075)) - 0.15) * heightF3 * 4.0
+      ld4 = max 0 (ln4r * (1.0 - (ln4g * 0.3 + ln4b * 0.15 + ln4a * 0.075)) - 0.15) * heightF4 * 4.0
+      ld5 = max 0 (ln5r * (1.0 - (ln5g * 0.3 + ln5b * 0.15 + ln5a * 0.075)) - 0.15) * heightF5 * 4.0
 
       lightT d =
         let b = exp (-d * 1.5)
