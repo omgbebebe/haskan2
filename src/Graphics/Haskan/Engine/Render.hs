@@ -212,6 +212,83 @@ instance (MonadIO m) => MonadGraphics (ReaderT RenderEnv m) where
     ctx <- asks reContext
     liftIO $ Render.runRenderM ctx $ Render.presentFrame idx sem
 
+-- | Handle frame inspector snapshot capture
+handleInspector ::
+  (MonadClock m, MonadIO m, MonadStateReader m) =>
+  Int ->
+  [DrawCall] ->
+  RenderContext ->
+  AnyCamera ->
+  Vulkan.VkExtent2D ->
+  m ()
+handleInspector frameNumber drawList ctx camera rcSurfaceExtent = do
+  mInsp <- readInspector
+  for_ mInsp $ \insp -> do
+    startTime <- getMonotonicTime
+    let snapshots = map drawCallToSnapshot drawList
+        w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
+        h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
+    snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> makeProjectionMatrix w h) snapshots
+    liftIO $ insp snap
+
+-- | Handle single gbuffer screenshot capture
+handleScreenshotSingle ::
+  (MonadLog m, MonadGraphics m, MonadIO m) =>
+  DeferredResources ->
+  Vulkan.VkDevice ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkCommandPool ->
+  Vulkan.VkQueue ->
+  Vulkan.VkExtent2D ->
+  Vulkan.Word32 ->
+  m ()
+handleScreenshotSingle dr device physicalDevice graphicsCommandPool graphicsQueueHandler rcSurfaceExtent imageIndex = do
+  deviceWaitIdle
+  let gbufferImages = drGBufferImages dr !! fromIntegral imageIndex
+  logInfo LogGeneral "capturing screenshot..."
+  liftIO $ Screenshot.saveGBufferStage device physicalDevice graphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
+  logInfo LogGeneral "screenshot saved"
+
+-- | Handle all pipeline stages screenshot capture
+handleScreenshotAllStages ::
+  (MonadLog m, MonadGraphics m, MonadIO m) =>
+  DeferredResources ->
+  Vulkan.VkDevice ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkCommandPool ->
+  Vulkan.VkQueue ->
+  Vulkan.VkExtent2D ->
+  Vulkan.Word32 ->
+  m ()
+handleScreenshotAllStages dr device physicalDevice graphicsCommandPool graphicsQueueHandler rcSurfaceExtent imageIndex = do
+  deviceWaitIdle
+  let gbufferImages = drGBufferImages dr !! fromIntegral imageIndex
+  logInfo LogGeneral "capturing all pipeline stages..."
+  liftIO $ do
+    Screenshot.saveGBufferStage device physicalDevice graphicsCommandPool graphicsQueueHandler (head gbufferImages) rcSurfaceExtent Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT "position"
+    Screenshot.saveGBufferStage device physicalDevice graphicsCommandPool graphicsQueueHandler (gbufferImages !! 1) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "normal"
+    Screenshot.saveGBufferStage device physicalDevice graphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
+    Screenshot.saveGBufferStage device physicalDevice graphicsCommandPool graphicsQueueHandler (gbufferImages !! 3) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "emissive"
+  logInfo LogGeneral "all stages saved"
+
+-- | Handle swapchain screenshot capture
+handleScreenshotSwapchain ::
+  (MonadLog m, MonadGraphics m, MonadIO m) =>
+  RenderContext ->
+  Vulkan.VkDevice ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkCommandPool ->
+  Vulkan.VkQueue ->
+  Vulkan.VkExtent2D ->
+  Vulkan.Word32 ->
+  m ()
+handleScreenshotSwapchain ctx device physicalDevice graphicsCommandPool graphicsQueueHandler rcSurfaceExtent imageIndex = do
+  deviceWaitIdle
+  let swapchainImage = swapchainImages ctx !! fromIntegral imageIndex
+  logInfo LogGeneral "capturing swapchain screenshot..."
+  liftIO $ Screenshot.saveSwapchainScreenshot device physicalDevice graphicsCommandPool graphicsQueueHandler swapchainImage rcSurfaceExtent
+  logInfo LogGeneral "swapchain screenshot saved"
+
 renderFrameLoop ::
   (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
   RenderEnv ->
@@ -414,42 +491,19 @@ renderFrameLoop' frameNumber = do
               presentResult <- presentFrameGraphics imageIndex (renderFinishedSemaphores !! fromIntegral imageIndex)
               case presentResult of
                 Vulkan.VK_SUCCESS -> do
-                  shouldInspect <- consumeInspectFlag
-                  when shouldInspect $ do
-                    mInsp <- readInspector
-                    for_ mInsp $ \insp -> do
-                      startTime <- getMonotonicTime
-                      let snapshots = map drawCallToSnapshot drawList
-                          w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
-                          h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
-                      snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> makeProjectionMatrix w h) snapshots
-                      liftIO $ insp snap
-                  shouldScreenshot <- consumeScreenshotFlag
-                  shouldAllStages <- consumeAllStagesFlag
-                  shouldSwapchain <- consumeSwapchainScreenshotFlag
-                  when shouldScreenshot $ do
-                    deviceWaitIdle
-                    let gbufferImages = drGBufferImages !! fromIntegral imageIndex
-                    logInfo LogGeneral "capturing screenshot..."
-                    liftIO $ Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
-                    logInfo LogGeneral "screenshot saved"
-                  when shouldAllStages $ do
-                    deviceWaitIdle
-                    let gbufferImages = drGBufferImages !! fromIntegral imageIndex
-                    logInfo LogGeneral "capturing all pipeline stages..."
-                    liftIO $ do
-                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (head gbufferImages) rcSurfaceExtent Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT "position"
-                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 1) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "normal"
-                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
-                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 3) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "emissive"
-                    logInfo LogGeneral "all stages saved"
-                  when shouldSwapchain $ do
-                    deviceWaitIdle
-                    let swapchainImage = swapchainImages !! fromIntegral imageIndex
-                    logInfo LogGeneral "capturing swapchain screenshot..."
-                    liftIO $ Screenshot.saveSwapchainScreenshot device physicalDevice rcGraphicsCommandPool graphicsQueueHandler swapchainImage rcSurfaceExtent
-                    logInfo LogGeneral "swapchain screenshot saved"
-                  pure (False, False)
+                   shouldInspect <- consumeInspectFlag
+                   when shouldInspect $ do
+                     handleInspector frameNumber drawList ctx camera rcSurfaceExtent
+                   shouldScreenshot <- consumeScreenshotFlag
+                   shouldAllStages <- consumeAllStagesFlag
+                   shouldSwapchain <- consumeSwapchainScreenshotFlag
+                   when shouldScreenshot $ do
+                     handleScreenshotSingle dr device physicalDevice rcGraphicsCommandPool graphicsQueueHandler rcSurfaceExtent imageIndex
+                   when shouldAllStages $ do
+                     handleScreenshotAllStages dr device physicalDevice rcGraphicsCommandPool graphicsQueueHandler rcSurfaceExtent imageIndex
+                   when shouldSwapchain $ do
+                     handleScreenshotSwapchain ctx device physicalDevice rcGraphicsCommandPool graphicsQueueHandler rcSurfaceExtent imageIndex
+                   pure (False, False)
                 Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
                 Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
                 _ -> fail "presentFrame failed"
