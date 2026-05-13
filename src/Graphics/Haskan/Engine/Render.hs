@@ -317,7 +317,10 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   frameState <- readFrameState
   let (sunState, skyTint, iblInt, sunAzimuth, sunDir) = computeSkyParams (fsDayNightEnabled frameState) (fsTimeOfDay frameState)
 
-  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir
+  currentTime <- getMonotonicTime
+  let elapsedSeconds = fromIntegral (toNanoSecs currentTime) / 1e9
+
+  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds
       recordAction = buildRecordAction recordCtx
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction

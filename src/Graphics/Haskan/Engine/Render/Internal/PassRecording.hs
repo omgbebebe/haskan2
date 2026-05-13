@@ -48,6 +48,7 @@ data RecordContext = RecordContext
     rcSunAzimuth :: !Float,
     rcSunDir :: !(V3 Float),
     rcCloudHeight :: !Float,
+    rcTime :: !Float,
     rcWireframeEnabled :: !Bool,
     rcDeferred :: !DeferredResources,
     rcCullResources :: !ComputeCullResources,
@@ -71,8 +72,9 @@ buildRecordContext ::
   Float ->
   Float ->
   V3 Float ->
+  Float ->
   RecordContext
-buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir =
+buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time =
   RecordContext
     { rcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
       rcFrameDescriptorSets = frameDescriptorSets,
@@ -90,6 +92,7 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
       rcSunAzimuth = sunAzimuth,
       rcSunDir = sunDir,
       rcCloudHeight = fsCloudHeight frameState,
+      rcTime = time,
       rcWireframeEnabled = fsWireframe frameState,
       rcDeferred = dr,
       rcCullResources = ccr,
@@ -158,6 +161,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdSunAzimuth = rcSunAzimuth,
                 dpdSunDir = rcSunDir,
                 dpdCloudHeight = rcCloudHeight,
+                dpdTime = rcTime,
                 dpdGBufferImages = gBufferImagesForFrame,
                 dpdWireframePipeline = drWireframePipeline rcDeferred,
                 dpdWireframeLayout = drWireframePipelineLayout rcDeferred,

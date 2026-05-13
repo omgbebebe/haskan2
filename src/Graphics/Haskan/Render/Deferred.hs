@@ -66,6 +66,7 @@ data DeferredPassData = DeferredPassData
     dpdSunAzimuth :: !Float,
     dpdSunDir :: !(V3 Float),
     dpdCloudHeight :: !Float,
+    dpdTime :: !Float,
     -- G-buffer images for barrier
     dpdGBufferImages :: ![Vulkan.VkImage],
     -- Wireframe overlay
@@ -168,7 +169,8 @@ buildDeferredGraph DeferredPassData {..} = do
                 -- After ray2(76) → skyTintR at 76 (scalar, no pad needed)
                 -- After iblInt(92) → sunDir needs 16-align → pad 1 float → sunDir at 96
                 -- After sunDir(108) → cloudHeight at 108 (scalar, no pad needed)
-                -- Total: 28 floats * 4 = 112 bytes
+                -- After cloudHeight(112) → time at 112 (scalar, no pad needed)
+                -- Total: 29 floats * 4 = 116 bytes
                 camPosData =
                   [ realToFrac camX,
                     realToFrac camY,
@@ -197,10 +199,11 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac sunDirX,
                     realToFrac sunDirY,
                     realToFrac sunDirZ,
-                    realToFrac dpdCloudHeight
+                    realToFrac dpdCloudHeight,
+                    realToFrac dpdTime
                   ] ::
                     [CFloat]
-             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 112 . Foreign.castPtr
+             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 116 . Foreign.castPtr
             -- Fullscreen triangle: 3 vertices, no indices
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
       }

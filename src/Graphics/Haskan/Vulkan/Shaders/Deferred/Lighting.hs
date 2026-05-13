@@ -77,9 +77,10 @@ type CameraPushConstant =
        "skyTintG" ':-> Float,
        "skyTintB" ':-> Float,
        "iblIntensity" ':-> Float,
-       "sunDir" ':-> V 3 Float,
-       "cloudHeight" ':-> Float
-     ]
+        "sunDir" ':-> V 3 Float,
+        "cloudHeight" ':-> Float,
+        "time" ':-> Float
+      ]
 
 type FragmentDefs =
   '[ "in_uv" ':-> Input '[Location 0] (V 2 Float),
@@ -150,6 +151,7 @@ type FragmentDefs =
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do
   uv <- get @"in_uv"
+  let (Vec2 uvX uvY) = uv
   rayDir <- get @"in_ray"
   let (Vec3 rayDirX rayDirY rayDirZ) = rayDir
 
@@ -168,6 +170,7 @@ fragment = shader do
       camZ = view @(Name "cameraZ") cameraPos
       ~(Vec3 sunDirX sunDirY sunDirZ) = view @(Name "sunDir") cameraPos
       cloudBottom = view @(Name "cloudHeight") cameraPos
+      time = view @(Name "time") cameraPos
 
   -- Precompute cubemap rotation from sun azimuth (kept for potential future use)
   let cosAz = cos sunAzimuth
@@ -195,14 +198,22 @@ fragment = shader do
       totalRayLength = cloudThickness / max 0.01 dirY
       stepSize = totalRayLength / 6.0
 
+      -- Blue noise dither: hash fragment UV to offset ray entry
+      ditherHash = fract (sin (uvX * 12.9898 + uvY * 78.233) * 43758.5453)
+      ditherOffset = ditherHash * stepSize
+
       -- Entry point: ray-plane intersection at cloudBottom
-      tEntry = (cloudBottom - camY) / max 0.01 dirY
+      tEntry = (cloudBottom - camY) / max 0.01 dirY + ditherOffset
       entryX = camX + dirX * tEntry
       entryY = cloudBottom
       entryZ = camZ + dirZ * tEntry
 
       -- Noise scale: 128³ texture covers 128 / 0.001 = 128,000 world units
       noiseScale = 0.001
+
+      -- Wind animation: time-based offset for cloud drift
+      windSpeed = 0.05
+      windOffset = time * windSpeed
 
       -- Domain warp: procedural displacement to break regular grid
       warpFreq = 0.002
@@ -215,7 +226,7 @@ fragment = shader do
       w0x = sin (p0y * warpFreq) * warpAmp
       w0y = cos (p0x * warpFreq) * warpAmp
       w0z = sin (p0z * warpFreq * 0.7) * warpAmp
-      s0x = fract ((p0x + w0x) * noiseScale)
+      s0x = fract ((p0x + w0x) * noiseScale - windOffset)
       s0y = fract ((p0y + w0y) * noiseScale)
       s0z = fract ((p0z + w0z) * noiseScale)
 
@@ -226,7 +237,7 @@ fragment = shader do
       w1x = sin (p1y * warpFreq) * warpAmp
       w1y = cos (p1x * warpFreq) * warpAmp
       w1z = sin (p1z * warpFreq * 0.7) * warpAmp
-      s1x = fract ((p1x + w1x) * noiseScale)
+      s1x = fract ((p1x + w1x) * noiseScale - windOffset)
       s1y = fract ((p1y + w1y) * noiseScale)
       s1z = fract ((p1z + w1z) * noiseScale)
 
@@ -237,7 +248,7 @@ fragment = shader do
       w2x = sin (p2y * warpFreq) * warpAmp
       w2y = cos (p2x * warpFreq) * warpAmp
       w2z = sin (p2z * warpFreq * 0.7) * warpAmp
-      s2x = fract ((p2x + w2x) * noiseScale)
+      s2x = fract ((p2x + w2x) * noiseScale - windOffset)
       s2y = fract ((p2y + w2y) * noiseScale)
       s2z = fract ((p2z + w2z) * noiseScale)
 
@@ -248,7 +259,7 @@ fragment = shader do
       w3x = sin (p3y * warpFreq) * warpAmp
       w3y = cos (p3x * warpFreq) * warpAmp
       w3z = sin (p3z * warpFreq * 0.7) * warpAmp
-      s3x = fract ((p3x + w3x) * noiseScale)
+      s3x = fract ((p3x + w3x) * noiseScale - windOffset)
       s3y = fract ((p3y + w3y) * noiseScale)
       s3z = fract ((p3z + w3z) * noiseScale)
 
@@ -259,7 +270,7 @@ fragment = shader do
       w4x = sin (p4y * warpFreq) * warpAmp
       w4y = cos (p4x * warpFreq) * warpAmp
       w4z = sin (p4z * warpFreq * 0.7) * warpAmp
-      s4x = fract ((p4x + w4x) * noiseScale)
+      s4x = fract ((p4x + w4x) * noiseScale - windOffset)
       s4y = fract ((p4y + w4y) * noiseScale)
       s4z = fract ((p4z + w4z) * noiseScale)
 
@@ -270,17 +281,17 @@ fragment = shader do
       w5x = sin (p5y * warpFreq) * warpAmp
       w5y = cos (p5x * warpFreq) * warpAmp
       w5z = sin (p5z * warpFreq * 0.7) * warpAmp
-      s5x = fract ((p5x + w5x) * noiseScale)
+      s5x = fract ((p5x + w5x) * noiseScale - windOffset)
       s5y = fract ((p5y + w5y) * noiseScale)
       s5z = fract ((p5z + w5z) * noiseScale)
 
   -- Sample 3D cloud noise texture at all 6 warped positions (monadic)
-  ~(Vec4 n0r n0g n0b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s0x s0y s0z)
-  ~(Vec4 n1r n1g n1b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s1x s1y s1z)
-  ~(Vec4 n2r n2g n2b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s2x s2y s2z)
-  ~(Vec4 n3r n3g n3b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s3x s3y s3z)
-  ~(Vec4 n4r n4g n4b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s4x s4y s4z)
-  ~(Vec4 n5r n5g n5b _) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s5x s5y s5z)
+  ~(Vec4 n0r n0g n0b n0a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s0x s0y s0z)
+  ~(Vec4 n1r n1g n1b n1a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s1x s1y s1z)
+  ~(Vec4 n2r n2g n2b n2a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s2x s2y s2z)
+  ~(Vec4 n3r n3g n3b n3a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s3x s3y s3z)
+  ~(Vec4 n4r n4g n4b n4a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s4x s4y s4z)
+  ~(Vec4 n5r n5g n5b n5a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s5x s5y s5z)
 
   let -- Height factor: wider soft middle, thin at top/bottom
       heightF0 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 0.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 0.5) - cloudBottom) / cloudThickness))
@@ -301,11 +312,13 @@ fragment = shader do
       -- Phase function
       cosTheta = dirX * sunDirX + dirY * sunDirY + dirZ * sunDirZ
 
-      hgPhase_ g =
+      -- Dual-lobe Henyey-Greenstein phase function
+      hgPhase g =
         let g2 = g * g
             denom = (1.0 + g2 - 2.0 * g * cosTheta) ** 1.5
          in (1.0 - g2) / (4.0 * 3.14159265 * denom)
-      phase = hgPhase_ 0.3
+      -- Strong forward lobe (0.7 weight, g=0.6) + backward lobe (0.3 weight, g=-0.3)
+      phase = 0.7 * hgPhase 0.6 + 0.3 * hgPhase (-0.3)
 
       -- Sun color (white)
       lightR = lightTransmittance * phase
@@ -318,16 +331,16 @@ fragment = shader do
       cloudBaseB = 0.95
 
       -- Compute density for each step
-      -- R=shape (low-freq Worley), G=med detail, B=fine detail, A=Perlin
-      -- density = shape - detail*erosion - threshold
-      d0 = max 0 (n0r - (n0g * 0.5 + n0b * 0.25) * 0.8 - 0.25) * heightF0 * 4.0
-      d1 = max 0 (n1r - (n1g * 0.5 + n1b * 0.25) * 0.8 - 0.25) * heightF1 * 4.0
-      d2 = max 0 (n2r - (n2g * 0.5 + n2b * 0.25) * 0.8 - 0.25) * heightF2 * 4.0
-      d3 = max 0 (n3r - (n3g * 0.5 + n3b * 0.25) * 0.8 - 0.25) * heightF3 * 4.0
-      d4 = max 0 (n4r - (n4g * 0.5 + n4b * 0.25) * 0.8 - 0.25) * heightF4 * 4.0
-      d5 = max 0 (n5r - (n5g * 0.5 + n5b * 0.25) * 0.8 - 0.25) * heightF5 * 4.0
+      -- R=shape (low-freq Worley), G=med detail, B=fine detail, A=Perlin coverage
+      -- density = shape * coverage - detail*erosion - threshold
+      d0 = max 0 (n0r * n0a - (n0g * 0.5 + n0b * 0.25) * 0.8 - 0.25) * heightF0 * 4.0
+      d1 = max 0 (n1r * n1a - (n1g * 0.5 + n1b * 0.25) * 0.8 - 0.25) * heightF1 * 4.0
+      d2 = max 0 (n2r * n2a - (n2g * 0.5 + n2b * 0.25) * 0.8 - 0.25) * heightF2 * 4.0
+      d3 = max 0 (n3r * n3a - (n3g * 0.5 + n3b * 0.25) * 0.8 - 0.25) * heightF3 * 4.0
+      d4 = max 0 (n4r * n4a - (n4g * 0.5 + n4b * 0.25) * 0.8 - 0.25) * heightF4 * 4.0
+      d5 = max 0 (n5r * n5a - (n5g * 0.5 + n5b * 0.25) * 0.8 - 0.25) * heightF5 * 4.0
 
-      -- Front-to-back compositing
+      -- Front-to-back compositing with early exit
       -- Step 0
       s0r = cloudBaseR * lightR * d0 * stepSize
       s0g = cloudBaseG * lightG * d0 * stepSize
@@ -346,38 +359,46 @@ fragment = shader do
       a1g = a0g + s1g * t0
       a1b = a0b + s1b * t0
 
-      -- Step 2
-      s2r = cloudBaseR * lightR * d2 * stepSize
-      s2g = cloudBaseG * lightG * d2 * stepSize
-      s2b = cloudBaseB * lightB * d2 * stepSize
-      t2 = t1 * exp (-d2 * stepSize)
+      -- Step 2 (early exit: skip if transmittance already near zero)
+      active2 = step 0.01 t1
+      d2_eff = d2 * active2
+      s2r = cloudBaseR * lightR * d2_eff * stepSize
+      s2g = cloudBaseG * lightG * d2_eff * stepSize
+      s2b = cloudBaseB * lightB * d2_eff * stepSize
+      t2 = t1 * exp (-d2_eff * stepSize)
       a2r = a1r + s2r * t1
       a2g = a1g + s2g * t1
       a2b = a1b + s2b * t1
 
       -- Step 3
-      s3r = cloudBaseR * lightR * d3 * stepSize
-      s3g = cloudBaseG * lightG * d3 * stepSize
-      s3b = cloudBaseB * lightB * d3 * stepSize
-      t3 = t2 * exp (-d3 * stepSize)
+      active3 = step 0.01 t2
+      d3_eff = d3 * active3
+      s3r = cloudBaseR * lightR * d3_eff * stepSize
+      s3g = cloudBaseG * lightG * d3_eff * stepSize
+      s3b = cloudBaseB * lightB * d3_eff * stepSize
+      t3 = t2 * exp (-d3_eff * stepSize)
       a3r = a2r + s3r * t2
       a3g = a2g + s3g * t2
       a3b = a2b + s3b * t2
 
       -- Step 4
-      s4r = cloudBaseR * lightR * d4 * stepSize
-      s4g = cloudBaseG * lightG * d4 * stepSize
-      s4b = cloudBaseB * lightB * d4 * stepSize
-      t4 = t3 * exp (-d4 * stepSize)
+      active4 = step 0.01 t3
+      d4_eff = d4 * active4
+      s4r = cloudBaseR * lightR * d4_eff * stepSize
+      s4g = cloudBaseG * lightG * d4_eff * stepSize
+      s4b = cloudBaseB * lightB * d4_eff * stepSize
+      t4 = t3 * exp (-d4_eff * stepSize)
       a4r = a3r + s4r * t3
       a4g = a3g + s4g * t3
       a4b = a3b + s4b * t3
 
       -- Step 5
-      s5r = cloudBaseR * lightR * d5 * stepSize
-      s5g = cloudBaseG * lightG * d5 * stepSize
-      s5b = cloudBaseB * lightB * d5 * stepSize
-      t5 = t4 * exp (-d5 * stepSize)
+      active5 = step 0.01 t4
+      d5_eff = d5 * active5
+      s5r = cloudBaseR * lightR * d5_eff * stepSize
+      s5g = cloudBaseG * lightG * d5_eff * stepSize
+      s5b = cloudBaseB * lightB * d5_eff * stepSize
+      t5 = t4 * exp (-d5_eff * stepSize)
       a5r = a4r + s5r * t4
       a5g = a4g + s5g * t4
       a5b = a4b + s5b * t4
@@ -403,7 +424,7 @@ fragment = shader do
       -- Debug outputs
       dbgCloud = a2r * cloudsMask
       dbgHeight = mix 1.0 cloudTransmittance cloudsMask
-      dbgNoise = hgPhase_ 0.3 * cloudsMask
+      dbgNoise = hgPhase 0.3 * cloudsMask
 
   let normX = normX_raw * 2 - 1
       normY = normY_raw * 2 - 1
