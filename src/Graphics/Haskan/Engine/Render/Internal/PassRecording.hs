@@ -3,6 +3,7 @@
 module Graphics.Haskan.Engine.Render.Internal.PassRecording
   ( RecordContext (..),
     buildRecordAction,
+    buildRecordContext,
   )
 where
 
@@ -13,6 +14,9 @@ import Data.Text qualified as Text
 import Data.Word (Word32)
 import Foreign.Marshal.Array qualified
 import Foreign.Storable (Storable (..))
+import Graphics.Haskan.Camera (AnyCamera, Camera (..))
+import Graphics.Haskan.Camera qualified as Camera
+import Graphics.Haskan.Engine.Render.Internal.FrameState (FrameState (..))
 import Graphics.Haskan.Engine.Types (ComputeCullResources (..), DrawIndexedIndirectCommand (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
 import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
@@ -21,6 +25,7 @@ import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
+import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Linear (V3 (..))
@@ -49,6 +54,48 @@ data RecordContext = RecordContext
     prcDevice :: !Vulkan.VkDevice,
     prcSurfaceExtent :: !Vulkan.VkExtent2D
   }
+
+buildRecordContext ::
+  RenderContext ->
+  DeferredResources ->
+  ComputeCullResources ->
+  [Vulkan.VkDescriptorSet] ->
+  Vulkan.VkSampler ->
+  Vulkan.VkBuffer ->
+  FrameState ->
+  AnyCamera ->
+  [DrawCall] ->
+  Word32 ->
+  (V3 Float, V3 Float, V3 Float) ->
+  V3 Float ->
+  Float ->
+  Float ->
+  V3 Float ->
+  RecordContext
+buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir =
+  RecordContext
+    { prcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
+      rcFrameDescriptorSets = frameDescriptorSets,
+      rcTextureSampler = textureSampler,
+      rcLightSsboBuffer = lightSsboBuffer,
+      rcDrawList = drawList,
+      rcCameraPos = realToFrac <$> Camera.cameraPosition camera,
+      rcSkyboxRays = skyboxRays,
+      rcDebugMode = fsDebugMode frameState,
+      rcAxisOverlay = fsAxisOverlay frameState,
+      rcGroundPlane = fsGroundPlane frameState,
+      rcLightCount = lightCount,
+      rcSkyTint = skyTint,
+      rcIBLIntensity = iblInt,
+      rcSunAzimuth = sunAzimuth,
+      rcSunDir = sunDir,
+      rcCloudHeight = fsCloudHeight frameState,
+      rcWireframeEnabled = fsWireframe frameState,
+      rcDeferred = dr,
+      rcCullResources = ccr,
+      prcDevice = device ctx,
+      prcSurfaceExtent = rcSurfaceExtent ctx
+    }
 
 buildRecordAction :: RecordContext -> Vulkan.Word32 -> Int -> IO ()
 buildRecordAction RecordContext {..} imageIdx frameIdx = do

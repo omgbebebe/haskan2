@@ -62,6 +62,7 @@ import Graphics.Haskan.Engine.Render.Internal.FrameState
 import Graphics.Haskan.Engine.Render.Internal.PassRecording
   ( RecordContext (..),
     buildRecordAction,
+    buildRecordContext,
   )
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
@@ -359,30 +360,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   frameState <- readFrameState
   let (sunState, skyTint, iblInt, sunAzimuth, sunDir) = computeSkyParams (fsDayNightEnabled frameState) (fsTimeOfDay frameState)
 
-  let recordCtx =
-        RecordContext
-          { prcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
-            rcFrameDescriptorSets = reFrameDescriptorSets,
-            rcTextureSampler = reTextureSampler,
-            rcLightSsboBuffer = reLightSsboBuffer,
-            rcDrawList = drawList,
-            rcCameraPos = realToFrac <$> Camera.cameraPosition camera,
-            rcSkyboxRays = skyboxRays,
-            rcDebugMode = fsDebugMode frameState,
-            rcAxisOverlay = fsAxisOverlay frameState,
-            rcGroundPlane = fsGroundPlane frameState,
-            rcLightCount = lightCount,
-            rcSkyTint = skyTint,
-            rcIBLIntensity = iblInt,
-            rcSunAzimuth = sunAzimuth,
-            rcSunDir = sunDir,
-            rcCloudHeight = fsCloudHeight frameState,
-            rcWireframeEnabled = fsWireframe frameState,
-            rcDeferred = dr,
-            rcCullResources = ccr,
-            prcDevice = device ctx,
-            prcSurfaceExtent = rcSurfaceExtent ctx
-          }
+  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir
       recordAction = buildRecordAction recordCtx
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
