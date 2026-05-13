@@ -285,6 +285,29 @@ fragment = shader do
       s5y = fract ((p5y + w5y) * noiseScale)
       s5z = fract ((p5z + w5z) * noiseScale)
 
+      -- Light march texture offsets: sample one step toward sun
+      sunTexOffsetX = sunDirX * stepSize * noiseScale
+      sunTexOffsetY = sunDirY * stepSize * noiseScale
+      sunTexOffsetZ = sunDirZ * stepSize * noiseScale
+      ls0x = fract (s0x + sunTexOffsetX)
+      ls0y = fract (s0y + sunTexOffsetY)
+      ls0z = fract (s0z + sunTexOffsetZ)
+      ls1x = fract (s1x + sunTexOffsetX)
+      ls1y = fract (s1y + sunTexOffsetY)
+      ls1z = fract (s1z + sunTexOffsetZ)
+      ls2x = fract (s2x + sunTexOffsetX)
+      ls2y = fract (s2y + sunTexOffsetY)
+      ls2z = fract (s2z + sunTexOffsetZ)
+      ls3x = fract (s3x + sunTexOffsetX)
+      ls3y = fract (s3y + sunTexOffsetY)
+      ls3z = fract (s3z + sunTexOffsetZ)
+      ls4x = fract (s4x + sunTexOffsetX)
+      ls4y = fract (s4y + sunTexOffsetY)
+      ls4z = fract (s4z + sunTexOffsetZ)
+      ls5x = fract (s5x + sunTexOffsetX)
+      ls5y = fract (s5y + sunTexOffsetY)
+      ls5z = fract (s5z + sunTexOffsetZ)
+
   -- Sample 3D cloud noise texture at all 6 warped positions (monadic)
   ~(Vec4 n0r n0g n0b n0a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s0x s0y s0z)
   ~(Vec4 n1r n1g n1b n1a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s1x s1y s1z)
@@ -293,6 +316,14 @@ fragment = shader do
   ~(Vec4 n4r n4g n4b n4a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s4x s4y s4z)
   ~(Vec4 n5r n5g n5b n5a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 s5x s5y s5z)
 
+  -- Light march: sample density toward sun for each step
+  ~(Vec4 ln0r ln0g ln0b ln0a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 ls0x ls0y ls0z)
+  ~(Vec4 ln1r ln1g ln1b ln1a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 ls1x ls1y ls1z)
+  ~(Vec4 ln2r ln2g ln2b ln2a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 ls2x ls2y ls2z)
+  ~(Vec4 ln3r ln3g ln3b ln3a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 ls3x ls3y ls3z)
+  ~(Vec4 ln4r ln4g ln4b ln4a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 ls4x ls4y ls4z)
+  ~(Vec4 ln5r ln5g ln5b ln5a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 ls5x ls5y ls5z)
+
   let -- Height factor: wider soft middle, thin at top/bottom
       heightF0 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 0.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 0.5) - cloudBottom) / cloudThickness))
       heightF1 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 1.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 1.5) - cloudBottom) / cloudThickness))
@@ -300,14 +331,6 @@ fragment = shader do
       heightF3 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 3.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 3.5) - cloudBottom) / cloudThickness))
       heightF4 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 4.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 4.5) - cloudBottom) / cloudThickness))
       heightF5 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 5.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 5.5) - cloudBottom) / cloudThickness))
-
-      -- Light march: simplified (single sample)
-      lightDensity = 0.3
-
-      -- Modified Beer-Lambert (powder effect)
-      beer = exp (-lightDensity * 15.0)
-      powder = 0.7 * exp (-lightDensity * 0.25)
-      lightTransmittance = max beer powder
 
       -- Phase function
       cosTheta = dirX * sunDirX + dirY * sunDirY + dirZ * sunDirZ
@@ -320,17 +343,12 @@ fragment = shader do
       -- Strong forward lobe (0.7 weight, g=0.6) + backward lobe (0.3 weight, g=-0.3)
       phase = 0.7 * hgPhase 0.6 + 0.3 * hgPhase (-0.3)
 
-      -- Sun color (white)
-      lightR = lightTransmittance * phase
-      lightG = lightTransmittance * phase
-      lightB = lightTransmittance * phase
-
       -- Cloud base color (white with slight blue tint)
       cloudBaseR = 1.0
       cloudBaseG = 0.98
       cloudBaseB = 0.95
 
-      -- Compute density for each step
+      -- Compute view density for each step
       -- R=shape (low-freq Worley), G=med detail, B=fine detail, A=Perlin coverage
       -- density = shape * coverage - detail*erosion - threshold
       d0 = max 0 (n0r * n0a - (n0g * 0.5 + n0b * 0.25) * 0.8 - 0.25) * heightF0 * 4.0
@@ -340,20 +358,59 @@ fragment = shader do
       d4 = max 0 (n4r * n4a - (n4g * 0.5 + n4b * 0.25) * 0.8 - 0.25) * heightF4 * 4.0
       d5 = max 0 (n5r * n5a - (n5g * 0.5 + n5b * 0.25) * 0.8 - 0.25) * heightF5 * 4.0
 
+      -- Light march densities: sample toward sun for per-step occlusion
+      ld0 = max 0 (ln0r * ln0a - (ln0g * 0.5 + ln0b * 0.25) * 0.8 - 0.25) * heightF0 * 4.0
+      ld1 = max 0 (ln1r * ln1a - (ln1g * 0.5 + ln1b * 0.25) * 0.8 - 0.25) * heightF1 * 4.0
+      ld2 = max 0 (ln2r * ln2a - (ln2g * 0.5 + ln2b * 0.25) * 0.8 - 0.25) * heightF2 * 4.0
+      ld3 = max 0 (ln3r * ln3a - (ln3g * 0.5 + ln3b * 0.25) * 0.8 - 0.25) * heightF3 * 4.0
+      ld4 = max 0 (ln4r * ln4a - (ln4g * 0.5 + ln4b * 0.25) * 0.8 - 0.25) * heightF4 * 4.0
+      ld5 = max 0 (ln5r * ln5a - (ln5g * 0.5 + ln5b * 0.25) * 0.8 - 0.25) * heightF5 * 4.0
+
+      -- Per-step light transmittance (Beer-Lambert with powder)
+      lightT d =
+        let b = exp (-d * 5.0)
+            p = 0.7 * exp (-d * 0.1)
+         in max b p
+      lightT0 = lightT ld0
+      lightT1 = lightT ld1
+      lightT2 = lightT ld2
+      lightT3 = lightT ld3
+      lightT4 = lightT ld4
+      lightT5 = lightT ld5
+
+      lightR0 = lightT0 * phase
+      lightG0 = lightT0 * phase
+      lightB0 = lightT0 * phase
+      lightR1 = lightT1 * phase
+      lightG1 = lightT1 * phase
+      lightB1 = lightT1 * phase
+      lightR2 = lightT2 * phase
+      lightG2 = lightT2 * phase
+      lightB2 = lightT2 * phase
+      lightR3 = lightT3 * phase
+      lightG3 = lightT3 * phase
+      lightB3 = lightT3 * phase
+      lightR4 = lightT4 * phase
+      lightG4 = lightT4 * phase
+      lightB4 = lightT4 * phase
+      lightR5 = lightT5 * phase
+      lightG5 = lightT5 * phase
+      lightB5 = lightT5 * phase
+
       -- Front-to-back compositing with early exit
       -- Step 0
-      s0r = cloudBaseR * lightR * d0 * stepSize
-      s0g = cloudBaseG * lightG * d0 * stepSize
-      s0b = cloudBaseB * lightB * d0 * stepSize
+      s0r = cloudBaseR * lightR0 * d0 * stepSize
+      s0g = cloudBaseG * lightG0 * d0 * stepSize
+      s0b = cloudBaseB * lightB0 * d0 * stepSize
       t0 = exp (-d0 * stepSize)
       a0r = s0r
       a0g = s0g
       a0b = s0b
 
       -- Step 1
-      s1r = cloudBaseR * lightR * d1 * stepSize
-      s1g = cloudBaseG * lightG * d1 * stepSize
-      s1b = cloudBaseB * lightB * d1 * stepSize
+      s1r = cloudBaseR * lightR1 * d1 * stepSize
+      s1g = cloudBaseG * lightG1 * d1 * stepSize
+      s1b = cloudBaseB * lightB1 * d1 * stepSize
       t1 = t0 * exp (-d1 * stepSize)
       a1r = a0r + s1r * t0
       a1g = a0g + s1g * t0
@@ -362,9 +419,9 @@ fragment = shader do
       -- Step 2 (early exit: skip if transmittance already near zero)
       active2 = step 0.01 t1
       d2_eff = d2 * active2
-      s2r = cloudBaseR * lightR * d2_eff * stepSize
-      s2g = cloudBaseG * lightG * d2_eff * stepSize
-      s2b = cloudBaseB * lightB * d2_eff * stepSize
+      s2r = cloudBaseR * lightR2 * d2_eff * stepSize
+      s2g = cloudBaseG * lightG2 * d2_eff * stepSize
+      s2b = cloudBaseB * lightB2 * d2_eff * stepSize
       t2 = t1 * exp (-d2_eff * stepSize)
       a2r = a1r + s2r * t1
       a2g = a1g + s2g * t1
@@ -373,9 +430,9 @@ fragment = shader do
       -- Step 3
       active3 = step 0.01 t2
       d3_eff = d3 * active3
-      s3r = cloudBaseR * lightR * d3_eff * stepSize
-      s3g = cloudBaseG * lightG * d3_eff * stepSize
-      s3b = cloudBaseB * lightB * d3_eff * stepSize
+      s3r = cloudBaseR * lightR3 * d3_eff * stepSize
+      s3g = cloudBaseG * lightG3 * d3_eff * stepSize
+      s3b = cloudBaseB * lightB3 * d3_eff * stepSize
       t3 = t2 * exp (-d3_eff * stepSize)
       a3r = a2r + s3r * t2
       a3g = a2g + s3g * t2
@@ -384,9 +441,9 @@ fragment = shader do
       -- Step 4
       active4 = step 0.01 t3
       d4_eff = d4 * active4
-      s4r = cloudBaseR * lightR * d4_eff * stepSize
-      s4g = cloudBaseG * lightG * d4_eff * stepSize
-      s4b = cloudBaseB * lightB * d4_eff * stepSize
+      s4r = cloudBaseR * lightR4 * d4_eff * stepSize
+      s4g = cloudBaseG * lightG4 * d4_eff * stepSize
+      s4b = cloudBaseB * lightB4 * d4_eff * stepSize
       t4 = t3 * exp (-d4_eff * stepSize)
       a4r = a3r + s4r * t3
       a4g = a3g + s4g * t3
@@ -395,9 +452,9 @@ fragment = shader do
       -- Step 5
       active5 = step 0.01 t4
       d5_eff = d5 * active5
-      s5r = cloudBaseR * lightR * d5_eff * stepSize
-      s5g = cloudBaseG * lightG * d5_eff * stepSize
-      s5b = cloudBaseB * lightB * d5_eff * stepSize
+      s5r = cloudBaseR * lightR5 * d5_eff * stepSize
+      s5g = cloudBaseG * lightG5 * d5_eff * stepSize
+      s5b = cloudBaseB * lightB5 * d5_eff * stepSize
       t5 = t4 * exp (-d5_eff * stepSize)
       a5r = a4r + s5r * t4
       a5g = a4g + s5g * t4
