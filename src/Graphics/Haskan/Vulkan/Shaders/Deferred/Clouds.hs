@@ -38,7 +38,8 @@ type CloudPushConstant =
        "iblIntensity" ':-> Float,
        "sunDir" ':-> V 3 Float,
        "cloudHeight" ':-> Float,
-       "time" ':-> Float
+       "time" ':-> Float,
+       "blendFactor" ':-> Float
      ]
 
 cloudVertex :: ShaderModule "main" VertexShader CloudVertexDefs _
@@ -71,6 +72,10 @@ type CloudFragmentDefs =
        ':-> Texture3D
               '[Binding 1, DescriptorSet 0]
               (RGBA8 UNorm),
+     "cloud_history"
+       ':-> Texture2D
+              '[Binding 2, DescriptorSet 0]
+              (RGBA16 F),
      "cameraPos"
        ':-> PushConstant
               '[]
@@ -364,4 +369,15 @@ cloudFragment = shader do
       tintedSkyG = cloudSkyG * skyTintG
       tintedSkyB = cloudSkyB * skyTintB
 
-  put @"out_colour" (Vec4 tintedSkyR tintedSkyG tintedSkyB 1.0)
+      -- Temporal accumulation: blend with history
+      blendFactor = view @(Name "blendFactor") cameraPos
+
+  ~(Vec4 histR_h histG_h histB_h _) <- use @(ImageTexel "cloud_history") NilOps uv
+  let histR = convert histR_h
+      histG = convert histG_h
+      histB = convert histB_h
+      accR = blendFactor * histR + (1.0 - blendFactor) * tintedSkyR
+      accG = blendFactor * histG + (1.0 - blendFactor) * tintedSkyG
+      accB = blendFactor * histB + (1.0 - blendFactor) * tintedSkyB
+
+  put @"out_colour" (Vec4 accR accG accB 1.0)

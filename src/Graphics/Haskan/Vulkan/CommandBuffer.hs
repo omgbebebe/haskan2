@@ -8,6 +8,7 @@ import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
+import Data.Bits ((.|.))
 import Graphics.Vulkan.Marshal.Create (set, setAt, setListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
@@ -386,7 +387,30 @@ layerTransition commandBuffer image oldLayout newLayout = do
               Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
               Vulkan.VK_ACCESS_SHADER_READ_BIT
             )
-
+          (Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) ->
+            ( Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+              Vulkan.VK_ACCESS_SHADER_READ_BIT,
+              Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT,
+              Vulkan.VK_ACCESS_TRANSFER_READ_BIT
+            )
+          (Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) ->
+            ( Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+              Vulkan.VK_ACCESS_SHADER_READ_BIT,
+              Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT,
+              Vulkan.VK_ACCESS_TRANSFER_WRITE_BIT
+            )
+          (Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) ->
+            ( Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT,
+              Vulkan.VK_ACCESS_TRANSFER_READ_BIT,
+              Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+              Vulkan.VK_ACCESS_SHADER_READ_BIT
+            )
+          _ ->
+            ( Vulkan.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+              Vulkan.VK_ACCESS_MEMORY_READ_BIT .|. Vulkan.VK_ACCESS_MEMORY_WRITE_BIT,
+              Vulkan.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+              Vulkan.VK_ACCESS_MEMORY_READ_BIT .|. Vulkan.VK_ACCESS_MEMORY_WRITE_BIT
+            )
       subresourceRange =
         Vulkan.createVk
           ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
@@ -421,6 +445,67 @@ layerTransition commandBuffer image oldLayout newLayout = do
             0
             Vulkan.vkNullPtr
             1
+      )
+
+cmdCopyImage ::
+  (MonadIO m) =>
+  Vulkan.VkCommandBuffer ->
+  Vulkan.VkImage ->
+  Vulkan.VkImage ->
+  Vulkan.Word32 ->
+  Vulkan.Word32 ->
+  m ()
+cmdCopyImage commandBuffer srcImage dstImage width height = do
+  let srcSubresource =
+        Vulkan.createVk
+          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+              &* set @"mipLevel" 0
+              &* set @"baseArrayLayer" 0
+              &* set @"layerCount" 1
+          )
+      dstSubresource =
+        Vulkan.createVk
+          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+              &* set @"mipLevel" 0
+              &* set @"baseArrayLayer" 0
+              &* set @"layerCount" 1
+          )
+      copyRegion =
+        Vulkan.createVk
+          ( set @"srcSubresource" srcSubresource
+              &* set @"srcOffset"
+                (Vulkan.createVk
+                   ( set @"x" 0
+                       &* set @"y" 0
+                       &* set @"z" 0
+                   )
+                )
+              &* set @"dstSubresource" dstSubresource
+              &* set @"dstOffset"
+                (Vulkan.createVk
+                   ( set @"x" 0
+                       &* set @"y" 0
+                       &* set @"z" 0
+                   )
+                )
+              &* set @"extent"
+                (Vulkan.createVk
+                   ( set @"width" width
+                       &* set @"height" height
+                       &* set @"depth" 1
+                   )
+                )
+          )
+  liftIO $
+    withPtr
+      copyRegion
+      ( Vulkan.vkCmdCopyImage
+          commandBuffer
+          srcImage
+          Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+          dstImage
+          Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+          1
       )
 
 copyBufferToImage ::

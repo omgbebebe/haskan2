@@ -111,7 +111,7 @@ createCloudDescriptorPool dev numSets = do
   let samplerPoolSize =
         Vulkan.createVk
           ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-              &* set @"descriptorCount" (fromIntegral (numSets * 2))
+              &* set @"descriptorCount" (fromIntegral (numSets * 3))
           )
       createInfo =
         Vulkan.createVk

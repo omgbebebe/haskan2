@@ -482,10 +482,14 @@ updateCloudDescriptorSets ::
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkSampler ->
+  -- | env cubemap view
   Maybe Vulkan.VkImageView ->
+  -- | 3D cloud noise texture view
+  Maybe Vulkan.VkImageView ->
+  -- | history texture view
   Maybe Vulkan.VkImageView ->
   m ()
-updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView = do
+updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView mCloudHistoryView = do
   let mkTextureInfo imageView =
         Vulkan.createVk
           ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -511,7 +515,10 @@ updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView 
       noiseWrite = case mCloudNoiseView of
         Just noiseView -> [mkWrite 1 noiseView]
         Nothing -> []
-      allWrites = envWrite ++ noiseWrite
+      historyWrite = case mCloudHistoryView of
+        Just historyView -> [mkWrite 2 historyView]
+        Nothing -> []
+      allWrites = envWrite ++ noiseWrite ++ historyWrite
   liftIO $
     Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
       Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr

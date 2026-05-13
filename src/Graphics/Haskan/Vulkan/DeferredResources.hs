@@ -52,6 +52,8 @@ data DeferredResources = DeferredResources
     drCloudDescriptorSets :: ![Vulkan.VkDescriptorSet],
     drCloudImages :: ![Vulkan.VkImage],
     drCloudImageViews :: ![Vulkan.VkImageView],
+    drCloudHistoryImages :: ![Vulkan.VkImage],
+    drCloudHistoryImageViews :: ![Vulkan.VkImageView],
     drCloudExtent :: !Vulkan.VkExtent2D,
     drGBufferImages :: ![[Vulkan.VkImage]],
     drGBufferImageViews :: ![[Vulkan.VkImageView]],
@@ -135,6 +137,15 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       cloudImageViews = map snd cloudImagesAndViews
   logDebugIO LogRender $ "cloud images created: " <> showT (length cloudImages) <> " sets"
 
+  -- Create cloud history images and views (same format/size)
+  cloudHistoryImagesAndViews <- for [0 .. numSwapchainImages - 1] $ \_ -> do
+    histImage <- Swapchain.managedGBufferImage pdev device cloudExtent cloudFormat
+    histView <- ImageView.managedImageView device cloudFormat histImage
+    pure (histImage, histView)
+  let cloudHistoryImages = map fst cloudHistoryImagesAndViews
+      cloudHistoryImageViews = map snd cloudHistoryImagesAndViews
+  logDebugIO LogRender $ "cloud history images created: " <> showT (length cloudHistoryImages) <> " sets"
+
   -- Initial layout transition for g-buffer images
   tempCmdBuf <- CommandBuffer.createCommandBuffer device (rcGraphicsCommandPool ctx)
   CommandBuffer.withCommandBufferOneTime
@@ -216,7 +227,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         Vulkan.createVk
           ( set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
               &* set @"offset" 0
-              &* set @"size" 116
+              &* set @"size" 120
           )
   cloudPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [cloudDescriptorSetLayout] [cloudPushConstantRange]
   logDebugIO LogRender "cloud pipeline layout created"
@@ -283,8 +294,8 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender $ "cloud descriptor sets allocated: " <> showT (length cloudDescriptorSets)
 
   -- Update cloud descriptor sets
-  liftIO $ for_ cloudDescriptorSets $ \ds ->
-    DescriptorSet.updateCloudDescriptorSets device ds sampler mEnvMapView mCloudNoiseView
+  liftIO $ for_ (zip cloudDescriptorSets cloudHistoryImageViews) $ \(ds, histView) ->
+    DescriptorSet.updateCloudDescriptorSets device ds sampler mEnvMapView mCloudNoiseView (Just histView)
   logDebugIO LogRender "cloud descriptor sets updated"
 
   pure
@@ -305,6 +316,8 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         drCloudDescriptorSets = cloudDescriptorSets,
         drCloudImages = cloudImages,
         drCloudImageViews = cloudImageViews,
+        drCloudHistoryImages = cloudHistoryImages,
+        drCloudHistoryImageViews = cloudHistoryImageViews,
         drCloudExtent = cloudExtent,
         drGBufferImages = gBufferImages,
         drGBufferImageViews = gBufferImageViews,

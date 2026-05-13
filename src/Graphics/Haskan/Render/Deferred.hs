@@ -67,6 +67,7 @@ data DeferredPassData = DeferredPassData
     dpdSunDir :: !(V3 Float),
     dpdCloudHeight :: !Float,
     dpdTime :: !Float,
+    dpdBlendFactor :: !Float,
     -- Cloud pass
     dpdCloudRenderPass :: !Vulkan.VkRenderPass,
     dpdCloudFramebuffer :: !Vulkan.VkFramebuffer,
@@ -74,6 +75,8 @@ data DeferredPassData = DeferredPassData
     dpdCloudLayout :: !Vulkan.VkPipelineLayout,
     dpdCloudDescriptor :: !Vulkan.VkDescriptorSet,
     dpdCloudExtent :: !Vulkan.VkExtent2D,
+    dpdCloudImage :: !Vulkan.VkImage,
+    dpdCloudHistoryImage :: !Vulkan.VkImage,
     -- G-buffer images for barrier
     dpdGBufferImages :: ![Vulkan.VkImage],
     -- Wireframe overlay
@@ -200,12 +203,19 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac sunDirX,
                     realToFrac sunDirY,
                     realToFrac sunDirZ,
-                    realToFrac dpdCloudHeight,
-                    realToFrac dpdTime
-                  ] ::
-                    [CFloat]
-             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdCloudLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 116 . Foreign.castPtr
+                     realToFrac dpdCloudHeight,
+                     realToFrac dpdTime,
+                     realToFrac dpdBlendFactor
+                   ] ::
+                     [CFloat]
+             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdCloudLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 120 . Foreign.castPtr
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
+            -- Copy current cloud result to history buffer for next frame
+            CommandBuffer.layerTransition commandBuffer dpdCloudImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+            CommandBuffer.layerTransition commandBuffer dpdCloudHistoryImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+            CommandBuffer.cmdCopyImage commandBuffer dpdCloudImage dpdCloudHistoryImage (Vulkan.getField @"width" dpdCloudExtent) (Vulkan.getField @"height" dpdCloudExtent)
+            CommandBuffer.layerTransition commandBuffer dpdCloudImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+            CommandBuffer.layerTransition commandBuffer dpdCloudHistoryImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       }
 
   -- Lighting pass: fullscreen triangle compositing
