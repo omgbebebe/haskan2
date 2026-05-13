@@ -49,6 +49,7 @@ library
                         Graphics.Haskan.Engine.Render.Internal.FramePrepare
                         Graphics.Haskan.Engine.Render.Internal.FrameState
                         Graphics.Haskan.Engine.Render.Internal.PassRecording
+                        Graphics.Haskan.Engine.Render.Internal.Screenshot
                        Graphics.Haskan.Input
                        Graphics.Haskan.Resources
                        Graphics.Haskan.Vertex
