@@ -106,7 +106,8 @@ cloudFragment = shader do
       camX = view @(Name "cameraX") cameraPos
       camY = view @(Name "cameraY") cameraPos
       camZ = view @(Name "cameraZ") cameraPos
-      ~(Vec3 sunDirX sunDirY sunDirZ) = view @(Name "sunDir") cameraPos
+      sunDir = view @(Name "sunDir") cameraPos
+      ~(Vec3 sunDirX sunDirY sunDirZ) = sunDir
       cloudBottom = view @(Name "cloudHeight") cameraPos
       time = view @(Name "time") cameraPos
 
@@ -232,7 +233,7 @@ cloudFragment = shader do
       heightF4 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 4.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 4.5) - cloudBottom) / cloudThickness))
       heightF5 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 5.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 5.5) - cloudBottom) / cloudThickness))
 
-      cosTheta = dirX * sunDirX + dirY * sunDirY + dirZ * sunDirZ
+      cosTheta = dir ^.^ sunDir
 
       hgPhase g =
         let g2 = g * g
@@ -240,9 +241,7 @@ cloudFragment = shader do
          in (1.0 - g2) / (4.0 * 3.14159265 * denom)
       phase = 0.7 * hgPhase 0.6 + 0.3 * hgPhase (-0.3)
 
-      cloudBaseR = 1.0
-      cloudBaseG = 0.98
-      cloudBaseB = 0.95
+      cloudBase = Vec3 1.0 0.98 0.95
 
       d0 = max 0 (n0r * (1.0 - (n0g * 0.3 + n0b * 0.15 + n0a * 0.075)) - 0.15) * heightF0 * 4.0
       d1 = max 0 (n1r * (1.0 - (n1g * 0.3 + n1b * 0.15 + n1a * 0.075)) - 0.15) * heightF1 * 4.0
@@ -269,84 +268,39 @@ cloudFragment = shader do
       lightT4 = lightT ld4
       lightT5 = lightT ld5
 
-      lightR0 = lightT0 * phase
-      lightG0 = lightT0 * phase
-      lightB0 = lightT0 * phase
-      lightR1 = lightT1 * phase
-      lightG1 = lightT1 * phase
-      lightB1 = lightT1 * phase
-      lightR2 = lightT2 * phase
-      lightG2 = lightT2 * phase
-      lightB2 = lightT2 * phase
-      lightR3 = lightT3 * phase
-      lightG3 = lightT3 * phase
-      lightB3 = lightT3 * phase
-      lightR4 = lightT4 * phase
-      lightG4 = lightT4 * phase
-      lightB4 = lightT4 * phase
-      lightR5 = lightT5 * phase
-      lightG5 = lightT5 * phase
-      lightB5 = lightT5 * phase
-
-      s0r = cloudBaseR * lightR0 * d0 * stepSize
-      s0g = cloudBaseG * lightG0 * d0 * stepSize
-      s0b = cloudBaseB * lightB0 * d0 * stepSize
+      s0 = cloudBase ^* (lightT0 * phase * d0 * stepSize)
       t0 = exp (-d0 * stepSize)
-      a0r = s0r
-      a0g = s0g
-      a0b = s0b
+      a0 = s0
 
-      s1r = cloudBaseR * lightR1 * d1 * stepSize
-      s1g = cloudBaseG * lightG1 * d1 * stepSize
-      s1b = cloudBaseB * lightB1 * d1 * stepSize
+      s1 = cloudBase ^* (lightT1 * phase * d1 * stepSize)
       t1 = t0 * exp (-d1 * stepSize)
-      a1r = a0r + s1r * t0
-      a1g = a0g + s1g * t0
-      a1b = a0b + s1b * t0
+      a1 = a0 ^+^ s1 ^* t0
 
       active2 = step 0.01 t1
       d2_eff = d2 * active2
-      s2r = cloudBaseR * lightR2 * d2_eff * stepSize
-      s2g = cloudBaseG * lightG2 * d2_eff * stepSize
-      s2b = cloudBaseB * lightB2 * d2_eff * stepSize
+      s2 = cloudBase ^* (lightT2 * phase * d2_eff * stepSize)
       t2 = t1 * exp (-d2_eff * stepSize)
-      a2r = a1r + s2r * t1
-      a2g = a1g + s2g * t1
-      a2b = a1b + s2b * t1
+      a2 = a1 ^+^ s2 ^* t1
 
       active3 = step 0.01 t2
       d3_eff = d3 * active3
-      s3r = cloudBaseR * lightR3 * d3_eff * stepSize
-      s3g = cloudBaseG * lightG3 * d3_eff * stepSize
-      s3b = cloudBaseB * lightB3 * d3_eff * stepSize
+      s3 = cloudBase ^* (lightT3 * phase * d3_eff * stepSize)
       t3 = t2 * exp (-d3_eff * stepSize)
-      a3r = a2r + s3r * t2
-      a3g = a2g + s3g * t2
-      a3b = a2b + s3b * t2
+      a3 = a2 ^+^ s3 ^* t2
 
       active4 = step 0.01 t3
       d4_eff = d4 * active4
-      s4r = cloudBaseR * lightR4 * d4_eff * stepSize
-      s4g = cloudBaseG * lightG4 * d4_eff * stepSize
-      s4b = cloudBaseB * lightB4 * d4_eff * stepSize
+      s4 = cloudBase ^* (lightT4 * phase * d4_eff * stepSize)
       t4 = t3 * exp (-d4_eff * stepSize)
-      a4r = a3r + s4r * t3
-      a4g = a3g + s4g * t3
-      a4b = a3b + s4b * t3
+      a4 = a3 ^+^ s4 ^* t3
 
       active5 = step 0.01 t4
       d5_eff = d5 * active5
-      s5r = cloudBaseR * lightR5 * d5_eff * stepSize
-      s5g = cloudBaseG * lightG5 * d5_eff * stepSize
-      s5b = cloudBaseB * lightB5 * d5_eff * stepSize
+      s5 = cloudBase ^* (lightT5 * phase * d5_eff * stepSize)
       t5 = t4 * exp (-d5_eff * stepSize)
-      a5r = a4r + s5r * t4
-      a5g = a4g + s5g * t4
-      a5b = a4b + s5b * t4
+      a5 = a4 ^+^ s5 ^* t4
 
-      cloudAccR = a5r
-      cloudAccG = a5g
-      cloudAccB = a5b
+      ~(Vec3 cloudAccR cloudAccG cloudAccB) = a5
       cloudTransmittance = t5
 
       cloudsMask = step 0.01 dirY
