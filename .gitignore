@@ -30,3 +30,4 @@ data/textures/
 
 # Test assets (glTF sample models)
 glTF-Sample-Assets/
+.ghc.environment.*
