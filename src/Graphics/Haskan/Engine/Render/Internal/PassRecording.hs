@@ -28,7 +28,7 @@ import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Linear (V3 (..))
+import Linear (M44, V3 (..))
 
 -- | All values pre-computed before creating the IO callback
 data RecordContext = RecordContext
@@ -49,6 +49,7 @@ data RecordContext = RecordContext
     rcSunDir :: !(V3 Float),
     rcCloudHeight :: !Float,
     rcTime :: !Float,
+    rcPrevViewProj :: !(M44 Float),
     rcWireframeEnabled :: !Bool,
     rcDeferred :: !DeferredResources,
     rcCullResources :: !ComputeCullResources,
@@ -73,8 +74,9 @@ buildRecordContext ::
   Float ->
   V3 Float ->
   Float ->
+  M44 Float ->
   RecordContext
-buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time =
+buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProj =
   RecordContext
     { rcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
       rcFrameDescriptorSets = frameDescriptorSets,
@@ -93,6 +95,7 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
       rcSunDir = sunDir,
       rcCloudHeight = fsCloudHeight frameState,
       rcTime = time,
+      rcPrevViewProj = prevViewProj,
       rcWireframeEnabled = fsWireframe frameState,
       rcDeferred = dr,
       rcCullResources = ccr,
@@ -176,7 +179,8 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdSunDir = rcSunDir,
                 dpdCloudHeight = rcCloudHeight,
                 dpdTime = rcTime,
-                dpdBlendFactor = 0.3,
+                dpdPrevViewProj = rcPrevViewProj,
+                dpdBlendFactor = 0.92,
                 dpdCloudRenderPass = drCloudRenderPass rcDeferred,
                 dpdCloudFramebuffer = cloudFramebuffer,
                 dpdCloudPipeline = drCloudPipeline rcDeferred,

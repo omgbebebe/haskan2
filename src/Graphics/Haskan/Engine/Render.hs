@@ -137,7 +137,7 @@ import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
-import Linear.Matrix (identity, inv33, inv44, transpose, (!*), (!*!))
+import Linear.Matrix (M44, identity, inv33, inv44, transpose, (!*), (!*!))
 import Linear.Projection qualified
 import Linear.Quaternion (Quaternion (..))
 import Linear.V3 (_x, _y, _z)
@@ -183,7 +183,8 @@ data RenderEnv = RenderEnv
     reTvTimeOfDay :: !(STM.TVar Float),
     reTvTimeSpeed :: !(STM.TVar Float),
     reTvDayNightEnabled :: !(STM.TVar Bool),
-    reTvCloudHeight :: !(STM.TVar Float)
+    reTvCloudHeight :: !(STM.TVar Float),
+    rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat))
   }
 
 instance (MonadIO m) => MonadTelemetry (ReaderT RenderEnv m) where
@@ -311,7 +312,10 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       (w, h) = surfaceExtentWH (rcSurfaceExtent ctx)
       view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
       projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
+      viewProj = projection !*! view
       skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
+  prevViewProj <- liftIO $ STM.readTVarIO rePrevViewProj
+  liftIO $ STM.atomically $ STM.writeTVar rePrevViewProj viewProj
   uploadUniformBuffer mvpMemory 0 [view, projection]
 
   frameState <- readFrameState
@@ -320,7 +324,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   currentTime <- getMonotonicTime
   let elapsedSeconds = fromIntegral (toNanoSecs currentTime) / 1e9
 
-  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds
+  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj)
       recordAction = buildRecordAction recordCtx
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
@@ -729,46 +733,48 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
         unless exit $ do
           renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
             with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView) $ \dr -> do
-              -- Update lighting descriptor sets with light SSBO
-              for_ (drLightingDescriptorSets dr) $ \ds ->
-                DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
-              let renderEnv =
-                    RenderEnv
-                      { reWindow = window,
-                        reContext = context,
-                        reDeferred = dr,
-                        reTargetFPS = targetFPS,
-                        reImageAvailableSemaphores = imageAvailableSemaphores,
-                        reControl = control,
-                        reFrameMvpMemories = frameMvpMemories,
-                        reTvCamera = tvCamera,
-                        reTvInspect = tvInspect,
-                        reTvInsp = tvInsp,
-                        reTvRenderDebug = tvRenderDebug,
-                        reECSWorld = ecsWorld,
-                        reResourceManager = rm,
-                        reTextureSampler = textureSampler,
-                        reFrameDescriptorSets = frameDescriptorSets,
-                        reTextureIndexMap = textureIndexMap,
-                        reTvWireframe = tvWireframe,
-                        reFrameStatsRef = frameStatsRef,
-                        reCullResources = computeCullResources,
-                        reTvDebugMode = tvDebugMode,
-                        reTvAxisOverlay = tvAxisOverlay,
-                        reTvGroundPlane = tvGroundPlane,
-                        reTvPendingScreenshot = tvPendingScreenshot,
-                        reTvPendingAllStages = tvPendingAllStages,
-                        reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
-                        rePhysicalDevice = physicalDevice,
-                        reLightSsboBuffer = lightSsboBuffer,
-                        reLightSsboMemory = lightSsboMemory,
-                        reTvLights = tvLights,
-                        reTvTimeOfDay = tvTimeOfDay,
-                        reTvTimeSpeed = tvTimeSpeed,
-                        reTvDayNightEnabled = tvDayNightEnabled,
-                        reTvCloudHeight = tvCloudHeight
-                      }
-              renderFrameLoop renderEnv 0
+               -- Update lighting descriptor sets with light SSBO
+               for_ (drLightingDescriptorSets dr) $ \ds ->
+                 DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
+               prevViewProjTVar <- STM.newTVarIO (identity :: M44 Foreign.C.CFloat)
+               let renderEnv =
+                     RenderEnv
+                       { reWindow = window,
+                         reContext = context,
+                         reDeferred = dr,
+                         reTargetFPS = targetFPS,
+                         reImageAvailableSemaphores = imageAvailableSemaphores,
+                         reControl = control,
+                         reFrameMvpMemories = frameMvpMemories,
+                         reTvCamera = tvCamera,
+                         reTvInspect = tvInspect,
+                         reTvInsp = tvInsp,
+                         reTvRenderDebug = tvRenderDebug,
+                         reECSWorld = ecsWorld,
+                         reResourceManager = rm,
+                         reTextureSampler = textureSampler,
+                         reFrameDescriptorSets = frameDescriptorSets,
+                         reTextureIndexMap = textureIndexMap,
+                         reTvWireframe = tvWireframe,
+                         reFrameStatsRef = frameStatsRef,
+                         reCullResources = computeCullResources,
+                         reTvDebugMode = tvDebugMode,
+                         reTvAxisOverlay = tvAxisOverlay,
+                         reTvGroundPlane = tvGroundPlane,
+                         reTvPendingScreenshot = tvPendingScreenshot,
+                         reTvPendingAllStages = tvPendingAllStages,
+                         reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
+                         rePhysicalDevice = physicalDevice,
+                         reLightSsboBuffer = lightSsboBuffer,
+                         reLightSsboMemory = lightSsboMemory,
+                         reTvLights = tvLights,
+                         reTvTimeOfDay = tvTimeOfDay,
+                         reTvTimeSpeed = tvTimeSpeed,
+                         reTvDayNightEnabled = tvDayNightEnabled,
+                         reTvCloudHeight = tvCloudHeight,
+                         rePrevViewProj = prevViewProjTVar
+                       }
+               renderFrameLoop renderEnv 0
           outerLoop renderFrameLoopFinished
 
   logInfo LogGeneral "Starting render loop"

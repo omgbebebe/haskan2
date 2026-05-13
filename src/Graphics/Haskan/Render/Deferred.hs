@@ -28,6 +28,8 @@ import Graphics.Haskan.Vulkan.Resources (BufferResource (..), MeshResource (..),
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Linear.V3 (V3 (..))
+import Linear.V4 (V4 (..))
+import Linear.Matrix (M44)
 
 -- | Data needed to build a deferred rendering graph.
 data DeferredPassData = DeferredPassData
@@ -67,6 +69,7 @@ data DeferredPassData = DeferredPassData
     dpdSunDir :: !(V3 Float),
     dpdCloudHeight :: !Float,
     dpdTime :: !Float,
+    dpdPrevViewProj :: !(M44 Float),
     dpdBlendFactor :: !Float,
     -- Cloud pass
     dpdCloudRenderPass :: !Vulkan.VkRenderPass,
@@ -175,6 +178,11 @@ buildDeferredGraph DeferredPassData {..} = do
                 (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = dpdSkyboxRays
                 (V3 tintR tintG tintB) = dpdSkyTint
                 (V3 sunDirX sunDirY sunDirZ) = dpdSunDir
+                (V4 col0 col1 col2 col3) = dpdPrevViewProj
+                (V4 m00 m10 m20 m30) = col0
+                (V4 m01 m11 m21 m31) = col1
+                (V4 m02 m12 m22 m32) = col2
+                (V4 m03 m13 m23 m33) = col3
                 camPosData =
                   [ realToFrac camX,
                     realToFrac camY,
@@ -205,10 +213,28 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac sunDirZ,
                     realToFrac dpdCloudHeight,
                     realToFrac dpdTime,
-                    realToFrac dpdBlendFactor
+                    realToFrac dpdBlendFactor,
+                    0,
+                    0,
+                    realToFrac m00,
+                    realToFrac m10,
+                    realToFrac m20,
+                    realToFrac m30,
+                    realToFrac m01,
+                    realToFrac m11,
+                    realToFrac m21,
+                    realToFrac m31,
+                    realToFrac m02,
+                    realToFrac m12,
+                    realToFrac m22,
+                    realToFrac m32,
+                    realToFrac m03,
+                    realToFrac m13,
+                    realToFrac m23,
+                    realToFrac m33
                   ] ::
                     [CFloat]
-             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdCloudLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 120 . Foreign.castPtr
+             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdCloudLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 192 . Foreign.castPtr
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
             -- Copy current cloud result to history buffer for next frame
             CommandBuffer.layerTransition commandBuffer dpdCloudImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL

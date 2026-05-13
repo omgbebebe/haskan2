@@ -42,10 +42,14 @@ type CloudPushConstant =
        "skyTintB" ':-> Float,
        "iblIntensity" ':-> Float,
        "sunDir" ':-> V 3 Float,
-       "cloudHeight" ':-> Float,
-       "time" ':-> Float,
-       "blendFactor" ':-> Float
-     ]
+        "cloudHeight" ':-> Float,
+        "time" ':-> Float,
+        "blendFactor" ':-> Float,
+        "prevViewProj0" ':-> V 4 Float,
+        "prevViewProj1" ':-> V 4 Float,
+        "prevViewProj2" ':-> V 4 Float,
+        "prevViewProj3" ':-> V 4 Float
+      ]
 
 cloudVertex :: ShaderModule "main" VertexShader CloudVertexDefs _
 cloudVertex = shader do
@@ -374,15 +378,48 @@ cloudFragment = shader do
       tintedSkyG = cloudSkyG * skyTintG
       tintedSkyB = cloudSkyB * skyTintB
 
-      -- Temporal accumulation: blend with history
+      -- Temporal accumulation with reprojection
       blendFactor = view @(Name "blendFactor") cameraPos
 
-  ~(Vec4 histR_h histG_h histB_h _) <- use @(ImageTexel "cloud_history") NilOps uv
+      -- World-space cloud entry point
+      worldX = camX + dirX * tEntry
+      worldY = cloudBottom
+      worldZ = camZ + dirZ * tEntry
+
+      -- Previous frame view-projection matrix columns
+      prevVP0 = view @(Name "prevViewProj0") cameraPos
+      prevVP1 = view @(Name "prevViewProj1") cameraPos
+      prevVP2 = view @(Name "prevViewProj2") cameraPos
+      prevVP3 = view @(Name "prevViewProj3") cameraPos
+
+      -- Manual mat4 * vec4 multiplication (column-vector convention)
+      ~(Vec4 m00 m10 m20 m30) = prevVP0
+      ~(Vec4 m01 m11 m21 m31) = prevVP1
+      ~(Vec4 m02 m12 m22 m32) = prevVP2
+      ~(Vec4 m03 m13 m23 m33) = prevVP3
+
+      prevClipX = m00 * worldX + m01 * worldY + m02 * worldZ + m03 * 1.0
+      prevClipY = m10 * worldX + m11 * worldY + m12 * worldZ + m13 * 1.0
+      prevClipZ = m20 * worldX + m21 * worldY + m22 * worldZ + m23 * 1.0
+      prevClipW = m30 * worldX + m31 * worldY + m32 * worldZ + m33 * 1.0
+
+      prevNDCX = prevClipX / max 0.0001 prevClipW
+      prevNDCY = prevClipY / max 0.0001 prevClipW
+
+      prevU = prevNDCX * 0.5 + 0.5
+      prevV = (-prevNDCY) * 0.5 + 0.5
+
+      validReproj = step 0.0 prevU * step prevU 1.0 * step 0.0 prevV * step prevV 1.0 * step 0.0 prevClipW
+
+      histUV = Vec2 prevU prevV
+
+  ~(Vec4 histR_h histG_h histB_h _) <- use @(ImageTexel "cloud_history") NilOps histUV
   let histR = convert histR_h
       histG = convert histG_h
       histB = convert histB_h
-      accR = blendFactor * histR + (1.0 - blendFactor) * tintedSkyR
-      accG = blendFactor * histG + (1.0 - blendFactor) * tintedSkyG
-      accB = blendFactor * histB + (1.0 - blendFactor) * tintedSkyB
+      reprojBlend = blendFactor * validReproj
+      accR = reprojBlend * histR + (1.0 - reprojBlend) * tintedSkyR
+      accG = reprojBlend * histG + (1.0 - reprojBlend) * tintedSkyG
+      accB = reprojBlend * histB + (1.0 - reprojBlend) * tintedSkyB
 
   put @"out_colour" (Vec4 accR accG accB 1.0)
