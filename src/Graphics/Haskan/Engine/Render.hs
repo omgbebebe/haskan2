@@ -54,7 +54,8 @@ import Graphics.Haskan.Debug.Server (CommandQueue, DebugServerHandle, startDebug
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
-import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
+import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logDebug, logInfo)
+import Graphics.Haskan.Logger (LogCategory (..), showT)
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
 import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
@@ -154,14 +155,14 @@ data RenderEnv = RenderEnv
   }
 
 renderFrameLoop ::
-  (MonadFail m, MonadIO m) =>
+  (MonadFail m, MonadIO m, MonadLog m) =>
   RenderEnv ->
   Int ->
   m Bool
 renderFrameLoop env frameNumber = runReaderT (renderFrameLoop' frameNumber) env
 
 renderFrameLoop' ::
-  (MonadFail m, MonadIO m) =>
+  (MonadFail m, MonadIO m, MonadLog m) =>
   Int ->
   RenderLoopM m Bool
 renderFrameLoop' frameNumber = do
@@ -207,7 +208,7 @@ renderFrameLoop' frameNumber = do
           mvpMemory = frameMvpMemories !! frameNumber
       camera <- liftIO $ STM.readTVarIO tvCamera
       drawList <- extractDrawList ecsWorld rm textureIndexMap
-      logDebugIO LogRender $ "draw list: " <> showT (length drawList) <> " entities"
+      logDebug LogRender $ "draw list: " <> showT (length drawList) <> " entities"
       liftIO $ do
         let camPos = realToFrac <$> Camera.cameraPosition camera
             camTarget = realToFrac <$> Camera.cameraTarget camera
@@ -309,14 +310,14 @@ renderFrameLoop' frameNumber = do
               }
       liftIO $ Buffer.updateStorageBuffer device ccrEntityMemory 0 entityData
       liftIO $ Buffer.updateUniformBuffer device ccrCullDataMemory [cullData]
-      logDebugIO LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
+      logDebug LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
 
       -- Upload lights to SSBO
       lights' <- liftIO $ STM.readTVarIO tvLights
       let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
       liftIO $ Buffer.updateStorageBuffer device lightSsboMemory 0 lightsToUpload
       let lightCount = fromIntegral (length lights') :: Word32
-      logDebugIO LogRender $ "lights uploaded: " <> showT (length lights')
+      logDebug LogRender $ "lights uploaded: " <> showT (length lights')
       case drawList of
         [] -> pure (False, False)
         _ -> do
@@ -411,7 +412,7 @@ renderFrameLoop' frameNumber = do
                               dpdWireframeEnabled = wireframeEnabled'
                             }
                 case Graph.compileGraph graphRes graphPasses of
-                  Left err -> liftIO $ logInfoIO LogRender $ "graph compilation failed: " <> Text.pack (show err)
+                  Left err -> liftIO $ logInfo LogRender $ "graph compilation failed: " <> Text.pack (show err)
                   Right compiled -> do
                     CommandBuffer.withCommandBuffer commandBuffer $ do
                       let numWorkgroups = (length drawList + 63) `div` 64
@@ -472,9 +473,9 @@ renderFrameLoop' frameNumber = do
                     when shouldScreenshot $ do
                       Vulkan.vkDeviceWaitIdle device >>= throwVkResult
                       let gbufferImages = drGBufferImages !! fromIntegral imageIndex
-                      logInfoIO LogGeneral "capturing screenshot..."
+                      logInfo LogGeneral "capturing screenshot..."
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
-                      logInfoIO LogGeneral "screenshot saved"
+                      logInfo LogGeneral "screenshot saved"
                     shouldAllStages <- STM.atomically $ do
                       b <- STM.readTVar tvPendingAllStages
                       when b $ STM.writeTVar tvPendingAllStages False
@@ -482,22 +483,22 @@ renderFrameLoop' frameNumber = do
                     when shouldAllStages $ do
                       Vulkan.vkDeviceWaitIdle device >>= throwVkResult
                       let gbufferImages = drGBufferImages !! fromIntegral imageIndex
-                      logInfoIO LogGeneral "capturing all pipeline stages..."
+                      logInfo LogGeneral "capturing all pipeline stages..."
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (head gbufferImages) rcSurfaceExtent Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT "position"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 1) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "normal"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 3) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "emissive"
-                      logInfoIO LogGeneral "all stages saved"
+                      logInfo LogGeneral "all stages saved"
                     shouldSwapchain <- STM.atomically $ do
                       b <- STM.readTVar tvPendingSwapchainScreenshot
                       when b $ STM.writeTVar tvPendingSwapchainScreenshot False
                       pure b
                     when shouldSwapchain $ do
                       Vulkan.vkDeviceWaitIdle device >>= throwVkResult
-                      logInfoIO LogGeneral "capturing swapchain screenshot..."
+                      logInfo LogGeneral "capturing swapchain screenshot..."
                       let swapchainImage = swapchainImages !! fromIntegral imageIndex
                       Screenshot.saveSwapchainScreenshot device physicalDevice rcGraphicsCommandPool graphicsQueueHandler swapchainImage rcSurfaceExtent
-                      logInfoIO LogGeneral "swapchain screenshot saved"
+                      logInfo LogGeneral "swapchain screenshot saved"
                   pure (False, False)
                 Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
                 Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
@@ -505,22 +506,22 @@ renderFrameLoop' frameNumber = do
             Render.FrameSuboptimal _ -> do
               liftIO $ fail "suboptimal"
             Render.FrameOutOfDate -> do
-              liftIO $ logInfoIO LogGeneral "resizing swapchain"
+              liftIO $ logInfo LogGeneral "resizing swapchain"
               pure (True, False)
             Render.FrameTimeout -> do
               liftIO $ threadDelay 16000
               pure (False, False)
             Render.FrameFailed err -> liftIO $ fail err
     Just Terminate -> do
-      liftIO $ logInfoIO LogGeneral "terminating render loop by signal"
+      liftIO $ logInfo LogGeneral "terminating render loop by signal"
       pure (True, True)
 
   frameEndTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   if needRestart
     then liftIO $ do
-      logInfoIO LogGeneral "waiting IDLE state for device"
+      logInfo LogGeneral "waiting IDLE state for device"
       Vulkan.vkDeviceWaitIdle device >>= throwVkResult
-      logInfoIO LogGeneral "terminating renderFrameLoop"
+      logInfo LogGeneral "terminating renderFrameLoop"
       pure terminating
     else do
       let renderTime = frameEndTime - frameStartTime
@@ -530,11 +531,11 @@ renderFrameLoop' frameNumber = do
         stats <- readIORef frameStatsRef
         let (newStats, mMsg) = updateFrameStats stats renderTime
         writeIORef frameStatsRef newStats
-        for_ mMsg $ logInfoIO LogRender
+        for_ mMsg $ logInfo LogRender
       renderFrameLoop' ((frameNumber + 1) `mod` Render.maxFramesInFlight)
 
 renderLoop ::
-  (MonadFail m, MonadManaged m, MonadIO m) =>
+  (MonadFail m, MonadManaged m, MonadIO m, MonadLog m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
   [String] ->
@@ -557,30 +558,30 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
   graphicsQueueHandler <- Device.getDeviceQueueHandler device graphicsQueueFamilyIndex 0
   presentQueueHandler <- Device.getDeviceQueueHandler device presentQueueFamilyIndex 0
 
-  logInfoIO LogGeneral "compiling shaders..."
+  logInfo LogGeneral "compiling shaders..."
   liftIO $ FIR.compileTo "data/shaders/fir/vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Shaders.vertex
-  logInfoIO LogGeneral "  vert.spv done"
+  logInfo LogGeneral "  vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Shaders.fragment
-  logInfoIO LogGeneral "  frag.spv done"
+  logInfo LogGeneral "  frag.spv done"
 
   liftIO $ FIR.compileTo "data/shaders/fir/gbuf_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GBufferShaders.vertex
-  logInfoIO LogGeneral "  gbuf_vert.spv done"
+  logInfo LogGeneral "  gbuf_vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/gbuf_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GBufferShaders.fragment
-  logInfoIO LogGeneral "  gbuf_frag.spv done"
+  logInfo LogGeneral "  gbuf_frag.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/light_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] LightingShaders.vertex
-  logInfoIO LogGeneral "  light_vert.spv done"
+  logInfo LogGeneral "  light_vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/light_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] LightingShaders.fragment
-  logInfoIO LogGeneral "  light_frag.spv done"
+  logInfo LogGeneral "  light_frag.spv done"
 
   liftIO $ FIR.compileTo "data/shaders/fir/wire_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WireframeShaders.vertex
-  logInfoIO LogGeneral "  wire_vert.spv done"
+  logInfo LogGeneral "  wire_vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/wire_geom.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WireframeShaders.geometry
-  logInfoIO LogGeneral "  wire_geom.spv done"
+  logInfo LogGeneral "  wire_geom.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/wire_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WireframeShaders.fragment
-  logInfoIO LogGeneral "  wire_frag.spv done"
+  logInfo LogGeneral "  wire_frag.spv done"
 
   liftIO $ FIR.compileTo "data/shaders/fir/cull_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CullShaders.program
-  logInfoIO LogGeneral "  cull_comp.spv done"
+  logInfo LogGeneral "  cull_comp.spv done"
 
   vertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/vert.spv"
   fragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/frag.spv"
@@ -611,12 +612,12 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
   renderFinishedFences <- replicateM Render.maxFramesInFlight (Fence.managedFence device)
 
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
-  logDebugIO LogTexture "textureCommandBuffer created"
+  logDebug LogTexture "textureCommandBuffer created"
 
   let envDir = "data/textures/cubemaps/" ++ envMapDir ++ "/"
       radianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
       irradianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
-  logInfoIO LogGeneral "loading IBL cubemaps..."
+  logInfo LogGeneral "loading IBL cubemaps..."
   radianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile radianceFacePaths
   irradianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile irradianceFacePaths
   let (radDatas, radWidths, _) = unzip3 radianceFaceDatas
@@ -628,20 +629,20 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
   irradianceCubemap <- Texture.createCubemap rm physicalDevice device irrSize irrDatas graphicsQueueHandler textureCommandBuffer
   mRadianceView <- Texture.textureImageView rm radianceCubemap
   mIrradianceView <- Texture.textureImageView rm irradianceCubemap
-  logInfoIO LogGeneral $ "IBL cubemaps loaded: radiance=" <> showT radSize <> "px irradiance=" <> showT irrSize <> "px mipLevels=" <> showT radMipLevels
+  logInfo LogGeneral $ "IBL cubemaps loaded: radiance=" <> showT radSize <> "px irradiance=" <> showT irrSize <> "px mipLevels=" <> showT radMipLevels
 
   lightingSampler <- Texture.createSamplerWithLod device (fromIntegral radMipLevels - 1)
-  logInfoIO LogGeneral "lighting sampler created with mip support"
+  logInfo LogGeneral "lighting sampler created with mip support"
 
   let brdfPixels = BRDF.generateBRDFLUT 256 256
   brdfTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 brdfPixels graphicsQueueHandler textureCommandBuffer
   mBrdfView <- Texture.textureImageView rm brdfTexHandle
-  logInfoIO LogGeneral "BRDF LUT generated"
+  logInfo LogGeneral "BRDF LUT generated"
 
   -- Load 3D cloud noise texture
-  logInfoIO LogGeneral "loading 3D cloud noise texture..."
+  logInfo LogGeneral "loading 3D cloud noise texture..."
   cloudNoiseView <- Texture.managedTexture3D physicalDevice device "data/textures/cloud_noise/cloud_noise_128.raw" 128 128 128 graphicsQueueHandler textureCommandBuffer
-  logInfoIO LogGeneral "3D cloud noise texture loaded"
+  logInfo LogGeneral "3D cloud noise texture loaded"
 
   assetCache <- initCache ".haskan2-cache"
 
@@ -686,7 +687,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
           let whiteTexData = Texture.generateGridTexture 2 2 1
           whiteTexHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
 
-          liftIO $ logInfoIO LogGeneral "spawning 10000 stress test entities"
+          liftIO $ logInfo LogGeneral "spawning 10000 stress test entities"
           forM_ [0 .. 9999] $ \i -> do
             let x = fromIntegral (i `mod` 100) * 1.0 - 50.0
                 z = fromIntegral (i `div` 100) * 1.0 - 50.0
@@ -699,7 +700,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
             ECS.setRoughnessFactor world entity 0.5
 
           let sceneBbox = BBox (V3 (-50) (-2) (-50)) (V3 50 2 50)
-          logInfoIO LogGeneral $ "stress test scene bounds: " <> showT sceneBbox
+          logInfo LogGeneral $ "stress test scene bounds: " <> showT sceneBbox
           pure (world, 10000, sceneBbox, IntMap.empty)
         else
           if isGLTF
@@ -714,7 +715,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
                       zip (map (fromIntegral . unTextureHandle) textures) textureData
 
               sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
-              logInfoIO LogGeneral $ "scene bounds: " <> showT sceneBbox
+              logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
 
               pure (world, length meshes, sceneBbox, pixelMap)
             else do
@@ -723,7 +724,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
               meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
 
               let objBounds = computeMeshBounds mesh
-              logInfoIO LogGeneral $ "OBJ mesh bounds: " <> showT objBounds
+              logInfo LogGeneral $ "OBJ mesh bounds: " <> showT objBounds
 
               entity1 <- ECS.spawnEntity world
               ECS.setTransform world entity1 (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
@@ -755,7 +756,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
               ECS.setRoughnessFactor world groundEntity 1.0
 
               sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
-              logInfoIO LogGeneral $ "scene bounds: " <> showT sceneBbox
+              logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
 
               pure (world, 1, sceneBbox, IntMap.empty)
 
@@ -770,13 +771,13 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
         Just _ -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.0) 0.78 (realToFrac (pi / 6 :: Double))
         Nothing -> setAngles adjustedCam 0 (realToFrac (pi / 6 :: Double))
   liftIO $ STM.atomically $ STM.writeTVar tvCamera finalCam
-  logInfoIO LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance finalCam)
+  logInfo LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance finalCam)
 
   when isStressTest $ liftIO $ STM.atomically $ STM.writeTVar (wireframeEnabled gameState) False
 
   initialDrawList <- extractDrawList ecsWorld rm IntMap.empty
   let numDrawEntities = length initialDrawList
-  logInfoIO LogRender $ "initial draw list has " <> showT numDrawEntities <> " entities"
+  logInfo LogRender $ "initial draw list has " <> showT numDrawEntities <> " entities"
 
   liftIO $ do
     let meshHandles = nub (map (mrHandle . dcMesh) initialDrawList)
@@ -794,16 +795,16 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
                 mrFirstIndex = fi,
                 mrVertexOffset = 0
               }
-      logInfoIO LogRender $ "merged " <> showT (length meshHandles) <> " meshes into single buffers"
+      logInfo LogRender $ "merged " <> showT (length meshHandles) <> " meshes into single buffers"
 
   let viewProjUniformSize = 128 :: Int
       initialViewProjData = [identity, makeProjectionMatrix 16 9] :: [M44 Foreign.C.CFloat]
 
-  logDebugIO LogBuffer $ "initialViewProjData length=" <> showT (length initialViewProjData) <> " size=" <> showT (length initialViewProjData * sizeOf (undefined :: M44 Foreign.C.CFloat))
+  logDebug LogBuffer $ "initialViewProjData length=" <> showT (length initialViewProjData) <> " size=" <> showT (length initialViewProjData * sizeOf (undefined :: M44 Foreign.C.CFloat))
   frameMvpBuffers <-
     replicateM Render.maxFramesInFlight $
       Buffer.managedUniformBuffer physicalDevice device initialViewProjData
-  logDebugIO LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
+  logDebug LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
 
   let maxEntities = 16384 :: Int
       dummyEntityData =
@@ -842,12 +843,12 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
   let maxLights = 256 :: Int
       dummyLightData = LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0
   (lightSsboBuffer, lightSsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxLights dummyLightData) Vulkan.VK_ZERO_FLAGS
-  logDebugIO LogBuffer $ "light SSBO created: " <> showT (maxLights * sizeOf (undefined :: LightData)) <> " bytes"
+  logDebug LogBuffer $ "light SSBO created: " <> showT (maxLights * sizeOf (undefined :: LightData)) <> " bytes"
 
-  logDebugIO LogBuffer $ "compute buffers created: entitySSBO=" <> showT (maxEntities * sizeOf (undefined :: ComputeEntityData)) <> " drawCommands=" <> showT (maxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)) <> " cullData=" <> showT (sizeOf (undefined :: ComputeCullData))
+  logDebug LogBuffer $ "compute buffers created: entitySSBO=" <> showT (maxEntities * sizeOf (undefined :: ComputeEntityData)) <> " drawCommands=" <> showT (maxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)) <> " cullData=" <> showT (sizeOf (undefined :: ComputeCullData))
 
   DescriptorSet.updateComputeDescriptorSets device computeDescriptorSet entitySsboBuffer drawCommandsBuffer cullDataBuffer
-  logDebugIO LogRender "compute descriptor set updated"
+  logDebug LogRender "compute descriptor set updated"
 
   let computeCullResources =
         ComputeCullResources
@@ -863,9 +864,9 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
             ccrMaxEntities = maxEntities
           }
 
-  logInfoIO LogTexture "creating sampler"
+  logInfo LogTexture "creating sampler"
   textureSampler <- Texture.managedSampler device
-  logInfoIO LogTexture "sampler created"
+  logInfo LogTexture "sampler created"
 
   let resizeImageBilinear src sw sh dw dh =
         let srcIdx x y = (y * sw + x) * 4
@@ -899,7 +900,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
   let uniqueTextures = nub $ IntMap.elems ecsMaterials
       numUniqueTextures = length uniqueTextures
 
-  logInfoIO LogTexture $ "unique textures: " <> showT numUniqueTextures
+  logInfo LogTexture $ "unique textures: " <> showT numUniqueTextures
 
   let textureIndexMap = IntMap.fromList $ zip (map (fromIntegral . unTextureHandle) uniqueTextures) [0 ..]
       unTextureHandle (TextureHandle h) = h
@@ -931,18 +932,18 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
             Just view -> pure view
             Nothing -> liftIO $ fail "failed to create texture view"
 
-  logInfoIO LogTexture $ "bindless textures created: " <> showT (length bindlessTextureViews)
+  logInfo LogTexture $ "bindless textures created: " <> showT (length bindlessTextureViews)
 
   let totalDescriptorSets = Render.maxFramesInFlight
   descriptorPool <- DescriptorPool.managedDescriptorPool device totalDescriptorSets
-  logDebugIO LogRender $ "descriptor pool created for " <> showT totalDescriptorSets <> " sets"
+  logDebug LogRender $ "descriptor pool created for " <> showT totalDescriptorSets <> " sets"
 
   frameDescriptorSets <-
     replicateM totalDescriptorSets $
       DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
-  logDebugIO LogRender $ "allocated " <> showT (length frameDescriptorSets) <> " frame descriptor sets"
+  logDebug LogRender $ "allocated " <> showT (length frameDescriptorSets) <> " frame descriptor sets"
 
-  logInfoIO LogVulkan "updating frame descriptor sets"
+  logInfo LogVulkan "updating frame descriptor sets"
   for_ (zip [0 ..] frameMvpBuffers) $ \(frameIdx, (buf, _)) -> do
     let ds = frameDescriptorSets !! frameIdx
     DescriptorSet.updateDescriptorSetsBindless
@@ -953,9 +954,9 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
       textureSampler
       bindlessTextureViews
       entitySsboBuffer
-  logInfoIO LogVulkan "frame descriptor sets updated"
+  logInfo LogVulkan "frame descriptor sets updated"
 
-  logInfoIO LogRender "all resources created, entering render loop"
+  logInfo LogRender "all resources created, entering render loop"
   liftIO $ putMVar readySemaphore ()
 
   let mkRenderContext =
@@ -1038,8 +1039,8 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
                 renderFrameLoop renderEnv 0
             outerLoop renderFrameLoopFinished
 
-  logInfoIO LogGeneral "Starting render loop"
+  logInfo LogGeneral "Starting render loop"
   outerLoop False
 
-  logInfoIO LogGeneral "renderLoop finished"
+  logInfo LogGeneral "renderLoop finished"
   destroyAllResources rm

@@ -24,6 +24,7 @@ module Graphics.Haskan.Logger
     logWarn,
     logError,
     logFatal,
+    logMessageIO,
     logDebugIO,
     logInfoIO,
     logWarnIO,
