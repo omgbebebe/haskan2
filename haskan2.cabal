@@ -45,7 +45,8 @@ library
                         Graphics.Haskan.Engine.Types
                        Graphics.Haskan.Engine.Scene
                        Graphics.Haskan.Engine.Update
-                       Graphics.Haskan.Engine.Render
+                        Graphics.Haskan.Engine.Render
+                        Graphics.Haskan.Engine.Render.Internal.FramePrepare
                        Graphics.Haskan.Input
                        Graphics.Haskan.Resources
                        Graphics.Haskan.Vertex

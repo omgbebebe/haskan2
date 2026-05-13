@@ -50,6 +50,13 @@ import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot 
 import Graphics.Haskan.Debug.Interface (DebugCameraSnapshot (..), DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), debugMessageToActionEvent, encodeDebugResponse, parseDebugMessage)
 import Graphics.Haskan.Debug.Screenshot qualified as Screenshot
 import Graphics.Haskan.Debug.Server (CommandQueue, DebugServerHandle, startDebugServer, stopDebugServer)
+import Graphics.Haskan.Engine.Render.Internal.FramePrepare
+  ( buildAllEntityData,
+    buildCullData,
+    buildRenderDebugInfo,
+    computeEntityDebugInfos,
+    computeSkyParams,
+  )
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
@@ -260,105 +267,17 @@ renderFrameLoop' frameNumber = do
       camera <- readCamera
       drawList <- extractDrawList ecsWorld rm textureIndexMap
       logDebug LogRender $ "draw list: " <> showT (length drawList) <> " entities"
-      liftIO $ do
-        let camPos = realToFrac <$> Camera.cameraPosition camera
-            camTarget = realToFrac <$> Camera.cameraTarget camera
-            w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
-            h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
-            projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> makeProjectionMatrix w h :: M44 Float
-            viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
-            sampleLocalVerts :: [V3 Float]
-            sampleLocalVerts =
-              [ V3 (-0.5) (-0.5) (-0.5),
-                V3 0.5 (-0.5) (-0.5),
-                V3 0.5 0.5 (-0.5),
-                V3 (-0.5) 0.5 (-0.5),
-                V3 (-0.5) (-0.5) 0.5,
-                V3 0.5 (-0.5) 0.5,
-                V3 0.5 0.5 0.5,
-                V3 (-0.5) 0.5 0.5
-              ]
-            toNDC :: M44 Float -> V3 Float -> V3 Float
-            toNDC mvp (V3 x y z) =
-              let x', y', z' :: Float
-                  x' = x
-                  y' = y
-                  z' = z
-                  V4 cx cy cz cw = (mvp !* V4 x' y' z' 1.0) :: V4 Float
-               in if abs cw > 0.001 then V3 (cx / cw) (cy / cw) (cz / cw) else V3 cx cy cz
-            entityDebugInfos =
-              zipWith
-                ( \idx dc ->
-                    let modelMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> dcWorldMatrix dc :: M44 Float
-                        mvp = projMat !*! viewMat !*! modelMat
-                        ndcVerts = map (toNDC mvp) sampleLocalVerts
-                     in EntityDebugInfo
-                          { ediEntityId = idx,
-                            ediWorldMatrix = map (map realToFrac) (toListOfV4 (fmap (fmap realToFrac) modelMat)),
-                            ediPosition = realToFrac <$> tPosition (dcTransform dc),
-                            ediSampleVerticesNDC = ndcVerts
-                          }
-                )
-                [0 ..]
-                drawList
-        STM.atomically $
-          STM.writeTVar tvRenderDebug $
-            Just
-              RenderDebugInfo
-                { rdiFrameNumber = frameNumber,
-                  rdiCameraPos = camPos,
-                  rdiCameraTarget = camTarget,
-                  rdiProjectionMatrix = map (map realToFrac) (toListOfV4 (fmap (fmap realToFrac) projMat)),
-                  rdiEntities = entityDebugInfos
-                }
-      entityData <- liftIO $ forM (zip [0 ..] drawList) $ \(idx, dc) -> do
-        let worldMat = dcWorldMatrix dc
-            meshRes = dcMesh dc
-            (wmin, wmax) = transformAABB worldMat (mrBounds meshRes)
-            m33 =
-              V3
-                (V3 (worldMat ^. _x . _x) (worldMat ^. _x . _y) (worldMat ^. _x . _z))
-                (V3 (worldMat ^. _y . _x) (worldMat ^. _y . _y) (worldMat ^. _y . _z))
-                (V3 (worldMat ^. _z . _x) (worldMat ^. _z . _y) (worldMat ^. _z . _z))
-            normalM33 = transpose (inv33 m33)
-            normalM44 =
-              V4
-                (V4 (normalM33 ^. _x . _x) (normalM33 ^. _x . _y) (normalM33 ^. _x . _z) 0)
-                (V4 (normalM33 ^. _y . _x) (normalM33 ^. _y . _y) (normalM33 ^. _y . _z) 0)
-                (V4 (normalM33 ^. _z . _x) (normalM33 ^. _z . _y) (normalM33 ^. _z . _z) 0)
-                (V4 0 0 0 1)
-        pure
-          ComputeEntityData
-            { ceTransform = (realToFrac <$>) <$> Linear.Matrix.transpose worldMat,
-              ceNormalMatrix = (realToFrac <$>) <$> normalM44,
-              ceAabbMin = V4 (realToFrac $ wmin ^. _x) (realToFrac $ wmin ^. _y) (realToFrac $ wmin ^. _z) 1,
-              ceAabbMax = V4 (realToFrac $ wmax ^. _x) (realToFrac $ wmax ^. _y) (realToFrac $ wmax ^. _z) (1 :: Foreign.C.CFloat),
-              ceMaterialIndex = dcMaterialIndex dc,
-              ceFirstIndex = fromIntegral (mrFirstIndex meshRes),
-              ceVertexOffset = fromIntegral (mrVertexOffset meshRes),
-              ceIndexCount = fromIntegral (mrIndexCount meshRes),
-              ceMetallicRoughnessIndex = dcMetallicRoughnessIndex dc,
-              ceMetallicFactor = realToFrac (dcMetallicFactor dc),
-              ceRoughnessFactor = realToFrac (dcRoughnessFactor dc),
-              ceNormalIndex = dcNormalIndex dc,
-              ceOcclusionIndex = dcOcclusionIndex dc,
-              ceOcclusionStrength = realToFrac (dcOcclusionStrength dc),
-              ceEmissiveIndex = dcEmissiveIndex dc
-            }
-      let w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
+      let camPos = realToFrac <$> Camera.cameraPosition camera
+          camTarget = realToFrac <$> Camera.cameraTarget camera
+          w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
           h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
-          vp = (realToFrac <$>) <$> (makeProjectionMatrix w h !*! Camera.unViewMatrix (Camera.toMatrix camera)) :: M44 Float
-          planes = extractFrustumPlanes vp
-          camPos = Camera.cameraPosition camera
-          cullData =
-            ComputeCullData
-              { ccFrustumPlanes = map (fmap realToFrac) planes,
-                ccCameraPosition = V4 (realToFrac $ camPos ^. _x) (realToFrac $ camPos ^. _y) (realToFrac $ camPos ^. _z) 1,
-                ccEntityCount = fromIntegral (length drawList),
-                ccLodDistance1 = 100.0,
-                ccLodDistance2 = 400.0,
-                ccPad3 = 0
-              }
+          projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> makeProjectionMatrix w h :: M44 Float
+          viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
+          entityDebugInfos = computeEntityDebugInfos drawList projMat viewMat
+          renderDebugInfo = buildRenderDebugInfo frameNumber camPos camTarget projMat entityDebugInfos
+      liftIO $ STM.atomically $ STM.writeTVar tvRenderDebug $ Just renderDebugInfo
+      let entityData = buildAllEntityData drawList
+          cullData = buildCullData w h camera drawList
       uploadStorageBuffer ccrEntityMemory 0 entityData
       uploadUniformBuffer ccrCullDataMemory 0 [cullData]
       logDebug LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
@@ -387,14 +306,7 @@ renderFrameLoop' frameNumber = do
           currentTime <- readTimeOfDay
           dnEnabled <- readDayNightEnabled
           cloudHeight' <- readCloudHeight
-          let sunState =
-                if dnEnabled
-                  then computeSunState defaultDayNightConfig currentTime
-                  else DayNight.SunState (V3 (-1) (-1) (-1)) 1.0 (V3 1 1 1) (V3 1 1 1) 0.3 0.0
-              skyTint = DayNight.ssSkyTint sunState
-              iblInt = DayNight.ssIBLIntensity sunState
-              sunAzimuth = DayNight.ssAzimuth sunState
-              sunDir = DayNight.ssDirection sunState
+          let (sunState, skyTint, iblInt, sunAzimuth, sunDir) = computeSkyParams dnEnabled currentTime
 
           let recordAction imageIdx frameIdx = do
                 let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIdx
