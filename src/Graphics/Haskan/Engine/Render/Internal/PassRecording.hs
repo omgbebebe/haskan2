@@ -32,7 +32,7 @@ import Linear (V3 (..))
 
 -- | All values pre-computed before creating the IO callback
 data RecordContext = RecordContext
-  {     prcGraphicsCommandBuffers :: ![Vulkan.VkCommandBuffer],
+  {     rcGraphicsCommandBuffers :: ![Vulkan.VkCommandBuffer],
     rcFrameDescriptorSets :: ![Vulkan.VkDescriptorSet],
     rcTextureSampler :: !Vulkan.VkSampler,
     rcLightSsboBuffer :: !Vulkan.VkBuffer,
@@ -51,8 +51,8 @@ data RecordContext = RecordContext
     rcWireframeEnabled :: !Bool,
     rcDeferred :: !DeferredResources,
     rcCullResources :: !ComputeCullResources,
-    prcDevice :: !Vulkan.VkDevice,
-    prcSurfaceExtent :: !Vulkan.VkExtent2D
+    rcDevice :: !Vulkan.VkDevice,
+    rcPassSurfaceExtent :: !Vulkan.VkExtent2D
   }
 
 buildRecordContext ::
@@ -74,7 +74,7 @@ buildRecordContext ::
   RecordContext
 buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir =
   RecordContext
-    { prcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
+    { rcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
       rcFrameDescriptorSets = frameDescriptorSets,
       rcTextureSampler = textureSampler,
       rcLightSsboBuffer = lightSsboBuffer,
@@ -93,13 +93,13 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
       rcWireframeEnabled = fsWireframe frameState,
       rcDeferred = dr,
       rcCullResources = ccr,
-      prcDevice = device ctx,
-      prcSurfaceExtent = rcSurfaceExtent ctx
+      rcDevice = device ctx,
+      rcPassSurfaceExtent = rcSurfaceExtent ctx
     }
 
 buildRecordAction :: RecordContext -> Vulkan.Word32 -> Int -> IO ()
 buildRecordAction RecordContext {..} imageIdx frameIdx = do
-  let commandBuffer = prcGraphicsCommandBuffers !! fromIntegral imageIdx
+  let commandBuffer = rcGraphicsCommandBuffers !! fromIntegral imageIdx
       gBufferFramebuffer = drGBufferFramebuffers rcDeferred !! fromIntegral imageIdx
       lightingFramebuffer = drLightingFramebuffers rcDeferred !! fromIntegral imageIdx
       frameDescriptorSet = rcFrameDescriptorSets !! frameIdx
@@ -113,7 +113,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
             pcDescriptorSet = Vulkan.vkNullPtr,
             pcFramebuffer = gBufferFramebuffer,
             pcRenderPass = drGBufferRenderPass rcDeferred,
-            pcExtent = prcSurfaceExtent
+            pcExtent = rcPassSurfaceExtent
           }
       lightingPassCtx =
         PassContext
@@ -123,14 +123,14 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
             pcDescriptorSet = lightingDescriptorSet,
             pcFramebuffer = lightingFramebuffer,
             pcRenderPass = drLightingRenderPass rcDeferred,
-            pcExtent = prcSurfaceExtent
+            pcExtent = rcPassSurfaceExtent
           }
 
       (graphRes, graphPasses) =
         Graph.execRenderGraphBuilder $
           buildDeferredGraph
             DeferredPassData
-              { dpdExtent = prcSurfaceExtent,
+              {                 dpdExtent = rcPassSurfaceExtent,
                 dpdGBufferRenderPass = drGBufferRenderPass rcDeferred,
                 dpdGBufferFramebuffer = gBufferFramebuffer,
                 dpdGBufferPipeline = drGBufferPipeline rcDeferred,
@@ -138,7 +138,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdGBufferDescriptor = frameDescriptorSet,
                 dpdGBufferSampler = rcTextureSampler,
                 dpdDrawList = rcDrawList,
-                dpdDevice = prcDevice,
+                dpdDevice = rcDevice,
                 dpdDrawCommandsBuffer = ccrDrawCommandsBuffer rcCullResources,
                 dpdEntityCount = fromIntegral (length rcDrawList),
                 dpdLightingRenderPass = drLightingRenderPass rcDeferred,
