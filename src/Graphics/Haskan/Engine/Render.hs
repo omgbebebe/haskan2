@@ -55,6 +55,7 @@ import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources 
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Engine.Capabilities.Clock (MonadClock (..))
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logDebug, logInfo)
+import Graphics.Haskan.Engine.Capabilities.StateReader (MonadStateReader (..), consumeTVar, readTVarIO)
 import Graphics.Haskan.Engine.Capabilities.Telemetry (MonadTelemetry (..))
 import Graphics.Haskan.Logger (LogCategory (..), showT)
 import Graphics.Haskan.Mesh qualified as Mesh
@@ -169,15 +170,32 @@ instance (MonadIO m) => MonadTelemetry (ReaderT RenderEnv m) where
       let (_, mMsg) = updateFrameStats stats 0
       pure mMsg
 
+instance (MonadIO m) => MonadStateReader (ReaderT RenderEnv m) where
+  readCamera = asks reTvCamera >>= readTVarIO
+  readControl = asks reControl >>= liftIO . STM.atomically . TChan.tryReadTChan
+  readWireframe = asks reTvWireframe >>= readTVarIO
+  readDebugMode = asks reTvDebugMode >>= readTVarIO
+  readAxisOverlay = asks reTvAxisOverlay >>= readTVarIO
+  readGroundPlane = asks reTvGroundPlane >>= readTVarIO
+  readTimeOfDay = asks reTvTimeOfDay >>= readTVarIO
+  readDayNightEnabled = asks reTvDayNightEnabled >>= readTVarIO
+  readCloudHeight = asks reTvCloudHeight >>= readTVarIO
+  readInspector = asks reTvInsp >>= readTVarIO
+  readLights = asks reTvLights >>= readTVarIO
+  consumeInspectFlag = asks reTvInspect >>= consumeTVar
+  consumeScreenshotFlag = asks reTvPendingScreenshot >>= consumeTVar
+  consumeAllStagesFlag = asks reTvPendingAllStages >>= consumeTVar
+  consumeSwapchainScreenshotFlag = asks reTvPendingSwapchainScreenshot >>= consumeTVar
+
 renderFrameLoop ::
-  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m) =>
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m) =>
   RenderEnv ->
   Int ->
   m Bool
 renderFrameLoop env frameNumber = runReaderT (renderFrameLoop' frameNumber) env
 
 renderFrameLoop' ::
-  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m) =>
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m) =>
   Int ->
   RenderLoopM m Bool
 renderFrameLoop' frameNumber = do
@@ -216,12 +234,12 @@ renderFrameLoop' frameNumber = do
       reTvCloudHeight = tvCloudHeight
     } <- ask
   frameStartTime <- getMonotonicTime
-  maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
+  maybeControlMessage <- readControl
   (needRestart, terminating) <- case maybeControlMessage of
     Nothing -> do
       let imageAvailableSemaphore = imageAvailableSemaphores !! frameNumber
           mvpMemory = frameMvpMemories !! frameNumber
-      camera <- liftIO $ STM.readTVarIO tvCamera
+      camera <- readCamera
       drawList <- extractDrawList ecsWorld rm textureIndexMap
       logDebug LogRender $ "draw list: " <> showT (length drawList) <> " entities"
       liftIO $ do
@@ -328,7 +346,7 @@ renderFrameLoop' frameNumber = do
       logDebug LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
 
       -- Upload lights to SSBO
-      lights' <- liftIO $ STM.readTVarIO tvLights
+      lights' <- readLights
       let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
       liftIO $ Buffer.updateStorageBuffer device lightSsboMemory 0 lightsToUpload
       let lightCount = fromIntegral (length lights') :: Word32
@@ -467,12 +485,9 @@ renderFrameLoop' frameNumber = do
               presentResult <- liftIO $ runRenderM ctx $ presentFrame imageIndex (renderFinishedSemaphores !! fromIntegral imageIndex)
               case presentResult of
                 Vulkan.VK_SUCCESS -> do
-                  shouldInspect <- liftIO $ STM.atomically $ do
-                    b <- STM.readTVar tvInspect
-                    when b $ STM.writeTVar tvInspect False
-                    pure b
+                  shouldInspect <- consumeInspectFlag
                   when shouldInspect $ do
-                    mInsp <- liftIO $ STM.readTVarIO tvInsp
+                    mInsp <- readInspector
                     for_ mInsp $ \insp -> do
                       startTime <- liftIO $ getTime Monotonic
                       let snapshots = map drawCallToSnapshot drawList
@@ -480,21 +495,16 @@ renderFrameLoop' frameNumber = do
                           h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
                       snap <- buildFrameSnapshot (fromIntegral frameNumber) startTime ctx camera ((realToFrac <$>) <$> makeProjectionMatrix w h) snapshots
                       liftIO $ insp snap
+                  shouldScreenshot <- consumeScreenshotFlag
+                  shouldAllStages <- consumeAllStagesFlag
+                  shouldSwapchain <- consumeSwapchainScreenshotFlag
                   liftIO $ do
-                    shouldScreenshot <- STM.atomically $ do
-                      b <- STM.readTVar tvPendingScreenshot
-                      when b $ STM.writeTVar tvPendingScreenshot False
-                      pure b
                     when shouldScreenshot $ do
                       Vulkan.vkDeviceWaitIdle device >>= throwVkResult
                       let gbufferImages = drGBufferImages !! fromIntegral imageIndex
                       logInfo LogGeneral "capturing screenshot..."
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
                       logInfo LogGeneral "screenshot saved"
-                    shouldAllStages <- STM.atomically $ do
-                      b <- STM.readTVar tvPendingAllStages
-                      when b $ STM.writeTVar tvPendingAllStages False
-                      pure b
                     when shouldAllStages $ do
                       Vulkan.vkDeviceWaitIdle device >>= throwVkResult
                       let gbufferImages = drGBufferImages !! fromIntegral imageIndex
@@ -504,10 +514,6 @@ renderFrameLoop' frameNumber = do
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 3) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "emissive"
                       logInfo LogGeneral "all stages saved"
-                    shouldSwapchain <- STM.atomically $ do
-                      b <- STM.readTVar tvPendingSwapchainScreenshot
-                      when b $ STM.writeTVar tvPendingSwapchainScreenshot False
-                      pure b
                     when shouldSwapchain $ do
                       Vulkan.vkDeviceWaitIdle device >>= throwVkResult
                       logInfo LogGeneral "capturing swapchain screenshot..."
@@ -548,7 +554,7 @@ renderFrameLoop' frameNumber = do
       renderFrameLoop' ((frameNumber + 1) `mod` Render.maxFramesInFlight)
 
 renderLoop ::
-  (MonadFail m, MonadManaged m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m) =>
+  (MonadFail m, MonadManaged m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
   [String] ->

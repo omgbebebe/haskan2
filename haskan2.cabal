@@ -39,6 +39,7 @@ library
                         Graphics.Haskan.Engine
                         Graphics.Haskan.Engine.Capabilities.Clock
                         Graphics.Haskan.Engine.Capabilities.Log
+                        Graphics.Haskan.Engine.Capabilities.StateReader
                         Graphics.Haskan.Engine.Capabilities.Telemetry
                         Graphics.Haskan.Engine.Types
                        Graphics.Haskan.Engine.Scene
