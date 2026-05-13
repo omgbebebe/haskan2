@@ -1,9 +1,10 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Engine.Render
-  ( renderFrameLoop
-  , renderLoop
-  ) where
+  ( renderFrameLoop,
+    renderLoop,
+  )
+where
 
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar)
@@ -22,18 +23,18 @@ import Control.Monad.Managed (MonadManaged, runManaged, with)
 import Data.Foldable (for_, toList)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
+import Data.Int (Int32)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
-import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.List (nub, sort)
 import Data.Maybe (catMaybes)
-import Data.Sequence (Seq(..))
+import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Vector.Storable qualified as Vector
-import Data.Word (Word8, Word32, Word64)
-import Data.Int (Int32)
+import Data.Word (Word32, Word64, Word8)
 import FIR qualified
 import Foreign.C qualified
 import Foreign.Marshal.Array qualified
@@ -42,30 +43,30 @@ import Foreign.Storable (Storable (..), peekByteOff, pokeByteOff)
 import GHC.Generics
 import Graphics.Haskan.Assets.Cache (initCache)
 import Graphics.Haskan.BoundingBox (BBox (..), bboxCenter, bboxDiagonal, emptyBBox, fromPoints, mergeBBox, mergePoint)
-import Graphics.Haskan.Camera (Camera (..), AnyCamera)
+import Graphics.Haskan.Camera (AnyCamera, Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
+import Graphics.Haskan.DayNight (computeSunState, defaultDayNightConfig)
 import Graphics.Haskan.DayNight qualified as DayNight
-import Graphics.Haskan.DayNight (defaultDayNightConfig, computeSunState)
-import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot (..), defaultInspector, buildFrameSnapshot)
-import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), DebugCameraSnapshot (..), debugMessageToActionEvent, parseDebugMessage, encodeDebugResponse)
+import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot (..), buildFrameSnapshot, defaultInspector)
+import Graphics.Haskan.Debug.Interface (DebugCameraSnapshot (..), DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), debugMessageToActionEvent, encodeDebugResponse, parseDebugMessage)
 import Graphics.Haskan.Debug.Screenshot qualified as Screenshot
-import Graphics.Haskan.Debug.Server (DebugServerHandle, CommandQueue, startDebugServer, stopDebugServer)
-import Graphics.Haskan.Engine.Scene (computeSkyboxRays, makeProjectionMatrix, drawCallToSnapshot, computeMeshBounds, computeWorldSpaceBounds, computeSceneBounds, adjustCameraForScene)
-import Graphics.Haskan.Engine.Types (ComputeCullResources (..), ComputeEntityData (..), ComputeCullData (..), DrawIndexedIndirectCommand (..), EngineConfig (..), FrameStats (..), FrameTime (..), GameState (..), WorldState (..), InputBuffer (..), ControlMessage (..), RenderDebugInfo (..), EntityDebugInfo (..), LightData (..), toListOfV4, forkIOWithHandler, emptyFrameStats, updateFrameStats, transformAABB, extractFrustumPlanes, filterVisible, newInputBuffer, writeInputBuffer, flushInputBuffer)
+import Graphics.Haskan.Debug.Server (CommandQueue, DebugServerHandle, startDebugServer, stopDebugServer)
+import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
+import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
-import Graphics.Haskan.Logger (logInfoIO, logDebugIO, showT, LogCategory(..))
+import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
-import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
-import Graphics.Haskan.Render.Graph qualified as Graph
-import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), RenderPassNode (..))
 import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
 import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
+import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), RenderPassNode (..))
+import Graphics.Haskan.Render.Graph qualified as Graph
+import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
+import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
 import Graphics.Haskan.Scene.Transform qualified as Transform
-import Graphics.Haskan.Resources (throwVkResult, allocaAndPeek)
 import Graphics.Haskan.Utils.ObjLoader qualified as ObjLoader
 import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.BRDF qualified as BRDF
@@ -80,21 +81,21 @@ import Graphics.Haskan.Vulkan.DescriptorSetLayout qualified as DescriptorSetLayo
 import Graphics.Haskan.Vulkan.Device qualified as Device
 import Graphics.Haskan.Vulkan.DeviceCapabilities (DeviceCapabilities (..), queryDeviceCapabilities)
 import Graphics.Haskan.Vulkan.Fence qualified as Fence
+import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.Instance qualified as Instance
 import Graphics.Haskan.Vulkan.PhysicalDevice qualified as PhysicalDevice
 import Graphics.Haskan.Vulkan.PipelineLayout qualified as PipelineLayout
 import Graphics.Haskan.Vulkan.Render (drawFrame, presentFrame)
 import Graphics.Haskan.Vulkan.Render qualified as Render
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
-import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
+import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
-import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
-import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
+import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Haskan.Window qualified as Window
@@ -102,7 +103,7 @@ import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
-import Linear (M44, V2 (..), V3 (..), V4 (..), (*^), (^+^), (^-^), normalize)
+import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
 import Linear.Matrix (identity, inv33, inv44, transpose, (!*), (!*!))
 import Linear.Projection qualified
 import Linear.Quaternion (Quaternion (..))
@@ -110,9 +111,9 @@ import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
 import SDL qualified
 import SDL.Input.Mouse qualified as SDL.Mouse
-import System.IO.Unsafe (unsafePerformIO)
 import System.Clock (Clock (..), getTime, toNanoSecs)
 import System.Directory (doesFileExist)
+import System.IO.Unsafe (unsafePerformIO)
 
 renderFrameLoop ::
   (MonadFail m, MonadIO m) =>
@@ -168,78 +169,101 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
             projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> makeProjectionMatrix w h :: M44 Float
             viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
             sampleLocalVerts :: [V3 Float]
-            sampleLocalVerts = [V3 (-0.5) (-0.5) (-0.5), V3 0.5 (-0.5) (-0.5), V3 0.5 0.5 (-0.5), V3 (-0.5) 0.5 (-0.5),
-                                V3 (-0.5) (-0.5) 0.5, V3 0.5 (-0.5) 0.5, V3 0.5 0.5 0.5, V3 (-0.5) 0.5 0.5]
+            sampleLocalVerts =
+              [ V3 (-0.5) (-0.5) (-0.5),
+                V3 0.5 (-0.5) (-0.5),
+                V3 0.5 0.5 (-0.5),
+                V3 (-0.5) 0.5 (-0.5),
+                V3 (-0.5) (-0.5) 0.5,
+                V3 0.5 (-0.5) 0.5,
+                V3 0.5 0.5 0.5,
+                V3 (-0.5) 0.5 0.5
+              ]
             toNDC :: M44 Float -> V3 Float -> V3 Float
             toNDC mvp (V3 x y z) =
               let x', y', z' :: Float
-                  x' = x; y' = y; z' = z
+                  x' = x
+                  y' = y
+                  z' = z
                   V4 cx cy cz cw = (mvp !* V4 x' y' z' 1.0) :: V4 Float
-              in if abs cw > 0.001 then V3 (cx / cw) (cy / cw) (cz / cw) else V3 cx cy cz
-            entityDebugInfos = zipWith (\idx dc ->
-              let modelMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> dcWorldMatrix dc :: M44 Float
-                  mvp = projMat !*! viewMat !*! modelMat
-                  ndcVerts = map (toNDC mvp) sampleLocalVerts
-              in EntityDebugInfo
-                  { ediEntityId = idx,
-                    ediWorldMatrix = map (map realToFrac) (toListOfV4 (fmap (fmap realToFrac) modelMat)),
-                    ediPosition = realToFrac <$> tPosition (dcTransform dc),
-                    ediSampleVerticesNDC = ndcVerts
-                  }
-              ) [0..] drawList
-        STM.atomically $ STM.writeTVar tvRenderDebug $ Just RenderDebugInfo
-          { rdiFrameNumber = frameNumber,
-            rdiCameraPos = camPos,
-            rdiCameraTarget = camTarget,
-            rdiProjectionMatrix = map (map realToFrac) (toListOfV4 (fmap (fmap realToFrac) projMat)),
-            rdiEntities = entityDebugInfos
-          }
-      entityData <- liftIO $ forM (zip [0..] drawList) $ \(idx, dc) -> do
+               in if abs cw > 0.001 then V3 (cx / cw) (cy / cw) (cz / cw) else V3 cx cy cz
+            entityDebugInfos =
+              zipWith
+                ( \idx dc ->
+                    let modelMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> dcWorldMatrix dc :: M44 Float
+                        mvp = projMat !*! viewMat !*! modelMat
+                        ndcVerts = map (toNDC mvp) sampleLocalVerts
+                     in EntityDebugInfo
+                          { ediEntityId = idx,
+                            ediWorldMatrix = map (map realToFrac) (toListOfV4 (fmap (fmap realToFrac) modelMat)),
+                            ediPosition = realToFrac <$> tPosition (dcTransform dc),
+                            ediSampleVerticesNDC = ndcVerts
+                          }
+                )
+                [0 ..]
+                drawList
+        STM.atomically $
+          STM.writeTVar tvRenderDebug $
+            Just
+              RenderDebugInfo
+                { rdiFrameNumber = frameNumber,
+                  rdiCameraPos = camPos,
+                  rdiCameraTarget = camTarget,
+                  rdiProjectionMatrix = map (map realToFrac) (toListOfV4 (fmap (fmap realToFrac) projMat)),
+                  rdiEntities = entityDebugInfos
+                }
+      entityData <- liftIO $ forM (zip [0 ..] drawList) $ \(idx, dc) -> do
         let worldMat = dcWorldMatrix dc
             meshRes = dcMesh dc
             (wmin, wmax) = transformAABB worldMat (mrBounds meshRes)
-            m33 = V3 (V3 (worldMat ^. _x . _x) (worldMat ^. _x . _y) (worldMat ^. _x . _z))
-                     (V3 (worldMat ^. _y . _x) (worldMat ^. _y . _y) (worldMat ^. _y . _z))
-                     (V3 (worldMat ^. _z . _x) (worldMat ^. _z . _y) (worldMat ^. _z . _z))
+            m33 =
+              V3
+                (V3 (worldMat ^. _x . _x) (worldMat ^. _x . _y) (worldMat ^. _x . _z))
+                (V3 (worldMat ^. _y . _x) (worldMat ^. _y . _y) (worldMat ^. _y . _z))
+                (V3 (worldMat ^. _z . _x) (worldMat ^. _z . _y) (worldMat ^. _z . _z))
             normalM33 = transpose (inv33 m33)
-            normalM44 = V4 (V4 (normalM33 ^. _x . _x) (normalM33 ^. _x . _y) (normalM33 ^. _x . _z) 0)
-                           (V4 (normalM33 ^. _y . _x) (normalM33 ^. _y . _y) (normalM33 ^. _y . _z) 0)
-                           (V4 (normalM33 ^. _z . _x) (normalM33 ^. _z . _y) (normalM33 ^. _z . _z) 0)
-                           (V4 0 0 0 1)
-        pure ComputeEntityData
-          { ceTransform = (realToFrac <$>) <$> Linear.Matrix.transpose worldMat
-          , ceNormalMatrix = (realToFrac <$>) <$> normalM44
-          , ceAabbMin = V4 (realToFrac $ wmin ^. _x) (realToFrac $ wmin ^. _y) (realToFrac $ wmin ^. _z) 1
-          , ceAabbMax = V4 (realToFrac $ wmax ^. _x) (realToFrac $ wmax ^. _y) (realToFrac $ wmax ^. _z) (1 :: Foreign.C.CFloat)
-          , ceMaterialIndex = dcMaterialIndex dc
-          , ceFirstIndex = fromIntegral (mrFirstIndex meshRes)
-          , ceVertexOffset = fromIntegral (mrVertexOffset meshRes)
-          , ceIndexCount = fromIntegral (mrIndexCount meshRes)
-          , ceMetallicRoughnessIndex = dcMetallicRoughnessIndex dc
-          , ceMetallicFactor = realToFrac (dcMetallicFactor dc)
-          , ceRoughnessFactor = realToFrac (dcRoughnessFactor dc)
-          , ceNormalIndex = dcNormalIndex dc
-          , ceOcclusionIndex = dcOcclusionIndex dc
-          , ceOcclusionStrength = realToFrac (dcOcclusionStrength dc)
-          , ceEmissiveIndex = dcEmissiveIndex dc
-          }
+            normalM44 =
+              V4
+                (V4 (normalM33 ^. _x . _x) (normalM33 ^. _x . _y) (normalM33 ^. _x . _z) 0)
+                (V4 (normalM33 ^. _y . _x) (normalM33 ^. _y . _y) (normalM33 ^. _y . _z) 0)
+                (V4 (normalM33 ^. _z . _x) (normalM33 ^. _z . _y) (normalM33 ^. _z . _z) 0)
+                (V4 0 0 0 1)
+        pure
+          ComputeEntityData
+            { ceTransform = (realToFrac <$>) <$> Linear.Matrix.transpose worldMat,
+              ceNormalMatrix = (realToFrac <$>) <$> normalM44,
+              ceAabbMin = V4 (realToFrac $ wmin ^. _x) (realToFrac $ wmin ^. _y) (realToFrac $ wmin ^. _z) 1,
+              ceAabbMax = V4 (realToFrac $ wmax ^. _x) (realToFrac $ wmax ^. _y) (realToFrac $ wmax ^. _z) (1 :: Foreign.C.CFloat),
+              ceMaterialIndex = dcMaterialIndex dc,
+              ceFirstIndex = fromIntegral (mrFirstIndex meshRes),
+              ceVertexOffset = fromIntegral (mrVertexOffset meshRes),
+              ceIndexCount = fromIntegral (mrIndexCount meshRes),
+              ceMetallicRoughnessIndex = dcMetallicRoughnessIndex dc,
+              ceMetallicFactor = realToFrac (dcMetallicFactor dc),
+              ceRoughnessFactor = realToFrac (dcRoughnessFactor dc),
+              ceNormalIndex = dcNormalIndex dc,
+              ceOcclusionIndex = dcOcclusionIndex dc,
+              ceOcclusionStrength = realToFrac (dcOcclusionStrength dc),
+              ceEmissiveIndex = dcEmissiveIndex dc
+            }
       let w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
           h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
           vp = (realToFrac <$>) <$> (makeProjectionMatrix w h !*! Camera.unViewMatrix (Camera.toMatrix camera)) :: M44 Float
           planes = extractFrustumPlanes vp
           camPos = Camera.cameraPosition camera
-          cullData = ComputeCullData
-            { ccFrustumPlanes = map (fmap realToFrac) planes
-            , ccCameraPosition = V4 (realToFrac $ camPos ^. _x) (realToFrac $ camPos ^. _y) (realToFrac $ camPos ^. _z) 1
-            , ccEntityCount = fromIntegral (length drawList)
-            , ccLodDistance1 = 100.0
-            , ccLodDistance2 = 400.0
-            , ccPad3 = 0
-            }
+          cullData =
+            ComputeCullData
+              { ccFrustumPlanes = map (fmap realToFrac) planes,
+                ccCameraPosition = V4 (realToFrac $ camPos ^. _x) (realToFrac $ camPos ^. _y) (realToFrac $ camPos ^. _z) 1,
+                ccEntityCount = fromIntegral (length drawList),
+                ccLodDistance1 = 100.0,
+                ccLodDistance2 = 400.0,
+                ccPad3 = 0
+              }
       liftIO $ Buffer.updateStorageBuffer device ccrEntityMemory 0 entityData
       liftIO $ Buffer.updateUniformBuffer device ccrCullDataMemory [cullData]
       logDebugIO LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
-      
+
       -- Upload lights to SSBO
       lights' <- liftIO $ STM.readTVarIO tvLights
       let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
@@ -263,35 +287,38 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                     frameDescriptorSet = frameDescriptorSets !! frameIdx
                     lightingDescriptorSet = drLightingDescriptorSets !! fromIntegral imageIdx
                     gBufferImagesForFrame = drGBufferImages !! fromIntegral imageIdx
-                    gBufferPassCtx = PassContext
-                      { pcCommandBuffer = commandBuffer
-                      , pcPipeline = drGBufferPipeline
-                      , pcPipelineLayout = drGBufferPipelineLayout
-                      , pcDescriptorSet = Vulkan.vkNullPtr
-                      , pcFramebuffer = gBufferFramebuffer
-                      , pcRenderPass = drGBufferRenderPass
-                      , pcExtent = rcSurfaceExtent
-                      }
-                    lightingPassCtx = PassContext
-                      { pcCommandBuffer = commandBuffer
-                      , pcPipeline = drLightingPipeline
-                      , pcPipelineLayout = drLightingPipelineLayout
-                      , pcDescriptorSet = lightingDescriptorSet
-                      , pcFramebuffer = lightingFramebuffer
-                      , pcRenderPass = drLightingRenderPass
-                      , pcExtent = rcSurfaceExtent
-                      }
+                    gBufferPassCtx =
+                      PassContext
+                        { pcCommandBuffer = commandBuffer,
+                          pcPipeline = drGBufferPipeline,
+                          pcPipelineLayout = drGBufferPipelineLayout,
+                          pcDescriptorSet = Vulkan.vkNullPtr,
+                          pcFramebuffer = gBufferFramebuffer,
+                          pcRenderPass = drGBufferRenderPass,
+                          pcExtent = rcSurfaceExtent
+                        }
+                    lightingPassCtx =
+                      PassContext
+                        { pcCommandBuffer = commandBuffer,
+                          pcPipeline = drLightingPipeline,
+                          pcPipelineLayout = drLightingPipelineLayout,
+                          pcDescriptorSet = lightingDescriptorSet,
+                          pcFramebuffer = lightingFramebuffer,
+                          pcRenderPass = drLightingRenderPass,
+                          pcExtent = rcSurfaceExtent
+                        }
                 wireframeEnabled' <- liftIO $ STM.readTVarIO tvWireframe
                 debugMode' <- liftIO $ STM.readTVarIO tvDebugMode
                 axisOverlay' <- liftIO $ STM.readTVarIO tvAxisOverlay
                 groundPlane' <- liftIO $ STM.readTVarIO tvGroundPlane
-                
+
                 -- Read day/night state for sky tint and IBL intensity
                 currentTime <- liftIO $ STM.readTVarIO tvTimeOfDay
                 dnEnabled <- liftIO $ STM.readTVarIO tvDayNightEnabled
-                let sunState = if dnEnabled
-                               then computeSunState defaultDayNightConfig currentTime
-                               else DayNight.SunState (V3 (-1) (-1) (-1)) 1.0 (V3 1 1 1) (V3 1 1 1) 0.3 0.0
+                let sunState =
+                      if dnEnabled
+                        then computeSunState defaultDayNightConfig currentTime
+                        else DayNight.SunState (V3 (-1) (-1) (-1)) 1.0 (V3 1 1 1) (V3 1 1 1) 0.3 0.0
                     skyTint = DayNight.ssSkyTint sunState
                     iblInt = DayNight.ssIBLIntensity sunState
                     sunAzimuth = DayNight.ssAzimuth sunState
@@ -299,41 +326,43 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
 
                 cloudHeight' <- liftIO $ STM.readTVarIO tvCloudHeight
 
-                let (graphRes, graphPasses) = Graph.execRenderGraphBuilder $
-                      buildDeferredGraph DeferredPassData
-                        { dpdExtent = rcSurfaceExtent
-                        , dpdGBufferRenderPass = drGBufferRenderPass
-                        , dpdGBufferFramebuffer = gBufferFramebuffer
-                        , dpdGBufferPipeline = drGBufferPipeline
-                        , dpdGBufferLayout = drGBufferPipelineLayout
-                        , dpdGBufferDescriptor = frameDescriptorSet
-                        , dpdGBufferSampler = textureSampler
-                        , dpdDrawList = drawList
-                        , dpdDevice = device
-                        , dpdDrawCommandsBuffer = ccrDrawCommandsBuffer
-                        , dpdEntityCount = fromIntegral (length drawList)
-                        , dpdLightingRenderPass = drLightingRenderPass
-                        , dpdLightingFramebuffer = lightingFramebuffer
-                        , dpdLightingPipeline = drLightingPipeline
-                        , dpdLightingLayout = drLightingPipelineLayout
-                        , dpdLightingDescriptor = lightingDescriptorSet
-                        , dpdCameraPos = realToFrac <$> Camera.cameraPosition camera
-                        , dpdSkyboxRays = skyboxRays
-                        , dpdDebugMode = debugMode'
-                        , dpdAxisOverlay = axisOverlay'
-                        , dpdGroundPlane = groundPlane'
-                        , dpdLightCount = lightCount
-                        , dpdLightBuffer = lightSsboBuffer
-                        , dpdSkyTint = skyTint
-                        , dpdIBLIntensity = iblInt
-                        , dpdSunAzimuth = sunAzimuth
-                        , dpdSunDir = sunDir
-                        , dpdCloudHeight = cloudHeight'
-                        , dpdGBufferImages = gBufferImagesForFrame
-                        , dpdWireframePipeline = drWireframePipeline
-                        , dpdWireframeLayout = drWireframePipelineLayout
-                        , dpdWireframeEnabled = wireframeEnabled'
-                        }
+                let (graphRes, graphPasses) =
+                      Graph.execRenderGraphBuilder $
+                        buildDeferredGraph
+                          DeferredPassData
+                            { dpdExtent = rcSurfaceExtent,
+                              dpdGBufferRenderPass = drGBufferRenderPass,
+                              dpdGBufferFramebuffer = gBufferFramebuffer,
+                              dpdGBufferPipeline = drGBufferPipeline,
+                              dpdGBufferLayout = drGBufferPipelineLayout,
+                              dpdGBufferDescriptor = frameDescriptorSet,
+                              dpdGBufferSampler = textureSampler,
+                              dpdDrawList = drawList,
+                              dpdDevice = device,
+                              dpdDrawCommandsBuffer = ccrDrawCommandsBuffer,
+                              dpdEntityCount = fromIntegral (length drawList),
+                              dpdLightingRenderPass = drLightingRenderPass,
+                              dpdLightingFramebuffer = lightingFramebuffer,
+                              dpdLightingPipeline = drLightingPipeline,
+                              dpdLightingLayout = drLightingPipelineLayout,
+                              dpdLightingDescriptor = lightingDescriptorSet,
+                              dpdCameraPos = realToFrac <$> Camera.cameraPosition camera,
+                              dpdSkyboxRays = skyboxRays,
+                              dpdDebugMode = debugMode',
+                              dpdAxisOverlay = axisOverlay',
+                              dpdGroundPlane = groundPlane',
+                              dpdLightCount = lightCount,
+                              dpdLightBuffer = lightSsboBuffer,
+                              dpdSkyTint = skyTint,
+                              dpdIBLIntensity = iblInt,
+                              dpdSunAzimuth = sunAzimuth,
+                              dpdSunDir = sunDir,
+                              dpdCloudHeight = cloudHeight',
+                              dpdGBufferImages = gBufferImagesForFrame,
+                              dpdWireframePipeline = drWireframePipeline,
+                              dpdWireframeLayout = drWireframePipelineLayout,
+                              dpdWireframeEnabled = wireframeEnabled'
+                            }
                 case Graph.compileGraph graphRes graphPasses of
                   Left err -> liftIO $ logInfoIO LogRender $ "graph compilation failed: " <> Text.pack (show err)
                   Right compiled -> do
@@ -352,14 +381,15 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                             0
                             Vulkan.vkNullPtr
                         liftIO $ CommandBuffer.cmdDispatch commandBuffer (fromIntegral numWorkgroups) 1 1
-                        liftIO $ CommandBuffer.cmdBufferBarrier
-                          commandBuffer
-                          ccrDrawCommandsBuffer
-                          (fromIntegral (ccrMaxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)))
-                          Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                          Vulkan.VK_ACCESS_SHADER_WRITE_BIT
-                          Vulkan.VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT
-                          Vulkan.VK_ACCESS_INDIRECT_COMMAND_READ_BIT
+                        liftIO $
+                          CommandBuffer.cmdBufferBarrier
+                            commandBuffer
+                            ccrDrawCommandsBuffer
+                            (fromIntegral (ccrMaxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)))
+                            Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                            Vulkan.VK_ACCESS_SHADER_WRITE_BIT
+                            Vulkan.VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT
+                            Vulkan.VK_ACCESS_INDIRECT_COMMAND_READ_BIT
 
                       let passes = Graph.cgPasses compiled
                       for_ passes $ \cp -> do
@@ -608,19 +638,20 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
     Just mode -> do
       world <- ECS.createWorld
       let uvCheckerPath = "data/textures/uv_checker.png"
-      uvTexHandle <- liftIO (doesFileExist uvCheckerPath) >>= \exists ->
-        if exists
-          then do
-            (pixelData, tw, th) <- Texture.readImageFromFile uvCheckerPath
-            Texture.createTextureFromData rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
-          else do
-             let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
-             Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
+      uvTexHandle <-
+        liftIO (doesFileExist uvCheckerPath) >>= \exists ->
+          if exists
+            then do
+              (pixelData, tw, th) <- Texture.readImageFromFile uvCheckerPath
+              Texture.createTextureFromData rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
+            else do
+              let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
+              Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
 
       let testMesh = case mode of
-            "cube"   -> Mesh.unitCube
+            "cube" -> Mesh.unitCube
             "sphere" -> Mesh.uvSphere 32 16 1.0
-            _        -> Mesh.uvPlane 1.0
+            _ -> Mesh.uvPlane 1.0
       testMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices testMesh) (Mesh.indices testMesh)
       testEntity <- ECS.spawnEntity world
       ECS.setTransform world testEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
@@ -631,94 +662,96 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
 
       let sceneBbox = BBox (V3 (-1) (-1) (-1)) (V3 1 1 1)
       pure (world, 1, sceneBbox, IntMap.empty)
+    Nothing ->
+      if isStressTest
+        then do
+          world <- ECS.createWorld
+          let cubeMesh = Mesh.unitCube
+          meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices cubeMesh) (Mesh.indices cubeMesh)
 
-    Nothing -> if isStressTest
-    then do
-      world <- ECS.createWorld
-      let cubeMesh = Mesh.unitCube
-      meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices cubeMesh) (Mesh.indices cubeMesh)
+          let whiteTexData = Texture.generateGridTexture 2 2 1
+          whiteTexHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
 
-      let whiteTexData = Texture.generateGridTexture 2 2 1
-      whiteTexHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
+          liftIO $ logInfoIO LogGeneral "spawning 10000 stress test entities"
+          forM_ [0 .. 9999] $ \i -> do
+            let x = fromIntegral (i `mod` 100) * 1.0 - 50.0
+                z = fromIntegral (i `div` 100) * 1.0 - 50.0
+                y = sin (fromIntegral i * 0.1) * 1.0
+            entity <- ECS.spawnEntity world
+            ECS.setTransform world entity (Transform (V3 x y z) (Quaternion 1 (V3 0 0 0)) (V3 0.5 0.5 0.5))
+            ECS.setMesh world entity meshHandle
+            ECS.setMaterial world entity whiteTexHandle
+            ECS.setMetallicFactor world entity 0.0
+            ECS.setRoughnessFactor world entity 0.5
 
-      liftIO $ logInfoIO LogGeneral "spawning 10000 stress test entities"
-      forM_ [0..9999] $ \i -> do
-        let x = fromIntegral (i `mod` 100) * 1.0 - 50.0
-            z = fromIntegral (i `div` 100) * 1.0 - 50.0
-            y = sin (fromIntegral i * 0.1) * 1.0
-        entity <- ECS.spawnEntity world
-        ECS.setTransform world entity (Transform (V3 x y z) (Quaternion 1 (V3 0 0 0)) (V3 0.5 0.5 0.5))
-        ECS.setMesh world entity meshHandle
-        ECS.setMaterial world entity whiteTexHandle
-        ECS.setMetallicFactor world entity 0.0
-        ECS.setRoughnessFactor world entity 0.5
+          let sceneBbox = BBox (V3 (-50) (-2) (-50)) (V3 50 2 50)
+          logInfoIO LogGeneral $ "stress test scene bounds: " <> showT sceneBbox
+          pure (world, 10000, sceneBbox, IntMap.empty)
+        else
+          if isGLTF
+            then do
+              result <- importGLTF rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName
+              let world = girWorld result
+                  meshes = girMeshes result
+                  textures = girTextures result
+                  textureData = girTextureData result
+                  pixelMap =
+                    IntMap.fromList $
+                      zip (map (fromIntegral . unTextureHandle) textures) textureData
 
-      let sceneBbox = BBox (V3 (-50) (-2) (-50)) (V3 50 2 50)
-      logInfoIO LogGeneral $ "stress test scene bounds: " <> showT sceneBbox
-      pure (world, 10000, sceneBbox, IntMap.empty)
+              sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
+              logInfoIO LogGeneral $ "scene bounds: " <> showT sceneBbox
 
-    else if isGLTF
-    then do
-      result <- importGLTF rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName
-      let world = girWorld result
-          meshes = girMeshes result
-          textures = girTextures result
-          textureData = girTextureData result
-          pixelMap = IntMap.fromList $
-            zip (map (fromIntegral . unTextureHandle) textures) textureData
+              pure (world, length meshes, sceneBbox, pixelMap)
+            else do
+              world <- ECS.createWorld
+              (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj meshName
+              meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
 
-      sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
-      logInfoIO LogGeneral $ "scene bounds: " <> showT sceneBbox
+              let objBounds = computeMeshBounds mesh
+              logInfoIO LogGeneral $ "OBJ mesh bounds: " <> showT objBounds
 
-      pure (world, length meshes, sceneBbox, pixelMap)
-    else do
-      world <- ECS.createWorld
-      (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj meshName
-      meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
+              entity1 <- ECS.spawnEntity world
+              ECS.setTransform world entity1 (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+              ECS.setMesh world entity1 meshHandle
+              ECS.setMetallicFactor world entity1 0.0
+              ECS.setRoughnessFactor world entity1 0.5
 
-      let objBounds = computeMeshBounds mesh
-      logInfoIO LogGeneral $ "OBJ mesh bounds: " <> showT objBounds
+              entity2 <- ECS.spawnEntity world
+              ECS.setTransform world entity2 (Transform (V3 2 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+              ECS.setMesh world entity2 meshHandle
+              ECS.setMetallicFactor world entity2 0.0
+              ECS.setRoughnessFactor world entity2 0.5
 
-      entity1 <- ECS.spawnEntity world
-      ECS.setTransform world entity1 (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-      ECS.setMesh world entity1 meshHandle
-      ECS.setMetallicFactor world entity1 0.0
-      ECS.setRoughnessFactor world entity1 0.5
+              entity3 <- ECS.spawnEntity world
+              ECS.setTransform world entity3 (Transform (V3 (-2) 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+              ECS.setMesh world entity3 meshHandle
+              ECS.setMetallicFactor world entity3 0.0
+              ECS.setRoughnessFactor world entity3 0.5
 
-      entity2 <- ECS.spawnEntity world
-      ECS.setTransform world entity2 (Transform (V3 2 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-      ECS.setMesh world entity2 meshHandle
-      ECS.setMetallicFactor world entity2 0.0
-      ECS.setRoughnessFactor world entity2 0.5
+              let groundMesh = Mesh.groundPlaneMesh 50.0
+              groundMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
+              let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
+              checkerTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
+              groundEntity <- ECS.spawnEntity world
+              ECS.setTransform world groundEntity (Transform (V3 0 (-0.5) 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+              ECS.setMesh world groundEntity groundMeshHandle
+              ECS.setMaterial world groundEntity checkerTexHandle
+              ECS.setMetallicFactor world groundEntity 0.0
+              ECS.setRoughnessFactor world groundEntity 1.0
 
-      entity3 <- ECS.spawnEntity world
-      ECS.setTransform world entity3 (Transform (V3 (-2) 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-      ECS.setMesh world entity3 meshHandle
-      ECS.setMetallicFactor world entity3 0.0
-      ECS.setRoughnessFactor world entity3 0.5
+              sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
+              logInfoIO LogGeneral $ "scene bounds: " <> showT sceneBbox
 
-      let groundMesh = Mesh.groundPlaneMesh 50.0
-      groundMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
-      let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
-      checkerTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
-      groundEntity <- ECS.spawnEntity world
-      ECS.setTransform world groundEntity (Transform (V3 0 (-0.5) 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-      ECS.setMesh world groundEntity groundMeshHandle
-      ECS.setMaterial world groundEntity checkerTexHandle
-      ECS.setMetallicFactor world groundEntity 0.0
-      ECS.setRoughnessFactor world groundEntity 1.0
-
-      sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
-      logInfoIO LogGeneral $ "scene bounds: " <> showT sceneBbox
-
-      pure (world, 1, sceneBbox, IntMap.empty)
+              pure (world, 1, sceneBbox, IntMap.empty)
 
   worldState <- liftIO $ STM.readTVarIO (world gameState)
   let tvCamera = activeCamera worldState
   currentCam <- liftIO $ STM.readTVarIO tvCamera
-  let adjustedCam = if isStressTest
-        then setDistance (setTarget currentCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) (150.0 :: Foreign.C.CFloat)
-        else adjustCameraForScene sceneBounds currentCam
+  let adjustedCam =
+        if isStressTest
+          then setDistance (setTarget currentCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) (150.0 :: Foreign.C.CFloat)
+          else adjustCameraForScene sceneBounds currentCam
       finalCam = case uvCheckMode of
         Just _ -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.0) 0.78 (realToFrac (pi / 6 :: Double))
         Nothing -> setAngles adjustedCam 0 (realToFrac (pi / 6 :: Double))
@@ -735,59 +768,63 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
     let meshHandles = nub (map (mrHandle . dcMesh) initialDrawList)
     unless (null meshHandles) $ do
       (mergedMesh, offsets) <- Buffer.mergeMeshes rm physicalDevice device meshHandles
-      let sharedVertBuf = (mrVertexBuffer mergedMesh) { brDestroy = pure () }
-          sharedIdxBuf = (mrIndexBuffer mergedMesh) { brDestroy = pure () }
+      let sharedVertBuf = (mrVertexBuffer mergedMesh) {brDestroy = pure ()}
+          sharedIdxBuf = (mrIndexBuffer mergedMesh) {brDestroy = pure ()}
       forM_ (HashMap.toList offsets) $ \(mh, (fi, vo)) -> do
         mMesh <- lookupMesh rm mh
         forM_ mMesh $ \mesh -> do
-          updateMesh rm mh $ mesh
-            { mrVertexBuffer = sharedVertBuf
-            , mrIndexBuffer = sharedIdxBuf
-            , mrFirstIndex = fi
-            , mrVertexOffset = 0
-            }
+          updateMesh rm mh $
+            mesh
+              { mrVertexBuffer = sharedVertBuf,
+                mrIndexBuffer = sharedIdxBuf,
+                mrFirstIndex = fi,
+                mrVertexOffset = 0
+              }
       logInfoIO LogRender $ "merged " <> showT (length meshHandles) <> " meshes into single buffers"
 
   let viewProjUniformSize = 128 :: Int
       initialViewProjData = [identity, makeProjectionMatrix 16 9] :: [M44 Foreign.C.CFloat]
 
   logDebugIO LogBuffer $ "initialViewProjData length=" <> showT (length initialViewProjData) <> " size=" <> showT (length initialViewProjData * sizeOf (undefined :: M44 Foreign.C.CFloat))
-  frameMvpBuffers <- replicateM Render.maxFramesInFlight $
-    Buffer.managedUniformBuffer physicalDevice device initialViewProjData
+  frameMvpBuffers <-
+    replicateM Render.maxFramesInFlight $
+      Buffer.managedUniformBuffer physicalDevice device initialViewProjData
   logDebugIO LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
 
   let maxEntities = 16384 :: Int
-      dummyEntityData = ComputeEntityData
-        { ceTransform = identity
-        , ceNormalMatrix = identity
-        , ceAabbMin = V4 (-1000) (-1000) (-1000) 1
-        , ceAabbMax = V4 1000 1000 1000 1
-        , ceMaterialIndex = 0
-        , ceFirstIndex = 0
-        , ceVertexOffset = 0
-        , ceIndexCount = 0
-        , ceMetallicRoughnessIndex = 0
-        , ceMetallicFactor = 0.0
-        , ceRoughnessFactor = 0.5
-        , ceNormalIndex = 0
-        , ceOcclusionIndex = 0
-        , ceOcclusionStrength = 1.0
-        , ceEmissiveIndex = 0
-        }
-      dummyCullData = ComputeCullData
-        { ccFrustumPlanes = replicate 6 (V4 0 0 0 0)
-        , ccCameraPosition = V4 0 0 0 1
-        , ccEntityCount = fromIntegral numDrawEntities
-        , ccLodDistance1 = 1000.0
-        , ccLodDistance2 = 5000.0
-        , ccPad3 = 0
-        }
+      dummyEntityData =
+        ComputeEntityData
+          { ceTransform = identity,
+            ceNormalMatrix = identity,
+            ceAabbMin = V4 (-1000) (-1000) (-1000) 1,
+            ceAabbMax = V4 1000 1000 1000 1,
+            ceMaterialIndex = 0,
+            ceFirstIndex = 0,
+            ceVertexOffset = 0,
+            ceIndexCount = 0,
+            ceMetallicRoughnessIndex = 0,
+            ceMetallicFactor = 0.0,
+            ceRoughnessFactor = 0.5,
+            ceNormalIndex = 0,
+            ceOcclusionIndex = 0,
+            ceOcclusionStrength = 1.0,
+            ceEmissiveIndex = 0
+          }
+      dummyCullData =
+        ComputeCullData
+          { ccFrustumPlanes = replicate 6 (V4 0 0 0 0),
+            ccCameraPosition = V4 0 0 0 1,
+            ccEntityCount = fromIntegral numDrawEntities,
+            ccLodDistance1 = 1000.0,
+            ccLodDistance2 = 5000.0,
+            ccPad3 = 0
+          }
       initialDrawCommands = replicate maxEntities (DrawIndexedIndirectCommand 0 0 0 0 0)
 
   (entitySsboBuffer, entitySsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxEntities dummyEntityData) Vulkan.VK_ZERO_FLAGS
   (drawCommandsBuffer, drawCommandsMemory) <- Buffer.managedStorageBuffer physicalDevice device initialDrawCommands Vulkan.VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
   (cullDataBuffer, cullDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [dummyCullData]
-  
+
   let maxLights = 256 :: Int
       dummyLightData = LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0
   (lightSsboBuffer, lightSsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxLights dummyLightData) Vulkan.VK_ZERO_FLAGS
@@ -798,18 +835,19 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
   DescriptorSet.updateComputeDescriptorSets device computeDescriptorSet entitySsboBuffer drawCommandsBuffer cullDataBuffer
   logDebugIO LogRender "compute descriptor set updated"
 
-  let computeCullResources = ComputeCullResources
-        { ccrPipeline = computePipeline
-        , ccrPipelineLayout = computePipelineLayout
-        , ccrDescriptorSet = computeDescriptorSet
-        , ccrEntityBuffer = entitySsboBuffer
-        , ccrEntityMemory = entitySsboMemory
-        , ccrDrawCommandsBuffer = drawCommandsBuffer
-        , ccrDrawCommandsMemory = drawCommandsMemory
-        , ccrCullDataBuffer = cullDataBuffer
-        , ccrCullDataMemory = cullDataMemory
-        , ccrMaxEntities = maxEntities
-        }
+  let computeCullResources =
+        ComputeCullResources
+          { ccrPipeline = computePipeline,
+            ccrPipelineLayout = computePipelineLayout,
+            ccrDescriptorSet = computeDescriptorSet,
+            ccrEntityBuffer = entitySsboBuffer,
+            ccrEntityMemory = entitySsboMemory,
+            ccrDrawCommandsBuffer = drawCommandsBuffer,
+            ccrDrawCommandsMemory = drawCommandsMemory,
+            ccrCullDataBuffer = cullDataBuffer,
+            ccrCullDataMemory = cullDataMemory,
+            ccrMaxEntities = maxEntities
+          }
 
   logInfoIO LogTexture "creating sampler"
   textureSampler <- Texture.managedSampler device
@@ -834,14 +872,14 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
                         c11 = src Vector.! (srcIdx x1 y1 + i)
                         c0 = lerpPixel c00 c10 fx
                         c1 = lerpPixel c01 c11 fx
-                    in lerpPixel c0 c1 fy
-             in [blendChannel 0, blendChannel 1, blendChannel 2, blendChannel 3]
+                     in lerpPixel c0 c1 fy
+               in [blendChannel 0, blendChannel 1, blendChannel 2, blendChannel 3]
             dstPixel dx dy =
               let sx = fromIntegral dx * fromIntegral sw / fromIntegral dw
                   sy = fromIntegral dy * fromIntegral sh / fromIntegral dh
-              in sample sx sy
+               in sample sx sy
             clamp lo hi v = max lo (min hi v)
-        in Vector.fromList [dstPixel dx dy !! c | dy <- [0..dh-1], dx <- [0..dw-1], c <- [0..3]]
+         in Vector.fromList [dstPixel dx dy !! c | dy <- [0 .. dh - 1], dx <- [0 .. dw - 1], c <- [0 .. 3]]
 
   ecsMaterials <- liftIO $ STM.readTVarIO (ECS.wMaterials ecsWorld)
   let uniqueTextures = nub $ IntMap.elems ecsMaterials
@@ -849,35 +887,36 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
 
   logInfoIO LogTexture $ "unique textures: " <> showT numUniqueTextures
 
-  let textureIndexMap = IntMap.fromList $ zip (map (fromIntegral . unTextureHandle) uniqueTextures) [0..]
+  let textureIndexMap = IntMap.fromList $ zip (map (fromIntegral . unTextureHandle) uniqueTextures) [0 ..]
       unTextureHandle (TextureHandle h) = h
 
-  bindlessTextureViews <- if numUniqueTextures == 0
-    then do
-      let whiteTexData = Texture.generateGridTexture 2 2 1
-      whiteHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
-      mView <- Texture.textureImageView rm whiteHandle
-      case mView of
-        Just view -> pure [view]
-        Nothing -> liftIO $ fail "failed to create white texture"
-    else do
-      views <- forM uniqueTextures $ \texHandle -> do
-        let hId = fromIntegral (unTextureHandle texHandle)
-        (tw, th, pixelData) <- case IntMap.lookup hId texturePixelMap of
-          Just (tw, th, pixelData) -> pure (tw, th, pixelData)
-          Nothing -> do
-            mTexRes <- lookupTexture rm texHandle
-            case mTexRes of
-              Nothing -> pure (256, 256, Texture.generateCheckerboardTexture 256 256 32)
-              Just texRes -> case trPixelData texRes of
-                Nothing -> pure (256, 256, Texture.generateCheckerboardTexture 256 256 32)
-                Just pixelData -> pure (trWidth texRes, trHeight texRes, pixelData)
-        texHandle' <- Texture.createTextureFromData rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
-        mView <- Texture.textureImageView rm texHandle'
+  bindlessTextureViews <-
+    if numUniqueTextures == 0
+      then do
+        let whiteTexData = Texture.generateGridTexture 2 2 1
+        whiteHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
+        mView <- Texture.textureImageView rm whiteHandle
         case mView of
-          Just view -> pure view
-          Nothing -> liftIO $ fail "failed to create texture view"
-      pure views
+          Just view -> pure [view]
+          Nothing -> liftIO $ fail "failed to create white texture"
+      else do
+        views <- forM uniqueTextures $ \texHandle -> do
+          let hId = fromIntegral (unTextureHandle texHandle)
+          (tw, th, pixelData) <- case IntMap.lookup hId texturePixelMap of
+            Just (tw, th, pixelData) -> pure (tw, th, pixelData)
+            Nothing -> do
+              mTexRes <- lookupTexture rm texHandle
+              case mTexRes of
+                Nothing -> pure (256, 256, Texture.generateCheckerboardTexture 256 256 32)
+                Just texRes -> case trPixelData texRes of
+                  Nothing -> pure (256, 256, Texture.generateCheckerboardTexture 256 256 32)
+                  Just pixelData -> pure (trWidth texRes, trHeight texRes, pixelData)
+          texHandle' <- Texture.createTextureFromData rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
+          mView <- Texture.textureImageView rm texHandle'
+          case mView of
+            Just view -> pure view
+            Nothing -> liftIO $ fail "failed to create texture view"
+        pure views
 
   logInfoIO LogTexture $ "bindless textures created: " <> showT (length bindlessTextureViews)
 
@@ -885,12 +924,13 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
   descriptorPool <- DescriptorPool.managedDescriptorPool device totalDescriptorSets
   logDebugIO LogRender $ "descriptor pool created for " <> showT totalDescriptorSets <> " sets"
 
-  frameDescriptorSets <- replicateM totalDescriptorSets $
-    DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
+  frameDescriptorSets <-
+    replicateM totalDescriptorSets $
+      DescriptorSet.allocateDescriptorSet device descriptorPool [descriptorSetLayout]
   logDebugIO LogRender $ "allocated " <> showT (length frameDescriptorSets) <> " frame descriptor sets"
 
   logInfoIO LogVulkan "updating frame descriptor sets"
-  for_ (zip [0..] frameMvpBuffers) $ \(frameIdx, (buf, _)) -> do
+  for_ (zip [0 ..] frameMvpBuffers) $ \(frameIdx, (buf, _)) -> do
     let ds = frameDescriptorSets !! frameIdx
     DescriptorSet.updateDescriptorSetsBindless
       device
@@ -944,14 +984,13 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
         if exit
           then pure ()
           else do
-              renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-                  with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView mBrdfView lightingSampler cloudNoiseView) $ \dr -> do
-                   -- Update lighting descriptor sets with light SSBO
-                   for_ (drLightingDescriptorSets dr) $ \ds ->
-                     DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
-                   renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights tvTimeOfDay tvTimeSpeed tvDayNightEnabled tvCloudHeight
-              outerLoop renderFrameLoopFinished
-
+            renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
+              with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView mBrdfView lightingSampler cloudNoiseView) $ \dr -> do
+                -- Update lighting descriptor sets with light SSBO
+                for_ (drLightingDescriptorSets dr) $ \ds ->
+                  DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
+                renderFrameLoop context dr 0 targetFPS imageAvailableSemaphores control frameMvpMemories tvCamera tvInspect tvInsp tvRenderDebug ecsWorld rm textureSampler frameDescriptorSets textureIndexMap tvWireframe frameStatsRef computeCullResources tvDebugMode tvAxisOverlay tvGroundPlane tvPendingScreenshot tvPendingAllStages tvPendingSwapchainScreenshot physicalDevice lightSsboBuffer lightSsboMemory tvLights tvTimeOfDay tvTimeSpeed tvDayNightEnabled tvCloudHeight
+            outerLoop renderFrameLoopFinished
 
   logInfoIO LogGeneral "Starting render loop"
   outerLoop False

@@ -3,35 +3,36 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Engine.Types
-  ( toListOfV4
-  , forkIOWithHandler
-  , InputBuffer(..)
-  , newInputBuffer
-  , writeInputBuffer
-  , flushInputBuffer
-  , LightType(..)
-  , LightData(..)
-  , ComputeEntityData(..)
-  , ComputeCullData(..)
-  , DrawIndexedIndirectCommand(..)
-  , ComputeCullResources(..)
-  , transformAABB
-  , extractFrustumPlanes
-  , filterVisible
-  , EngineConfig(..)
-  , FrameTime(..)
-  , FrameStats(..)
-  , emptyFrameStats
-  , updateFrameStats
-  , Position
-  , Distance
-  , WorldState(..)
-  , GameState(..)
-  , RenderDebugInfo(..)
-  , EntityDebugInfo(..)
-  , ControlMessage(..)
-  , CameraMode(..)
-  ) where
+  ( toListOfV4,
+    forkIOWithHandler,
+    InputBuffer (..),
+    newInputBuffer,
+    writeInputBuffer,
+    flushInputBuffer,
+    LightType (..),
+    LightData (..),
+    ComputeEntityData (..),
+    ComputeCullData (..),
+    DrawIndexedIndirectCommand (..),
+    ComputeCullResources (..),
+    transformAABB,
+    extractFrustumPlanes,
+    filterVisible,
+    EngineConfig (..),
+    FrameTime (..),
+    FrameStats (..),
+    emptyFrameStats,
+    updateFrameStats,
+    Position,
+    Distance,
+    WorldState (..),
+    GameState (..),
+    RenderDebugInfo (..),
+    EntityDebugInfo (..),
+    ControlMessage (..),
+    CameraMode (..),
+  )
+where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, putMVar)
@@ -46,15 +47,15 @@ import Control.Monad (forM, forM_)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Aeson (ToJSON (..), object, (.=))
 import Data.Foldable (toList)
+import Data.IORef (IORef)
+import Data.Int (Int32)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
-import Data.IORef (IORef)
-import Data.Sequence (Seq(..))
+import Data.Sequence (Seq (..))
 import Data.Sequence qualified as Seq
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Word (Word32, Word64)
-import Data.Int (Int32)
 import Foreign.C qualified
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (Storable (..), peekByteOff, pokeByteOff)
@@ -62,15 +63,14 @@ import GHC.Generics
 import Graphics.Haskan.BoundingBox (BBox (..))
 import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot (..))
-import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), DebugCameraSnapshot (..))
-import Graphics.Haskan.Debug.Server (DebugServerHandle, CommandQueue)
+import Graphics.Haskan.Debug.Interface (DebugCameraSnapshot (..), DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..))
+import Graphics.Haskan.Debug.Server (CommandQueue, DebugServerHandle)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
-import Graphics.Haskan.Logger (logInfoIO, LogCategory(..), showT)
+import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
-import Graphics.Haskan.Resources (throwVkResult, allocaAndPeek)
+import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Vulkan qualified as Vulkan
-import Linear (M44, V2 (..), V3 (..), V4 (..), (*^), (^+^), (^-^), normalize)
-
+import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
 import Linear.Matrix (identity, inv33, inv44, transpose, (!*), (!*!))
 import Linear.Projection qualified
 import Linear.Quaternion (Quaternion (..))
@@ -95,8 +95,8 @@ forkIOWithHandler name finishedSemaphore action = do
   pure ()
 
 data InputBuffer = InputBuffer
-  { ibEvents :: !(TVar (Seq ActionEvent))
-  , ibOverflow :: !(TVar Word64)
+  { ibEvents :: !(TVar (Seq ActionEvent)),
+    ibOverflow :: !(TVar Word64)
   }
 
 newInputBuffer :: IO InputBuffer
@@ -127,24 +127,26 @@ data LightType = LightDirectional | LightPoint | LightSpot
   deriving (Show, Eq, Enum)
 
 data LightData = LightData
-  { ldPosition :: V3 Foreign.C.CFloat
-  , ldIntensity :: Foreign.C.CFloat
-  , ldColor :: V3 Foreign.C.CFloat
-  , ldType :: Word32
-  , ldDirection :: V3 Foreign.C.CFloat
-  , ldRange :: Foreign.C.CFloat
-  } deriving (Show)
+  { ldPosition :: V3 Foreign.C.CFloat,
+    ldIntensity :: Foreign.C.CFloat,
+    ldColor :: V3 Foreign.C.CFloat,
+    ldType :: Word32,
+    ldDirection :: V3 Foreign.C.CFloat,
+    ldRange :: Foreign.C.CFloat
+  }
+  deriving (Show)
 
 instance Storable LightData where
   sizeOf _ = 48
   alignment _ = 16
-  peek ptr = LightData
-    <$> peekByteOff ptr 0
-    <*> peekByteOff ptr 12
-    <*> peekByteOff ptr 16
-    <*> peekByteOff ptr 28
-    <*> peekByteOff ptr 32
-    <*> peekByteOff ptr 44
+  peek ptr =
+    LightData
+      <$> peekByteOff ptr 0
+      <*> peekByteOff ptr 12
+      <*> peekByteOff ptr 16
+      <*> peekByteOff ptr 28
+      <*> peekByteOff ptr 32
+      <*> peekByteOff ptr 44
   poke ptr (LightData pos int col typ dir rng) = do
     pokeByteOff ptr 0 pos
     pokeByteOff ptr 12 int
@@ -154,42 +156,44 @@ instance Storable LightData where
     pokeByteOff ptr 44 rng
 
 data ComputeEntityData = ComputeEntityData
-  { ceTransform :: M44 Foreign.C.CFloat
-  , ceNormalMatrix :: M44 Foreign.C.CFloat
-  , ceAabbMin :: V4 Foreign.C.CFloat
-  , ceAabbMax :: V4 Foreign.C.CFloat
-  , ceMaterialIndex :: Word32
-  , ceFirstIndex :: Word32
-  , ceVertexOffset :: Foreign.C.CInt
-  , ceIndexCount :: Word32
-  , ceMetallicRoughnessIndex :: Word32
-  , ceMetallicFactor :: Foreign.C.CFloat
-  , ceRoughnessFactor :: Foreign.C.CFloat
-  , ceNormalIndex :: Word32
-  , ceOcclusionIndex :: Word32
-  , ceOcclusionStrength :: Foreign.C.CFloat
-  , ceEmissiveIndex :: Word32
-  } deriving (Show)
+  { ceTransform :: M44 Foreign.C.CFloat,
+    ceNormalMatrix :: M44 Foreign.C.CFloat,
+    ceAabbMin :: V4 Foreign.C.CFloat,
+    ceAabbMax :: V4 Foreign.C.CFloat,
+    ceMaterialIndex :: Word32,
+    ceFirstIndex :: Word32,
+    ceVertexOffset :: Foreign.C.CInt,
+    ceIndexCount :: Word32,
+    ceMetallicRoughnessIndex :: Word32,
+    ceMetallicFactor :: Foreign.C.CFloat,
+    ceRoughnessFactor :: Foreign.C.CFloat,
+    ceNormalIndex :: Word32,
+    ceOcclusionIndex :: Word32,
+    ceOcclusionStrength :: Foreign.C.CFloat,
+    ceEmissiveIndex :: Word32
+  }
+  deriving (Show)
 
 instance Storable ComputeEntityData where
   sizeOf _ = 208
   alignment _ = 16
-  peek ptr = ComputeEntityData
-    <$> peekByteOff ptr 0
-    <*> peekByteOff ptr 64
-    <*> peekByteOff ptr 128
-    <*> peekByteOff ptr 144
-    <*> peekByteOff ptr 160
-    <*> peekByteOff ptr 164
-    <*> peekByteOff ptr 168
-    <*> peekByteOff ptr 172
-    <*> peekByteOff ptr 176
-    <*> peekByteOff ptr 180
-    <*> peekByteOff ptr 184
-    <*> peekByteOff ptr 188
-    <*> peekByteOff ptr 192
-    <*> peekByteOff ptr 196
-    <*> peekByteOff ptr 200
+  peek ptr =
+    ComputeEntityData
+      <$> peekByteOff ptr 0
+      <*> peekByteOff ptr 64
+      <*> peekByteOff ptr 128
+      <*> peekByteOff ptr 144
+      <*> peekByteOff ptr 160
+      <*> peekByteOff ptr 164
+      <*> peekByteOff ptr 168
+      <*> peekByteOff ptr 172
+      <*> peekByteOff ptr 176
+      <*> peekByteOff ptr 180
+      <*> peekByteOff ptr 184
+      <*> peekByteOff ptr 188
+      <*> peekByteOff ptr 192
+      <*> peekByteOff ptr 196
+      <*> peekByteOff ptr 200
   poke ptr (ComputeEntityData t nm amin amax mat fi vo ic mri met rou ni oi os ei) = do
     pokeByteOff ptr 0 t
     pokeByteOff ptr 64 nm
@@ -208,19 +212,20 @@ instance Storable ComputeEntityData where
     pokeByteOff ptr 200 ei
 
 data ComputeCullData = ComputeCullData
-  { ccFrustumPlanes :: [V4 Foreign.C.CFloat]
-  , ccCameraPosition :: V4 Foreign.C.CFloat
-  , ccEntityCount :: Word32
-  , ccLodDistance1 :: Foreign.C.CFloat
-  , ccLodDistance2 :: Foreign.C.CFloat
-  , ccPad3 :: Word32
-  } deriving (Show)
+  { ccFrustumPlanes :: [V4 Foreign.C.CFloat],
+    ccCameraPosition :: V4 Foreign.C.CFloat,
+    ccEntityCount :: Word32,
+    ccLodDistance1 :: Foreign.C.CFloat,
+    ccLodDistance2 :: Foreign.C.CFloat,
+    ccPad3 :: Word32
+  }
+  deriving (Show)
 
 instance Storable ComputeCullData where
   sizeOf _ = 128
   alignment _ = 16
   peek ptr = do
-    planes <- sequence [peekByteOff ptr (i * 16) | i <- [0..5]]
+    planes <- sequence [peekByteOff ptr (i * 16) | i <- [0 .. 5]]
     camPos <- peekByteOff ptr 96
     count <- peekByteOff ptr 112
     lod1 <- peekByteOff ptr 116
@@ -228,7 +233,7 @@ instance Storable ComputeCullData where
     pad <- peekByteOff ptr 124
     pure (ComputeCullData planes camPos count lod1 lod2 pad)
   poke ptr (ComputeCullData planes camPos count lod1 lod2 pad) = do
-    forM_ (zip [0..5] planes) $ \(i, p) -> pokeByteOff ptr (i * 16) p
+    forM_ (zip [0 .. 5] planes) $ \(i, p) -> pokeByteOff ptr (i * 16) p
     pokeByteOff ptr 96 camPos
     pokeByteOff ptr 112 count
     pokeByteOff ptr 116 lod1
@@ -236,22 +241,24 @@ instance Storable ComputeCullData where
     pokeByteOff ptr 124 pad
 
 data DrawIndexedIndirectCommand = DrawIndexedIndirectCommand
-  { diicIndexCount :: Word32
-  , diicInstanceCount :: Word32
-  , diicFirstIndex :: Word32
-  , diicVertexOffset :: Int32
-  , diicFirstInstance :: Word32
-  } deriving (Show)
+  { diicIndexCount :: Word32,
+    diicInstanceCount :: Word32,
+    diicFirstIndex :: Word32,
+    diicVertexOffset :: Int32,
+    diicFirstInstance :: Word32
+  }
+  deriving (Show)
 
 instance Storable DrawIndexedIndirectCommand where
   sizeOf _ = 20
   alignment _ = 4
-  peek ptr = DrawIndexedIndirectCommand
-    <$> peekByteOff ptr 0
-    <*> peekByteOff ptr 4
-    <*> peekByteOff ptr 8
-    <*> peekByteOff ptr 12
-    <*> peekByteOff ptr 16
+  peek ptr =
+    DrawIndexedIndirectCommand
+      <$> peekByteOff ptr 0
+      <*> peekByteOff ptr 4
+      <*> peekByteOff ptr 8
+      <*> peekByteOff ptr 12
+      <*> peekByteOff ptr 16
   poke ptr (DrawIndexedIndirectCommand ic ins fi vo fii) = do
     pokeByteOff ptr 0 ic
     pokeByteOff ptr 4 ins
@@ -260,29 +267,35 @@ instance Storable DrawIndexedIndirectCommand where
     pokeByteOff ptr 16 fii
 
 data ComputeCullResources = ComputeCullResources
-  { ccrPipeline :: Vulkan.VkPipeline
-  , ccrPipelineLayout :: Vulkan.VkPipelineLayout
-  , ccrDescriptorSet :: Vulkan.VkDescriptorSet
-  , ccrEntityBuffer :: Vulkan.VkBuffer
-  , ccrEntityMemory :: Vulkan.VkDeviceMemory
-  , ccrDrawCommandsBuffer :: Vulkan.VkBuffer
-  , ccrDrawCommandsMemory :: Vulkan.VkDeviceMemory
-  , ccrCullDataBuffer :: Vulkan.VkBuffer
-  , ccrCullDataMemory :: Vulkan.VkDeviceMemory
-  , ccrMaxEntities :: Int
+  { ccrPipeline :: Vulkan.VkPipeline,
+    ccrPipelineLayout :: Vulkan.VkPipelineLayout,
+    ccrDescriptorSet :: Vulkan.VkDescriptorSet,
+    ccrEntityBuffer :: Vulkan.VkBuffer,
+    ccrEntityMemory :: Vulkan.VkDeviceMemory,
+    ccrDrawCommandsBuffer :: Vulkan.VkBuffer,
+    ccrDrawCommandsMemory :: Vulkan.VkDeviceMemory,
+    ccrCullDataBuffer :: Vulkan.VkBuffer,
+    ccrCullDataMemory :: Vulkan.VkDeviceMemory,
+    ccrMaxEntities :: Int
   }
 
 transformAABB :: M44 Float -> BBox -> (V3 Float, V3 Float)
 transformAABB worldMat (BBox (V3 minX minY minZ) (V3 maxX maxY maxZ)) =
   let corners =
-        [ V3 minX minY minZ, V3 maxX minY minZ, V3 minX maxY minZ, V3 maxX maxY minZ
-        , V3 minX minY maxZ, V3 maxX minY maxZ, V3 minX maxY maxZ, V3 maxX maxY maxZ
+        [ V3 minX minY minZ,
+          V3 maxX minY minZ,
+          V3 minX maxY minZ,
+          V3 maxX maxY minZ,
+          V3 minX minY maxZ,
+          V3 maxX minY maxZ,
+          V3 minX maxY maxZ,
+          V3 maxX maxY maxZ
         ]
       worldCorners = map (\(V3 x y z) -> let V4 wx wy wz _ = worldMat !* V4 x y z 1 in V3 wx wy wz) corners
       xs = map (\(V3 x _ _) -> x) worldCorners
       ys = map (\(V3 _ y _) -> y) worldCorners
       zs = map (\(V3 _ _ z) -> z) worldCorners
-  in (V3 (minimum xs) (minimum ys) (minimum zs), V3 (maximum xs) (maximum ys) (maximum zs))
+   in (V3 (minimum xs) (minimum ys) (minimum zs), V3 (maximum xs) (maximum ys) (maximum zs))
 
 extractFrustumPlanes :: M44 Float -> [V4 Float]
 extractFrustumPlanes vp =
@@ -290,17 +303,17 @@ extractFrustumPlanes vp =
       r2 = vp ^. _y
       r3 = vp ^. _z
       r4 = vp ^. _w
-      left   = r1 ^+^ r4
-      right  = r4 ^-^ r1
+      left = r1 ^+^ r4
+      right = r4 ^-^ r1
       bottom = r2 ^+^ r4
-      top    = r4 ^-^ r2
-      near   = r3 ^+^ r4
-      far    = r4 ^-^ r3
-  in [left, right, bottom, top, near, far]
+      top = r4 ^-^ r2
+      near = r3 ^+^ r4
+      far = r4 ^-^ r3
+   in [left, right, bottom, top, near, far]
 
 filterVisible :: [DrawCall] -> IntMap Word32 -> [DrawCall]
 filterVisible drawList visibleFlags =
-  [dc | (idx, dc) <- zip [0..] drawList, IntMap.findWithDefault 1 idx visibleFlags == 1]
+  [dc | (idx, dc) <- zip [0 ..] drawList, IntMap.findWithDefault 1 idx visibleFlags == 1]
 
 data EngineConfig = EngineConfig
   { targetRenderFPS :: !Integer,
@@ -345,17 +358,27 @@ updateFrameStats stats frameTime =
       maxT = max (fsMaxTime stats) frameTime
       total = fsTotalFrames stats + 1
       newStats = FrameStats count accum minT maxT total
-  in if count >= 300
-       then let avg = accum `div` fromIntegral count
-                avgMs = fromIntegral avg / 1_000_000 :: Double
-                minMs = fromIntegral minT / 1_000_000 :: Double
-                maxMs = fromIntegral maxT / 1_000_000 :: Double
-                fps = 1_000_000_000.0 / fromIntegral avg :: Double
-                msg = Text.pack $
-                  "Frame stats [last 60 frames]: avg=" ++ show avgMs ++ "ms, min=" ++ show minMs ++ "ms, max=" ++ show maxMs ++ "ms, fps=" ++ show fps
-                          ++ " | total frames=" ++ show total
-            in (FrameStats 0 0 999999999999 0 total, Just msg)
-       else (newStats, Nothing)
+   in if count >= 300
+        then
+          let avg = accum `div` fromIntegral count
+              avgMs = fromIntegral avg / 1_000_000 :: Double
+              minMs = fromIntegral minT / 1_000_000 :: Double
+              maxMs = fromIntegral maxT / 1_000_000 :: Double
+              fps = 1_000_000_000.0 / fromIntegral avg :: Double
+              msg =
+                Text.pack $
+                  "Frame stats [last 60 frames]: avg="
+                    ++ show avgMs
+                    ++ "ms, min="
+                    ++ show minMs
+                    ++ "ms, max="
+                    ++ show maxMs
+                    ++ "ms, fps="
+                    ++ show fps
+                    ++ " | total frames="
+                    ++ show total
+           in (FrameStats 0 0 999999999999 0 total, Just msg)
+        else (newStats, Nothing)
 
 type Position = V3 Float
 

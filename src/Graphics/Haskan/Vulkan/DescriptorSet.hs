@@ -13,7 +13,7 @@ import Graphics.Vulkan.Marshal.Create (set, setListRef, setStrListRef, setVkRef,
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 allocateDescriptorSet ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorPool ->
   [Vulkan.VkDescriptorSetLayout] ->
@@ -30,7 +30,7 @@ allocateDescriptorSet dev descriptorPool setLayouts = do
    in liftIO $ withPtr allocateInfo (\aiPtr -> allocaAndPeek (Vulkan.vkAllocateDescriptorSets dev aiPtr))
 
 updateDescriptorSets ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkBuffer ->
@@ -84,7 +84,7 @@ updateDescriptorSets dev descriptorSet buffer textureImageView textureSampler = 
       Vulkan.vkUpdateDescriptorSets dev 2 writeUpdatePtr 0 Vulkan.vkNullPtr
 
 updateDescriptorSetsRange ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkBuffer ->
@@ -139,13 +139,16 @@ updateDescriptorSetsRange dev descriptorSet buffer range textureImageView textur
       Vulkan.vkUpdateDescriptorSets dev 2 writeUpdatePtr 0 Vulkan.vkNullPtr
 
 updateLightingDescriptorSets ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkSampler ->
-  [Vulkan.VkImageView] -> -- ^ 7 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive, env_cubemap, irradiance_cubemap, brdf_lut
-  Maybe Vulkan.VkBuffer -> -- ^ light SSBO (optional)
-  Maybe Vulkan.VkImageView -> -- ^ 3D cloud noise texture (optional)
+  -- | 7 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive, env_cubemap, irradiance_cubemap, brdf_lut
+  [Vulkan.VkImageView] ->
+  -- | light SSBO (optional)
+  Maybe Vulkan.VkBuffer ->
+  -- | 3D cloud noise texture (optional)
+  Maybe Vulkan.VkImageView ->
   m ()
 updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer mCloudNoiseView = do
   let mkTextureInfo imageView =
@@ -167,7 +170,7 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer m
               &* set @"descriptorCount" 1
               &* set @"dstArrayElement" 0
           )
-      writes = zipWith mkWrite [0..] imageViews
+      writes = zipWith mkWrite [0 ..] imageViews
       lightWrite = case mLightBuffer of
         Nothing -> []
         Just lightBuffer ->
@@ -177,18 +180,19 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer m
                       &* set @"offset" 0
                       &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
                   )
-          in [Vulkan.createVk
-                ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
-                    &* set @"pNext" Vulkan.VK_NULL
-                    &* set @"dstSet" descriptorSet
-                    &* set @"dstBinding" 7
-                    &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-                    &* set @"pTexelBufferView" Vulkan.VK_NULL
-                    &* set @"pImageInfo" Vulkan.VK_NULL
-                    &* setVkRef @"pBufferInfo" bufferInfo
-                    &* set @"descriptorCount" 1
-                    &* set @"dstArrayElement" 0
-                )]
+           in [ Vulkan.createVk
+                  ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+                      &* set @"pNext" Vulkan.VK_NULL
+                      &* set @"dstSet" descriptorSet
+                      &* set @"dstBinding" 7
+                      &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+                      &* set @"pTexelBufferView" Vulkan.VK_NULL
+                      &* set @"pImageInfo" Vulkan.VK_NULL
+                      &* setVkRef @"pBufferInfo" bufferInfo
+                      &* set @"descriptorCount" 1
+                      &* set @"dstArrayElement" 0
+                  )
+              ]
       cloudNoiseWrite = case mCloudNoiseView of
         Nothing -> []
         Just cloudNoiseView ->
@@ -200,7 +204,7 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer m
 
 -- | Update only the light SSBO binding (binding 7) in a lighting descriptor set.
 updateLightingLightBuffer ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkBuffer ->
@@ -231,7 +235,7 @@ updateLightingLightBuffer dev descriptorSet lightBuffer = do
 
 -- | Update UBO, bindless texture array, and entity SSBO in a descriptor set.
 updateDescriptorSetsBindless ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkBuffer -> -- view+proj UBO
@@ -313,7 +317,7 @@ updateDescriptorSetsBindless dev descriptorSet buffer range sampler imageViews e
 
 -- | Update a single combined image sampler binding in a descriptor set.
 updateTextureBinding ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkSampler ->
@@ -342,12 +346,12 @@ updateTextureBinding dev descriptorSet sampler imageView bindingIdx = do
           )
   liftIO $
     Foreign.Marshal.Array.withArray [write] $ \writePtr ->
-       Vulkan.vkUpdateDescriptorSets dev 1 writePtr 0 Vulkan.vkNullPtr
+      Vulkan.vkUpdateDescriptorSets dev 1 writePtr 0 Vulkan.vkNullPtr
 
 -- | Update a single texture in a bindless descriptor array.
 -- dstArrayElement is the index in the texture array.
 updateBindlessTexture ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkSampler ->
@@ -379,7 +383,7 @@ updateBindlessTexture dev descriptorSet sampler imageView arrayIndex = do
       Vulkan.vkUpdateDescriptorSets dev 1 writePtr 0 Vulkan.vkNullPtr
 
 cmdBindDescriptorSets ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkPipelineBindPoint ->
   Vulkan.VkPipelineLayout ->
@@ -403,7 +407,7 @@ cmdBindDescriptorSets commandBuffer pipelineBindPoint layout firstSet descriptor
 
 -- | Update compute culling descriptor set with SSBOs and UBO.
 updateComputeDescriptorSets ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkBuffer -> -- entities SSBO

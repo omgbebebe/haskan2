@@ -1,9 +1,10 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Engine.Update
-  ( stateUpdateLoop
-  , updateCamera
-  ) where
+  ( stateUpdateLoop,
+    updateCamera,
+  )
+where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (MVar, putMVar)
@@ -19,27 +20,27 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Aeson (ToJSON (..))
 import Data.Foldable (toList)
 import Foreign.C qualified
-import Graphics.Haskan.Camera (Camera (..), AnyCamera(..), toAnyCamera)
+import Graphics.Haskan.Camera (AnyCamera (..), Camera (..), toAnyCamera)
 import Graphics.Haskan.Camera qualified as Camera
-import Graphics.Haskan.DayNight (defaultDayNightConfig, computeSunState, SunState(..))
-import Graphics.Haskan.Debug.Interface (DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), DebugCameraSnapshot (..), debugMessageToActionEvent, parseDebugMessage, encodeDebugResponse)
+import Graphics.Haskan.DayNight (SunState (..), computeSunState, defaultDayNightConfig)
+import Graphics.Haskan.Debug.Interface (DebugCameraSnapshot (..), DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), debugMessageToActionEvent, encodeDebugResponse, parseDebugMessage)
 import Graphics.Haskan.Debug.Server (CommandQueue)
-import Graphics.Haskan.Engine.Types (GameState (..), WorldState (..), InputBuffer (..), ControlMessage (..), LightData (..), flushInputBuffer, CameraMode(..))
+import Graphics.Haskan.Engine.Types (CameraMode (..), ControlMessage (..), GameState (..), InputBuffer (..), LightData (..), WorldState (..), flushInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent)
-import Graphics.Haskan.Logger (logInfoIO, LogCategory(..), showT)
+import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Linear (V2 (..), V3 (..))
 import SDL qualified
 import SDL.Input.Mouse qualified as SDL.Mouse
 import System.Clock (Clock (..), getTime, toNanoSecs)
 
-stateUpdateLoop :: MonadIO m => Integer -> GameState AnyCamera -> MVar () -> InputBuffer -> CommandQueue -> TChan ControlMessage -> m ()
+stateUpdateLoop :: (MonadIO m) => Integer -> GameState AnyCamera -> MVar () -> InputBuffer -> CommandQueue -> TChan ControlMessage -> m ()
 stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue controlChannel = liftIO $ do
   logInfoIO LogGeneral "stateUpdateLoop starting"
   control <- STM.atomically $ TChan.dupTChan controlChannel
 
   let camSpeed = 10.0 :: Foreign.C.CFloat
 
-  let loop :: MonadIO m => Integer -> GameState AnyCamera -> Integer -> m ()
+  let loop :: (MonadIO m) => Integer -> GameState AnyCamera -> Integer -> m ()
       loop tFPS _gameState prevTime = liftIO $ do
         maybeControlMessage <- STM.atomically $ TChan.tryReadTChan control
         case maybeControlMessage of
@@ -60,14 +61,15 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                 (StrafeLeft, b, _) -> STM.atomically $ STM.writeTVar (strafeLeft gameState) b
                 (StrafeRight, b, _) -> STM.atomically $ STM.writeTVar (strafeRight gameState) b
                 (MouseMove (V2 x y), _, isRepeated) ->
-                  when mouseCaptured $ unless isRepeated $ STM.atomically
-                    ( updateCamera
-                        (activeCamera worldState)
-                        [ Camera.Rotate
-                              ( V3 (fromIntegral x * 0.1 * dtSeconds) (fromIntegral y * 0.1 * dtSeconds) 0.0
-                             )
-                        ]
-                    )
+                  when mouseCaptured $
+                    unless isRepeated $
+                      STM.atomically
+                        ( updateCamera
+                            (activeCamera worldState)
+                            [ Camera.Rotate
+                                (V3 (fromIntegral x * 0.1 * dtSeconds) (fromIntegral y * 0.1 * dtSeconds) 0.0)
+                            ]
+                        )
                 (Zoom amount, _, _) ->
                   STM.atomically
                     ( updateCamera
@@ -148,12 +150,20 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                   STM.atomically $ STM.modifyTVar' (activeCamera worldState) (\cam -> setDistance cam (realToFrac d))
                   STM.atomically $ STM.putTMVar respVar (AckResponse "camera_distance_set")
                 SetCameraTarget (V3 tx ty tz) -> do
-                  STM.atomically $ STM.modifyTVar' (activeCamera worldState) (\cam ->
-                    setTarget cam (V3 (realToFrac tx) (realToFrac ty) (realToFrac tz)))
+                  STM.atomically $
+                    STM.modifyTVar'
+                      (activeCamera worldState)
+                      ( \cam ->
+                          setTarget cam (V3 (realToFrac tx) (realToFrac ty) (realToFrac tz))
+                      )
                   STM.atomically $ STM.putTMVar respVar (AckResponse "camera_target_set")
                 SetCameraAngles az el -> do
-                  STM.atomically $ STM.modifyTVar' (activeCamera worldState) (\cam ->
-                    setAngles cam (realToFrac az) (realToFrac el))
+                  STM.atomically $
+                    STM.modifyTVar'
+                      (activeCamera worldState)
+                      ( \cam ->
+                          setAngles cam (realToFrac az) (realToFrac el)
+                      )
                   STM.atomically $ STM.putTMVar respVar (AckResponse "camera_angles_set")
                 TriggerFrameInspect -> do
                   STM.atomically $ STM.writeTVar (inspectFrame gameState) True
@@ -169,11 +179,12 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                       dist = realToFrac $ cameraDistance cam
                       az = realToFrac $ cameraAzimuth cam
                       el = realToFrac $ cameraElevation cam
-                      snapshot = GameStateSnapshot
-                        { gssCamera = DebugCameraSnapshot pos tgt dist az el
-                        , gssRunning = running
-                        , gssFrameInspectorEnabled = inspecting
-                        }
+                      snapshot =
+                        GameStateSnapshot
+                          { gssCamera = DebugCameraSnapshot pos tgt dist az el,
+                            gssRunning = running,
+                            gssFrameInspectorEnabled = inspecting
+                          }
                   STM.atomically $ STM.putTMVar respVar (StateResponse snapshot)
                 GetRenderState -> do
                   mDebugInfo <- STM.readTVarIO (renderDebugState gameState)
@@ -198,7 +209,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
             when (sl) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight (-camMove)]
             when (sr) $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight camMove]
             STM.atomically $ STM.modifyTVar' (activeCamera worldState) (\cam -> Camera.animate cam dtSeconds)
-            
+
             -- Update day/night cycle
             dnEnabled <- STM.readTVarIO (gameDayNightEnabled gameState)
             when dnEnabled $ do
@@ -213,13 +224,15 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
               lightsList <- STM.readTVarIO (lights gameState)
               let updatedLights = case lightsList of
                     [] -> []
-                    (sun:rest) -> sun
-                      { ldDirection = realToFrac <$> ssDirection sunState
-                      , ldIntensity = realToFrac (ssIntensity sunState)
-                      , ldColor = realToFrac <$> ssColor sunState
-                      } : rest
+                    (sun : rest) ->
+                      sun
+                        { ldDirection = realToFrac <$> ssDirection sunState,
+                          ldIntensity = realToFrac (ssIntensity sunState),
+                          ldColor = realToFrac <$> ssColor sunState
+                        }
+                        : rest
               STM.atomically $ STM.writeTVar (lights gameState) updatedLights
-            
+
             let targetDelayMicros = 1000000 `div` fromIntegral tFPS
             threadDelay (fromIntegral targetDelayMicros)
             when isRunning $ loop tFPS _gameState newTime
@@ -233,7 +246,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
   putMVar finishedSemaphore ()
 
 updateCamera ::
-  Camera cam =>
+  (Camera cam) =>
   TVar cam ->
   [Camera.Modifier Foreign.C.CFloat] ->
   STM ()

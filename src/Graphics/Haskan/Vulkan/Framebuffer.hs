@@ -10,7 +10,7 @@ import Graphics.Vulkan.Marshal.Create (set, setListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 managedFramebuffer ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkRenderPass ->
   Vulkan.VkExtent2D ->
@@ -24,7 +24,7 @@ managedFramebuffer dev renderPass extent imageView depthView =
     (\ptr -> Vulkan.vkDestroyFramebuffer dev ptr Vulkan.vkNullPtr)
 
 createFramebuffer ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkRenderPass ->
   Vulkan.VkExtent2D ->
@@ -46,7 +46,7 @@ createFramebuffer dev renderPass extent imageView depthView = do
   liftIO $ withPtr framebufferCI (\fciPtr -> allocaAndPeek (Vulkan.vkCreateFramebuffer dev fciPtr Vulkan.VK_NULL))
 
 managedGBufferFramebuffer ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkRenderPass ->
   Vulkan.VkExtent2D ->
@@ -60,7 +60,7 @@ managedGBufferFramebuffer dev renderPass extent colorViews depthView =
     (\ptr -> Vulkan.vkDestroyFramebuffer dev ptr Vulkan.vkNullPtr)
 
 createGBufferFramebuffer ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkRenderPass ->
   Vulkan.VkExtent2D ->
@@ -82,7 +82,7 @@ createGBufferFramebuffer dev renderPass extent colorViews depthView = do
   liftIO $ withPtr framebufferCI (\fciPtr -> allocaAndPeek (Vulkan.vkCreateFramebuffer dev fciPtr Vulkan.VK_NULL))
 
 managedLightingFramebuffer ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkRenderPass ->
   Vulkan.VkExtent2D ->
@@ -95,7 +95,7 @@ managedLightingFramebuffer dev renderPass extent imageView =
     (\ptr -> Vulkan.vkDestroyFramebuffer dev ptr Vulkan.vkNullPtr)
 
 createLightingFramebuffer ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkRenderPass ->
   Vulkan.VkExtent2D ->

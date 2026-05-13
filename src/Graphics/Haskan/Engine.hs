@@ -1,23 +1,24 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Engine
-  ( mainLoop
-  , EngineConfig (..)
-  , GameState
-  , WorldState
-  , ControlMessage (..)
-  , FrameStats (..)
-  , FrameTime (..)
-  , emptyFrameStats
-  , updateFrameStats
-  , forkIOWithHandler
-  , InputBuffer (..)
-  , newInputBuffer
-  , writeInputBuffer
-  , flushInputBuffer
-  , makeProjectionMatrix
-  , computeSkyboxRays
-  ) where
+  ( mainLoop,
+    EngineConfig (..),
+    GameState,
+    WorldState,
+    ControlMessage (..),
+    FrameStats (..),
+    FrameTime (..),
+    emptyFrameStats,
+    updateFrameStats,
+    forkIOWithHandler,
+    InputBuffer (..),
+    newInputBuffer,
+    writeInputBuffer,
+    flushInputBuffer,
+    makeProjectionMatrix,
+    computeSkyboxRays,
+  )
+where
 
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar, tryTakeMVar)
@@ -38,42 +39,42 @@ import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.Camera.Fly (defaultFlyCamera)
 import Graphics.Haskan.Camera.Orbital (defaultOrbitalCamera)
-import Graphics.Haskan.DayNight (defaultDayNightConfig, computeSunState)
+import Graphics.Haskan.DayNight (computeSunState, defaultDayNightConfig)
 import Graphics.Haskan.Debug.FrameInspector (defaultInspector)
 import Graphics.Haskan.Debug.Interface (DebugMessage (..), debugMessageToActionEvent)
 import Graphics.Haskan.Debug.Server (startDebugServer, stopDebugServer)
-import Graphics.Haskan.Engine.Scene (makeProjectionMatrix, computeSkyboxRays)
+import Graphics.Haskan.Engine.Render (renderLoop)
+import Graphics.Haskan.Engine.Scene (computeSkyboxRays, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types
-  ( EngineConfig (..)
-  , FrameStats (..)
-  , FrameTime (..)
-  , GameState (..)
-  , WorldState (..)
-  , InputBuffer (..)
-  , ControlMessage (..)
-  , LightData (..)
-  , CameraMode (..)
-  , emptyFrameStats
-  , updateFrameStats
-  , forkIOWithHandler
-  , newInputBuffer
-  , writeInputBuffer
-  , flushInputBuffer
+  ( CameraMode (..),
+    ControlMessage (..),
+    EngineConfig (..),
+    FrameStats (..),
+    FrameTime (..),
+    GameState (..),
+    InputBuffer (..),
+    LightData (..),
+    WorldState (..),
+    emptyFrameStats,
+    flushInputBuffer,
+    forkIOWithHandler,
+    newInputBuffer,
+    updateFrameStats,
+    writeInputBuffer,
   )
 import Graphics.Haskan.Engine.Update (stateUpdateLoop)
-import Graphics.Haskan.Engine.Render (renderLoop)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
-import Graphics.Haskan.Logger (logDebugIO, logInfoIO, LogCategory(..), showT)
+import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
 import Graphics.Haskan.Vulkan.Instance qualified as Instance
 import Graphics.Haskan.Vulkan.PhysicalDevice qualified as PhysicalDevice
 import Graphics.Haskan.Window qualified as Window
 import Linear (V3 (..))
 import SDL qualified
 import SDL.Input.Mouse qualified as SDL.Mouse
-import System.Clock (Clock(..), getTime, toNanoSecs)
+import System.Clock (Clock (..), getTime, toNanoSecs)
 import System.Timeout (timeout)
 
-mainLoop :: MonadIO m => String -> EngineConfig -> m ()
+mainLoop :: (MonadIO m) => String -> EngineConfig -> m ()
 mainLoop meshName EngineConfig {..} = do
   logInfoIO LogGeneral "starting mainLoop"
   let initialCam = Camera.Orbital defaultOrbitalCamera
@@ -100,18 +101,21 @@ mainLoop meshName EngineConfig {..} = do
   tvPendingAllStages <- liftIO $ STM.newTVarIO False
   tvPendingSwapchainScreenshot <- liftIO $ STM.newTVarIO False
   tvMouseCaptureEnabled <- liftIO $ STM.newTVarIO False
-  tvLights <- liftIO $ STM.newTVarIO
-    ( take lightCount
-      [ LightData (V3 1 1 1) 1.0 (V3 1 1 1) 0 (V3 (-1) (-1) (-1)) 0.0
-      , LightData (V3 (-1) 1 (-1)) 0.5 (V3 1 0.8 0.6) 0 (V3 1 (-1) 1) 0.0
-      , LightData (V3 0 (-1) 0) 0.3 (V3 0.4 0.4 0.6) 0 (V3 0 1 0) 0.0
-      , LightData (V3 1 0 0) 0.7 (V3 0.9 0.2 0.2) 0 (V3 (-1) 0 0) 0.0
-      , LightData (V3 0 1 0) 0.4 (V3 0.2 0.9 0.2) 0 (V3 0 (-1) 0) 0.0
-      , LightData (V3 0 0 1) 0.6 (V3 0.2 0.2 0.9) 0 (V3 0 0 (-1)) 0.0
-      , LightData (V3 1 1 (-1)) 0.5 (V3 0.8 0.8 0.2) 0 (V3 (-1) (-1) 1) 0.0
-      , LightData (V3 (-1) (-1) 1) 0.4 (V3 0.8 0.2 0.8) 0 (V3 1 1 (-1)) 0.0
-      ]
-    )
+  tvLights <-
+    liftIO $
+      STM.newTVarIO
+        ( take
+            lightCount
+            [ LightData (V3 1 1 1) 1.0 (V3 1 1 1) 0 (V3 (-1) (-1) (-1)) 0.0,
+              LightData (V3 (-1) 1 (-1)) 0.5 (V3 1 0.8 0.6) 0 (V3 1 (-1) 1) 0.0,
+              LightData (V3 0 (-1) 0) 0.3 (V3 0.4 0.4 0.6) 0 (V3 0 1 0) 0.0,
+              LightData (V3 1 0 0) 0.7 (V3 0.9 0.2 0.2) 0 (V3 (-1) 0 0) 0.0,
+              LightData (V3 0 1 0) 0.4 (V3 0.2 0.9 0.2) 0 (V3 0 (-1) 0) 0.0,
+              LightData (V3 0 0 1) 0.6 (V3 0.2 0.2 0.9) 0 (V3 0 0 (-1)) 0.0,
+              LightData (V3 1 1 (-1)) 0.5 (V3 0.8 0.8 0.2) 0 (V3 (-1) (-1) 1) 0.0,
+              LightData (V3 (-1) (-1) 1) 0.4 (V3 0.8 0.2 0.8) 0 (V3 1 1 (-1)) 0.0
+            ]
+        )
   tvTimeOfDay <- liftIO $ STM.newTVarIO initialTimeOfDay
   tvTimeSpeed <- liftIO $ STM.newTVarIO timeSpeed
   tvDayNightEnabled <- liftIO $ STM.newTVarIO dayNightEnabled
@@ -196,7 +200,7 @@ mainLoop meshName EngineConfig {..} = do
   liftIO $ forkIOWithHandler "stateUpdateLoop" stateUpdateLoopFinished $ stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished inputBuffer debugCmdQueue controlChannel
 
   when renderLoopOk $ do
-    let inputLoop :: MonadIO m => m ()
+    let inputLoop :: (MonadIO m) => m ()
         inputLoop = do
           events <- SDL.pollEvents
           let actionEvents = catMaybes $ map (payloadToActionEvent . SDL.eventPayload) events
@@ -216,16 +220,16 @@ mainLoop meshName EngineConfig {..} = do
   logInfoIO LogGeneral "waiting for other threads to finish (timeout: 10s)..."
 
   -- Wait for threads with timeout - if they don't finish in time, force quit
-  let shutdownTimeoutMicros = 10 * 1000000  -- 10 seconds
+  let shutdownTimeoutMicros = 10 * 1000000 -- 10 seconds
   mbRenderDone <- liftIO $ timeout shutdownTimeoutMicros $ takeMVar renderLoopFinished
   case mbRenderDone of
     Nothing -> logInfoIO LogGeneral "WARNING: render loop shutdown timed out after 10s"
-    Just _  -> logInfoIO LogGeneral "render loop shut down cleanly"
+    Just _ -> logInfoIO LogGeneral "render loop shut down cleanly"
 
   mbStateDone <- liftIO $ timeout shutdownTimeoutMicros $ takeMVar stateUpdateLoopFinished
   case mbStateDone of
     Nothing -> logInfoIO LogGeneral "WARNING: state update loop shutdown timed out after 10s"
-    Just _  -> logInfoIO LogGeneral "state update loop shut down cleanly"
+    Just _ -> logInfoIO LogGeneral "state update loop shut down cleanly"
 
   liftIO $ forM_ mDebugServer stopDebugServer
 

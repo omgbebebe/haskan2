@@ -1,7 +1,8 @@
 module Graphics.Haskan.Vulkan.ComputePipeline
-  ( managedComputePipeline
-  , createComputePipeline
-  ) where
+  ( managedComputePipeline,
+    createComputePipeline,
+  )
+where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
@@ -13,7 +14,7 @@ import Graphics.Vulkan.Marshal.Create (set, setStrRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 managedComputePipeline ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkPipelineLayout ->
   Vulkan.VkShaderModule ->
@@ -25,7 +26,7 @@ managedComputePipeline dev layout shaderModule =
     (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
 
 createComputePipeline ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkPipelineLayout ->
   Vulkan.VkShaderModule ->

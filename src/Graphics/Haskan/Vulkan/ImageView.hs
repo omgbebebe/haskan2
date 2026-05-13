@@ -11,7 +11,7 @@ import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 managedImageView ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkImage ->
@@ -23,7 +23,7 @@ managedImageView dev format img =
     (\ptr -> Vulkan.vkDestroyImageView dev ptr Vulkan.vkNullPtr)
 
 createImageView ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkImage ->
@@ -54,11 +54,10 @@ createImageView dev format img = do
               &* set @"baseArrayLayer" 0
               &* set @"layerCount" 1
           )
-   in
-      liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateImageView dev ptr Vulkan.VK_NULL)
+   in liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateImageView dev ptr Vulkan.VK_NULL)
 
 managedImageView3D ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkImage ->
@@ -70,7 +69,7 @@ managedImageView3D dev format img =
     (\ptr -> Vulkan.vkDestroyImageView dev ptr Vulkan.vkNullPtr)
 
 createImageView3D ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkImage ->
@@ -109,11 +108,12 @@ createImageView3D dev format img = do
           )
 
 managedImageView2DArray ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkImage ->
-  Vulkan.Word32 -> -- ^ layer count
+  -- | layer count
+  Vulkan.Word32 ->
   m Vulkan.VkImageView
 managedImageView2DArray dev format img layerCount =
   alloc
@@ -122,11 +122,12 @@ managedImageView2DArray dev format img layerCount =
     (\ptr -> Vulkan.vkDestroyImageView dev ptr Vulkan.vkNullPtr)
 
 createImageView2DArray ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkImage ->
-  Vulkan.Word32 -> -- ^ layer count
+  -- | layer count
+  Vulkan.Word32 ->
   m Vulkan.VkImageView
 createImageView2DArray dev format img layerCount = do
   let createInfo =
@@ -154,11 +155,10 @@ createImageView2DArray dev format img layerCount = do
               &* set @"baseArrayLayer" 0
               &* set @"layerCount" layerCount
           )
-   in
-      liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateImageView dev ptr Vulkan.VK_NULL)
+   in liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateImageView dev ptr Vulkan.VK_NULL)
 
 managedImageViewCube ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkImage ->
@@ -170,7 +170,7 @@ managedImageViewCube dev format img =
     (\ptr -> Vulkan.vkDestroyImageView dev ptr Vulkan.vkNullPtr)
 
 createImageViewCube ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkImage ->
@@ -201,15 +201,15 @@ createImageViewCube dev format img = do
               &* set @"baseArrayLayer" 0
               &* set @"layerCount" 6
           )
-   in
-      liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateImageView dev ptr Vulkan.VK_NULL)
+   in liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateImageView dev ptr Vulkan.VK_NULL)
 
 managedImageViewCubeMips ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkImage ->
-  Vulkan.Word32 -> -- ^ mip level count
+  -- | mip level count
+  Vulkan.Word32 ->
   m Vulkan.VkImageView
 managedImageViewCubeMips dev format img mipLevels =
   alloc
@@ -218,11 +218,12 @@ managedImageViewCubeMips dev format img mipLevels =
     (\ptr -> Vulkan.vkDestroyImageView dev ptr Vulkan.vkNullPtr)
 
 createImageViewCubeMips ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkImage ->
-  Vulkan.Word32 -> -- ^ mip level count
+  -- | mip level count
+  Vulkan.Word32 ->
   m Vulkan.VkImageView
 createImageViewCubeMips dev format img mipLevels = do
   let createInfo =
@@ -250,5 +251,4 @@ createImageViewCubeMips dev format img mipLevels = do
               &* set @"baseArrayLayer" 0
               &* set @"layerCount" 6
           )
-   in
-      liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateImageView dev ptr Vulkan.VK_NULL)
+   in liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateImageView dev ptr Vulkan.VK_NULL)

@@ -9,14 +9,14 @@ import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
-managedFence :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkFence
+managedFence :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkFence
 managedFence dev =
   alloc
     "Vulkan Fence"
     (createFence dev)
     (\ptr -> Vulkan.vkDestroyFence dev ptr Vulkan.vkNullPtr)
 
-createFence :: MonadIO m => Vulkan.VkDevice -> m Vulkan.VkFence
+createFence :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkFence
 createFence dev =
   let createInfo =
         Vulkan.createVk

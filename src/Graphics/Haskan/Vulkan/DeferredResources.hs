@@ -1,9 +1,10 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Vulkan.DeferredResources
-  ( DeferredResources (..)
-  , createDeferredResources
-  ) where
+  ( DeferredResources (..),
+    createDeferredResources,
+  )
+where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
@@ -11,9 +12,9 @@ import Data.Bits ((.|.))
 import Data.Foldable (for_)
 import Data.Traversable (for)
 import Foreign.Marshal.Array qualified
-import Graphics.Haskan.Logger (logDebugIO, logInfoIO, showT, LogCategory (..))
-import Graphics.Haskan.Resources (alloc, allocaAndPeek)
+import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
 import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..))
+import Graphics.Haskan.Resources (alloc, allocaAndPeek)
 import Graphics.Haskan.Vertex (Vertex)
 import Graphics.Haskan.Vertex qualified as Vertex
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
@@ -35,20 +36,20 @@ import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 data DeferredResources = DeferredResources
-  { drGBufferRenderPass    :: !Vulkan.VkRenderPass
-  , drGBufferPipeline      :: !Vulkan.VkPipeline
-  , drGBufferPipelineLayout :: !Vulkan.VkPipelineLayout
-  , drGBufferFramebuffers  :: ![Vulkan.VkFramebuffer]
-  , drLightingRenderPass   :: !Vulkan.VkRenderPass
-  , drLightingPipeline     :: !Vulkan.VkPipeline
-  , drLightingPipelineLayout :: !Vulkan.VkPipelineLayout
-  , drLightingFramebuffers :: ![Vulkan.VkFramebuffer]
-  , drLightingDescriptorSets :: ![Vulkan.VkDescriptorSet]
-  , drGBufferImages        :: ![[Vulkan.VkImage]]
-  , drGBufferImageViews    :: ![[Vulkan.VkImageView]]
-  , drSampler              :: !Vulkan.VkSampler
-  , drWireframePipeline    :: !Vulkan.VkPipeline
-  , drWireframePipelineLayout :: !Vulkan.VkPipelineLayout
+  { drGBufferRenderPass :: !Vulkan.VkRenderPass,
+    drGBufferPipeline :: !Vulkan.VkPipeline,
+    drGBufferPipelineLayout :: !Vulkan.VkPipelineLayout,
+    drGBufferFramebuffers :: ![Vulkan.VkFramebuffer],
+    drLightingRenderPass :: !Vulkan.VkRenderPass,
+    drLightingPipeline :: !Vulkan.VkPipeline,
+    drLightingPipelineLayout :: !Vulkan.VkPipelineLayout,
+    drLightingFramebuffers :: ![Vulkan.VkFramebuffer],
+    drLightingDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    drGBufferImages :: ![[Vulkan.VkImage]],
+    drGBufferImageViews :: ![[Vulkan.VkImageView]],
+    drSampler :: !Vulkan.VkSampler,
+    drWireframePipeline :: !Vulkan.VkPipeline,
+    drWireframePipelineLayout :: !Vulkan.VkPipelineLayout
   }
 
 createDeferredResources ::
@@ -65,16 +66,21 @@ createDeferredResources ::
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
-  Maybe Vulkan.VkImageView -> -- ^ env cubemap view
-  Maybe Vulkan.VkImageView -> -- ^ irradiance cubemap view
-  Maybe Vulkan.VkImageView -> -- ^ brdf lut view
-  Vulkan.VkSampler -> -- ^ lighting sampler
-  Vulkan.VkImageView -> -- ^ 3D cloud noise texture view
+  -- | env cubemap view
+  Maybe Vulkan.VkImageView ->
+  -- | irradiance cubemap view
+  Maybe Vulkan.VkImageView ->
+  -- | brdf lut view
+  Maybe Vulkan.VkImageView ->
+  -- | lighting sampler
+  Vulkan.VkSampler ->
+  -- | 3D cloud noise texture view
+  Vulkan.VkImageView ->
   m DeferredResources
 createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader mEnvMapView mIrradianceView mBrdfView sampler cloudNoiseView = do
   let extent = rcSurfaceExtent ctx
-      gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT  -- position needs negative values
-      gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM      -- normal, albedo, emissive
+      gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT -- position needs negative values
+      gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM -- normal, albedo, emissive
       depthFormat = Vulkan.VK_FORMAT_D32_SFLOAT
       numSwapchainImages = length (rcFramebuffers ctx)
 
@@ -90,7 +96,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender "lighting render pass created"
 
   -- Create g-buffer images and views (4 per swapchain image: position=SFLOAT, normal=UNORM, albedo=UNORM, emissive=UNORM)
-  gBufferImagesAndViews <- for [0..numSwapchainImages-1] $ \_ -> do
+  gBufferImagesAndViews <- for [0 .. numSwapchainImages - 1] $ \_ -> do
     posImage <- Swapchain.managedGBufferImage pdev device extent gbufPosFormat
     normImage <- Swapchain.managedGBufferImage pdev device extent gbufColorFormat
     albImage <- Swapchain.managedGBufferImage pdev device extent gbufColorFormat
@@ -111,8 +117,9 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   CommandBuffer.withCommandBufferOneTime
     (graphicsQueueHandler ctx)
     tempCmdBuf
-    (for_ (concat gBufferImages) $ \img ->
-      CommandBuffer.layerTransition tempCmdBuf img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+    ( for_ (concat gBufferImages) $ \img ->
+        CommandBuffer.layerTransition tempCmdBuf img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    )
   liftIO $ Foreign.Marshal.Array.withArray [tempCmdBuf] $ \ptr ->
     Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1 ptr
   logDebugIO LogRender "g-buffer images transitioned to SHADER_READ_ONLY_OPTIMAL"
@@ -138,11 +145,11 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       gBufferPipelineLayout
       gBufferRenderPass
       ShaderProgram
-        { spVertex = gbufVertShader
-        , spTessControl = Nothing
-        , spTessEvaluation = Nothing
-        , spGeometry = Nothing
-        , spFragment = gbufFragShader
+        { spVertex = gbufVertShader,
+          spTessControl = Nothing,
+          spTessEvaluation = Nothing,
+          spGeometry = Nothing,
+          spFragment = gbufFragShader
         }
       extent
       Vertex.vertexFormat
@@ -167,11 +174,11 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       lightingPipelineLayout
       lightingRenderPass
       ShaderProgram
-        { spVertex = litVertShader
-        , spTessControl = Nothing
-        , spTessEvaluation = Nothing
-        , spGeometry = Nothing
-        , spFragment = litFragShader
+        { spVertex = litVertShader,
+          spTessControl = Nothing,
+          spTessEvaluation = Nothing,
+          spGeometry = Nothing,
+          spFragment = litFragShader
         }
       extent
   logDebugIO LogRender "lighting pipeline created"
@@ -183,11 +190,11 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       gBufferPipelineLayout
       gBufferRenderPass
       ShaderProgram
-        { spVertex = wireVertShader
-        , spTessControl = Nothing
-        , spTessEvaluation = Nothing
-        , spGeometry = Just wireGeomShader
-        , spFragment = wireFragShader
+        { spVertex = wireVertShader,
+          spTessControl = Nothing,
+          spTessEvaluation = Nothing,
+          spGeometry = Just wireGeomShader,
+          spFragment = wireFragShader
         }
       extent
       Vertex.vertexFormat
@@ -204,32 +211,32 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
 
   -- Lighting descriptor pool and sets
   lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages 7
-  lightingDescriptorSets <- for [0..numSwapchainImages-1] $ \_ ->
+  lightingDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
     DescriptorSet.allocateDescriptorSet device lightingDescriptorPool [lightingDescriptorSetLayout]
   logDebugIO LogRender $ "lighting descriptor sets allocated: " <> showT (length lightingDescriptorSets)
 
   -- Update lighting descriptor sets with g-buffer views + cubemaps + brdf lut
   liftIO $ for_ (zip lightingDescriptorSets gBufferImageViews) $ \(ds, views) -> do
     let allViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
-                     (Just env, Just irr, Just brdf) -> views ++ [env, irr, brdf]
-                     _ -> views ++ (replicate 3 Vulkan.VK_NULL_HANDLE)
+          (Just env, Just irr, Just brdf) -> views ++ [env, irr, brdf]
+          _ -> views ++ (replicate 3 Vulkan.VK_NULL_HANDLE)
     DescriptorSet.updateLightingDescriptorSets device ds sampler allViews Nothing (Just cloudNoiseView)
   logDebugIO LogRender "lighting descriptor sets updated"
 
-  pure DeferredResources
-    { drGBufferRenderPass = gBufferRenderPass
-    , drGBufferPipeline = gBufferPipeline
-    , drGBufferPipelineLayout = gBufferPipelineLayout
-    , drGBufferFramebuffers = gBufferFramebuffers
-    , drLightingRenderPass = lightingRenderPass
-    , drLightingPipeline = lightingPipeline
-    , drLightingPipelineLayout = lightingPipelineLayout
-    , drLightingFramebuffers = lightingFramebuffers
-    , drLightingDescriptorSets = lightingDescriptorSets
-    , drGBufferImages = gBufferImages
-    , drGBufferImageViews = gBufferImageViews
-    , drSampler = sampler
-    , drWireframePipeline = wireframePipeline
-    , drWireframePipelineLayout = gBufferPipelineLayout
-    }
-
+  pure
+    DeferredResources
+      { drGBufferRenderPass = gBufferRenderPass,
+        drGBufferPipeline = gBufferPipeline,
+        drGBufferPipelineLayout = gBufferPipelineLayout,
+        drGBufferFramebuffers = gBufferFramebuffers,
+        drLightingRenderPass = lightingRenderPass,
+        drLightingPipeline = lightingPipeline,
+        drLightingPipelineLayout = lightingPipelineLayout,
+        drLightingFramebuffers = lightingFramebuffers,
+        drLightingDescriptorSets = lightingDescriptorSets,
+        drGBufferImages = gBufferImages,
+        drGBufferImageViews = gBufferImageViews,
+        drSampler = sampler,
+        drWireframePipeline = wireframePipeline,
+        drWireframePipelineLayout = gBufferPipelineLayout
+      }

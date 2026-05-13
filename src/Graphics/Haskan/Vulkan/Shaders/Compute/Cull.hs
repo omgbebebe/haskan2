@@ -1,46 +1,50 @@
-{-# LANGUAGE BlockArguments      #-}
-{-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE RebindableSyntax    #-}
-{-# LANGUAGE TypeApplications    #-}
-{-# LANGUAGE TypeOperators       #-}
+{-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE RebindableSyntax #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Graphics.Haskan.Vulkan.Shaders.Compute.Cull
-  ( program
-  ) where
+  ( program,
+  )
+where
 
 import FIR
-import Math.Linear
 import Graphics.Haskan.Vulkan.Shaders.EntityData
+import Math.Linear
 
 -- | Cull uniform data.
-type CullData = Struct
-  '[ "frustumPlanes"  ':-> Array 6 (V 4 Float)
-   , "cameraPosition" ':-> V 4 Float
-   , "entityCount"    ':-> Word32
-   , "lodDistance1"   ':-> Float
-   , "lodDistance2"   ':-> Float
-   , "_pad3"          ':-> Word32
-   ]
+type CullData =
+  Struct
+    '[ "frustumPlanes" ':-> Array 6 (V 4 Float),
+       "cameraPosition" ':-> V 4 Float,
+       "entityCount" ':-> Word32,
+       "lodDistance1" ':-> Float,
+       "lodDistance2" ':-> Float,
+       "_pad3" ':-> Word32
+     ]
 
 -- | Draw command output (matches VkDrawIndexedIndirectCommand, 20 bytes).
-type DrawCommand = Struct
-  '[ "indexCount"    ':-> Word32
-   , "instanceCount" ':-> Word32
-   , "firstIndex"    ':-> Word32
-   , "vertexOffset"  ':-> Int32
-   , "firstInstance" ':-> Word32
-   ]
+type DrawCommand =
+  Struct
+    '[ "indexCount" ':-> Word32,
+       "instanceCount" ':-> Word32,
+       "firstIndex" ':-> Word32,
+       "vertexOffset" ':-> Int32,
+       "firstInstance" ':-> Word32
+     ]
 
-type DrawCommandsData = Struct
-  '[ "commands" ':-> Array 16384 DrawCommand
-   ]
+type DrawCommandsData =
+  Struct
+    '[ "commands" ':-> Array 16384 DrawCommand
+     ]
 
-type Defs
-  =  '[ "entities"     ':-> StorageBuffer '[ DescriptorSet 0, Binding 0 ] EntitiesData
-      , "drawCommands" ':-> StorageBuffer '[ DescriptorSet 0, Binding 1 ] DrawCommandsData
-      , "cullData"     ':-> Uniform       '[ DescriptorSet 0, Binding 2 ] CullData
-      , "main"         ':-> EntryPoint    '[ LocalSize 64 1 1 ] Compute
-      ]
+type Defs =
+  '[ "entities" ':-> StorageBuffer '[DescriptorSet 0, Binding 0] EntitiesData,
+     "drawCommands" ':-> StorageBuffer '[DescriptorSet 0, Binding 1] DrawCommandsData,
+     "cullData" ':-> Uniform '[DescriptorSet 0, Binding 2] CullData,
+     "main" ':-> EntryPoint '[LocalSize 64 1 1] Compute
+   ]
 
 program :: Module Defs
 program = Module $ entryPoint @"main" @Compute do
@@ -54,7 +58,7 @@ program = Module $ entryPoint @"main" @Compute do
     then pure (Lit ())
     else do
       -- Load entity data
-      entity    <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32) idx
+      entity <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32) idx
       let aabbMin = view @(Name "aabbMin") entity
           aabbMax = view @(Name "aabbMax") entity
           firstIdx = view @(Name "firstIndex") entity
@@ -103,10 +107,16 @@ program = Module $ entryPoint @"main" @Compute do
           safeHalf = if halfTriCount >= 1 then halfTriCount * 3 else 3
           safeQuarter = if quarterTriCount >= 1 then quarterTriCount * 3 else 3
 
-          ic = if visible == 0 then 0
-               else if distSq < lod1Sq then idxCount
-               else if distSq < lod2Sq then safeHalf
-               else safeQuarter
+          ic =
+            if visible == 0
+              then 0
+              else
+                if distSq < lod1Sq
+                  then idxCount
+                  else
+                    if distSq < lod2Sq
+                      then safeHalf
+                      else safeQuarter
 
       assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "indexCount") idx ic
       assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "instanceCount") idx 1

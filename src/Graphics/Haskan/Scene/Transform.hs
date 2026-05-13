@@ -1,10 +1,11 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Scene.Transform
-  ( Transform (..)
-  , defaultTransform
-  , toMatrix
-  ) where
+  ( Transform (..),
+    defaultTransform,
+    toMatrix,
+  )
+where
 
 import Control.Lens ((&), (.~), (^.))
 import Linear (M44, Quaternion (..), V3 (..), V4 (..), _x, _y, _z)
@@ -12,9 +13,9 @@ import Linear.Matrix ((!*!))
 import Linear.Matrix qualified as Matrix
 
 data Transform = Transform
-  { tPosition :: !(V3 Float)
-  , tRotation :: !(Quaternion Float)
-  , tScale :: !(V3 Float)
+  { tPosition :: !(V3 Float),
+    tRotation :: !(Quaternion Float),
+    tScale :: !(V3 Float)
   }
   deriving (Eq, Show)
 

@@ -10,7 +10,7 @@ import Data.List (partition)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
-import Graphics.Haskan.Logger (logInfoIO, logWarnIO, LogCategory (..))
+import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, logWarnIO)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, peekVkList)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -19,14 +19,14 @@ import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setStrListRef, setVkRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
-managedInstance :: MonadManaged m => [ByteString] -> m (Vulkan.VkInstance, [String])
+managedInstance :: (MonadManaged m) => [ByteString] -> m (Vulkan.VkInstance, [String])
 managedInstance extraExtensions =
   alloc
     "VkInstance"
     (createInstance extraExtensions)
     (\(ptr, _) -> Vulkan.vkDestroyInstance ptr Vulkan.vkNullPtr)
 
-createInstance :: MonadIO m => [ByteString] -> m (Vulkan.VkInstance, [String])
+createInstance :: (MonadIO m) => [ByteString] -> m (Vulkan.VkInstance, [String])
 createInstance extraExtensions = do
   let partitionOptReq :: (Show a, Eq a, MonadIO m) => Text -> [a] -> [a] -> [a] -> m [a]
       partitionOptReq type' available optional required = do
@@ -49,8 +49,8 @@ createInstance extraExtensions = do
       <$> peekVkList (Vulkan.vkEnumerateInstanceLayerProperties)
 
   let validationLayerNames =
-        [ "VK_LAYER_KHRONOS_validation"
-        , "VK_LAYER_LUNARG_standard_validation"
+        [ "VK_LAYER_KHRONOS_validation",
+          "VK_LAYER_LUNARG_standard_validation"
         ]
       validationLayersAvailable =
         filter (`elem` availableLayers) validationLayerNames

@@ -3,33 +3,39 @@
 
 module Graphics.Haskan.Render.Graph
   ( -- * Resource IDs
-    ResourceId (..)
-  , resourceId
+    ResourceId (..),
+    resourceId,
+
     -- * Graph resources
-  , GraphResource (..)
-  , ImageDesc (..)
-  , BufferDesc (..)
+    GraphResource (..),
+    ImageDesc (..),
+    BufferDesc (..),
+
     -- * Pass definition
-  , RenderPassNode (..)
-  , PassRecordFunc (..)
-  , PassContext (..)
+    RenderPassNode (..),
+    PassRecordFunc (..),
+    PassContext (..),
+
     -- * Graph builder
-  , RenderGraph
-  , RenderGraphBuilder
-  , runRenderGraphBuilder
-  , execRenderGraphBuilder
-     -- * Builder operations
-  , addResource
-  , addPass
-  , transientImage
-  , transientBuffer
-  , getGraphResources
-  , getGraphPasses
+    RenderGraph,
+    RenderGraphBuilder,
+    runRenderGraphBuilder,
+    execRenderGraphBuilder,
+
+    -- * Builder operations
+    addResource,
+    addPass,
+    transientImage,
+    transientBuffer,
+    getGraphResources,
+    getGraphPasses,
+
     -- * Compiled graph
-  , CompiledGraph (..)
-  , CompiledPass (..)
-  , compileGraph
-  ) where
+    CompiledGraph (..),
+    CompiledPass (..),
+    compileGraph,
+  )
+where
 
 import Control.Monad.State.Strict (State, execState, gets, modify', runState)
 import Data.HashMap.Strict (HashMap)
@@ -46,7 +52,7 @@ import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 -- Resource IDs
 -- ---------------------------------------------------------------------------
 
-newtype ResourceId = ResourceId { unResourceId :: Text }
+newtype ResourceId = ResourceId {unResourceId :: Text}
   deriving (Eq, Ord, Show, Hashable)
 
 resourceId :: Text -> ResourceId
@@ -63,16 +69,16 @@ data GraphResource
   deriving (Eq, Show)
 
 data BufferDesc = BufferDesc
-  { bdSize  :: !Vulkan.VkDeviceSize
-  , bdUsage :: !(Vulkan.VkBufferUsageBitmask Vulkan.FlagMask)
+  { bdSize :: !Vulkan.VkDeviceSize,
+    bdUsage :: !(Vulkan.VkBufferUsageBitmask Vulkan.FlagMask)
   }
   deriving (Eq, Show)
 
 data ImageDesc = ImageDesc
-  { idFormat  :: !Vulkan.VkFormat
-  , idExtent  :: !Vulkan.VkExtent2D
-  , idUsage   :: !(Vulkan.VkImageUsageBitmask Vulkan.FlagMask)
-  , idSamples :: !Vulkan.VkSampleCountFlagBits
+  { idFormat :: !Vulkan.VkFormat,
+    idExtent :: !Vulkan.VkExtent2D,
+    idUsage :: !(Vulkan.VkImageUsageBitmask Vulkan.FlagMask),
+    idSamples :: !Vulkan.VkSampleCountFlagBits
   }
   deriving (Eq, Show)
 
@@ -81,10 +87,10 @@ data ImageDesc = ImageDesc
 -- ---------------------------------------------------------------------------
 
 data RenderPassNode = RenderPassNode
-  { rpName    :: !Text
-  , rpInputs  :: ![ResourceId]
-  , rpOutputs :: ![ResourceId]
-  , rpRecord  :: !PassRecordFunc
+  { rpName :: !Text,
+    rpInputs :: ![ResourceId],
+    rpOutputs :: ![ResourceId],
+    rpRecord :: !PassRecordFunc
   }
 
 -- | Opaque function that records Vulkan commands for a pass.
@@ -94,13 +100,13 @@ data PassRecordFunc = PassRecordFunc
   }
 
 data PassContext = PassContext
-  { pcCommandBuffer   :: !Vulkan.VkCommandBuffer
-  , pcPipeline        :: !Vulkan.VkPipeline
-  , pcPipelineLayout  :: !Vulkan.VkPipelineLayout
-  , pcDescriptorSet   :: !Vulkan.VkDescriptorSet
-  , pcFramebuffer     :: !Vulkan.VkFramebuffer
-  , pcRenderPass      :: !Vulkan.VkRenderPass
-  , pcExtent          :: !Vulkan.VkExtent2D
+  { pcCommandBuffer :: !Vulkan.VkCommandBuffer,
+    pcPipeline :: !Vulkan.VkPipeline,
+    pcPipelineLayout :: !Vulkan.VkPipelineLayout,
+    pcDescriptorSet :: !Vulkan.VkDescriptorSet,
+    pcFramebuffer :: !Vulkan.VkFramebuffer,
+    pcRenderPass :: !Vulkan.VkRenderPass,
+    pcExtent :: !Vulkan.VkExtent2D
   }
 
 -- ---------------------------------------------------------------------------
@@ -108,9 +114,9 @@ data PassContext = PassContext
 -- ---------------------------------------------------------------------------
 
 data GraphBuildState = GraphBuildState
-  { gbsResources :: !(HashMap ResourceId GraphResource)
-  , gbsPasses    :: ![RenderPassNode]
-  , gbsNextId    :: !Int
+  { gbsResources :: !(HashMap ResourceId GraphResource),
+    gbsPasses :: ![RenderPassNode],
+    gbsNextId :: !Int
   }
 
 emptyGraphState :: GraphBuildState
@@ -126,46 +132,46 @@ type RenderGraph = RenderGraphBuilder ()
 runRenderGraphBuilder :: RenderGraphBuilder a -> (a, HashMap ResourceId GraphResource, [RenderPassNode])
 runRenderGraphBuilder (RenderGraphBuilder m) =
   let (a, s) = runState m emptyGraphState
-  in (a, gbsResources s, reverse (gbsPasses s))
+   in (a, gbsResources s, reverse (gbsPasses s))
 
 execRenderGraphBuilder :: RenderGraphBuilder a -> (HashMap ResourceId GraphResource, [RenderPassNode])
 execRenderGraphBuilder m =
   let (_, res, passes) = runRenderGraphBuilder m
-  in (res, passes)
+   in (res, passes)
 
 -- | Add a named resource to the graph.
 addResource :: ResourceId -> GraphResource -> RenderGraphBuilder ()
 addResource rid gr = RenderGraphBuilder $ modify' $ \s ->
-  s { gbsResources = HashMap.insert rid gr (gbsResources s) }
+  s {gbsResources = HashMap.insert rid gr (gbsResources s)}
 
 -- | Add a pass to the graph.
 addPass :: RenderPassNode -> RenderGraphBuilder ()
 addPass pass = RenderGraphBuilder $ modify' $ \s ->
-  s { gbsPasses = pass : gbsPasses s }
+  s {gbsPasses = pass : gbsPasses s}
 
 -- | Create a transient image resource with an auto-generated ID.
-transientImage
-  :: Text
-  -> Vulkan.VkFormat
-  -> Vulkan.VkExtent2D
-  -> Vulkan.VkImageUsageFlags
-  -> RenderGraphBuilder ResourceId
+transientImage ::
+  Text ->
+  Vulkan.VkFormat ->
+  Vulkan.VkExtent2D ->
+  Vulkan.VkImageUsageFlags ->
+  RenderGraphBuilder ResourceId
 transientImage name fmt extent usage = do
   idx <- RenderGraphBuilder $ gets gbsNextId
-  RenderGraphBuilder $ modify' $ \s -> s { gbsNextId = gbsNextId s + 1 }
+  RenderGraphBuilder $ modify' $ \s -> s {gbsNextId = gbsNextId s + 1}
   let rid = ResourceId (name <> "_" <> Text.pack (show idx))
   addResource rid (GRImage (ImageDesc fmt extent usage Vulkan.VK_SAMPLE_COUNT_1_BIT))
   pure rid
 
 -- | Create a transient buffer resource with an auto-generated ID.
-transientBuffer
-  :: Text
-  -> Vulkan.VkDeviceSize
-  -> (Vulkan.VkBufferUsageBitmask Vulkan.FlagMask)
-  -> RenderGraphBuilder ResourceId
+transientBuffer ::
+  Text ->
+  Vulkan.VkDeviceSize ->
+  (Vulkan.VkBufferUsageBitmask Vulkan.FlagMask) ->
+  RenderGraphBuilder ResourceId
 transientBuffer name size usage = do
   idx <- RenderGraphBuilder $ gets gbsNextId
-  RenderGraphBuilder $ modify' $ \s -> s { gbsNextId = gbsNextId s + 1 }
+  RenderGraphBuilder $ modify' $ \s -> s {gbsNextId = gbsNextId s + 1}
   let rid = ResourceId (name <> "_" <> Text.pack (show idx))
   addResource rid (GRBuffer (BufferDesc size usage))
   pure rid
@@ -185,22 +191,22 @@ data CompiledGraph = CompiledGraph
   }
 
 data CompiledPass = CompiledPass
-  { cpPass   :: !RenderPassNode
-  , cpIndex  :: !Int
+  { cpPass :: !RenderPassNode,
+    cpIndex :: !Int
   }
 
 -- | Compile a render graph by topologically sorting passes based on
 -- resource dependencies (read-after-write ordering).
-compileGraph
-  :: HashMap ResourceId GraphResource
-  -> [RenderPassNode]
-  -> Either Text CompiledGraph
+compileGraph ::
+  HashMap ResourceId GraphResource ->
+  [RenderPassNode] ->
+  Either Text CompiledGraph
 compileGraph resources passes =
   case topologicalSort passes of
     Nothing -> Left "render graph contains a dependency cycle"
     Just sorted ->
-      let compiled = zipWith (\idx pass -> CompiledPass pass idx) [0..] sorted
-      in Right (CompiledGraph compiled)
+      let compiled = zipWith (\idx pass -> CompiledPass pass idx) [0 ..] sorted
+       in Right (CompiledGraph compiled)
 
 -- | Topological sort of passes: if Pass B reads a resource written by Pass A,
 -- A must come before B.
@@ -208,36 +214,38 @@ topologicalSort :: [RenderPassNode] -> Maybe [RenderPassNode]
 topologicalSort passes = go queue [] []
   where
     -- Build write map: resource -> index of pass that writes it
-    writeMap = HashMap.fromList
-      [ (res, idx)
-      | (idx, pass) <- zip [0..] passes
-      , res <- rpOutputs pass
-      ]
+    writeMap =
+      HashMap.fromList
+        [ (res, idx)
+        | (idx, pass) <- zip [0 ..] passes,
+          res <- rpOutputs pass
+        ]
     -- For each pass, find dependencies: passes that write resources this pass reads
     deps pass =
       [ HashMap.lookupDefault (-1) res writeMap
-      | res <- rpInputs pass
-      , HashMap.member res writeMap
+      | res <- rpInputs pass,
+        HashMap.member res writeMap
       ]
     n = length passes
-    edges = [ (dep, i)
-            | (i, pass) <- zip [0..] passes
-            , dep <- deps pass
-            , dep >= 0 && dep /= i
-            ]
+    edges =
+      [ (dep, i)
+      | (i, pass) <- zip [0 ..] passes,
+        dep <- deps pass,
+        dep >= 0 && dep /= i
+      ]
     incDegree m (_, dst) = HashMap.insertWith (+) dst 1 m
-    inDegrees = foldl' incDegree (HashMap.fromList [(i, 0) | i <- [0..n-1]]) edges
+    inDegrees = foldl' incDegree (HashMap.fromList [(i, 0) | i <- [0 .. n - 1]]) edges
     adjList = HashMap.fromListWith (++) [(src, [dst]) | (src, dst) <- edges]
-    queue = [i | i <- [0..n-1], HashMap.lookupDefault 0 i inDegrees == 0]
+    queue = [i | i <- [0 .. n - 1], HashMap.lookupDefault 0 i inDegrees == 0]
     go [] visited result
       | length result == n = Just (reverse result)
       | otherwise = Nothing
-    go (u:q) visited result =
+    go (u : q) visited result =
       let neighbors = HashMap.lookupDefault [] u adjList
           processNeighbor (qAcc, m) v =
             let deg = HashMap.lookupDefault 0 v m - 1
                 m' = HashMap.insert v deg m
                 qAcc' = if deg == 0 then v : qAcc else qAcc
-            in (qAcc', m')
+             in (qAcc', m')
           (q', inDegs') = foldl' processNeighbor (q, inDegrees) neighbors
-      in go q' (u : visited) (passes !! u : result)
+       in go q' (u : visited) (passes !! u : result)

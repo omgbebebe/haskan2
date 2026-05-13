@@ -73,19 +73,49 @@ unitCube =
       verts = [vf0, vf1, vf2, vf3, vb0, vb1, vb2, vb3, vr0, vr1, vr2, vr3, vl0, vl1, vl2, vl3, vt0, vt1, vt2, vt3, vbot0, vbot1, vbot2, vbot3]
       idxs =
         [ -- Front (CCW from +Z)
-          0, 1, 2, 0, 2, 3,
+          0,
+          1,
+          2,
+          0,
+          2,
+          3,
           -- Back (CCW from -Z)
-          4, 5, 6, 4, 6, 7,
+          4,
+          5,
+          6,
+          4,
+          6,
+          7,
           -- Right (CCW from +X)
-          8, 9, 10, 8, 10, 11,
+          8,
+          9,
+          10,
+          8,
+          10,
+          11,
           -- Left (CCW from -X)
-          12, 13, 14, 12, 14, 15,
+          12,
+          13,
+          14,
+          12,
+          14,
+          15,
           -- Top (CCW from +Y)
-          16, 18, 17, 16, 19, 18,
+          16,
+          18,
+          17,
+          16,
+          19,
+          18,
           -- Bottom (CCW from -Y): reversed winding
-          20, 22, 21, 20, 23, 22
+          20,
+          22,
+          21,
+          20,
+          23,
+          22
         ]
-    in Mesh {vertices = verts, indices = idxs}
+   in Mesh {vertices = verts, indices = idxs}
 
 -- | Create a UV-mapped sphere centered at origin.
 -- latSegments: number of latitude segments (excluding poles)
@@ -113,23 +143,24 @@ uvSphere latSegments lonSegments radius =
             tz = realToFrac (-cos phi) :: Foreign.C.CFloat
          in Vertex (V3 x y z) (V2 u v) (V3 nx ny nz) (V4 tx ty tz 1) (V3 1 1 1)
       -- Generate vertices: latCount+1 rows, lonCount+1 columns
-      verts = [mkVert latIdx lonIdx | latIdx <- [0..latCount], lonIdx <- [0..lonCount]]
+      verts = [mkVert latIdx lonIdx | latIdx <- [0 .. latCount], lonIdx <- [0 .. lonCount]]
       -- Generate indices for quads (two triangles per quad)
       -- CCW from outside: base -> nextBase+1 -> nextBase, base -> base+1 -> nextBase+1
-      idxs = concat
-         [ let base = latIdx * (lonCount + 1) + lonIdx
-               nextBase = (latIdx + 1) * (lonCount + 1) + lonIdx
-            in [ fromIntegral base
-               , fromIntegral (nextBase + 1)
-               , fromIntegral nextBase
-               , fromIntegral base
-               , fromIntegral (base + 1)
-               , fromIntegral (nextBase + 1)
-               ]
-         | latIdx <- [0..latCount-1]
-         , lonIdx <- [0..lonCount-1]
-         ]
-  in Mesh {vertices = verts, indices = idxs}
+      idxs =
+        concat
+          [ let base = latIdx * (lonCount + 1) + lonIdx
+                nextBase = (latIdx + 1) * (lonCount + 1) + lonIdx
+             in [ fromIntegral base,
+                  fromIntegral (nextBase + 1),
+                  fromIntegral nextBase,
+                  fromIntegral base,
+                  fromIntegral (base + 1),
+                  fromIntegral (nextBase + 1)
+                ]
+          | latIdx <- [0 .. latCount - 1],
+            lonIdx <- [0 .. lonCount - 1]
+          ]
+   in Mesh {vertices = verts, indices = idxs}
 
 -- | Create a UV-mapped plane in the XZ plane (Y=0) with UVs 0..1.
 -- size: half-extent
@@ -145,6 +176,7 @@ uvPlane size =
         { vertices = [v0, v1, v2, v3],
           indices = [0, 1, 2, 0, 2, 3]
         }
+
 groundPlaneMeshGrid subdivisions size =
   let n = subdivisions
       s = size
@@ -158,22 +190,22 @@ groundPlaneMeshGrid subdivisions size =
               isDark = (i + j) `mod` 2 == 0
               col = if isDark then V3 0.15 0.15 0.15 else V3 0.35 0.35 0.35
            in Vertex (V3 x y 0) (V2 (fromIntegral i) (fromIntegral j)) (V3 0 0 1) t col
-        | j <- [0 .. n]
-        , i <- [0 .. n]
+        | j <- [0 .. n],
+          i <- [0 .. n]
         ]
       -- Generate indices for quads (two triangles per quad)
       idxs =
         concat
           [ let base = j * (n + 1) + i
-             in [ fromIntegral base
-                , fromIntegral (base + 1)
-                , fromIntegral (base + n + 2)
-                , fromIntegral base
-                , fromIntegral (base + n + 2)
-                , fromIntegral (base + n + 1)
+             in [ fromIntegral base,
+                  fromIntegral (base + 1),
+                  fromIntegral (base + n + 2),
+                  fromIntegral base,
+                  fromIntegral (base + n + 2),
+                  fromIntegral (base + n + 1)
                 ]
-          | j <- [0 .. n - 1]
-          , i <- [0 .. n - 1]
+          | j <- [0 .. n - 1],
+            i <- [0 .. n - 1]
           ]
    in Mesh {vertices = verts, indices = idxs}
 
@@ -196,14 +228,46 @@ axisArrow axisDir color =
       v5 = Vertex (axisDir + (-r) *^ perp1 + r *^ perp2) (V2 0 0) axisDir t color
       v6 = Vertex (axisDir + r *^ perp1 + r *^ perp2) (V2 0 0) axisDir t color
       v7 = Vertex (axisDir + r *^ perp1 + (-r) *^ perp2) (V2 0 0) axisDir t color
-      verts = [v0,v1,v2,v3,v4,v5,v6,v7]
-      idxs = [ 0,2,1,0,3,2
-             , 4,5,6,4,6,7
-             , 0,1,5,0,5,4
-             , 2,3,7,2,7,6
-             , 0,4,7,0,7,3
-             , 1,2,6,1,6,5 ]
-  in Mesh {vertices = verts, indices = idxs}
+      verts = [v0, v1, v2, v3, v4, v5, v6, v7]
+      idxs =
+        [ 0,
+          2,
+          1,
+          0,
+          3,
+          2,
+          4,
+          5,
+          6,
+          4,
+          6,
+          7,
+          0,
+          1,
+          5,
+          0,
+          5,
+          4,
+          2,
+          3,
+          7,
+          2,
+          7,
+          6,
+          0,
+          4,
+          7,
+          0,
+          7,
+          3,
+          1,
+          2,
+          6,
+          1,
+          6,
+          5
+        ]
+   in Mesh {vertices = verts, indices = idxs}
 
 -- | Create a unit-length axis arrow mesh.
 -- X arrow is red, Y arrow is green, Z arrow is blue.
@@ -217,7 +281,9 @@ axisArrows =
       yVerts = vertices yArrow
       zVerts = vertices zArrow
       xIdxs = indices xArrow
-      yIdxs = map (+8) (indices yArrow)
-      zIdxs = map (+16) (indices zArrow)
-  in Mesh { vertices = xVerts ++ yVerts ++ zVerts
-          , indices = xIdxs ++ yIdxs ++ zIdxs }
+      yIdxs = map (+ 8) (indices yArrow)
+      zIdxs = map (+ 16) (indices zArrow)
+   in Mesh
+        { vertices = xVerts ++ yVerts ++ zVerts,
+          indices = xIdxs ++ yIdxs ++ zIdxs
+        }

@@ -11,7 +11,7 @@ import Graphics.Vulkan.Marshal.Create (set, setAt, setListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 createCommandBuffer ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkCommandPool ->
   m Vulkan.VkCommandBuffer
@@ -27,14 +27,14 @@ createCommandBuffer dev commandPool =
    in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkAllocateCommandBuffers dev ciPtr))
 
 withCommandBuffer ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   m a ->
   m a
 withCommandBuffer commandBuffer action = withCommandBuffer' commandBuffer Vulkan.VK_ZERO_FLAGS action
 
 withCommandBufferOneTime ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   m () ->
@@ -60,7 +60,7 @@ withCommandBufferOneTime queue commandBuffer action = do
       )
 
 withCommandBuffer' ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkCommandBufferUsageBitmask Vulkan.FlagMask ->
   m a ->
@@ -83,19 +83,19 @@ withCommandBuffer' commandBuffer flags action =
       end = liftIO $ Vulkan.vkEndCommandBuffer commandBuffer >>= throwVkResult
    in (begin *> action <* end)
 
-cmdDraw :: MonadIO m => Vulkan.VkCommandBuffer -> Word32 -> Word32 -> Int32 -> Word32 -> m ()
+cmdDraw :: (MonadIO m) => Vulkan.VkCommandBuffer -> Word32 -> Word32 -> Int32 -> Word32 -> m ()
 cmdDraw commandBuffer indexCount firstIndex vertexOffset firstInstance =
   liftIO $ Vulkan.vkCmdDrawIndexed commandBuffer indexCount 1 firstIndex vertexOffset firstInstance
 
-cmdDrawIndexedIndirect :: MonadIO m => Vulkan.VkCommandBuffer -> Vulkan.VkBuffer -> Word32 -> Word32 -> m ()
+cmdDrawIndexedIndirect :: (MonadIO m) => Vulkan.VkCommandBuffer -> Vulkan.VkBuffer -> Word32 -> Word32 -> m ()
 cmdDrawIndexedIndirect commandBuffer buffer drawCount stride =
   liftIO $ Vulkan.vkCmdDrawIndexedIndirect commandBuffer buffer 0 drawCount stride
 
-cmdDispatch :: MonadIO m => Vulkan.VkCommandBuffer -> Word32 -> Word32 -> Word32 -> m ()
+cmdDispatch :: (MonadIO m) => Vulkan.VkCommandBuffer -> Word32 -> Word32 -> Word32 -> m ()
 cmdDispatch commandBuffer gx gy gz = liftIO $ Vulkan.vkCmdDispatch commandBuffer gx gy gz
 
 cmdBufferBarrier ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkBuffer ->
   Vulkan.VkDeviceSize ->
@@ -135,14 +135,16 @@ cmdBufferBarrier commandBuffer buffer size srcStage srcAccess dstStage dstAccess
       )
 
 copyBufferToImageLayer ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkBuffer ->
   Vulkan.VkImage ->
   Vulkan.Word32 ->
   Vulkan.Word32 ->
-  Vulkan.Word32 -> -- ^ array layer
-  Vulkan.VkDeviceSize -> -- ^ buffer offset
+  -- | array layer
+  Vulkan.Word32 ->
+  -- | buffer offset
+  Vulkan.VkDeviceSize ->
   m ()
 copyBufferToImageLayer commandBuffer buffer image width height layer bufferOffset = do
   let imageSubresource =
@@ -187,12 +189,13 @@ copyBufferToImageLayer commandBuffer buffer image width height layer bufferOffse
       )
 
 layerTransitionAll ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkImage ->
   Vulkan.VkImageLayout ->
   Vulkan.VkImageLayout ->
-  Vulkan.Word32 -> -- ^ layer count
+  -- | layer count
+  Vulkan.Word32 ->
   m ()
 layerTransitionAll commandBuffer image oldLayout newLayout layerCount = do
   let (srcStage, srcAccessMask, dstStage, dstAccessMask) =
@@ -255,7 +258,7 @@ layerTransitionAll commandBuffer image oldLayout newLayout layerCount = do
       )
 
 copyBuffer ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   Vulkan.VkBuffer ->
@@ -275,24 +278,28 @@ copyBuffer queue commandBuffer srcBuffer dstBuffer size = do
     (liftIO $ withPtr regionSize (\rsPtr -> Vulkan.vkCmdCopyBuffer commandBuffer srcBuffer dstBuffer 1 rsPtr))
 
 mipLayerTransition ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkImage ->
   Vulkan.VkImageLayout ->
   Vulkan.VkImageLayout ->
-  Vulkan.Word32 -> -- ^ base mip level
-  Vulkan.Word32 -> -- ^ level count
-  Vulkan.Word32 -> -- ^ layer count
+  -- | base mip level
+  Vulkan.Word32 ->
+  -- | level count
+  Vulkan.Word32 ->
+  -- | layer count
+  Vulkan.Word32 ->
   m ()
 mipLayerTransition commandBuffer image oldLayout newLayout baseMip levelCount layerCount = do
   let (srcStage, srcAccessMask, dstStage, dstAccessMask) =
         case (oldLayout, newLayout) of
-          _ | oldLayout == newLayout ->
-            ( Vulkan.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-              Vulkan.VK_ZERO_FLAGS,
-              Vulkan.VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-              Vulkan.VK_ZERO_FLAGS
-            )
+          _
+            | oldLayout == newLayout ->
+                ( Vulkan.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                  Vulkan.VK_ZERO_FLAGS,
+                  Vulkan.VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                  Vulkan.VK_ZERO_FLAGS
+                )
           (Vulkan.VK_IMAGE_LAYOUT_UNDEFINED, Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) ->
             ( Vulkan.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
               Vulkan.VK_ZERO_FLAGS,
@@ -357,7 +364,7 @@ mipLayerTransition commandBuffer image oldLayout newLayout baseMip levelCount la
       )
 
 layerTransition ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkImage ->
   Vulkan.VkImageLayout ->
@@ -424,7 +431,7 @@ layerTransition commandBuffer image oldLayout newLayout = do
       )
 
 copyBufferToImage ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkBuffer ->
   Vulkan.VkImage ->
@@ -474,7 +481,7 @@ copyBufferToImage commandBuffer buffer image width height = do
       )
 
 copyBufferToImage3D ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkBuffer ->
   Vulkan.VkImage ->
@@ -525,13 +532,17 @@ copyBufferToImage3D commandBuffer buffer image width height depth = do
       )
 
 cmdBlitImageCubemapMip ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkImage ->
-  Word32 -> -- ^ src mip level
-  Word32 -> -- ^ dst mip level
-  Int32 -> -- ^ src size
-  Int32 -> -- ^ dst size
+  -- | src mip level
+  Word32 ->
+  -- | dst mip level
+  Word32 ->
+  -- | src size
+  Int32 ->
+  -- | dst size
+  Int32 ->
   m ()
 cmdBlitImageCubemapMip commandBuffer image srcMip dstMip srcSize dstSize = do
   let srcSubresource =

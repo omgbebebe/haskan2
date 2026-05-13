@@ -1,24 +1,26 @@
 {-# LANGUAGE LambdaCase #-}
 
 module Graphics.Haskan.Vulkan.Texture
-  ( readImageFromFile
-  , decodeImageBytes
-  , managedTexture
-  , managedTexture3D
-  , managedSampler
-  , createSamplerWithLod
-  , createTextureResource
-  , textureImageView
-  , generateGridTexture
-  , generateCheckerboardTexture
-  , createTextureFromData
-  , createTextureFromBytesCached
-  , decodeTextureCached
-  , uploadTexture
-  , createTexture2DArray
-  , createCubemap
-  , createCubemapMips
-  ) where
+  ( readImageFromFile,
+    decodeImageBytes,
+    managedTexture,
+    managedTexture3D,
+    managedSampler,
+    createSamplerWithLod,
+    createTextureResource,
+    textureImageView,
+    generateGridTexture,
+    generateCheckerboardTexture,
+    createTextureFromData,
+    createTextureFromBytesCached,
+    decodeTextureCached,
+    uploadTexture,
+    createTexture2DArray,
+    createCubemap,
+    createCubemapMips,
+  )
+where
+
 import Codec.Picture
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -30,22 +32,21 @@ import Data.Foldable (for_)
 import Data.Vector.Storable qualified
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word8)
-import Graphics.Haskan.Logger (logDebugIO, showT, LogCategory (..))
+import Graphics.Haskan.Assets.Cache (AssetCache)
+import Graphics.Haskan.Assets.InternalFormat (InternalTexture (..), TextureMetadata (..))
+import Graphics.Haskan.Assets.TexturePreprocessor
+  ( TextureConfig,
+    defaultTextureConfig,
+    loadTextureBytesCached,
+    loadTextureCached,
+  )
+import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, showT)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
 import Graphics.Haskan.Vulkan.Buffer qualified as Haskan
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as Haskan
 import Graphics.Haskan.Vulkan.ImageView qualified as Haskan
 import Graphics.Haskan.Vulkan.Memory qualified as Haskan
 import Graphics.Haskan.Vulkan.Resources
-import Graphics.Haskan.Assets.Cache (AssetCache)
-import Graphics.Haskan.Assets.TexturePreprocessor
-  ( TextureConfig
-  , defaultTextureConfig
-  , loadTextureCached
-  , loadTextureBytesCached
-  )
-import Graphics.Haskan.Assets.InternalFormat (InternalTexture(..), TextureMetadata(..))
-
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
@@ -173,10 +174,14 @@ managedTexture3D ::
   (MonadManaged m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
-  FilePath -> -- ^ Path to raw binary file
-  Int -> -- ^ Width
-  Int -> -- ^ Height
-  Int -> -- ^ Depth
+  -- | Path to raw binary file
+  FilePath ->
+  -- | Width
+  Int ->
+  -- | Height
+  Int ->
+  -- | Depth
+  Int ->
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   m Vulkan.VkImageView
@@ -186,7 +191,8 @@ managedTexture3D pdev dev filePath width height depth queue commandBuffer = do
       expectedSize = width * height * depth * 4
       actualSize = BS.length imgData
   when (actualSize /= expectedSize) $
-    error $ "managedTexture3D: expected " ++ show expectedSize ++ " bytes, got " ++ show actualSize
+    error $
+      "managedTexture3D: expected " ++ show expectedSize ++ " bytes, got " ++ show actualSize
 
   (stagingBuffer, stagingMemoryRequirement) <-
     Haskan.managedBuffer dev dataList Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
@@ -275,7 +281,7 @@ bindImageMemory dev image memory offset =
   liftIO (Vulkan.vkBindImageMemory dev image memory offset) >>= throwVkResult
 
 managedSampler ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   m Vulkan.VkSampler
 managedSampler dev =
@@ -285,7 +291,7 @@ managedSampler dev =
     (\ptr -> Vulkan.vkDestroySampler dev ptr Vulkan.vkNullPtr)
 
 createSampler ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   m Vulkan.VkSampler
 createSampler dev =
@@ -295,9 +301,9 @@ createSampler dev =
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"magFilter" Vulkan.VK_FILTER_LINEAR
               &* set @"minFilter" Vulkan.VK_FILTER_LINEAR
-               &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-               &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-               &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
               --      &* set @"anisotropyEnable" Vulkan.VK_TRUE
               --      &* set @"maxAnisotropy" 16.0
               &* set @"anisotropyEnable" Vulkan.VK_FALSE
@@ -314,9 +320,10 @@ createSampler dev =
    in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateSampler dev ciPtr Vulkan.vkNullPtr))
 
 createSamplerWithLod ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
-  Float -> -- ^ max LOD
+  -- | max LOD
+  Float ->
   m Vulkan.VkSampler
 createSamplerWithLod dev maxLod =
   let createInfo =
@@ -325,9 +332,9 @@ createSamplerWithLod dev maxLod =
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"magFilter" Vulkan.VK_FILTER_LINEAR
               &* set @"minFilter" Vulkan.VK_FILTER_LINEAR
-               &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-               &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-               &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
               &* set @"anisotropyEnable" Vulkan.VK_FALSE
               &* set @"maxAnisotropy" 1.0
               &* set @"borderColor" Vulkan.VK_BORDER_COLOR_INT_OPAQUE_BLACK
@@ -347,7 +354,8 @@ uploadTexture ::
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
-  Int -> Int ->
+  Int ->
+  Int ->
   Data.Vector.Storable.Vector Word8 ->
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
@@ -435,14 +443,14 @@ uploadTexture rm pdev dev width height imgData queue commandBuffer = do
 
       resource =
         TextureResource
-          { trHandle = texH
-          , trImage = image
-          , trImageView = imageView
-          , trMemory = imageMemory
-          , trWidth = width
-          , trHeight = height
-          , trPixelData = Just imgData
-          , trDestroy = destroy
+          { trHandle = texH,
+            trImage = image,
+            trImageView = imageView,
+            trMemory = imageMemory,
+            trWidth = width,
+            trHeight = height,
+            trPixelData = Just imgData,
+            trDestroy = destroy
           }
 
   registerTexture rm resource
@@ -502,7 +510,7 @@ createTextureFromBytesCached rm pdev dev cache rawBytes queue commandBuffer = do
 -- | Decode texture bytes using asset cache, returning dimensions and pixel data.
 -- Does NOT upload to GPU.
 decodeTextureCached ::
-  MonadIO m =>
+  (MonadIO m) =>
   AssetCache ->
   ByteString ->
   m (Either String (Int, Int, Data.Vector.Storable.Vector Word8))
@@ -512,9 +520,8 @@ decodeTextureCached cache rawBytes = liftIO $ do
     Left err -> pure (Left err)
     Right (InternalTexture meta imgData) -> pure (Right (itmWidth meta, itmHeight meta, imgData))
 
-
 -- | Resolve a texture handle to its VkImageView.
-textureImageView :: MonadIO m => ResourceManager -> TextureHandle -> m (Maybe Vulkan.VkImageView)
+textureImageView :: (MonadIO m) => ResourceManager -> TextureHandle -> m (Maybe Vulkan.VkImageView)
 textureImageView rm handle = do
   mTex <- lookupTexture rm handle
   pure $ fmap trImageView mTex
@@ -531,10 +538,10 @@ generateCheckerboardTexture width height squareSize =
         sqY = y `div` squareSize
         isWhite = (sqX + sqY) `mod` 2 == 0
      in case idx `mod` 4 of
-          0 -> if isWhite then 220 else 40   -- R
-          1 -> if isWhite then 220 else 40   -- G
-          2 -> if isWhite then 220 else 40   -- B
-          _ -> 255                        -- A
+          0 -> if isWhite then 220 else 40 -- R
+          1 -> if isWhite then 220 else 40 -- G
+          2 -> if isWhite then 220 else 40 -- B
+          _ -> 255 -- A
 
 -- | Generate a procedural grid texture as RGBA8 pixel data.
 -- Dark gray background with lighter gray grid lines every `spacing` pixels.
@@ -547,10 +554,10 @@ generateGridTexture width height spacing =
         onGrid = (x `mod` spacing == 0) || (y `mod` spacing == 0)
         majorGrid = (x `mod` (spacing * 5) == 0) || (y `mod` (spacing * 5) == 0)
      in case idx `mod` 4 of
-          0 -> if majorGrid then 180 else if onGrid then 120 else 64   -- R
-          1 -> if majorGrid then 180 else if onGrid then 120 else 64   -- G
-          2 -> if majorGrid then 180 else if onGrid then 120 else 64   -- B
-          _ -> 255                                                    -- A
+          0 -> if majorGrid then 180 else if onGrid then 120 else 64 -- R
+          1 -> if majorGrid then 180 else if onGrid then 120 else 64 -- G
+          2 -> if majorGrid then 180 else if onGrid then 120 else 64 -- B
+          _ -> 255 -- A
 
 -- | Create a 2D texture array from multiple RGBA8 textures.
 -- All textures must have the same width and height.
@@ -559,9 +566,12 @@ createTexture2DArray ::
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
-  Int -> -- ^ width
-  Int -> -- ^ height
-  [Data.Vector.Storable.Vector Word8] -> -- ^ one per layer
+  -- | width
+  Int ->
+  -- | height
+  Int ->
+  -- | one per layer
+  [Data.Vector.Storable.Vector Word8] ->
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   m TextureHandle
@@ -627,7 +637,7 @@ createTexture2DArray rm pdev dev width height layers queue commandBuffer = do
       Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
       (fromIntegral numLayers)
 
-    for_ (zip [0..] layers) $ \(layerIdx, _) -> do
+    for_ (zip [0 ..] layers) $ \(layerIdx, _) -> do
       let offset = fromIntegral (layerIdx * layerSize)
       Haskan.copyBufferToImageLayer
         commandBuffer
@@ -657,14 +667,14 @@ createTexture2DArray rm pdev dev width height layers queue commandBuffer = do
 
       resource =
         TextureResource
-          { trHandle = texH
-          , trImage = image
-          , trImageView = imageView
-          , trMemory = imageMemory
-          , trWidth = width
-          , trHeight = height
-          , trPixelData = Nothing -- GPU-only array, no CPU pixel data stored
-          , trDestroy = destroy
+          { trHandle = texH,
+            trImage = image,
+            trImageView = imageView,
+            trMemory = imageMemory,
+            trWidth = width,
+            trHeight = height,
+            trPixelData = Nothing, -- GPU-only array, no CPU pixel data stored
+            trDestroy = destroy
           }
 
   registerTexture rm resource
@@ -678,8 +688,10 @@ createCubemap ::
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
-  Int -> -- ^ face width/height
-  [Data.Vector.Storable.Vector Word8] -> -- ^ 6 face pixel datas
+  -- | face width/height
+  Int ->
+  -- | 6 face pixel datas
+  [Data.Vector.Storable.Vector Word8] ->
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   m TextureHandle
@@ -745,7 +757,7 @@ createCubemap rm pdev dev faceSize faces queue commandBuffer = do
       Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
       6
 
-    for_ (zip [0..] faces) $ \(faceIdx, _) -> do
+    for_ (zip [0 ..] faces) $ \(faceIdx, _) -> do
       let offset = fromIntegral (faceIdx * facePixelCount)
       Haskan.copyBufferToImageLayer
         commandBuffer
@@ -781,14 +793,14 @@ createCubemap rm pdev dev faceSize faces queue commandBuffer = do
 
       resource =
         TextureResource
-          { trHandle = texH
-          , trImage = image
-          , trImageView = imageView
-          , trMemory = imageMemory
-          , trWidth = faceSize
-          , trHeight = faceSize
-          , trPixelData = Nothing
-          , trDestroy = destroy
+          { trHandle = texH,
+            trImage = image,
+            trImageView = imageView,
+            trMemory = imageMemory,
+            trWidth = faceSize,
+            trHeight = faceSize,
+            trPixelData = Nothing,
+            trDestroy = destroy
           }
 
   registerTexture rm resource
@@ -803,8 +815,10 @@ createCubemapMips ::
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
-  Int -> -- ^ face width/height
-  [Data.Vector.Storable.Vector Word8] -> -- ^ 6 face pixel datas
+  -- | face width/height
+  Int ->
+  -- | 6 face pixel datas
+  [Data.Vector.Storable.Vector Word8] ->
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   m TextureHandle
@@ -870,10 +884,12 @@ createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
       image
       Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
       Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-      0 1 6
+      0
+      1
+      6
 
     -- Upload face data to mip 0
-    for_ (zip [0..] faces) $ \(faceIdx, _) -> do
+    for_ (zip [0 ..] faces) $ \(faceIdx, _) -> do
       let offset = fromIntegral (faceIdx * facePixelCount)
       Haskan.copyBufferToImageLayer
         commandBuffer
@@ -890,9 +906,10 @@ createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
           dstMip = fromIntegral mip
           srcSize = faceSize `div` (2 ^ (mip - 1))
           dstSize = faceSize `div` (2 ^ mip)
-          srcOldLayout = if mip == 1
-                           then Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-                           else Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+          srcOldLayout =
+            if mip == 1
+              then Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+              else Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
 
       -- Transition src mip to SRC optimal
       Haskan.mipLayerTransition
@@ -900,7 +917,9 @@ createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
         image
         srcOldLayout
         Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-        srcMip 1 6
+        srcMip
+        1
+        6
 
       -- Transition dst mip to DST optimal
       Haskan.mipLayerTransition
@@ -908,7 +927,9 @@ createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
         image
         Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
         Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-        dstMip 1 6
+        dstMip
+        1
+        6
 
       -- Blit all 6 faces
       Haskan.cmdBlitImageCubemapMip
@@ -925,7 +946,9 @@ createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
         image
         Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
         Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-        dstMip 1 6
+        dstMip
+        1
+        6
 
     -- Transition all mips to SHADER_READ_ONLY_OPTIMAL
     Haskan.mipLayerTransition
@@ -933,7 +956,9 @@ createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
       image
       Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
       Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-      0 (fromIntegral mipLevels) 6
+      0
+      (fromIntegral mipLevels)
+      6
 
   liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
 
@@ -953,14 +978,14 @@ createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
 
       resource =
         TextureResource
-          { trHandle = texH
-          , trImage = image
-          , trImageView = imageView
-          , trMemory = imageMemory
-          , trWidth = faceSize
-          , trHeight = faceSize
-          , trPixelData = Nothing
-          , trDestroy = destroy
+          { trHandle = texH,
+            trImage = image,
+            trImageView = imageView,
+            trMemory = imageMemory,
+            trWidth = faceSize,
+            trHeight = faceSize,
+            trPixelData = Nothing,
+            trDestroy = destroy
           }
 
   registerTexture rm resource

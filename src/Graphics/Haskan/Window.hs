@@ -9,19 +9,19 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Coerce
 import Data.Text (Text)
-import Graphics.Haskan.Logger (logInfoIO, LogCategory(..), showT)
+import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Resources (alloc, alloc_)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
 import SDL qualified
-import SDL.Internal.Types (Window(..))
+import SDL.Internal.Types (Window (..))
 import SDL.Raw qualified as Raw
-import SDL.Raw.Enum (pattern SDL_WINDOW_MINIMIZED, pattern SDL_WINDOW_HIDDEN)
+import SDL.Raw.Enum (pattern SDL_WINDOW_HIDDEN, pattern SDL_WINDOW_MINIMIZED)
 -- import SDL.Raw.Video (createWindowFrom)
 import SDL.Video.Vulkan qualified
 
 managedWindow ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Text ->
   (Int, Int) ->
   m ([ByteString], SDL.Window)
@@ -30,7 +30,7 @@ managedWindow title (width, height) = do
   window <-
     alloc
       "SDL Window"
-     (createWindow title (width, height))
+      (createWindow title (width, height))
       -- (createWindowFrom 1)
       SDL.destroyWindow
 
@@ -44,11 +44,11 @@ managedWindow title (width, height) = do
   logInfoIO LogGeneral ("Window extensions: " <> showT windowExtensions)
   pure (windowExtensions, window)
 
-loadVulkanLibrary :: MonadIO m => m ()
+loadVulkanLibrary :: (MonadIO m) => m ()
 loadVulkanLibrary = SDL.Video.Vulkan.vkLoadLibrary Nothing
 
 createWindow ::
-  MonadIO m =>
+  (MonadIO m) =>
   Text ->
   (Int, Int) ->
   m SDL.Window
@@ -66,11 +66,11 @@ createWindow title (width, height) = do
           }
       )
 
-windowExtensions :: MonadIO m => SDL.Window -> m [ByteString]
+windowExtensions :: (MonadIO m) => SDL.Window -> m [ByteString]
 windowExtensions window = liftIO $ traverse BS.packCString =<< SDL.Video.Vulkan.vkGetInstanceExtensions window
 
 managedSurface ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkInstance ->
   SDL.Window ->
   m Vulkan.VkSurfaceKHR
@@ -81,17 +81,18 @@ managedSurface inst window =
     (\ptr -> Vulkan.vkDestroySurfaceKHR (coerce inst) ptr Vulkan.vkNullPtr)
 
 createSurface ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkInstance ->
   SDL.Window ->
   m Vulkan.VkSurfaceKHR
 createSurface inst window = liftIO $ Vulkan.VkPtr <$> SDL.Video.Vulkan.vkCreateSurface window (coerce inst)
 
-showWindow :: MonadIO m => SDL.Window -> m ()
+showWindow :: (MonadIO m) => SDL.Window -> m ()
 showWindow window = liftIO (SDL.showWindow window)
 
-isWindowVisible :: MonadIO m => SDL.Window -> m Bool
+isWindowVisible :: (MonadIO m) => SDL.Window -> m Bool
 isWindowVisible window = do
   flags <- Raw.getWindowFlags (coerce window)
-  pure $ (flags .&. fromIntegral SDL_WINDOW_MINIMIZED) == 0
+  pure $
+    (flags .&. fromIntegral SDL_WINDOW_MINIMIZED) == 0
       && (flags .&. fromIntegral SDL_WINDOW_HIDDEN) == 0

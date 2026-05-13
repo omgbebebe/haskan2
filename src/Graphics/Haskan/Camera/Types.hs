@@ -1,25 +1,25 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Camera.Types
-  ( InterpolationMethod(..)
-  , ViewMatrix(..)
-  , Modifier(..)
-  , Camera(..)
-  , worldUp
-  , lookAtNegativeYUp
-  , nlerpQuaternion
-  ) where
+  ( InterpolationMethod (..),
+    ViewMatrix (..),
+    Modifier (..),
+    Camera (..),
+    worldUp,
+    lookAtNegativeYUp,
+    nlerpQuaternion,
+  )
+where
 
 import Control.Lens ((^.))
 import Foreign.C qualified
-import Linear (V2 (..), V3 (..), V4 (..), cross, dot)
-import Linear.V3 (_x, _y, _z)
+import Linear (V2 (..), V3 (..), V4 (..), cross, dot, (*^), (^*))
 import Linear.Epsilon (Epsilon)
 import Linear.Matrix (M44 (..))
 import Linear.Metric (normalize)
-import Linear ((*^), (^*))
 import Linear.Quaternion (Quaternion (..), axisAngle, rotate, slerp)
 import Linear.Quaternion qualified as Quat
+import Linear.V3 (_x, _y, _z)
 
 data InterpolationMethod
   = Instantaneous
@@ -84,6 +84,6 @@ nlerpQuaternion :: (RealFloat a, Epsilon a) => Quaternion a -> Quaternion a -> a
 nlerpQuaternion q1 q2 t =
   let q2' = if quatDot q1 q2 < 0 then negate q2 else q2
       result = q1 + fmap (* t) (q2' - q1)
-  in normalize result
+   in normalize result
   where
     quatDot (Quaternion w1 v1) (Quaternion w2 v2) = w1 * w2 + dot v1 v2

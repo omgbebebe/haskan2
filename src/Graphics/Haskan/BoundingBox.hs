@@ -3,8 +3,8 @@ module Graphics.Haskan.BoundingBox where
 import Linear (V3 (..))
 
 data BBox = BBox
-  { bMin :: !(V3 Float)
-  , bMax :: !(V3 Float)
+  { bMin :: !(V3 Float),
+    bMax :: !(V3 Float)
   }
   deriving (Show, Eq)
 

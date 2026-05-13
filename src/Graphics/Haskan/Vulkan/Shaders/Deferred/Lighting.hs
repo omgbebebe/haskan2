@@ -8,8 +8,8 @@
 module Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting where
 
 import FIR
-import Math.Linear
 import Graphics.Haskan.Vulkan.Shaders.LightData
+import Math.Linear
 
 ------------------------------------------------
 -- fullscreen triangle vertex shader
@@ -60,73 +60,74 @@ vertex = shader do
 -- Samples g-buffer and computes PBR lighting
 -- All math done with scalars to avoid FIR vector-scalar inference issues
 
-type CameraPushConstant = Struct
-  '[ "cameraX" ':-> Float
-   , "cameraY" ':-> Float
-   , "cameraZ" ':-> Float
-   , "debugMode" ':-> Float
-   , "axisOverlay" ':-> Float
-   , "groundPlane" ':-> Float
-   , "sunAzimuth" ':-> Float
-   , "lightCount" ':-> Float
-   , "ray0" ':-> V 3 Float
-   , "ray1" ':-> V 3 Float
-   , "ray2" ':-> V 3 Float
-   , "skyTintR" ':-> Float
-   , "skyTintG" ':-> Float
-   , "skyTintB" ':-> Float
-   , "iblIntensity" ':-> Float
-   , "sunDir" ':-> V 3 Float
-   , "cloudHeight" ':-> Float
-   ]
+type CameraPushConstant =
+  Struct
+    '[ "cameraX" ':-> Float,
+       "cameraY" ':-> Float,
+       "cameraZ" ':-> Float,
+       "debugMode" ':-> Float,
+       "axisOverlay" ':-> Float,
+       "groundPlane" ':-> Float,
+       "sunAzimuth" ':-> Float,
+       "lightCount" ':-> Float,
+       "ray0" ':-> V 3 Float,
+       "ray1" ':-> V 3 Float,
+       "ray2" ':-> V 3 Float,
+       "skyTintR" ':-> Float,
+       "skyTintG" ':-> Float,
+       "skyTintB" ':-> Float,
+       "iblIntensity" ':-> Float,
+       "sunDir" ':-> V 3 Float,
+       "cloudHeight" ':-> Float
+     ]
 
 type FragmentDefs =
   '[ "in_uv" ':-> Input '[Location 0] (V 2 Float),
      "in_ray" ':-> Input '[Location 1] (V 3 Float),
-      "gbuf_position"
-        ':-> Texture2D'
-               '[Binding 0, DescriptorSet 0]
-               (RGBA32 F)
-               (RGBA16 F),
+     "gbuf_position"
+       ':-> Texture2D'
+              '[Binding 0, DescriptorSet 0]
+              (RGBA32 F)
+              (RGBA16 F),
      "gbuf_normal"
        ':-> Texture2D
               '[Binding 1, DescriptorSet 0]
               (RGBA8 UNorm),
-      "gbuf_albedo"
-        ':-> Texture2D
-               '[Binding 2, DescriptorSet 0]
-               (RGBA8 UNorm),
-      "gbuf_emissive"
-        ':-> Texture2D
-               '[Binding 3, DescriptorSet 0]
-               (RGBA8 UNorm),
-      "env_map"
-        ':-> TextureCube
-               '[Binding 4, DescriptorSet 0]
-               (RGBA8 UNorm),
-        "irradiance_map"
-          ':-> TextureCube
-                 '[Binding 5, DescriptorSet 0]
-                 (RGBA8 UNorm),
-        "brdf_lut"
-          ':-> Texture2D
-                 '[Binding 6, DescriptorSet 0]
-                 (RGBA8 UNorm),
-         "lights"
-           ':-> StorageBuffer
-                  '[Binding 7, DescriptorSet 0]
-                  LightsData,
-         "cloud_noise"
-           ':-> Texture3D
-                  '[Binding 8, DescriptorSet 0]
-                  (RGBA8 UNorm),
-         "cameraPos"
-          ':-> PushConstant
-                 '[]
-                 CameraPushConstant,
-        "out_colour" ':-> Output '[Location 0] (V 4 Float),
-       "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
-     ]
+     "gbuf_albedo"
+       ':-> Texture2D
+              '[Binding 2, DescriptorSet 0]
+              (RGBA8 UNorm),
+     "gbuf_emissive"
+       ':-> Texture2D
+              '[Binding 3, DescriptorSet 0]
+              (RGBA8 UNorm),
+     "env_map"
+       ':-> TextureCube
+              '[Binding 4, DescriptorSet 0]
+              (RGBA8 UNorm),
+     "irradiance_map"
+       ':-> TextureCube
+              '[Binding 5, DescriptorSet 0]
+              (RGBA8 UNorm),
+     "brdf_lut"
+       ':-> Texture2D
+              '[Binding 6, DescriptorSet 0]
+              (RGBA8 UNorm),
+     "lights"
+       ':-> StorageBuffer
+              '[Binding 7, DescriptorSet 0]
+              LightsData,
+     "cloud_noise"
+       ':-> Texture3D
+              '[Binding 8, DescriptorSet 0]
+              (RGBA8 UNorm),
+     "cameraPos"
+       ':-> PushConstant
+              '[]
+              CameraPushConstant,
+     "out_colour" ':-> Output '[Location 0] (V 4 Float),
+     "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
+   ]
 
 -- Debug mode values (all Float type, passed as push constant)
 -- 0  = normal lit (default)
@@ -303,7 +304,7 @@ fragment = shader do
       hgPhase_ g =
         let g2 = g * g
             denom = (1.0 + g2 - 2.0 * g * cosTheta) ** 1.5
-        in (1.0 - g2) / (4.0 * 3.14159265 * denom)
+         in (1.0 - g2) / (4.0 * 3.14159265 * denom)
       phase = hgPhase_ 0.3
 
       -- Sun color (white)
@@ -734,61 +735,154 @@ fragment = shader do
       dbgFresZ = fresIBLz
 
       -- Debug output selection (debugMode is Float, compare with float literals)
-      outR = if debugMode == 1.0 then albR else
-             if debugMode == 2.0 then dbgNormX else
-             if debugMode == 3.0 then roughness else
-             if debugMode == 4.0 then metallic else
-             if debugMode == 5.0 then dbgPosX else
-             if debugMode == 6.0 then emissiveR else
-             if debugMode == 7.0 then ao else
-             if debugMode == 8.0 then l0nDotL else
-             if debugMode == 9.0 then dbgIrrX else
-             if debugMode == 10.0 then dbgSpecX else
-             if debugMode == 11.0 then dbgFresX else
-             if debugMode == 12.0 then dbgSkyR else
-             if debugMode == 13.0 then dbgCloud else
-             if debugMode == 14.0 then dbgHeight else
-             if debugMode == 15.0 then dbgNoise else
-             finalx
+      outR =
+        if debugMode == 1.0
+          then albR
+          else
+            if debugMode == 2.0
+              then dbgNormX
+              else
+                if debugMode == 3.0
+                  then roughness
+                  else
+                    if debugMode == 4.0
+                      then metallic
+                      else
+                        if debugMode == 5.0
+                          then dbgPosX
+                          else
+                            if debugMode == 6.0
+                              then emissiveR
+                              else
+                                if debugMode == 7.0
+                                  then ao
+                                  else
+                                    if debugMode == 8.0
+                                      then l0nDotL
+                                      else
+                                        if debugMode == 9.0
+                                          then dbgIrrX
+                                          else
+                                            if debugMode == 10.0
+                                              then dbgSpecX
+                                              else
+                                                if debugMode == 11.0
+                                                  then dbgFresX
+                                                  else
+                                                    if debugMode == 12.0
+                                                      then dbgSkyR
+                                                      else
+                                                        if debugMode == 13.0
+                                                          then dbgCloud
+                                                          else
+                                                            if debugMode == 14.0
+                                                              then dbgHeight
+                                                              else
+                                                                if debugMode == 15.0
+                                                                  then dbgNoise
+                                                                  else
+                                                                    finalx
 
-      outG = if debugMode == 1.0 then albG else
-             if debugMode == 2.0 then dbgNormY else
-             if debugMode == 3.0 then roughness else
-             if debugMode == 4.0 then metallic else
-             if debugMode == 5.0 then dbgPosY else
-             if debugMode == 6.0 then emissiveG else
-             if debugMode == 7.0 then ao else
-             if debugMode == 8.0 then l0nDotL else
-             if debugMode == 9.0 then dbgIrrY else
-             if debugMode == 10.0 then dbgSpecY else
-             if debugMode == 11.0 then dbgFresY else
-             if debugMode == 12.0 then dbgSkyG else
-             if debugMode == 13.0 then dbgCloud else
-             if debugMode == 14.0 then dbgHeight else
-             if debugMode == 15.0 then dbgNoise else
-             finaly
+      outG =
+        if debugMode == 1.0
+          then albG
+          else
+            if debugMode == 2.0
+              then dbgNormY
+              else
+                if debugMode == 3.0
+                  then roughness
+                  else
+                    if debugMode == 4.0
+                      then metallic
+                      else
+                        if debugMode == 5.0
+                          then dbgPosY
+                          else
+                            if debugMode == 6.0
+                              then emissiveG
+                              else
+                                if debugMode == 7.0
+                                  then ao
+                                  else
+                                    if debugMode == 8.0
+                                      then l0nDotL
+                                      else
+                                        if debugMode == 9.0
+                                          then dbgIrrY
+                                          else
+                                            if debugMode == 10.0
+                                              then dbgSpecY
+                                              else
+                                                if debugMode == 11.0
+                                                  then dbgFresY
+                                                  else
+                                                    if debugMode == 12.0
+                                                      then dbgSkyG
+                                                      else
+                                                        if debugMode == 13.0
+                                                          then dbgCloud
+                                                          else
+                                                            if debugMode == 14.0
+                                                              then dbgHeight
+                                                              else
+                                                                if debugMode == 15.0
+                                                                  then dbgNoise
+                                                                  else
+                                                                    finaly
 
-      outB = if debugMode == 1.0 then albB else
-             if debugMode == 2.0 then dbgNormZ else
-             if debugMode == 3.0 then roughness else
-             if debugMode == 4.0 then metallic else
-             if debugMode == 5.0 then dbgPosZ else
-             if debugMode == 6.0 then emissiveB else
-             if debugMode == 7.0 then ao else
-             if debugMode == 8.0 then l0nDotL else
-             if debugMode == 9.0 then dbgIrrZ else
-             if debugMode == 10.0 then dbgSpecZ else
-             if debugMode == 11.0 then dbgFresZ else
-             if debugMode == 12.0 then dbgSkyB else
-             if debugMode == 13.0 then dbgCloud else
-             if debugMode == 14.0 then dbgHeight else
-             if debugMode == 15.0 then dbgNoise else
-             finalz
+      outB =
+        if debugMode == 1.0
+          then albB
+          else
+            if debugMode == 2.0
+              then dbgNormZ
+              else
+                if debugMode == 3.0
+                  then roughness
+                  else
+                    if debugMode == 4.0
+                      then metallic
+                      else
+                        if debugMode == 5.0
+                          then dbgPosZ
+                          else
+                            if debugMode == 6.0
+                              then emissiveB
+                              else
+                                if debugMode == 7.0
+                                  then ao
+                                  else
+                                    if debugMode == 8.0
+                                      then l0nDotL
+                                      else
+                                        if debugMode == 9.0
+                                          then dbgIrrZ
+                                          else
+                                            if debugMode == 10.0
+                                              then dbgSpecZ
+                                              else
+                                                if debugMode == 11.0
+                                                  then dbgFresZ
+                                                  else
+                                                    if debugMode == 12.0
+                                                      then dbgSkyB
+                                                      else
+                                                        if debugMode == 13.0
+                                                          then dbgCloud
+                                                          else
+                                                            if debugMode == 14.0
+                                                              then dbgHeight
+                                                              else
+                                                                if debugMode == 15.0
+                                                                  then dbgNoise
+                                                                  else
+                                                                    finalz
 
       -- World axes overlay: draw thin lines radiating from screen center
       -- Use pre-normalized dirX/dirY/dirZ from early in the shader
-      axisThresh = 0.9995  -- cos(1.8 degrees), much tighter for thin lines
-      
+      axisThresh = 0.9995 -- cos(1.8 degrees), much tighter for thin lines
+
       -- Only show positive axis directions (radiate outward from center)
       onXp = dirX > axisThresh
       onXn = (-dirX) > axisThresh

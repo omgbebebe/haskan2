@@ -1,22 +1,23 @@
 {-# LANGUAGE StrictData #-}
 
 module Graphics.Haskan.Assets.Cache
-  ( AssetCache
-  , CacheKey
-  , mkCacheKey
-  , initCache
-  , cacheLookup
-  , cacheInsert
-  , cacheInvalidate
-  , cachePath
-  ) where
+  ( AssetCache,
+    CacheKey,
+    mkCacheKey,
+    initCache,
+    cacheLookup,
+    cacheInsert,
+    cacheInvalidate,
+    cachePath,
+  )
+where
 
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
-import qualified Data.ByteString.Char8 as BSC
-import Data.ByteString.Builder (Builder, byteString, word32HexFixed, toLazyByteString)
+import Data.ByteString qualified as BS
+import Data.ByteString.Builder (Builder, byteString, toLazyByteString, word32HexFixed)
+import Data.ByteString.Char8 qualified as BSC
 import Data.ByteString.Lazy (toStrict)
 import Data.List (foldl')
 import Data.Word (Word32, Word8)
@@ -26,7 +27,8 @@ import System.FilePath ((</>))
 -- | Opaque cache handle. Wraps the root cache directory.
 newtype AssetCache = AssetCache
   { acRoot :: FilePath
-  } deriving (Eq, Show)
+  }
+  deriving (Eq, Show)
 
 -- | Cache key: hex-encoded deterministic hash of source content + config fingerprint.
 newtype CacheKey = CacheKey ByteString
@@ -44,10 +46,10 @@ mkCacheKey sourceBytes configTag =
       cfgHash = djb2 configTag
       builder :: Builder
       builder = word32HexFixed srcHash <> byteString "-" <> word32HexFixed cfgHash
-  in CacheKey (toStrict (toLazyByteString builder))
+   in CacheKey (toStrict (toLazyByteString builder))
 
 -- | Initialise the cache, creating the directory if absent.
-initCache :: MonadIO m => FilePath -> m AssetCache
+initCache :: (MonadIO m) => FilePath -> m AssetCache
 initCache root = liftIO $ do
   createDirectoryIfMissing True root
   createDirectoryIfMissing True (root </> "textures")
@@ -60,7 +62,7 @@ cachePath (AssetCache root) (CacheKey key) subdir =
   root </> subdir </> BSC.unpack key <> ".bin"
 
 -- | Check if a cached entry exists and is valid (non-empty).
-cacheLookup :: MonadIO m => AssetCache -> CacheKey -> FilePath -> m Bool
+cacheLookup :: (MonadIO m) => AssetCache -> CacheKey -> FilePath -> m Bool
 cacheLookup cache key subdir = liftIO $ do
   let path = cachePath cache key subdir
   exists <- doesFileExist path
@@ -69,14 +71,14 @@ cacheLookup cache key subdir = liftIO $ do
     else pure False
 
 -- | Write a preprocessed blob to the cache.
-cacheInsert :: MonadIO m => AssetCache -> CacheKey -> FilePath -> ByteString -> m ()
+cacheInsert :: (MonadIO m) => AssetCache -> CacheKey -> FilePath -> ByteString -> m ()
 cacheInsert cache key subdir bytes = liftIO $ do
   let path = cachePath cache key subdir
   createDirectoryIfMissing True (takeDirectory path)
   BS.writeFile path bytes
 
 -- | Remove a single cached entry.
-cacheInvalidate :: MonadIO m => AssetCache -> CacheKey -> FilePath -> m ()
+cacheInvalidate :: (MonadIO m) => AssetCache -> CacheKey -> FilePath -> m ()
 cacheInvalidate cache key subdir = liftIO $ do
   let path = cachePath cache key subdir
   exists <- doesFileExist path
@@ -87,5 +89,5 @@ takeDirectory = fst . splitFileName
 
 splitFileName :: FilePath -> (FilePath, FilePath)
 splitFileName fp = case break (== '/') fp of
-  (a, [])   -> (".", a)
-  (a, b)    -> (a, drop 1 b)
+  (a, []) -> (".", a)
+  (a, b) -> (a, drop 1 b)

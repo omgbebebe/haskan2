@@ -22,7 +22,7 @@ import Foreign.Marshal.Array qualified
 import Foreign.Storable (Storable, peek)
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 
-alloc :: MonadManaged m => Text -> IO a -> (a -> IO b) -> m a
+alloc :: (MonadManaged m) => Text -> IO a -> (a -> IO b) -> m a
 alloc resName create destroy =
   using
     ( managed
@@ -32,7 +32,7 @@ alloc resName create destroy =
         )
     )
 
-alloc_ :: MonadManaged m => Text -> IO a -> IO b -> m a
+alloc_ :: (MonadManaged m) => Text -> IO a -> IO b -> m a
 alloc_ resName create destroy = alloc resName create (\_ -> destroy)
 
 allocaAndPeek :: (MonadIO m, Storable a) => (Vulkan.Ptr a -> IO Vulkan.VkResult) -> m a

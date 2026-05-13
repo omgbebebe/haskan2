@@ -38,11 +38,11 @@ fromObj Obj.Obj {..} =
                         (v4, t4, n4)
                       )
                   ) ->
-                      let qf = QuadFace (v1, v2, v3, v4)
-                          colRed = V3 1.0 0.0 0.0
-                          vData vi ti ni = (vi, v3ToCFloat (v !! vi), v2ToCFloat (vt !! ti), v3ToCFloat (vn !! ni))
-                          vertexData = [vData v1 t1 n1, vData v2 t2 n2, vData v3 t3 n3, vData v4 t4 n4]
-                          vertices' = foldl (\vs (i, p, t, n) -> HashMap.insert i (Vertex p t n (V4 1 0 0 1) colRed) vs) vertices vertexData
+                    let qf = QuadFace (v1, v2, v3, v4)
+                        colRed = V3 1.0 0.0 0.0
+                        vData vi ti ni = (vi, v3ToCFloat (v !! vi), v2ToCFloat (vt !! ti), v3ToCFloat (vn !! ni))
+                        vertexData = [vData v1 t1 n1, vData v2 t2 n2, vData v3 t3 n3, vData v4 t4 n4]
+                        vertices' = foldl (\vs (i, p, t, n) -> HashMap.insert i (Vertex p t n (V4 1 0 0 1) colRed) vs) vertices vertexData
                      in (vertices', qf)
           )
           HashMap.empty
@@ -81,7 +81,7 @@ v2ToCFloat (V2 a b) = V2 (realToFrac a) (realToFrac b)
 v3ToCFloat :: V3 Float -> V3 Foreign.C.CFloat
 v3ToCFloat (V3 a b c) = V3 (realToFrac a) (realToFrac b) (realToFrac c)
 
-variants :: Foldable t => t (QuadFace a) -> [QuadFace a]
+variants :: (Foldable t) => t (QuadFace a) -> [QuadFace a]
 variants faces = concatMap (\(QuadFace f) -> map (\n -> QuadFace (rot4 n f)) [0 .. 3]) faces
 
 rot4 :: Int -> (a, a, a, a) -> (a, a, a, a)
@@ -119,13 +119,13 @@ fromPie PieLevel {..} = do
       verts =
         map
           ( \(i, (V3 x y z)) ->
-               let norm = fromMaybe (V3 0.0 0.0 0.0) (lookup i firstNormals)
-                 in Vertex
-                      { vPos = V3 (realToFrac x) (realToFrac y) (realToFrac z),
-                        vTexUV = V2 0.0 0.0,
-                        vNorm = norm,
-                        vCol = V3 0.6 0.6 0.0
-                      }
+              let norm = fromMaybe (V3 0.0 0.0 0.0) (lookup i firstNormals)
+               in Vertex
+                    { vPos = V3 (realToFrac x) (realToFrac y) (realToFrac z),
+                      vTexUV = V2 0.0 0.0,
+                      vNorm = norm,
+                      vCol = V3 0.6 0.6 0.0
+                    }
           )
           (zip [0 ..] vertices)
   Mesh verts indices
@@ -213,9 +213,10 @@ removeDoubles =
     ([], [])
 
 normalizeMesh vertices indices =
-  let minIdx [x, y, z] | x <= y && x <= z = 0
-                       | y <= x && y <= z = 1
-                       | otherwise         = 2
+  let minIdx [x, y, z]
+        | x <= y && x <= z = 0
+        | y <= x && y <= z = 1
+        | otherwise = 2
       rotate n (a, b, c) =
         case mod n 3 of
           0 -> (a, b, c)
@@ -224,15 +225,17 @@ normalizeMesh vertices indices =
       stride' (a : b : c : xs) = (a, b, c) : stride' xs
       stride' [] = []
       faces =
-        fmap (\(a, b, c) -> rotate (minIdx [a, b, c]) (a, b, c))
-             (stride' indices)
+        fmap
+          (\(a, b, c) -> rotate (minIdx [a, b, c]) (a, b, c))
+          (stride' indices)
    in --    normals = map (\(a,b,c) -> calcNormal a b c) faces
       Face <$> faces
 
 normalizeIndices indices =
-  let minIdx [x, y, z] | x <= y && x <= z = 0
-                       | y <= x && y <= z = 1
-                       | otherwise         = 2
+  let minIdx [x, y, z]
+        | x <= y && x <= z = 0
+        | y <= x && y <= z = 1
+        | otherwise = 2
       rotate n (a, b, c) =
         case mod n 3 of
           0 -> (a, b, c)

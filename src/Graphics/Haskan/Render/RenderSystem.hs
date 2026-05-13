@@ -1,49 +1,50 @@
 module Graphics.Haskan.Render.RenderSystem
-  ( DrawCall (..)
-  , extractDrawList
-  ) where
+  ( DrawCall (..),
+    extractDrawList,
+  )
+where
 
 import Control.Concurrent.STM qualified as STM
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Data.Word (Word32)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
 import Data.Maybe (catMaybes, fromMaybe)
-import Linear.Matrix (M44, (!*!))
-import Linear.Matrix qualified as Matrix
-
+import Data.Word (Word32)
 import Graphics.Haskan.Scene.ECS (EntityId (..), World (..))
 import Graphics.Haskan.Scene.Transform (Transform, toMatrix)
 import Graphics.Haskan.Vulkan.Resources
-  ( ResourceManager
-  , MeshHandle
-  , TextureHandle(..)
-  , lookupMesh
-  , lookupTexture
-  , MeshResource
-  , TextureResource
+  ( MeshHandle,
+    MeshResource,
+    ResourceManager,
+    TextureHandle (..),
+    TextureResource,
+    lookupMesh,
+    lookupTexture,
   )
+import Linear.Matrix (M44, (!*!))
+import Linear.Matrix qualified as Matrix
 
 data DrawCall = DrawCall
-  { dcMesh :: !MeshResource
-  , dcTransform :: !Transform
-  , dcWorldMatrix :: !(M44 Float)
-  , dcMaterial :: !(Maybe TextureResource)
-  , dcMaterialIndex :: !Word32
-  , dcMetallicFactor :: !Float
-  , dcRoughnessFactor :: !Float
-  , dcMetallicRoughnessIndex :: !Word32
-  , dcNormalIndex :: !Word32
-  , dcOcclusionIndex :: !Word32
-  , dcOcclusionStrength :: !Float
-  , dcEmissiveIndex :: !Word32
+  { dcMesh :: !MeshResource,
+    dcTransform :: !Transform,
+    dcWorldMatrix :: !(M44 Float),
+    dcMaterial :: !(Maybe TextureResource),
+    dcMaterialIndex :: !Word32,
+    dcMetallicFactor :: !Float,
+    dcRoughnessFactor :: !Float,
+    dcMetallicRoughnessIndex :: !Word32,
+    dcNormalIndex :: !Word32,
+    dcOcclusionIndex :: !Word32,
+    dcOcclusionStrength :: !Float,
+    dcEmissiveIndex :: !Word32
   }
 
 extractDrawList ::
-  MonadIO m =>
+  (MonadIO m) =>
   World ->
   ResourceManager ->
-  IntMap Word32 -> -- ^ texture handle -> material index mapping
+  -- | texture handle -> material index mapping
+  IntMap Word32 ->
   m [DrawCall]
 extractDrawList world rm texIndexMap = liftIO $ do
   meshes <- STM.readTVarIO (wMeshes world)
@@ -122,18 +123,21 @@ resolveEntity rm transforms materials metallicFactors roughnessFactors mrTexture
       occlusionStrength = fromMaybe 1.0 mOcclusionStrength
 
   case (mMeshRes, mTransform, mWorldMatrix) of
-    (Just mesh, Just trans, Just wm) -> pure $ Just DrawCall
-      { dcMesh = mesh
-      , dcTransform = trans
-      , dcWorldMatrix = wm
-      , dcMaterial = mMatRes
-      , dcMaterialIndex = matIdx
-      , dcMetallicFactor = metallic
-      , dcRoughnessFactor = roughness
-      , dcMetallicRoughnessIndex = mrIdx
-      , dcNormalIndex = normalIdx
-      , dcOcclusionIndex = occlusionIdx
-      , dcOcclusionStrength = occlusionStrength
-      , dcEmissiveIndex = emissiveIdx
-      }
+    (Just mesh, Just trans, Just wm) ->
+      pure $
+        Just
+          DrawCall
+            { dcMesh = mesh,
+              dcTransform = trans,
+              dcWorldMatrix = wm,
+              dcMaterial = mMatRes,
+              dcMaterialIndex = matIdx,
+              dcMetallicFactor = metallic,
+              dcRoughnessFactor = roughness,
+              dcMetallicRoughnessIndex = mrIdx,
+              dcNormalIndex = normalIdx,
+              dcOcclusionIndex = occlusionIdx,
+              dcOcclusionStrength = occlusionStrength,
+              dcEmissiveIndex = emissiveIdx
+            }
     _ -> pure Nothing

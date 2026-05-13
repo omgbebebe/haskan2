@@ -59,7 +59,7 @@ vertexFormat =
     vertex Vertex {..} =
       (vPos, (vTexUV, (vNorm, (vTangent, vCol))))
 
-(>*<) :: Divisible f => f a -> f b -> f (a, b)
+(>*<) :: (Divisible f) => f a -> f b -> f (a, b)
 (>*<) = divided
 
 infixr 5 >*<

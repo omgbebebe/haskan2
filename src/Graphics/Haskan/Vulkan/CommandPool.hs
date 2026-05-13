@@ -10,7 +10,7 @@ import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 managedCommandPool ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Int ->
   m Vulkan.VkCommandPool
@@ -21,7 +21,7 @@ managedCommandPool dev qfi =
     (\ptr -> Vulkan.vkDestroyCommandPool dev ptr Vulkan.vkNullPtr)
 
 createCommandPool ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Int ->
   m Vulkan.VkCommandPool
@@ -31,10 +31,9 @@ createCommandPool dev queueFamilyIndex = do
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"queueFamilyIndex" (fromIntegral queueFamilyIndex)
-               &* set @"flags" Vulkan.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
+              &* set @"flags" Vulkan.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
           )
   liftIO $
     withPtr
       commandPoolCI
-      ( \ciPtr -> allocaAndPeek (Vulkan.vkCreateCommandPool dev ciPtr Vulkan.VK_NULL)
-      )
+      (\ciPtr -> allocaAndPeek (Vulkan.vkCreateCommandPool dev ciPtr Vulkan.VK_NULL))

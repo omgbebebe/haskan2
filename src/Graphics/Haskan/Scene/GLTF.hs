@@ -1,17 +1,18 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Scene.GLTF
-  ( importGLTF
-  , GLTFImportResult (..)
-  ) where
+  ( importGLTF,
+    GLTFImportResult (..),
+  )
+where
 
 import Control.Concurrent (forkIO)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar)
 import Control.Monad (forM, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
-import Data.Aeson.KeyMap qualified as KeyMap
 import Data.Aeson qualified as JSON
+import Data.Aeson.KeyMap qualified as KeyMap
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as BSL
@@ -25,66 +26,65 @@ import Data.Vector qualified as Vector
 import Data.Vector.Storable qualified as VectorStorable
 import Data.Word (Word32, Word8)
 import Foreign.C qualified
-import Graphics.Haskan.Logger (logDebugIO, logInfoIO, showT, LogCategory (..))
-import Graphics.Haskan.Mesh (Mesh (..))
-import Graphics.Haskan.Scene.ECS (World, EntityId)
-import Graphics.Haskan.Scene.ECS qualified as ECS
-import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform)
 import Graphics.Haskan.Assets.Cache (AssetCache)
 import Graphics.Haskan.Assets.TexturePreprocessor (TextureConfig, defaultTextureConfig)
-import Graphics.Haskan.Vertex (Vertex (..))
+import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
+import Graphics.Haskan.Mesh (Mesh (..))
+import Graphics.Haskan.Scene.ECS (EntityId, World)
+import Graphics.Haskan.Scene.ECS qualified as ECS
+import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform)
 import Graphics.Haskan.Utils.TangentSpace (computeTangents)
-
+import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
-import Graphics.Haskan.Vulkan.Resources (ResourceManager, MeshHandle, TextureHandle (..), allocHandle, rmNextId)
+import Graphics.Haskan.Vulkan.Resources (MeshHandle, ResourceManager, TextureHandle (..), allocHandle, rmNextId)
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
-import Linear (V2 (..), V3 (..), V4 (..), Quaternion (..))
-import Linear qualified
 import Graphics.Vulkan qualified as Vulkan
+import Linear (Quaternion (..), V2 (..), V3 (..), V4 (..))
+import Linear qualified
 import System.Directory (withCurrentDirectory)
 import System.FilePath (takeDirectory)
 import Text.GLTF.Loader qualified as GLTF
-import Text.GLTF.Loader.Gltf qualified as GLTFTypes
-  ( Gltf (..)
-  , Mesh (..)
-  , MeshPrimitive (..)
-  , Node (..)
-  , Image (..)
-  , Texture (..)
-  , Material (..)
-  , PbrMetallicRoughness (..)
-  , TextureInfo (..)
-  )
-import Text.GLTF.Loader.Gltf
-  ( nodeTranslation
-  , nodeRotation
-  , nodeScale
-  , nodeChildren
-  , nodeMeshId
-  , meshPrimitives
-  , meshPrimitivePositions
-  , meshPrimitiveNormals
-  , meshPrimitiveTexCoords
-  , meshPrimitiveIndices
-  , meshPrimitiveMaterial
-  , gltfMeshes
-  , gltfNodes
-  , gltfImages
-  , gltfMaterials
-  , gltfTextures
-  , pbrBaseColorTexture
-  , textureSourceId
-  , materialOcclusionTexture
-  , materialOcclusionStrength
-  , materialEmissiveTexture
-  )
 import Text.GLTF.Loader.Errors (Errors)
+import Text.GLTF.Loader.Gltf
+  ( gltfImages,
+    gltfMaterials,
+    gltfMeshes,
+    gltfNodes,
+    gltfTextures,
+    materialEmissiveTexture,
+    materialOcclusionStrength,
+    materialOcclusionTexture,
+    meshPrimitiveIndices,
+    meshPrimitiveMaterial,
+    meshPrimitiveNormals,
+    meshPrimitivePositions,
+    meshPrimitiveTexCoords,
+    meshPrimitives,
+    nodeChildren,
+    nodeMeshId,
+    nodeRotation,
+    nodeScale,
+    nodeTranslation,
+    pbrBaseColorTexture,
+    textureSourceId,
+  )
+import Text.GLTF.Loader.Gltf qualified as GLTFTypes
+  ( Gltf (..),
+    Image (..),
+    Material (..),
+    Mesh (..),
+    MeshPrimitive (..),
+    Node (..),
+    PbrMetallicRoughness (..),
+    Texture (..),
+    TextureInfo (..),
+  )
 
 -- | Pre-process glTF JSON to add missing image mime types.
 fixImageMimeTypes :: ByteString -> ByteString
 fixImageMimeTypes bs =
   case JSON.decodeStrict' bs of
-    Nothing -> bs  -- Not valid JSON, return as-is
+    Nothing -> bs -- Not valid JSON, return as-is
     Just (obj :: JSON.Object) ->
       case KeyMap.lookup "images" obj of
         Just (JSON.Array images) ->
@@ -95,11 +95,12 @@ fixImageMimeTypes bs =
   where
     fixImageMimeType (JSON.Object img) =
       case KeyMap.lookup "mimeType" img of
-        Just _ -> JSON.Object img  -- Already has mime type
+        Just _ -> JSON.Object img -- Already has mime type
         Nothing ->
           case KeyMap.lookup "uri" img of
-            Just (JSON.String uri) -> let mime = inferMimeType (Text.unpack uri)
-              in JSON.Object (KeyMap.insert "mimeType" (JSON.String mime) img)
+            Just (JSON.String uri) ->
+              let mime = inferMimeType (Text.unpack uri)
+               in JSON.Object (KeyMap.insert "mimeType" (JSON.String mime) img)
             _ -> JSON.Object img
     fixImageMimeType other = other
 
@@ -107,15 +108,16 @@ fixImageMimeTypes bs =
       | ".png" `Text.isSuffixOf` Text.pack (map Char.toLower uri) = "image/png"
       | ".jpg" `Text.isSuffixOf` Text.pack (map Char.toLower uri) = "image/jpeg"
       | ".jpeg" `Text.isSuffixOf` Text.pack (map Char.toLower uri) = "image/jpeg"
-      | otherwise = "image/png"  -- Default fallback
+      | otherwise = "image/png" -- Default fallback
 
 -- | Result of importing a glTF scene
 data GLTFImportResult = GLTFImportResult
-  { girWorld :: !World
-  , girMeshes :: ![MeshHandle]
-  , girTextures :: ![TextureHandle]
-  , girTextureData :: ![(Int, Int, VectorStorable.Vector Word8)]  -- ^ parallel to girTextures: (width, height, pixels)
-  , girRootEntity :: !EntityId
+  { girWorld :: !World,
+    girMeshes :: ![MeshHandle],
+    girTextures :: ![TextureHandle],
+    -- | parallel to girTextures: (width, height, pixels)
+    girTextureData :: ![(Int, Int, VectorStorable.Vector Word8)],
+    girRootEntity :: !EntityId
   }
 
 -- | Import a glTF file into the engine's ECS + ResourceManager.
@@ -136,15 +138,22 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
   -- Pre-process JSON to fix missing image mime types, then load from the file's directory
   jsonBytes <- liftIO $ BS.readFile path
   let fixedBytes = fixImageMimeTypes jsonBytes
-  gltfResult <- liftIO $ withCurrentDirectory (takeDirectory path) $
-    GLTF.fromJsonByteString fixedBytes
+  gltfResult <-
+    liftIO $
+      withCurrentDirectory (takeDirectory path) $
+        GLTF.fromJsonByteString fixedBytes
   gltf <- case gltfResult of
     Left err -> error $ "failed to load glTF: " <> show err
     Right g -> pure g
 
-  logInfoIO LogGeneral $ "glTF loaded: " <> showT (Vector.length (gltfMeshes gltf)) <> " meshes, "
-    <> showT (Vector.length (gltfNodes gltf)) <> " nodes, "
-    <> showT (Vector.length (gltfImages gltf)) <> " images"
+  logInfoIO LogGeneral $
+    "glTF loaded: "
+      <> showT (Vector.length (gltfMeshes gltf))
+      <> " meshes, "
+      <> showT (Vector.length (gltfNodes gltf))
+      <> " nodes, "
+      <> showT (Vector.length (gltfImages gltf))
+      <> " images"
 
   -- Create ECS world
   world <- ECS.createWorld
@@ -166,13 +175,14 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
   -- Build scene graph from nodes
   rootEntity <- buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures
 
-  pure GLTFImportResult
-    { girWorld = world
-    , girMeshes = meshes
-    , girTextures = textures
-    , girTextureData = textureData
-    , girRootEntity = rootEntity
-    }
+  pure
+    GLTFImportResult
+      { girWorld = world,
+        girMeshes = meshes,
+        girTextures = textures,
+        girTextureData = textureData,
+        girRootEntity = rootEntity
+      }
 
 -- | Load all images from glTF as placeholder texture handles.
 -- Decodes all images concurrently. No GPU upload — pixel data is returned for batch array creation.
@@ -241,9 +251,10 @@ buildMaterialTextures gltf textures =
         pbr <- GLTFTypes.materialPbrMetallicRoughness mat
         texInfo <- pbrBaseColorTexture pbr
         let texIdx = GLTFTypes.textureId texInfo
-        gltfTex <- if texIdx >= 0 && texIdx < length texturesList
-                     then Just (texturesList !! texIdx)
-                     else Nothing
+        gltfTex <-
+          if texIdx >= 0 && texIdx < length texturesList
+            then Just (texturesList !! texIdx)
+            else Nothing
         imgIdx <- textureSourceId gltfTex
         if imgIdx >= 0 && imgIdx < length textures
           then Just (textures !! imgIdx)
@@ -259,9 +270,10 @@ buildMaterialMetallicRoughnessTextures gltf textures =
         pbr <- GLTFTypes.materialPbrMetallicRoughness mat
         texInfo <- GLTFTypes.pbrMetallicRoughnessTexture pbr
         let texIdx = GLTFTypes.textureId texInfo
-        gltfTex <- if texIdx >= 0 && texIdx < length texturesList
-                     then Just (texturesList !! texIdx)
-                     else Nothing
+        gltfTex <-
+          if texIdx >= 0 && texIdx < length texturesList
+            then Just (texturesList !! texIdx)
+            else Nothing
         imgIdx <- textureSourceId gltfTex
         if imgIdx >= 0 && imgIdx < length textures
           then Just (textures !! imgIdx)
@@ -276,9 +288,10 @@ buildMaterialNormalTextures gltf textures =
       resolveMaterial mat = do
         texInfo <- GLTFTypes.materialNormalTexture mat
         let texIdx = GLTFTypes.textureId texInfo
-        gltfTex <- if texIdx >= 0 && texIdx < length texturesList
-                     then Just (texturesList !! texIdx)
-                     else Nothing
+        gltfTex <-
+          if texIdx >= 0 && texIdx < length texturesList
+            then Just (texturesList !! texIdx)
+            else Nothing
         imgIdx <- textureSourceId gltfTex
         if imgIdx >= 0 && imgIdx < length textures
           then Just (textures !! imgIdx)
@@ -293,9 +306,10 @@ buildMaterialOcclusionTextures gltf textures =
       resolveMaterial mat = do
         texInfo <- GLTFTypes.materialOcclusionTexture mat
         let texIdx = GLTFTypes.textureId texInfo
-        gltfTex <- if texIdx >= 0 && texIdx < length texturesList
-                     then Just (texturesList !! texIdx)
-                     else Nothing
+        gltfTex <-
+          if texIdx >= 0 && texIdx < length texturesList
+            then Just (texturesList !! texIdx)
+            else Nothing
         imgIdx <- textureSourceId gltfTex
         if imgIdx >= 0 && imgIdx < length textures
           then Just (textures !! imgIdx)
@@ -310,9 +324,10 @@ buildMaterialEmissiveTextures gltf textures =
       resolveMaterial mat = do
         texInfo <- GLTFTypes.materialEmissiveTexture mat
         let texIdx = GLTFTypes.textureId texInfo
-        gltfTex <- if texIdx >= 0 && texIdx < length texturesList
-                     then Just (texturesList !! texIdx)
-                     else Nothing
+        gltfTex <-
+          if texIdx >= 0 && texIdx < length texturesList
+            then Just (texturesList !! texIdx)
+            else Nothing
         imgIdx <- textureSourceId gltfTex
         if imgIdx >= 0 && imgIdx < length textures
           then Just (textures !! imgIdx)
@@ -332,7 +347,7 @@ loadMeshes rm pdev dev gltf = do
   let meshes = Vector.toList (gltfMeshes gltf)
       numMeshes = length meshes
   logInfoIO LogGeneral $ "loading " <> showT numMeshes <> " meshes concurrently"
-  
+
   liftIO $ do
     mvars <- mapM (\_ -> newEmptyMVar) meshes
     for_ (zip meshes mvars) $ \(mesh, mvar) -> forkIO $ do
@@ -357,13 +372,15 @@ loadMesh rm pdev dev gltfMesh = do
             primIdxs = primitiveToIndices prim
             offset = length verts
             offsetIdxs = map (+ fromIntegral offset) primIdxs
-        in (verts ++ primVerts, idxs ++ offsetIdxs)
+         in (verts ++ primVerts, idxs ++ offsetIdxs)
       (allVertices, allIndices) = accumulatePrimitives (Vector.toList primitives)
   logInfoIO LogGeneral $ "glTF mesh: " <> showT (length allVertices) <> " vertices, " <> showT (length allIndices) <> " indices"
   let uvs = map vTexUV allVertices
       (uvals, vvals) = unzip [(realToFrac u, realToFrac v) | V2 u v <- uvs]
-      umin = minimum uvals; umax = maximum uvals
-      vmin = minimum vvals; vmax = maximum vvals
+      umin = minimum uvals
+      umax = maximum uvals
+      vmin = minimum vvals
+      vmax = maximum vvals
   logInfoIO LogGeneral $ "UV range: U[" <> showT umin <> ", " <> showT umax <> "], V[" <> showT vmin <> ", " <> showT vmax <> "]"
   Buffer.createMeshResource rm pdev dev allVertices allIndices
 
@@ -379,38 +396,41 @@ primitiveToVertices prim =
       defaultUV = V2 0 0
       defaultColor = V3 1 1 1
       defaultTangent = V4 1 0 0 1
-      
+
       -- Compute tangents from geometry
       n = length positions
       paddedNormals = take n (normals ++ repeat defaultNormal)
       paddedUVs = take n (texCoords ++ repeat defaultUV)
-      tangents = if length idxs >= 3
-        then Vector.toList $ computeTangents
-               (Vector.fromList positions)
-               (Vector.fromList paddedNormals)
-               (Vector.fromList paddedUVs)
-               (Vector.fromList idxs)
-        else replicate n defaultTangent
-        
+      tangents =
+        if length idxs >= 3
+          then
+            Vector.toList $
+              computeTangents
+                (Vector.fromList positions)
+                (Vector.fromList paddedNormals)
+                (Vector.fromList paddedUVs)
+                (Vector.fromList idxs)
+          else replicate n defaultTangent
+
       -- Zip them together
       nCount = length normals
       uvCount = length texCoords
    in zipWith4
-        (\pos norm uv tangent ->
-          Vertex
-            { vPos = v3ToCFloat pos
-            , vNorm = if nCount > 0 then v3ToCFloat norm else v3ToCFloat defaultNormal
-            , vTexUV = if uvCount > 0 then v2ToCFloat uv else v2ToCFloat defaultUV
-            , vTangent = v4ToCFloat tangent
-            , vCol = v3ToCFloat defaultColor
-            }
+        ( \pos norm uv tangent ->
+            Vertex
+              { vPos = v3ToCFloat pos,
+                vNorm = if nCount > 0 then v3ToCFloat norm else v3ToCFloat defaultNormal,
+                vTexUV = if uvCount > 0 then v2ToCFloat uv else v2ToCFloat defaultUV,
+                vTangent = v4ToCFloat tangent,
+                vCol = v3ToCFloat defaultColor
+              }
         )
         positions
         (normals ++ repeat defaultNormal)
         (texCoords ++ repeat defaultUV)
         tangents
   where
-    zipWith4 f (a:as) (b:bs) (c:cs) (d:ds) = f a b c d : zipWith4 f as bs cs ds
+    zipWith4 f (a : as) (b : bs) (c : cs) (d : ds) = f a b c d : zipWith4 f as bs cs ds
     zipWith4 _ _ _ _ _ = []
 
 -- | Convert a glTF primitive to engine indices.
@@ -488,7 +508,7 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
           let gltfMesh = gltfMeshesList !! meshIdx
               primitives = Vector.toList (meshPrimitives gltfMesh)
           case primitives of
-            (prim:_) -> do
+            (prim : _) -> do
               case meshPrimitiveMaterial prim of
                 Just matIdx -> do
                   when (matIdx >= 0 && matIdx < length materialTextures) $ do
@@ -568,9 +588,9 @@ nodeToTransform node =
       V4 rx ry rz rw = rotation
       quat = Quaternion rw (V3 rx ry rz)
    in Transform
-        { tPosition = translation
-        , tRotation = quat
-        , tScale = scale
+        { tPosition = translation,
+          tRotation = quat,
+          tScale = scale
         }
 
 v3ToCFloat :: V3 Float -> V3 Foreign.C.CFloat

@@ -2,15 +2,15 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Input
-  ( Action (..)
-  , ActionEvent
-  , KeyModifier (..)
-  , KeyBindings
-  , defaultBindings
-  , modifiersToList
-  , payloadToActionEvent
-  , mouseMotionToAction
-  , keyToAction
+  ( Action (..),
+    ActionEvent,
+    KeyModifier (..),
+    KeyBindings,
+    defaultBindings,
+    modifiersToList,
+    payloadToActionEvent,
+    mouseMotionToAction,
+    keyToAction,
   )
 where
 
@@ -43,7 +43,7 @@ data Action
   | SwitchCameraMode
   deriving (Eq, Show, Generic)
 
-type ActionEvent = (Action, Bool, Bool)  -- (action, pressed, isRepeated)
+type ActionEvent = (Action, Bool, Bool) -- (action, pressed, isRepeated)
 
 data KeyModifier
   = LShift
@@ -73,33 +73,33 @@ defaultBindings =
       (([], SDL.KeycodeA), StrafeLeft),
       (([], SDL.KeycodeD), StrafeRight),
       (([], SDL.KeycodeF12), FrameInspect),
-       (([LShift], SDL.KeycodeQ), Escape),
-       (([LShift], SDL.KeycodeEscape), DebugMode 0),  -- reset debug mode, render full pipeline
+      (([LShift], SDL.KeycodeQ), Escape),
+      (([LShift], SDL.KeycodeEscape), DebugMode 0), -- reset debug mode, render full pipeline
       (([LShift], SDL.KeycodeF3), ToggleWireframe),
       (([], SDL.KeycodeG), ToggleAxisOverlay),
       (([LShift], SDL.KeycodeG), ToggleGroundPlane),
       -- Debug modes F1-F9 (modes 1-9)
-      (([], SDL.KeycodeF1), DebugMode 1),   -- albedo
-      (([], SDL.KeycodeF2), DebugMode 2),   -- normals
-      (([], SDL.KeycodeF3), DebugMode 3),   -- roughness
-      (([], SDL.KeycodeF4), DebugMode 4),   -- metallic
-      (([], SDL.KeycodeF5), DebugMode 5),   -- position
-      (([], SDL.KeycodeF6), DebugMode 6),   -- emissive
-      (([], SDL.KeycodeF7), DebugMode 7),   -- AO
-      (([], SDL.KeycodeF8), DebugMode 8),   -- NdotL
-      (([], SDL.KeycodeF9), DebugMode 9),   -- irradiance
+      (([], SDL.KeycodeF1), DebugMode 1), -- albedo
+      (([], SDL.KeycodeF2), DebugMode 2), -- normals
+      (([], SDL.KeycodeF3), DebugMode 3), -- roughness
+      (([], SDL.KeycodeF4), DebugMode 4), -- metallic
+      (([], SDL.KeycodeF5), DebugMode 5), -- position
+      (([], SDL.KeycodeF6), DebugMode 6), -- emissive
+      (([], SDL.KeycodeF7), DebugMode 7), -- AO
+      (([], SDL.KeycodeF8), DebugMode 8), -- NdotL
+      (([], SDL.KeycodeF9), DebugMode 9), -- irradiance
       -- Screenshots
       (([], SDL.KeycodeF10), SaveScreenshot),
       (([], SDL.KeycodeF11), SaveAllStages),
       (([LShift], SDL.KeycodeF11), SaveSwapchainScreenshot),
       -- Debug modes with modifiers
-      (([LCtrl], SDL.KeycodeF12), DebugMode 10),  -- specular IBL
+      (([LCtrl], SDL.KeycodeF12), DebugMode 10), -- specular IBL
       (([LShift], SDL.KeycodeF12), DebugMode 11), -- Fresnel
       (([LShift, LCtrl], SDL.KeycodeF12), DebugMode 12), -- raw skybox
       -- Cloud debug modes (Shift+F1/F2/F3)
-      (([LShift], SDL.KeycodeF1), DebugMode 13),  -- cloud density
-      (([LShift], SDL.KeycodeF2), DebugMode 14),  -- height mask
-      (([LShift], SDL.KeycodeF3), DebugMode 15),  -- raw noise
+      (([LShift], SDL.KeycodeF1), DebugMode 13), -- cloud density
+      (([LShift], SDL.KeycodeF2), DebugMode 14), -- height mask
+      (([LShift], SDL.KeycodeF3), DebugMode 15), -- raw noise
       -- Cloud height adjustment
       (([], SDL.KeycodeRightBracket), CloudHeightUp),
       (([], SDL.KeycodeLeftBracket), CloudHeightDown),
@@ -108,14 +108,15 @@ defaultBindings =
     ]
 
 modifiersToList :: SDL.KeyModifier -> [KeyModifier]
-modifiersToList SDL.KeyModifier {..} = map fst . filter snd $
-  [ (LShift,   keyModifierLeftShift)
-  , (RShift,   keyModifierRightShift)
-  , (LCtrl,    keyModifierLeftCtrl)
-  , (RCtrl,    keyModifierRightCtrl)
-  , (LAlt,     keyModifierLeftAlt)
-  , (RAlt,     keyModifierRightAlt)
-  ]
+modifiersToList SDL.KeyModifier {..} =
+  map fst . filter snd $
+    [ (LShift, keyModifierLeftShift),
+      (RShift, keyModifierRightShift),
+      (LCtrl, keyModifierLeftCtrl),
+      (RCtrl, keyModifierRightCtrl),
+      (LAlt, keyModifierLeftAlt),
+      (RAlt, keyModifierRightAlt)
+    ]
 
 payloadToActionEvent :: SDL.EventPayload -> Maybe ActionEvent
 payloadToActionEvent SDL.QuitEvent = Just (Escape, True, False)
@@ -128,7 +129,7 @@ mouseWheelToAction :: SDL.MouseWheelEventData -> Maybe ActionEvent
 mouseWheelToAction (SDL.MouseWheelEventData _window _mouseDevice scroll _direction) =
   let (SDL.V2 _scrollX scrollY) = scroll
       -- Negative scrollY means scroll down (zoom out), positive means scroll up (zoom in)
-      zoomAmount = fromIntegral scrollY * (-0.01)  -- scale factor for zoom sensitivity
+      zoomAmount = fromIntegral scrollY * (-0.01) -- scale factor for zoom sensitivity
    in Just (Zoom zoomAmount, True, False)
 
 mouseMotionToAction :: SDL.MouseMotionEventData -> Maybe ActionEvent

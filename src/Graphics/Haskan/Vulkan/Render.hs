@@ -14,7 +14,7 @@ import Control.Monad.Managed (MonadManaged)
 import Data.Foldable (for_)
 import Data.Traversable (for)
 import Foreign.Marshal.Array qualified
-import Graphics.Haskan.Logger (logDebugIO, logInfoIO, showT, LogCategory (..))
+import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
 import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..))
 import Graphics.Haskan.Resources (allocaAndPeekVkResult, throwVkResult)
 import Graphics.Haskan.Vertex qualified as Vertex
@@ -82,11 +82,11 @@ createRenderContext
         pipelineLayout
         renderPass
         ShaderProgram
-          { spVertex = vertShader
-          , spTessControl = Nothing
-          , spTessEvaluation = Nothing
-          , spGeometry = Nothing
-          , spFragment = fragShader
+          { spVertex = vertShader,
+            spTessControl = Nothing,
+            spTessEvaluation = Nothing,
+            spGeometry = Nothing,
+            spFragment = fragShader
           }
         surfaceExtent
         Vertex.vertexFormat
@@ -105,22 +105,22 @@ createRenderContext
 
     pure
       RenderContext
-          { device = device,
-            swapchain = swapchain,
-            swapchainImages = images,
-            graphicsCommandBuffers = graphicsCommandBuffers,
-            graphicsQueueHandler = graphicsQueueHandler,
-            presentQueueHandler = presentQueueHandler,
-            renderFinishedFences = renderFinishedFences,
-            renderFinishedSemaphores = renderFinishedSemaphores,
-            rcPipelineLayout = pipelineLayout,
-            rcGraphicsPipeline = graphicsPipeline,
-            rcRenderPass = renderPass,
-            rcFramebuffers = framebuffers,
-            rcDescriptorSets = descriptorSets,
-            rcSurfaceExtent = surfaceExtent,
-            rcGraphicsCommandPool = graphicsCommandPool
-          }
+        { device = device,
+          swapchain = swapchain,
+          swapchainImages = images,
+          graphicsCommandBuffers = graphicsCommandBuffers,
+          graphicsQueueHandler = graphicsQueueHandler,
+          presentQueueHandler = presentQueueHandler,
+          renderFinishedFences = renderFinishedFences,
+          renderFinishedSemaphores = renderFinishedSemaphores,
+          rcPipelineLayout = pipelineLayout,
+          rcGraphicsPipeline = graphicsPipeline,
+          rcRenderPass = renderPass,
+          rcFramebuffers = framebuffers,
+          rcDescriptorSets = descriptorSets,
+          rcSurfaceExtent = surfaceExtent,
+          rcGraphicsCommandPool = graphicsCommandPool
+        }
 
 drawFrame :: (MonadIO m) => RenderContext -> Vulkan.VkSemaphore -> Int -> (Vulkan.Word32 -> Int -> IO ()) -> m RenderResult
 drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex recordAction = do
@@ -164,7 +164,7 @@ drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex recordAction
     _ -> pure $ FrameFailed (show vkResult)
 
 renderImage ::
-  MonadIO m =>
+  (MonadIO m) =>
   RenderContext ->
   Vulkan.VkSemaphore ->
   Int ->
@@ -196,7 +196,7 @@ renderImage RenderContext {..} imageAvailableSemaphore fenceIndex imageIndex rec
       Vulkan.vkQueueSubmit graphicsQueueHandler 1 siPtr renderFinishedFence >>= throwVkResult
   pure (imageIndex)
 
-presentFrame :: MonadIO m => RenderContext -> Vulkan.Word32 -> Vulkan.VkSemaphore -> m Vulkan.VkResult
+presentFrame :: (MonadIO m) => RenderContext -> Vulkan.Word32 -> Vulkan.VkSemaphore -> m Vulkan.VkResult
 presentFrame RenderContext {..} imageIndex renderFinishedSem = do
   let presentInfo =
         Vulkan.createVk

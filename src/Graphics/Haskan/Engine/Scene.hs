@@ -1,15 +1,16 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Engine.Scene
-  ( computeSkyboxRays
-  , modelMatrix
-  , makeProjectionMatrix
-  , drawCallToSnapshot
-  , computeMeshBounds
-  , computeWorldSpaceBounds
-  , computeSceneBounds
-  , adjustCameraForScene
-  ) where
+  ( computeSkyboxRays,
+    modelMatrix,
+    makeProjectionMatrix,
+    drawCallToSnapshot,
+    computeMeshBounds,
+    computeWorldSpaceBounds,
+    computeSceneBounds,
+    adjustCameraForScene,
+  )
+where
 
 import Control.Monad (forM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -26,8 +27,7 @@ import Graphics.Haskan.Scene.Transform (Transform (..))
 import Graphics.Haskan.Scene.Transform qualified as Transform
 import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.Resources (MeshHandle, ResourceManager, lookupMesh, mrBounds, mrIndexCount)
-import Graphics.Haskan.Vulkan.Resources (MeshHandle)
-import Linear (M44, V2 (..), V3 (..), V4 (..), (*^), (^+^), (^-^), normalize)
+import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
 import Linear.Matrix (identity, inv33, inv44, transpose, (!*), (!*!))
 import Linear.Projection qualified
 import Linear.Quaternion (Quaternion (..))
@@ -45,16 +45,16 @@ computeSkyboxRays view proj =
       ndcToDir :: V4 Float -> V3 Float
       ndcToDir (V4 x y _z _w) =
         let viewDir = V3 (x / fx) (y / fy) (-1)
-        in normalize (worldRot !* viewDir)
+         in normalize (worldRot !* viewDir)
 
-      bottomLeft  = ndcToDir (V4 (-1) (-1) 0 1)
-      bottomRight = ndcToDir (V4 1    (-1) 0 1)
-      topLeft     = ndcToDir (V4 (-1) 1    0 1)
+      bottomLeft = ndcToDir (V4 (-1) (-1) 0 1)
+      bottomRight = ndcToDir (V4 1 (-1) 0 1)
+      topLeft = ndcToDir (V4 (-1) 1 0 1)
 
       ray0 = bottomLeft
       ray1 = 2 *^ bottomRight ^-^ bottomLeft
       ray2 = 2 *^ topLeft ^-^ bottomLeft
-  in (ray0, ray1, ray2)
+   in (ray0, ray1, ray2)
 
 modelMatrix :: M44 Foreign.C.CFloat
 modelMatrix =
@@ -73,13 +73,13 @@ makeProjectionMatrix width height =
 drawCallToSnapshot :: DrawCall -> RenderableSnapshot
 drawCallToSnapshot DrawCall {..} =
   RenderableSnapshot
-    { rsName = "entity"
-    , rsWorldMatrix = (realToFrac <$>) <$> dcWorldMatrix
-    , rsScale = V3 1 1 1
-    , rsVisible = True
-    , rsMaterial = maybe "default" (const "textured") dcMaterial
-    , rsMesh = "mesh"
-    , rsIndexCount = mrIndexCount dcMesh
+    { rsName = "entity",
+      rsWorldMatrix = (realToFrac <$>) <$> dcWorldMatrix,
+      rsScale = V3 1 1 1,
+      rsVisible = True,
+      rsMaterial = maybe "default" (const "textured") dcMaterial,
+      rsMesh = "mesh",
+      rsIndexCount = mrIndexCount dcMesh
     }
 
 computeMeshBounds :: Mesh.Mesh -> BBox
@@ -106,15 +106,18 @@ computeWorldSpaceBounds world rm = do
 
 computeSceneBounds :: [MeshHandle] -> ResourceManager -> BBox
 computeSceneBounds meshes rm = unsafePerformIO $ do
-  boundsList <- mapM (\mh -> do
-    mMesh <- lookupMesh rm mh
-    case mMesh of
-      Just meshRes -> pure $ mrBounds meshRes
-      Nothing -> pure emptyBBox
-    ) meshes
+  boundsList <-
+    mapM
+      ( \mh -> do
+          mMesh <- lookupMesh rm mh
+          case mMesh of
+            Just meshRes -> pure $ mrBounds meshRes
+            Nothing -> pure emptyBBox
+      )
+      meshes
   pure $ foldl mergeBBox emptyBBox boundsList
 
-adjustCameraForScene :: Camera a => BBox -> a -> a
+adjustCameraForScene :: (Camera a) => BBox -> a -> a
 adjustCameraForScene bbox cam =
   let center = bboxCenter bbox
       diag = bboxDiagonal bbox
@@ -125,4 +128,4 @@ adjustCameraForScene bbox cam =
       maxDist = targetDist * 5.0
       cam' = setTarget cam (fmap realToFrac center)
       cam'' = setMaxDistance cam' (realToFrac maxDist)
-  in setDistance cam'' (realToFrac targetDist)
+   in setDistance cam'' (realToFrac targetDist)

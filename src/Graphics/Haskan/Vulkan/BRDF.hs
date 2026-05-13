@@ -1,13 +1,14 @@
 {-# LANGUAGE BangPatterns #-}
 
 module Graphics.Haskan.Vulkan.BRDF
-  ( generateBRDFLUT
-  ) where
+  ( generateBRDFLUT,
+  )
+where
 
-import Data.Word (Word8)
 import Data.Vector.Storable (Vector)
 import Data.Vector.Storable qualified as Vector
-import Linear (V2(..), V3(..), normalize, dot, (*^))
+import Data.Word (Word8)
+import Linear (V2 (..), V3 (..), dot, normalize, (*^))
 import System.Random (mkStdGen, randoms)
 
 -- | Generate a 256x256 BRDF LUT for split-sum approximation.
@@ -15,15 +16,16 @@ import System.Random (mkStdGen, randoms)
 -- Returns RGBA8 pixel data (R=scale, G=bias, B=0, A=255).
 generateBRDFLUT :: Int -> Int -> Vector Word8
 generateBRDFLUT width height =
-  Vector.fromList $ concat
-    [ let u = (fromIntegral x + 0.5) / fromIntegral width
-          v = (fromIntegral y + 0.5) / fromIntegral height
-          (scale, bias) = integrateBRDF u v 128
-          r = clamp01 scale
-          g = clamp01 bias
-       in [r, g, 0, 255]
-      | y <- [0 .. height - 1]
-      , x <- [0 .. width - 1]
+  Vector.fromList $
+    concat
+      [ let u = (fromIntegral x + 0.5) / fromIntegral width
+            v = (fromIntegral y + 0.5) / fromIntegral height
+            (scale, bias) = integrateBRDF u v 128
+            r = clamp01 scale
+            g = clamp01 bias
+         in [r, g, 0, 255]
+      | y <- [0 .. height - 1],
+        x <- [0 .. width - 1]
       ]
   where
     clamp01 v = round (max 0.0 (min 1.0 v) * 255.0) :: Word8
@@ -41,7 +43,7 @@ integrateBRDF ndotv roughness samples =
     piVal = 3.14159265
 
     go 0 !s !b _ = (s, b)
-    go n !s !b (r1:r2:rs) =
+    go n !s !b (r1 : r2 : rs) =
       let -- Importance sample GGX distribution
           a = roughness * roughness
           phi = 2 * piVal * r1
@@ -66,9 +68,10 @@ integrateBRDF ndotv roughness samples =
           pdf = d * ndoth / (4 * vdoth)
           -- Visibility term: G_Vis = G*VdotH/(NdotH*NdotV)
           -- This already equals BRDF*NdotL/PDF, so no extra weight needed
-          vis = if ndotl > 0 && ndotv > 0
-                 then g * vdoth / (ndoth * ndotv)
-                 else 0
+          vis =
+            if ndotl > 0 && ndotv > 0
+              then g * vdoth / (ndoth * ndotv)
+              else 0
           -- Fresnel terms
           fc = (1 - vdoth) ^ (5 :: Int)
           scale' = vis * (1 - fc)

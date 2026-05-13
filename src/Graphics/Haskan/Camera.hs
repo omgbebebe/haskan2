@@ -1,19 +1,19 @@
 module Graphics.Haskan.Camera
-  ( module Graphics.Haskan.Camera.Types
-  , module Graphics.Haskan.Camera.Orbital
-  , module Graphics.Haskan.Camera.Fly
-  , AnyCamera(..)
-  , updateCamera
-  , toAnyCamera
-  ) where
+  ( module Graphics.Haskan.Camera.Types,
+    module Graphics.Haskan.Camera.Orbital,
+    module Graphics.Haskan.Camera.Fly,
+    AnyCamera (..),
+    updateCamera,
+    toAnyCamera,
+  )
+where
 
 import Foreign.C qualified
-import Graphics.Haskan.Camera.Types
-import Graphics.Haskan.Camera.Orbital
 import Graphics.Haskan.Camera.Fly
-import Linear (V3 (..))
+import Graphics.Haskan.Camera.Orbital
+import Graphics.Haskan.Camera.Types
+import Linear (V3 (..), (*^), (^*))
 import Linear.Quaternion (Quaternion (..), axisAngle, rotate)
-import Linear ((*^), (^*))
 
 data AnyCamera
   = Orbital OrbitalCamera
@@ -63,7 +63,7 @@ instance Camera AnyCamera where
   animate (Orbital c) dt = Orbital (animate c dt)
   animate (Fly c) dt = Fly (animate c dt)
 
-updateCamera :: Camera c => c -> [Modifier Foreign.C.CFloat] -> c
+updateCamera :: (Camera c) => c -> [Modifier Foreign.C.CFloat] -> c
 updateCamera cam mods = update cam mods
 
 -- | Convert between camera types while preserving position and orientation.
@@ -72,22 +72,24 @@ toAnyCamera (Orbital orb) =
   let pos = orbitalCameraPosition orb
       fwd = orbitalCameraForward orb
       (az, el) = (quatToAzimuth (orientation orb), quatToElevation (orientation orb))
-      fly = defaultFlyCamera
-        { flyPosition = pos
-        , flyOrientation = orientationFromAzEl az el
-        }
-  in Fly fly
+      fly =
+        defaultFlyCamera
+          { flyPosition = pos,
+            flyOrientation = orientationFromAzEl az el
+          }
+   in Fly fly
 toAnyCamera (Fly fly) =
   let pos = flyPosition fly
       fwd = flyCameraForward fly
       az = cameraAzimuth fly
       el = cameraElevation fly
-      orb = defaultOrbitalCamera
-        { target = pos + fwd ^* 20.0
-        , distance = 20.0
-        , orientation = orientationFromAzEl az el
-        , targetOrientation = orientationFromAzEl az el
-        , animationStartOrientation = orientationFromAzEl az el
-        , animationElapsed = 0
-        }
-  in Orbital orb
+      orb =
+        defaultOrbitalCamera
+          { target = pos + fwd ^* 20.0,
+            distance = 20.0,
+            orientation = orientationFromAzEl az el,
+            targetOrientation = orientationFromAzEl az el,
+            animationStartOrientation = orientationFromAzEl az el,
+            animationElapsed = 0
+          }
+   in Orbital orb

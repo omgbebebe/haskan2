@@ -8,8 +8,8 @@
 module Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer where
 
 import FIR
-import Math.Linear
 import Graphics.Haskan.Vulkan.Shaders.EntityData
+import Math.Linear
 
 ------------------------------------------------
 -- pipeline input
@@ -19,7 +19,7 @@ type VertexInput =
      Slot 1 0 ':-> V 2 Float, -- UV coordinates
      Slot 2 0 ':-> V 3 Float, -- normal
      Slot 3 0 ':-> V 4 Float, -- tangent (xyz = direction, w = handedness)
-     Slot 4 0 ':-> V 3 Float  -- colour
+     Slot 4 0 ':-> V 3 Float -- colour
    ]
 
 ------------------------------------------------
@@ -27,31 +27,31 @@ type VertexInput =
 
 type VertexDefs =
   '[ "in_position" ':-> Input '[Location 0] (V 3 Float),
-     "in_uv"       ':-> Input '[Location 1] (V 2 Float),
-     "in_normal"   ':-> Input '[Location 2] (V 3 Float),
-     "in_tangent"  ':-> Input '[Location 3] (V 4 Float),
-     "in_colour"   ':-> Input '[Location 4] (V 3 Float),
-      "out_position" ':-> Output '[Location 0] (V 4 Float),
-      "out_normal"   ':-> Output '[Location 1] (V 4 Float),
-      "out_albedo"   ':-> Output '[Location 2] (V 4 Float),
-      "out_uv"       ':-> Output '[Location 3] (V 2 Float),
-      "out_materialIndex" ':-> Output '[Location 4, Flat] Word32,
-      "out_entityIndex"   ':-> Output '[Location 5, Flat] Word32,
-      "out_tangent"       ':-> Output '[Location 6] (V 4 Float),
-      "ubo"
-        ':-> Uniform
-               '[Binding 0, DescriptorSet 0]
-               ( Struct
-                   '[ "view" ':-> M 4 4 Float,
-                      "projection" ':-> M 4 4 Float
-                    ]
-               ),
-      "entities"
-        ':-> StorageBuffer
-               '[Binding 2, DescriptorSet 0]
-               EntitiesData,
-      "main" ':-> EntryPoint '[] Vertex
-    ]
+     "in_uv" ':-> Input '[Location 1] (V 2 Float),
+     "in_normal" ':-> Input '[Location 2] (V 3 Float),
+     "in_tangent" ':-> Input '[Location 3] (V 4 Float),
+     "in_colour" ':-> Input '[Location 4] (V 3 Float),
+     "out_position" ':-> Output '[Location 0] (V 4 Float),
+     "out_normal" ':-> Output '[Location 1] (V 4 Float),
+     "out_albedo" ':-> Output '[Location 2] (V 4 Float),
+     "out_uv" ':-> Output '[Location 3] (V 2 Float),
+     "out_materialIndex" ':-> Output '[Location 4, Flat] Word32,
+     "out_entityIndex" ':-> Output '[Location 5, Flat] Word32,
+     "out_tangent" ':-> Output '[Location 6] (V 4 Float),
+     "ubo"
+       ':-> Uniform
+              '[Binding 0, DescriptorSet 0]
+              ( Struct
+                  '[ "view" ':-> M 4 4 Float,
+                     "projection" ':-> M 4 4 Float
+                   ]
+              ),
+     "entities"
+       ':-> StorageBuffer
+              '[Binding 2, DescriptorSet 0]
+              EntitiesData,
+     "main" ':-> EntryPoint '[] Vertex
+   ]
 
 vertex :: ShaderModule "main" VertexShader VertexDefs _
 vertex = shader do
@@ -87,26 +87,26 @@ vertex = shader do
 
 type FragmentDefs =
   '[ "in_position" ':-> Input '[Location 0] (V 4 Float),
-      "in_normal"   ':-> Input '[Location 1] (V 4 Float),
-      "in_albedo"   ':-> Input '[Location 2] (V 4 Float),
-      "in_uv"       ':-> Input '[Location 3] (V 2 Float),
-      "in_materialIndex" ':-> Input '[Location 4, Flat] Word32,
-      "in_entityIndex"   ':-> Input '[Location 5, Flat] Word32,
-      "in_tangent"       ':-> Input '[Location 6] (V 4 Float),
-       "out_position" ':-> Output '[Location 0] (V 4 Float),
-       "out_normal"   ':-> Output '[Location 1] (V 4 Float),
-       "out_albedo"   ':-> Output '[Location 2] (V 4 Float),
-       "out_emissive" ':-> Output '[Location 3] (V 4 Float),
-        "tex"
-         ':-> BindlessTexture2D
-                '[Binding 1, DescriptorSet 0]
-                (RGBA8 UNorm),
-       "entities"
-         ':-> StorageBuffer
-                '[Binding 2, DescriptorSet 0]
-                EntitiesData,
-       "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
-     ]
+     "in_normal" ':-> Input '[Location 1] (V 4 Float),
+     "in_albedo" ':-> Input '[Location 2] (V 4 Float),
+     "in_uv" ':-> Input '[Location 3] (V 2 Float),
+     "in_materialIndex" ':-> Input '[Location 4, Flat] Word32,
+     "in_entityIndex" ':-> Input '[Location 5, Flat] Word32,
+     "in_tangent" ':-> Input '[Location 6] (V 4 Float),
+     "out_position" ':-> Output '[Location 0] (V 4 Float),
+     "out_normal" ':-> Output '[Location 1] (V 4 Float),
+     "out_albedo" ':-> Output '[Location 2] (V 4 Float),
+     "out_emissive" ':-> Output '[Location 3] (V 4 Float),
+     "tex"
+       ':-> BindlessTexture2D
+              '[Binding 1, DescriptorSet 0]
+              (RGBA8 UNorm),
+     "entities"
+       ':-> StorageBuffer
+              '[Binding 2, DescriptorSet 0]
+              EntitiesData,
+     "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
+   ]
 
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do

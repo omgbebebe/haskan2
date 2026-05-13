@@ -9,14 +9,14 @@ import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
-managedSemaphore :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkSemaphore
+managedSemaphore :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkSemaphore
 managedSemaphore dev =
   alloc
     "Vulkan Semaphore"
     (createSemaphore dev)
     (\ptr -> Vulkan.vkDestroySemaphore dev ptr Vulkan.vkNullPtr)
 
-createSemaphore :: MonadIO m => Vulkan.VkDevice -> m Vulkan.VkSemaphore
+createSemaphore :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkSemaphore
 createSemaphore dev =
   let createInfo =
         Vulkan.createVk

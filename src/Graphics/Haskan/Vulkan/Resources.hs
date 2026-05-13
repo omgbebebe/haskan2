@@ -2,36 +2,36 @@
 
 module Graphics.Haskan.Vulkan.Resources
   ( -- Handle types
-    BufferHandle (..)
-  , MeshHandle (..)
-  , TextureHandle (..)
+    BufferHandle (..),
+    MeshHandle (..),
+    TextureHandle (..),
     -- Resource types
-  , BufferResource (..)
-  , MeshResource (..)
-  , TextureResource (..)
+    BufferResource (..),
+    MeshResource (..),
+    TextureResource (..),
     -- ResourceManager
-  , ResourceManager
-  , newResourceManager
-  , allocHandle
+    ResourceManager,
+    newResourceManager,
+    allocHandle,
     -- ResourceManager fields (for internal use)
-  , rmNextId
-  , rmBuffers
-  , rmMeshes
-  , rmTextures
+    rmNextId,
+    rmBuffers,
+    rmMeshes,
+    rmTextures,
     -- Registration
-  , registerBuffer
-  , registerMesh
-  , registerTexture
+    registerBuffer,
+    registerMesh,
+    registerTexture,
     -- Lookup
-  , lookupBuffer
-  , lookupMesh
-  , lookupTexture
-  , updateMesh
+    lookupBuffer,
+    lookupMesh,
+    lookupTexture,
+    updateMesh,
     -- Destruction
-  , destroyBuffer
-  , destroyMesh
-  , destroyTexture
-  , destroyAllResources
+    destroyBuffer,
+    destroyMesh,
+    destroyTexture,
+    destroyAllResources,
   )
 where
 
@@ -42,74 +42,74 @@ import Data.Foldable (for_)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
 import Data.Hashable (Hashable)
+import Data.Int (Int32)
 import Data.Vector.Storable (Vector)
 import Data.Word (Word32, Word64, Word8)
-import Data.Int (Int32)
 import GHC.Generics (Generic)
-import Graphics.Haskan.Vertex (Vertex)
 import Graphics.Haskan.BoundingBox (BBox)
+import Graphics.Haskan.Vertex (Vertex)
 import Graphics.Vulkan qualified as Vulkan
 
 -- | Opaque handle for buffer resources.
-newtype BufferHandle = BufferHandle { unBufferHandle :: Word64 }
+newtype BufferHandle = BufferHandle {unBufferHandle :: Word64}
   deriving (Eq, Ord, Show, Generic)
 
 instance Hashable BufferHandle
 
 -- | Opaque handle for mesh resources.
-newtype MeshHandle = MeshHandle { unMeshHandle :: Word64 }
+newtype MeshHandle = MeshHandle {unMeshHandle :: Word64}
   deriving (Eq, Ord, Show, Generic)
 
 instance Hashable MeshHandle
 
 -- | Opaque handle for texture resources.
-newtype TextureHandle = TextureHandle { unTextureHandle :: Word64 }
+newtype TextureHandle = TextureHandle {unTextureHandle :: Word64}
   deriving (Eq, Ord, Show, Generic)
 
 instance Hashable TextureHandle
 
 -- | GPU buffer with embedded cleanup.
 data BufferResource = BufferResource
-  { brVkBuffer :: !Vulkan.VkBuffer
-  , brMemory :: !Vulkan.VkDeviceMemory
-  , brSize :: !Word64
-  , brDestroy :: !(IO ())
+  { brVkBuffer :: !Vulkan.VkBuffer,
+    brMemory :: !Vulkan.VkDeviceMemory,
+    brSize :: !Word64,
+    brDestroy :: !(IO ())
   }
 
 -- | Mesh composed of vertex and index buffers.
 data MeshResource = MeshResource
-  { mrHandle :: !MeshHandle
-  , mrVertexBuffer :: !BufferResource
-  , mrIndexBuffer :: !BufferResource
-  , mrIndexCount :: !Int
-  , mrFirstIndex :: !Word32
-  , mrVertexOffset :: !Int32
-  , mrBounds :: !BBox
-  , mrVertices :: ![Vertex]
-  , mrIndices :: ![Word32]
+  { mrHandle :: !MeshHandle,
+    mrVertexBuffer :: !BufferResource,
+    mrIndexBuffer :: !BufferResource,
+    mrIndexCount :: !Int,
+    mrFirstIndex :: !Word32,
+    mrVertexOffset :: !Int32,
+    mrBounds :: !BBox,
+    mrVertices :: ![Vertex],
+    mrIndices :: ![Word32]
   }
 
 -- | Texture with image, view, memory, and cleanup action.
 data TextureResource = TextureResource
-  { trHandle :: !TextureHandle
-  , trImage :: !Vulkan.VkImage
-  , trImageView :: !Vulkan.VkImageView
-  , trMemory :: !Vulkan.VkDeviceMemory
-  , trWidth :: !Int
-  , trHeight :: !Int
-  , trPixelData :: !(Maybe (Data.Vector.Storable.Vector Word8))
-  , trDestroy :: !(IO ())
+  { trHandle :: !TextureHandle,
+    trImage :: !Vulkan.VkImage,
+    trImageView :: !Vulkan.VkImageView,
+    trMemory :: !Vulkan.VkDeviceMemory,
+    trWidth :: !Int,
+    trHeight :: !Int,
+    trPixelData :: !(Maybe (Data.Vector.Storable.Vector Word8)),
+    trDestroy :: !(IO ())
   }
 
 -- | Central registry for all GPU resources.
 data ResourceManager = ResourceManager
-  { rmNextId :: !(TVar Word64)
-  , rmBuffers :: !(TVar (HashMap BufferHandle BufferResource))
-  , rmMeshes :: !(TVar (HashMap MeshHandle MeshResource))
-  , rmTextures :: !(TVar (HashMap TextureHandle TextureResource))
+  { rmNextId :: !(TVar Word64),
+    rmBuffers :: !(TVar (HashMap BufferHandle BufferResource)),
+    rmMeshes :: !(TVar (HashMap MeshHandle MeshResource)),
+    rmTextures :: !(TVar (HashMap TextureHandle TextureResource))
   }
 
-newResourceManager :: MonadIO m => m ResourceManager
+newResourceManager :: (MonadIO m) => m ResourceManager
 newResourceManager = liftIO $ do
   ResourceManager
     <$> STM.newTVarIO 0
@@ -117,52 +117,52 @@ newResourceManager = liftIO $ do
     <*> STM.newTVarIO HashMap.empty
     <*> STM.newTVarIO HashMap.empty
 
-allocHandle :: MonadIO m => TVar Word64 -> m Word64
+allocHandle :: (MonadIO m) => TVar Word64 -> m Word64
 allocHandle ref = liftIO $ STM.atomically $ do
   h <- STM.readTVar ref
   STM.writeTVar ref (h + 1)
   pure h
 
 -- | Register a buffer resource and return its handle.
-registerBuffer :: MonadIO m => ResourceManager -> BufferResource -> m BufferHandle
+registerBuffer :: (MonadIO m) => ResourceManager -> BufferResource -> m BufferHandle
 registerBuffer rm resource = do
   handle <- BufferHandle <$> allocHandle (rmNextId rm)
   liftIO $ STM.atomically $ STM.modifyTVar' (rmBuffers rm) (HashMap.insert handle resource)
   pure handle
 
 -- | Register a mesh resource and return its handle.
-registerMesh :: MonadIO m => ResourceManager -> MeshResource -> m MeshHandle
+registerMesh :: (MonadIO m) => ResourceManager -> MeshResource -> m MeshHandle
 registerMesh rm resource = do
   let handle = mrHandle resource
   liftIO $ STM.atomically $ STM.modifyTVar' (rmMeshes rm) (HashMap.insert handle resource)
   pure handle
 
 -- | Register a texture resource and return its handle.
-registerTexture :: MonadIO m => ResourceManager -> TextureResource -> m TextureHandle
+registerTexture :: (MonadIO m) => ResourceManager -> TextureResource -> m TextureHandle
 registerTexture rm resource = do
   let handle = trHandle resource
   liftIO $ STM.atomically $ STM.modifyTVar' (rmTextures rm) (HashMap.insert handle resource)
   pure handle
 
 -- | Look up a buffer by handle.
-lookupBuffer :: MonadIO m => ResourceManager -> BufferHandle -> m (Maybe BufferResource)
+lookupBuffer :: (MonadIO m) => ResourceManager -> BufferHandle -> m (Maybe BufferResource)
 lookupBuffer rm handle = liftIO $ STM.atomically $ HashMap.lookup handle <$> STM.readTVar (rmBuffers rm)
 
 -- | Look up a mesh by handle.
-lookupMesh :: MonadIO m => ResourceManager -> MeshHandle -> m (Maybe MeshResource)
+lookupMesh :: (MonadIO m) => ResourceManager -> MeshHandle -> m (Maybe MeshResource)
 lookupMesh rm handle = liftIO $ STM.atomically $ HashMap.lookup handle <$> STM.readTVar (rmMeshes rm)
 
 -- | Update an existing mesh resource in the registry.
-updateMesh :: MonadIO m => ResourceManager -> MeshHandle -> MeshResource -> m ()
+updateMesh :: (MonadIO m) => ResourceManager -> MeshHandle -> MeshResource -> m ()
 updateMesh rm handle resource =
   liftIO $ STM.atomically $ STM.modifyTVar' (rmMeshes rm) (HashMap.insert handle resource)
 
 -- | Look up a texture by handle.
-lookupTexture :: MonadIO m => ResourceManager -> TextureHandle -> m (Maybe TextureResource)
+lookupTexture :: (MonadIO m) => ResourceManager -> TextureHandle -> m (Maybe TextureResource)
 lookupTexture rm handle = liftIO $ STM.atomically $ HashMap.lookup handle <$> STM.readTVar (rmTextures rm)
 
 -- | Destroy a buffer resource and remove it from the registry.
-destroyBuffer :: MonadIO m => ResourceManager -> BufferHandle -> m ()
+destroyBuffer :: (MonadIO m) => ResourceManager -> BufferHandle -> m ()
 destroyBuffer rm handle = liftIO $ do
   mResource <- STM.atomically $ do
     mRes <- HashMap.lookup handle <$> STM.readTVar (rmBuffers rm)
@@ -171,7 +171,7 @@ destroyBuffer rm handle = liftIO $ do
   for_ mResource brDestroy
 
 -- | Destroy a mesh resource (including its buffers) and remove it from the registry.
-destroyMesh :: MonadIO m => ResourceManager -> MeshHandle -> m ()
+destroyMesh :: (MonadIO m) => ResourceManager -> MeshHandle -> m ()
 destroyMesh rm handle = liftIO $ do
   mResource <- STM.atomically $ do
     mRes <- HashMap.lookup handle <$> STM.readTVar (rmMeshes rm)
@@ -182,7 +182,7 @@ destroyMesh rm handle = liftIO $ do
     brDestroy (mrIndexBuffer mesh)
 
 -- | Destroy a texture resource and remove it from the registry.
-destroyTexture :: MonadIO m => ResourceManager -> TextureHandle -> m ()
+destroyTexture :: (MonadIO m) => ResourceManager -> TextureHandle -> m ()
 destroyTexture rm handle = liftIO $ do
   mResource <- STM.atomically $ do
     mRes <- HashMap.lookup handle <$> STM.readTVar (rmTextures rm)
@@ -191,7 +191,7 @@ destroyTexture rm handle = liftIO $ do
   for_ mResource trDestroy
 
 -- | Destroy all resources in the manager and clear all registries.
-destroyAllResources :: MonadIO m => ResourceManager -> m ()
+destroyAllResources :: (MonadIO m) => ResourceManager -> m ()
 destroyAllResources rm = liftIO $ do
   meshes <- STM.atomically $ STM.readTVar (rmMeshes rm)
   for_ meshes $ \mesh -> do

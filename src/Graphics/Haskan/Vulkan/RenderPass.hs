@@ -12,7 +12,7 @@ import Graphics.Vulkan.Marshal.Create (set, setAt, setListRef, setVkRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 managedRenderPass ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkSurfaceFormatKHR ->
   Vulkan.VkFormat ->
@@ -24,7 +24,7 @@ managedRenderPass dev surfaceFormat depthFormat =
     (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
 
 createRenderPass ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkSurfaceFormatKHR ->
   Vulkan.VkFormat ->
@@ -101,7 +101,7 @@ createRenderPass dev surfaceFormat depthFormat =
 -- ---------------------------------------------------------------------------
 
 managedGBufferRenderPass ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkFormat ->
@@ -113,7 +113,7 @@ managedGBufferRenderPass dev colorFormat depthFormat =
     (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
 
 createGBufferRenderPass ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkFormat ->
@@ -131,17 +131,17 @@ createGBufferRenderPass dev colorFormat depthFormat =
               &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
           )
       colorAttachments =
-        [ mkColorAttachment colorFormat  -- position
-        , mkColorAttachment colorFormat  -- normal
-        , mkColorAttachment colorFormat  -- albedo
-        , mkColorAttachment colorFormat  -- material (metallic, roughness, AO)
+        [ mkColorAttachment colorFormat, -- position
+          mkColorAttachment colorFormat, -- normal
+          mkColorAttachment colorFormat, -- albedo
+          mkColorAttachment colorFormat -- material (metallic, roughness, AO)
         ]
       colorAttachmentRefs =
         [ Vulkan.createVk
             ( set @"attachment" i
                 &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
             )
-        | i <- [0..3]
+        | i <- [0 .. 3]
         ]
       depthAttachment =
         Vulkan.createVk
@@ -202,11 +202,14 @@ createGBufferRenderPass dev colorFormat depthFormat =
    in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
 
 managedGBufferRenderPassEx ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
-  Vulkan.VkFormat -> -- ^ position format (e.g. SFLOAT)
-  Vulkan.VkFormat -> -- ^ other color formats (e.g. UNORM)
-  Vulkan.VkFormat -> -- ^ depth format
+  -- | position format (e.g. SFLOAT)
+  Vulkan.VkFormat ->
+  -- | other color formats (e.g. UNORM)
+  Vulkan.VkFormat ->
+  -- | depth format
+  Vulkan.VkFormat ->
   m Vulkan.VkRenderPass
 managedGBufferRenderPassEx dev posFormat colorFormat depthFormat =
   alloc
@@ -215,7 +218,7 @@ managedGBufferRenderPassEx dev posFormat colorFormat depthFormat =
     (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
 
 createGBufferRenderPassEx ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkFormat ->
   Vulkan.VkFormat ->
@@ -234,17 +237,17 @@ createGBufferRenderPassEx dev posFormat colorFormat depthFormat =
               &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
           )
       colorAttachments =
-        [ mkColorAttachment posFormat   -- position (needs negative values)
-        , mkColorAttachment colorFormat -- normal
-        , mkColorAttachment colorFormat -- albedo
-        , mkColorAttachment colorFormat -- emissive
+        [ mkColorAttachment posFormat, -- position (needs negative values)
+          mkColorAttachment colorFormat, -- normal
+          mkColorAttachment colorFormat, -- albedo
+          mkColorAttachment colorFormat -- emissive
         ]
       colorAttachmentRefs =
         [ Vulkan.createVk
             ( set @"attachment" i
                 &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
             )
-        | i <- [0..3]
+        | i <- [0 .. 3]
         ]
       depthAttachment =
         Vulkan.createVk
@@ -309,7 +312,7 @@ createGBufferRenderPassEx dev posFormat colorFormat depthFormat =
 -- ---------------------------------------------------------------------------
 
 managedLightingRenderPass ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkSurfaceFormatKHR ->
   m Vulkan.VkRenderPass
@@ -320,7 +323,7 @@ managedLightingRenderPass dev surfaceFormat =
     (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
 
 createLightingRenderPass ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkSurfaceFormatKHR ->
   m Vulkan.VkRenderPass
@@ -375,7 +378,7 @@ createLightingRenderPass dev surfaceFormat =
    in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
 
 withRenderPass ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkRenderPass ->
   Vulkan.VkFramebuffer ->
@@ -409,7 +412,7 @@ withRenderPass commandBuffer renderPass framebuffer extent clearValues action =
    in (begin *> action <* end)
 
 withGBufferRenderPass ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkRenderPass ->
   Vulkan.VkFramebuffer ->
@@ -423,16 +426,16 @@ withGBufferRenderPass commandBuffer renderPass framebuffer extent action =
       matClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.5 &* setAt @"float32" @2 1.0 &* setAt @"float32" @3 1.0)
       depthClear = Vulkan.createVk (set @"depth" 1 &* set @"stencil" 0)
       clearValues =
-        [ Vulkan.createVk (set @"color" posClear)
-        , Vulkan.createVk (set @"color" normClear)
-        , Vulkan.createVk (set @"color" albClear)
-        , Vulkan.createVk (set @"color" matClear)
-        , Vulkan.createVk (set @"depthStencil" depthClear)
+        [ Vulkan.createVk (set @"color" posClear),
+          Vulkan.createVk (set @"color" normClear),
+          Vulkan.createVk (set @"color" albClear),
+          Vulkan.createVk (set @"color" matClear),
+          Vulkan.createVk (set @"depthStencil" depthClear)
         ]
    in withRenderPass commandBuffer renderPass framebuffer extent clearValues action
 
 withLightingRenderPass ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkCommandBuffer ->
   Vulkan.VkRenderPass ->
   Vulkan.VkFramebuffer ->
@@ -443,4 +446,3 @@ withLightingRenderPass commandBuffer renderPass framebuffer extent action =
   let colorClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.0 &* setAt @"float32" @2 1.0 &* setAt @"float32" @3 1.0)
       clearValues = [Vulkan.createVk (set @"color" colorClear)]
    in withRenderPass commandBuffer renderPass framebuffer extent clearValues action
-

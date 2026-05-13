@@ -7,7 +7,7 @@ import Data.Bits
 import Data.Foldable (for_)
 import Foreign qualified
 import Foreign.Marshal qualified
-import Graphics.Haskan.Logger (logDebugIO, showT, LogCategory (..))
+import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, showT)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -16,7 +16,7 @@ import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 managedMemoryFor ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
   Vulkan.VkMemoryRequirements ->

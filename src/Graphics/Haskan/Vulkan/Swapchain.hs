@@ -3,7 +3,7 @@ module Graphics.Haskan.Vulkan.Swapchain where
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
-import Graphics.Haskan.Logger (logDebugIO, showT, LogCategory (..))
+import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, showT)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, peekVkList, throwVkResult)
 import Graphics.Haskan.Vulkan.Memory (managedMemoryFor)
 import Graphics.Haskan.Vulkan.PhysicalDevice (selectPresentMode)
@@ -15,7 +15,7 @@ import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 managedSwapchain ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
@@ -28,7 +28,7 @@ managedSwapchain dev pdev surface extent =
     (\ptr -> Vulkan.vkDestroySwapchainKHR dev ptr Vulkan.vkNullPtr)
 
 createSwapchain ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
@@ -65,7 +65,7 @@ createSwapchain dev pdev surface extent = do
   swapchain <- liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateSwapchainKHR dev ptr Vulkan.vkNullPtr)
   pure swapchain
 
-getSwapchainImages :: MonadIO m => Vulkan.VkDevice -> Vulkan.VkSwapchainKHR -> m [Vulkan.VkImage]
+getSwapchainImages :: (MonadIO m) => Vulkan.VkDevice -> Vulkan.VkSwapchainKHR -> m [Vulkan.VkImage]
 getSwapchainImages dev swapchain = liftIO $ peekVkList (Vulkan.vkGetSwapchainImagesKHR dev swapchain)
 
 -- TODO: get SurfaceFormats from device
@@ -80,7 +80,7 @@ surfaceFormat =
         )
 
 managedDepthImage ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
   Vulkan.VkExtent2D ->
@@ -99,7 +99,7 @@ managedDepthImage pdev dev extent depthFormat = do
   pure image
 
 managedGBufferImage ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
   Vulkan.VkExtent2D ->
@@ -117,7 +117,7 @@ managedGBufferImage pdev dev extent format = do
   pure image
 
 createGBufferImage ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkExtent2D ->
   Vulkan.VkFormat ->
@@ -150,7 +150,7 @@ createGBufferImage dev extent format = do
   liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
 
 createDepthImage ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkExtent2D ->
   Vulkan.VkFormat ->
@@ -183,7 +183,7 @@ createDepthImage dev extent depthFormat = do
   liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
 
 managedDepthView ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkImage ->
   Vulkan.VkFormat ->
@@ -195,7 +195,7 @@ managedDepthView dev img depthFormat =
     (\ptr -> Vulkan.vkDestroyImageView dev ptr Vulkan.vkNullPtr)
 
 createDepthView ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkImage ->
   Vulkan.VkFormat ->
@@ -230,7 +230,7 @@ createDepthView dev img depthFormat = do
    in liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateImageView dev ptr Vulkan.VK_NULL)
 
 getImageMemoryRequirements ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkImage ->
   m Vulkan.VkMemoryRequirements

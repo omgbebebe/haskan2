@@ -3,15 +3,15 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Debug.Interface
-  ( DebugMessage (..)
-  , DebugCommand (..)
-  , DebugEvent (..)
-  , DebugResponse (..)
-  , GameStateSnapshot (..)
-  , DebugCameraSnapshot (..)
-  , parseDebugMessage
-  , debugMessageToActionEvent
-  , encodeDebugResponse
+  ( DebugMessage (..),
+    DebugCommand (..),
+    DebugEvent (..),
+    DebugResponse (..),
+    GameStateSnapshot (..),
+    DebugCameraSnapshot (..),
+    parseDebugMessage,
+    debugMessageToActionEvent,
+    encodeDebugResponse,
   )
 where
 
@@ -86,9 +86,9 @@ instance FromJSON DebugMessage where
 aesonOptions :: Options
 aesonOptions =
   defaultOptions
-    { sumEncoding = ObjectWithSingleField
-    , constructorTagModifier = camelTo2 '_'
-    , fieldLabelModifier = camelTo2 '_'
+    { sumEncoding = ObjectWithSingleField,
+      constructorTagModifier = camelTo2 '_',
+      fieldLabelModifier = camelTo2 '_'
     }
 
 parseDebugMessage :: Text -> Either String DebugMessage
@@ -141,18 +141,18 @@ data DebugResponse
   deriving (Eq, Show, Generic)
 
 data GameStateSnapshot = GameStateSnapshot
-  { gssCamera :: DebugCameraSnapshot
-  , gssRunning :: Bool
-  , gssFrameInspectorEnabled :: Bool
+  { gssCamera :: DebugCameraSnapshot,
+    gssRunning :: Bool,
+    gssFrameInspectorEnabled :: Bool
   }
   deriving (Eq, Show, Generic)
 
 data DebugCameraSnapshot = DebugCameraSnapshot
-  { csPosition :: V3 Float
-  , csTarget :: V3 Float
-  , csDistance :: Float
-  , csAzimuth :: Float
-  , csElevation :: Float
+  { csPosition :: V3 Float,
+    csTarget :: V3 Float,
+    csDistance :: Float,
+    csAzimuth :: Float,
+    csElevation :: Float
   }
   deriving (Eq, Show, Generic)
 

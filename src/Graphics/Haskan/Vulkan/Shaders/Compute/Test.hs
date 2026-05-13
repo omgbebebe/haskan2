@@ -1,12 +1,13 @@
-{-# LANGUAGE BlockArguments      #-}
-{-# LANGUAGE DataKinds           #-}
-{-# LANGUAGE RebindableSyntax    #-}
-{-# LANGUAGE TypeApplications    #-}
-{-# LANGUAGE TypeOperators       #-}
+{-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE RebindableSyntax #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Graphics.Haskan.Vulkan.Shaders.Compute.Test
-  ( program
-  ) where
+  ( program,
+  )
+where
 
 import FIR
 import Math.Linear
@@ -14,12 +15,12 @@ import Math.Linear
 -- Minimal compute shader: increments a counter in a storage buffer.
 -- Used to validate compute pipeline infrastructure.
 
-type CounterStruct = Struct '[ "value" ':-> Word32 ]
+type CounterStruct = Struct '["value" ':-> Word32]
 
-type Defs
-  =  '[ "counter" ':-> StorageBuffer '[ DescriptorSet 0, Binding 0 ] CounterStruct
-      , "main"    ':-> EntryPoint '[ LocalSize 1 1 1 ] Compute
-      ]
+type Defs =
+  '[ "counter" ':-> StorageBuffer '[DescriptorSet 0, Binding 0] CounterStruct,
+     "main" ':-> EntryPoint '[LocalSize 1 1 1] Compute
+   ]
 
 program :: Module Defs
 program = Module $ entryPoint @"main" @Compute do

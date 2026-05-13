@@ -26,14 +26,14 @@ import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 maxBindlessTextures :: Int
 maxBindlessTextures = 1024
 
-managedDescriptorSetLayout :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 managedDescriptorSetLayout dev =
   alloc
     "DescriptorSetLayout"
     (createDescriptorSetLayout dev)
     (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
 
-createDescriptorSetLayout :: MonadIO m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 createDescriptorSetLayout dev = do
   let viewProjBinding =
         Vulkan.createVk
@@ -63,12 +63,13 @@ createDescriptorSetLayout dev = do
       bindingFlags :: Vulkan12.VkDescriptorBindingFlags
       bindingFlags = Vulkan12.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
       bindingFlagsCreateInfo :: Vulkan12.VkDescriptorSetLayoutBindingFlagsCreateInfo
-      bindingFlagsCreateInfo = Vulkan.createVk
-        ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO
-            &* set @"pNext" Vulkan.VK_NULL
-            &* set @"bindingCount" 3
-            &* setListRef @"pBindingFlags" [Vulkan.VK_ZERO_FLAGS, bindingFlags, Vulkan.VK_ZERO_FLAGS]  -- binding 0: no flags, binding 1: partially bound, binding 2: no flags
-        )
+      bindingFlagsCreateInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"bindingCount" 3
+              &* setListRef @"pBindingFlags" [Vulkan.VK_ZERO_FLAGS, bindingFlags, Vulkan.VK_ZERO_FLAGS] -- binding 0: no flags, binding 1: partially bound, binding 2: no flags
+          )
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
@@ -81,14 +82,14 @@ createDescriptorSetLayout dev = do
         withPtr createInfo $ \ciPtr ->
           allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
 
-managedLightingDescriptorSetLayout :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedLightingDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 managedLightingDescriptorSetLayout dev =
   alloc
     "LightingDescriptorSetLayout"
     (createLightingDescriptorSetLayout dev)
     (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
 
-createLightingDescriptorSetLayout :: MonadIO m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createLightingDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 createLightingDescriptorSetLayout dev = do
   let mkSamplerBinding bindingIdx =
         Vulkan.createVk
@@ -132,14 +133,14 @@ createLightingDescriptorSetLayout dev = do
 
 -- | Bindless descriptor set layout: one array of textures with
 -- UPDATE_AFTER_BIND + PARTIALLY_BOUND.
-managedBindlessDescriptorSetLayout :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedBindlessDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 managedBindlessDescriptorSetLayout dev =
   alloc
     "BindlessDescriptorSetLayout"
     (createBindlessDescriptorSetLayout dev)
     (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
 
-createBindlessDescriptorSetLayout :: MonadIO m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createBindlessDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 createBindlessDescriptorSetLayout dev = do
   let textureBinding =
         Vulkan.createVk
@@ -151,15 +152,17 @@ createBindlessDescriptorSetLayout dev = do
           )
       -- Binding flags: partially bound + update after bind
       bindingFlags :: Vulkan12.VkDescriptorBindingFlags
-      bindingFlags = Vulkan12.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
-                     .|. Vulkan12.VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
+      bindingFlags =
+        Vulkan12.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+          .|. Vulkan12.VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
       bindingFlagsCreateInfo :: Vulkan12.VkDescriptorSetLayoutBindingFlagsCreateInfo
-      bindingFlagsCreateInfo = Vulkan.createVk
-        ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO
-            &* set @"pNext" Vulkan.VK_NULL
-            &* set @"bindingCount" 1
-            &* setListRef @"pBindingFlags" [bindingFlags]
-        )
+      bindingFlagsCreateInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"bindingCount" 1
+              &* setListRef @"pBindingFlags" [bindingFlags]
+          )
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
@@ -173,14 +176,14 @@ createBindlessDescriptorSetLayout dev = do
           allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
 
 -- | Compute culling descriptor set layout: 2 SSBOs + 1 UBO.
-managedComputeDescriptorSetLayout :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedComputeDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 managedComputeDescriptorSetLayout dev =
   alloc
     "ComputeDescriptorSetLayout"
     (createComputeDescriptorSetLayout dev)
     (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
 
-createComputeDescriptorSetLayout :: MonadIO m => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 createComputeDescriptorSetLayout dev = do
   let entitiesBinding =
         Vulkan.createVk

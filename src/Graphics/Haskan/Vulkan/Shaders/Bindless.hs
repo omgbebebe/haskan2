@@ -1,14 +1,15 @@
-{-# LANGUAGE BlockArguments      #-}
-{-# LANGUAGE DataKinds           #-}
+{-# LANGUAGE BlockArguments #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PartialTypeSignatures #-}
-{-# LANGUAGE RebindableSyntax    #-}
-{-# LANGUAGE TypeApplications    #-}
-{-# LANGUAGE TypeOperators       #-}
+{-# LANGUAGE RebindableSyntax #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TypeOperators #-}
 
 module Graphics.Haskan.Vulkan.Shaders.Bindless
-  ( vertex
-  , fragment
-  ) where
+  ( vertex,
+    fragment,
+  )
+where
 
 import FIR
 import Math.Linear
@@ -17,31 +18,31 @@ import Math.Linear
 -- Material array layer is passed via push constant in fragment shader.
 
 type VertexDefs =
-  '[ "in_position" ':-> Input '[Location 0] (V 3 Float)
-   , "in_uv"       ':-> Input '[Location 1] (V 2 Float)
-   , "in_normal"   ':-> Input '[Location 2] (V 3 Float)
-   , "out_uv"      ':-> Output '[Location 0] (V 2 Float)
-   , "out_normal"  ':-> Output '[Location 1] (V 3 Float)
-   , "ubo"
+  '[ "in_position" ':-> Input '[Location 0] (V 3 Float),
+     "in_uv" ':-> Input '[Location 1] (V 2 Float),
+     "in_normal" ':-> Input '[Location 2] (V 3 Float),
+     "out_uv" ':-> Output '[Location 0] (V 2 Float),
+     "out_normal" ':-> Output '[Location 1] (V 3 Float),
+     "ubo"
        ':-> Uniform
               '[Binding 0, DescriptorSet 0]
               ( Struct
-                  '[ "model" ':-> M 4 4 Float
-                   , "view" ':-> M 4 4 Float
-                   , "projection" ':-> M 4 4 Float
+                  '[ "model" ':-> M 4 4 Float,
+                     "view" ':-> M 4 4 Float,
+                     "projection" ':-> M 4 4 Float
                    ]
-              )
-   , "main" ':-> EntryPoint '[] Vertex
+              ),
+     "main" ':-> EntryPoint '[] Vertex
    ]
 
 vertex :: ShaderModule "main" VertexShader VertexDefs _
 vertex = shader do
   ~(Vec3 x y z) <- get @"in_position"
-  uv          <- get @"in_uv"
-  normal      <- get @"in_normal"
-  projection  <- use @(Name "ubo" :.: Name "projection")
-  model       <- use @(Name "ubo" :.: Name "model")
-  view        <- use @(Name "ubo" :.: Name "view")
+  uv <- get @"in_uv"
+  normal <- get @"in_normal"
+  projection <- use @(Name "ubo" :.: Name "projection")
+  model <- use @(Name "ubo" :.: Name "model")
+  view <- use @(Name "ubo" :.: Name "view")
   let mvp = (projection !*! view) !*! model
       worldPos = model !*^ Vec4 x y z 1
       worldNormal = model !*^ Vec4 (view @(Index 0) normal) (view @(Index 1) normal) (view @(Index 2) normal) 0
@@ -54,27 +55,27 @@ vertex = shader do
 -- Coordinates are vec3: (u, v, layer).
 
 type FragmentDefs =
-  '[ "in_uv"        ':-> Input '[Location 0] (V 2 Float)
-   , "in_normal"    ':-> Input '[Location 1] (V 3 Float)
-   , "out_position" ':-> Output '[Location 0] (V 4 Float)
-   , "out_normal"   ':-> Output '[Location 1] (V 4 Float)
-   , "out_albedo"   ':-> Output '[Location 2] (V 4 Float)
-   , "tex"
+  '[ "in_uv" ':-> Input '[Location 0] (V 2 Float),
+     "in_normal" ':-> Input '[Location 1] (V 3 Float),
+     "out_position" ':-> Output '[Location 0] (V 4 Float),
+     "out_normal" ':-> Output '[Location 1] (V 4 Float),
+     "out_albedo" ':-> Output '[Location 2] (V 4 Float),
+     "tex"
        ':-> Texture2DArray
               '[Binding 1, DescriptorSet 0]
-              (RGBA8 UNorm)
-   , "materialIndex"
+              (RGBA8 UNorm),
+     "materialIndex"
        ':-> PushConstant
-              '[ ]
-              (Struct '[ "index" ':-> Word32 ])
-   , "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
+              '[]
+              (Struct '["index" ':-> Word32]),
+     "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
 
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do
-  uv       <- get @"in_uv"
-  normal   <- get @"in_normal"
-  matIdx   <- use @(Name "materialIndex" :.: Name "index")
+  uv <- get @"in_uv"
+  normal <- get @"in_normal"
+  matIdx <- use @(Name "materialIndex" :.: Name "index")
   -- FIR 'Word32' is unsigned integer; we need a floating-point layer index for sampling.
   -- Convert to Code Float via fromIntegral.
   let layer = fromIntegral matIdx :: Code Float
@@ -84,5 +85,5 @@ fragment = shader do
       texG = view @(Index 1) texColor
       texB = view @(Index 2) texColor
   put @"out_position" (Vec4 0 0 0 1)
-  put @"out_normal"   (Vec4 (view @(Index 0) normal) (view @(Index 1) normal) (view @(Index 2) normal) 0)
-  put @"out_albedo"   (Vec4 texR texG texB 1)
+  put @"out_normal" (Vec4 (view @(Index 0) normal) (view @(Index 1) normal) (view @(Index 2) normal) 0)
+  put @"out_albedo" (Vec4 texR texG texB 1)

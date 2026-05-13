@@ -12,22 +12,22 @@ import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setListRef, setStrListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
-managedPipelineLayout :: MonadManaged m => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> m Vulkan.VkPipelineLayout
+managedPipelineLayout :: (MonadManaged m) => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> m Vulkan.VkPipelineLayout
 managedPipelineLayout dev descriptorSetLayouts =
   managedPipelineLayoutWithPushConstants dev descriptorSetLayouts []
 
-managedPipelineLayoutWithPushConstants :: MonadManaged m => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> [Vulkan.VkPushConstantRange] -> m Vulkan.VkPipelineLayout
+managedPipelineLayoutWithPushConstants :: (MonadManaged m) => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> [Vulkan.VkPushConstantRange] -> m Vulkan.VkPipelineLayout
 managedPipelineLayoutWithPushConstants dev descriptorSetLayouts pushConstantRanges =
   alloc
     "PipelineLayout"
     (createPipelineLayoutWithPushConstants dev descriptorSetLayouts pushConstantRanges)
     (\ptr -> Vulkan.vkDestroyPipelineLayout dev ptr Vulkan.vkNullPtr)
 
-createPipelineLayout :: MonadIO m => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> m Vulkan.VkPipelineLayout
+createPipelineLayout :: (MonadIO m) => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> m Vulkan.VkPipelineLayout
 createPipelineLayout dev descriptorSetLayouts =
   createPipelineLayoutWithPushConstants dev descriptorSetLayouts []
 
-createPipelineLayoutWithPushConstants :: MonadIO m => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> [Vulkan.VkPushConstantRange] -> m Vulkan.VkPipelineLayout
+createPipelineLayoutWithPushConstants :: (MonadIO m) => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> [Vulkan.VkPushConstantRange] -> m Vulkan.VkPipelineLayout
 createPipelineLayoutWithPushConstants dev descriptorSetLayouts pushConstantRanges =
   let createInfo =
         Vulkan.createVk

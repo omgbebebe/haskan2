@@ -5,8 +5,8 @@ import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
 import Foreign qualified
 import Foreign.C qualified
+import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..), stageCount, toPipelineStages)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
-import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..), toPipelineStages, stageCount)
 import Graphics.Haskan.Vertex (Vertex)
 import Graphics.Haskan.Vulkan.VertexFormat (VertexFormat)
 import Graphics.Haskan.Vulkan.VertexFormat qualified as VertexFormat
@@ -18,7 +18,7 @@ import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Linear (V3 (..))
 
 managedGraphicsPipeline ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkPipelineLayout ->
   Vulkan.VkRenderPass ->
@@ -34,7 +34,7 @@ managedGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent vert
     (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
 
 createGraphicsPipeline ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkPipelineLayout ->
   Vulkan.VkRenderPass ->
@@ -238,7 +238,7 @@ createGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent verte
 -- ---------------------------------------------------------------------------
 
 managedFullscreenPipeline ::
-  MonadManaged m =>
+  (MonadManaged m) =>
   Vulkan.VkDevice ->
   Vulkan.VkPipelineLayout ->
   Vulkan.VkRenderPass ->
@@ -252,7 +252,7 @@ managedFullscreenPipeline dev layout renderPass shaderProgram swapchainExtent =
     (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
 
 createFullscreenPipeline ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkPipelineLayout ->
   Vulkan.VkRenderPass ->
@@ -430,7 +430,7 @@ createFullscreenPipeline dev layout renderPass shaderProgram swapchainExtent = d
               allocaAndPeek $ Vulkan.vkCreateGraphicsPipelines dev Vulkan.VK_NULL 1 pciPtr Vulkan.VK_NULL
           )
 
-cmdBindPipeline :: MonadIO m => Vulkan.VkCommandBuffer -> Vulkan.VkPipeline -> m ()
+cmdBindPipeline :: (MonadIO m) => Vulkan.VkCommandBuffer -> Vulkan.VkPipeline -> m ()
 cmdBindPipeline commandBuffer pipeline =
   liftIO $
     Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS pipeline -- >>= throwVkResult

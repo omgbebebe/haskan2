@@ -6,39 +6,40 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Graphics.Haskan.Vulkan.Shaders.Wireframe
-  ( vertex
-  , geometry
-  , fragment
-  ) where
+  ( vertex,
+    geometry,
+    fragment,
+  )
+where
 
 import FIR
-import Math.Linear
 import Graphics.Haskan.Vulkan.Shaders.EntityData
+import Math.Linear
 
 -- Vertex: transform by MVP (same UBO as g-buffer)
 type VertexDefs =
-  '[ "in_position" ':-> Input '[Location 0] (V 3 Float)
-   , "in_uv"       ':-> Input '[Location 1] (V 2 Float)
-   , "ubo"
+  '[ "in_position" ':-> Input '[Location 0] (V 3 Float),
+     "in_uv" ':-> Input '[Location 1] (V 2 Float),
+     "ubo"
        ':-> Uniform
               '[Binding 0, DescriptorSet 0]
               ( Struct
-                  '[ "view" ':-> M 4 4 Float
-                   , "projection" ':-> M 4 4 Float
+                  '[ "view" ':-> M 4 4 Float,
+                     "projection" ':-> M 4 4 Float
                    ]
-              )
-   , "entities"
+              ),
+     "entities"
        ':-> StorageBuffer
               '[Binding 2, DescriptorSet 0]
-              EntitiesData
-   , "main"        ':-> EntryPoint '[] Vertex
+              EntitiesData,
+     "main" ':-> EntryPoint '[] Vertex
    ]
 
 vertex :: ShaderModule "main" VertexShader VertexDefs _
 vertex = shader do
   ~(Vec3 x y z) <- get @"in_position"
   projection <- use @(Name "ubo" :.: Name "projection")
-  view       <- use @(Name "ubo" :.: Name "view")
+  view <- use @(Name "ubo" :.: Name "view")
 
   entityIdx <- get @"gl_InstanceIndex"
   model <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32 :.: Name "transform") entityIdx
@@ -48,15 +49,16 @@ vertex = shader do
 
 -- Geometry: triangles -> line strip, emit 3 edges per triangle
 type GeometryDefs =
-  '[ "in_uv"  ':-> Input '[Location 0] (Array 3 (V 2 Float))
-   , "out_uv" ':-> Output '[Location 0] (V 2 Float)
-   , "main"   ':-> EntryPoint
-                       '[ Triangles
-                        , OutputLineStrip
-                        , OutputVertices 6
-                        , Invocations 1
-                        ]
-                        Geometry
+  '[ "in_uv" ':-> Input '[Location 0] (Array 3 (V 2 Float)),
+     "out_uv" ':-> Output '[Location 0] (V 2 Float),
+     "main"
+       ':-> EntryPoint
+              '[ Triangles,
+                 OutputLineStrip,
+                 OutputVertices 6,
+                 Invocations 1
+               ]
+              Geometry
    ]
 
 geometry :: ShaderModule "main" GeometryShader GeometryDefs _
@@ -91,8 +93,8 @@ geometry = shader do
 
 -- Fragment: bright green wireframe on albedo (Location 2)
 type FragmentDefs =
-  '[ "out_albedo" ':-> Output '[Location 2] (V 4 Float)
-   , "main"       ':-> EntryPoint '[OriginUpperLeft] Fragment
+  '[ "out_albedo" ':-> Output '[Location 2] (V 4 Float),
+     "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
 
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _

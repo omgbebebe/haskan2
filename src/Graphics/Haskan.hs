@@ -4,7 +4,7 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import Graphics.Haskan.Engine (EngineConfig (..))
 import Graphics.Haskan.Engine qualified as Engine
-import Graphics.Haskan.Logger (logInfoIO, LogCategory(..))
+import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
 
 runHaskan :: Text -> String -> Maybe Integer -> Maybe FilePath -> Bool -> Bool -> Bool -> String -> Int -> Float -> Float -> Bool -> IO ()
 runHaskan title meshName mTimeout mDebugSocket uvCheckCube uvCheckSphere uvCheckPlane envDir numLights initialTime speed dayNight = do
@@ -20,10 +20,16 @@ runHaskan title meshName mTimeout mDebugSocket uvCheckCube uvCheckSphere uvCheck
         title = title,
         debugSocketPath = mDebugSocket,
         timeoutSeconds = mTimeout,
-        uvCheckMode = if uvCheckCube then Just "cube"
-                       else if uvCheckSphere then Just "sphere"
-                       else if uvCheckPlane then Just "plane"
-                       else Nothing,
+        uvCheckMode =
+          if uvCheckCube
+            then Just "cube"
+            else
+              if uvCheckSphere
+                then Just "sphere"
+                else
+                  if uvCheckPlane
+                    then Just "plane"
+                    else Nothing,
         envMapDir = envDir,
         lightCount = numLights,
         initialTimeOfDay = initialTime,

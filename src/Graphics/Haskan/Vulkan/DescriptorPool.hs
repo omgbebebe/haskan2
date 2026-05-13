@@ -20,14 +20,14 @@ import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
-managedDescriptorPool :: MonadManaged m => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+managedDescriptorPool :: (MonadManaged m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
 managedDescriptorPool dev imageViewCount =
   alloc
     "DescriptorPool"
     (createDescriptorPool dev imageViewCount)
     (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
 
-createDescriptorPool :: MonadIO m => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+createDescriptorPool :: (MonadIO m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
 createDescriptorPool dev numSets = do
   let poolSize =
         Vulkan.createVk
@@ -62,14 +62,14 @@ createDescriptorPool dev numSets = do
   where
     maxBindlessTextures = 1024
 
-managedLightingDescriptorPool :: MonadManaged m => Vulkan.VkDevice -> Int -> Int -> m Vulkan.VkDescriptorPool
+managedLightingDescriptorPool :: (MonadManaged m) => Vulkan.VkDevice -> Int -> Int -> m Vulkan.VkDescriptorPool
 managedLightingDescriptorPool dev numSets texturesPerSet =
   alloc
     "LightingDescriptorPool"
     (createLightingDescriptorPool dev numSets texturesPerSet)
     (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
 
-createLightingDescriptorPool :: MonadIO m => Vulkan.VkDevice -> Int -> Int -> m Vulkan.VkDescriptorPool
+createLightingDescriptorPool :: (MonadIO m) => Vulkan.VkDevice -> Int -> Int -> m Vulkan.VkDescriptorPool
 createLightingDescriptorPool dev numSets texturesPerSet = do
   let samplerPoolSize =
         Vulkan.createVk
@@ -97,14 +97,14 @@ createLightingDescriptorPool dev numSets texturesPerSet = do
               allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
           )
 
-managedBindlessDescriptorPool :: MonadManaged m => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+managedBindlessDescriptorPool :: (MonadManaged m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
 managedBindlessDescriptorPool dev maxTextures =
   alloc
     "BindlessDescriptorPool"
     (createBindlessDescriptorPool dev maxTextures)
     (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
 
-createBindlessDescriptorPool :: MonadIO m => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+createBindlessDescriptorPool :: (MonadIO m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
 createBindlessDescriptorPool dev maxTextures = do
   let samplerPoolSize =
         Vulkan.createVk
@@ -127,14 +127,14 @@ createBindlessDescriptorPool dev maxTextures = do
               allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
           )
 
-managedComputeDescriptorPool :: MonadManaged m => Vulkan.VkDevice -> m Vulkan.VkDescriptorPool
+managedComputeDescriptorPool :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorPool
 managedComputeDescriptorPool dev =
   alloc
     "ComputeDescriptorPool"
     (createComputeDescriptorPool dev)
     (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
 
-createComputeDescriptorPool :: MonadIO m => Vulkan.VkDevice -> m Vulkan.VkDescriptorPool
+createComputeDescriptorPool :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorPool
 createComputeDescriptorPool dev = do
   let ssboPoolSize =
         Vulkan.createVk

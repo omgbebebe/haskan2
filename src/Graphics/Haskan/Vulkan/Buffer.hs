@@ -5,16 +5,16 @@ import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
-import Data.Maybe (catMaybes)
-import Data.List (foldl')
-import Data.Word (Word32)
 import Data.Int (Int32)
+import Data.List (foldl')
+import Data.Maybe (catMaybes)
+import Data.Word (Word32)
 import Foreign qualified
 import Foreign.Marshal qualified
 import Foreign.Storable (Storable, sizeOf)
-import Graphics.Haskan.Logger (logDebugIO, showT, LogCategory (..))
-import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
 import Graphics.Haskan.BoundingBox (BBox, fromPoints)
+import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, showT)
+import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
 import Graphics.Haskan.Vertex (Vertex (..), VertexIndex)
 import Graphics.Haskan.Vulkan.Memory qualified as Memory
 import Graphics.Haskan.Vulkan.Resources
@@ -44,8 +44,8 @@ createBuffer ::
   m (Vulkan.VkBuffer, Vulkan.VkMemoryRequirements)
 createBuffer dev data' usage = do
   let size = case data' of
-               [] -> 0
-               (x:_) -> fromIntegral (length data' * Foreign.sizeOf x)
+        [] -> 0
+        (x : _) -> fromIntegral (length data' * Foreign.sizeOf x)
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
@@ -100,8 +100,8 @@ bindBufferMemory dev buffer memory data' = liftIO $ do
 
 copyDataToDeviceMemory dev memory data' = liftIO $ do
   let size = case data' of
-               [] -> 0
-               (x:_) -> fromIntegral (length data' * Foreign.sizeOf x)
+        [] -> 0
+        (x : _) -> fromIntegral (length data' * Foreign.sizeOf x)
   logDebugIO LogBuffer $ "copyDataToDeviceMemory size=" <> showT size
   if size == 0
     then logDebugIO LogBuffer "copyDataToDeviceMemory skipping empty data"
@@ -192,18 +192,18 @@ makeBufferResource pdev dev data' usage = do
   liftIO $ bindBufferMemory dev buffer memory data'
 
   let bufSize = case data' of
-                  [] -> 0
-                  (x:_) -> fromIntegral (length data' * sizeOf x)
+        [] -> 0
+        (x : _) -> fromIntegral (length data' * sizeOf x)
       destroy = do
         Vulkan.vkDestroyBuffer dev buffer Vulkan.vkNullPtr
         Vulkan.vkFreeMemory dev memory Vulkan.vkNullPtr
 
   pure
     BufferResource
-      { brVkBuffer = buffer
-      , brMemory = memory
-      , brSize = bufSize
-      , brDestroy = destroy
+      { brVkBuffer = buffer,
+        brMemory = memory,
+        brSize = bufSize,
+        brDestroy = destroy
       }
 
 -- | Create and register a mesh resource (vertex + index buffers).
@@ -224,15 +224,15 @@ createMeshResource rm pdev dev vertices indices = do
   let bounds = fromPoints (map (fmap realToFrac . vPos) vertices)
       mesh =
         MeshResource
-          { mrHandle = meshH
-          , mrVertexBuffer = vertBuf
-          , mrIndexBuffer = idxBuf
-          , mrIndexCount = length indices
-          , mrFirstIndex = 0
-          , mrVertexOffset = 0
-          , mrBounds = bounds
-          , mrVertices = vertices
-          , mrIndices = indices
+          { mrHandle = meshH,
+            mrVertexBuffer = vertBuf,
+            mrIndexBuffer = idxBuf,
+            mrIndexCount = length indices,
+            mrFirstIndex = 0,
+            mrVertexOffset = 0,
+            mrBounds = bounds,
+            mrVertices = vertices,
+            mrIndices = indices
           }
 
   registerMesh rm mesh
@@ -256,27 +256,28 @@ mergeMeshes rm pdev dev meshHandles = do
                 ioff = length idxs
                 newIdxs = map (+ fromIntegral voff) (mrIndices mesh)
                 newOffs = HashMap.insert (mrHandle mesh) (fromIntegral ioff, fromIntegral voff) offs
-            in (verts ++ mrVertices mesh, idxs ++ newIdxs, newOffs)
+             in (verts ++ mrVertices mesh, idxs ++ newIdxs, newOffs)
 
   vertBuf <- makeBufferResource pdev dev allVertices Vulkan.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
   idxBuf <- makeBufferResource pdev dev allIndices Vulkan.VK_BUFFER_USAGE_INDEX_BUFFER_BIT
 
   -- Create shared buffers with no-op destroy (managed by mergedMesh)
-  let sharedVertBuf = vertBuf { brDestroy = pure () }
-      sharedIdxBuf = idxBuf { brDestroy = pure () }
+  let sharedVertBuf = vertBuf {brDestroy = pure ()}
+      sharedIdxBuf = idxBuf {brDestroy = pure ()}
 
-  let mergedHandle = MeshHandle 0  -- dummy handle
-      mergedMesh = MeshResource
-        { mrHandle = mergedHandle
-        , mrVertexBuffer = vertBuf
-        , mrIndexBuffer = idxBuf
-        , mrIndexCount = length allIndices
-        , mrFirstIndex = 0
-        , mrVertexOffset = 0
-        , mrBounds = fromPoints (map (fmap realToFrac . vPos) allVertices)
-        , mrVertices = allVertices
-        , mrIndices = allIndices
-        }
+  let mergedHandle = MeshHandle 0 -- dummy handle
+      mergedMesh =
+        MeshResource
+          { mrHandle = mergedHandle,
+            mrVertexBuffer = vertBuf,
+            mrIndexBuffer = idxBuf,
+            mrIndexCount = length allIndices,
+            mrFirstIndex = 0,
+            mrVertexOffset = 0,
+            mrBounds = fromPoints (map (fmap realToFrac . vPos) allVertices),
+            mrVertices = allVertices,
+            mrIndices = allIndices
+          }
 
   -- Register merged mesh so its buffers get destroyed at shutdown
   _ <- registerMesh rm mergedMesh
@@ -285,7 +286,7 @@ mergeMeshes rm pdev dev meshHandles = do
 
 -- | Resolve a mesh handle to its raw Vulkan buffers and index count.
 meshBuffers ::
-  MonadIO m =>
+  (MonadIO m) =>
   ResourceManager ->
   MeshHandle ->
   m (Maybe (Vulkan.VkBuffer, Vulkan.VkBuffer, Int))

@@ -1,26 +1,27 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Render.Bindless
-  ( BindlessSet(..)
-  , createBindlessSet
-  , registerTexture
-  ) where
+  ( BindlessSet (..),
+    createBindlessSet,
+    registerTexture,
+  )
+where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
-import Data.IORef (IORef, newIORef, readIORef, modifyIORef')
-import Graphics.Haskan.Logger (logInfoIO, showT, LogCategory(..))
-import Graphics.Haskan.Vulkan.DescriptorPool qualified as DescriptorPool
+import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
+import qualified Graphics.Haskan.Vulkan.DescriptorPool as DescriptorPool
 import Graphics.Haskan.Vulkan.DescriptorSet (updateBindlessTexture)
-import Graphics.Haskan.Vulkan.DescriptorSetLayout qualified as DescriptorSetLayout
-import Graphics.Vulkan qualified as Vulkan
+import qualified Graphics.Haskan.Vulkan.DescriptorSetLayout as DescriptorSetLayout
+import qualified Graphics.Vulkan as Vulkan
 
 -- | Handle to a bindless texture descriptor set.
 data BindlessSet = BindlessSet
-  { bsDescriptorSet :: !Vulkan.VkDescriptorSet
-  , bsSampler       :: !Vulkan.VkSampler
-  , bsNextIndex     :: !(IORef Word32)
-  , bsMaxTextures   :: !Word32
+  { bsDescriptorSet :: !Vulkan.VkDescriptorSet,
+    bsSampler :: !Vulkan.VkSampler,
+    bsNextIndex :: !(IORef Word32),
+    bsMaxTextures :: !Word32
   }
 
 createBindlessSet ::
@@ -30,19 +31,20 @@ createBindlessSet ::
   m BindlessSet
 createBindlessSet dev sampler = do
   layout <- DescriptorSetLayout.managedBindlessDescriptorSetLayout dev
-  pool   <- DescriptorPool.managedBindlessDescriptorPool dev DescriptorSetLayout.maxBindlessTextures
-  ds     <- allocateDescriptorSet dev pool [layout]
+  pool <- DescriptorPool.managedBindlessDescriptorPool dev DescriptorSetLayout.maxBindlessTextures
+  ds <- allocateDescriptorSet dev pool [layout]
   idxRef <- liftIO $ newIORef 0
   logInfoIO LogRender $ "Bindless set created with " <> showT DescriptorSetLayout.maxBindlessTextures <> " slots"
-  pure BindlessSet
-    { bsDescriptorSet = ds
-    , bsSampler       = sampler
-    , bsNextIndex     = idxRef
-    , bsMaxTextures   = fromIntegral DescriptorSetLayout.maxBindlessTextures
-    }
+  pure
+    BindlessSet
+      { bsDescriptorSet = ds,
+        bsSampler = sampler,
+        bsNextIndex = idxRef,
+        bsMaxTextures = fromIntegral DescriptorSetLayout.maxBindlessTextures
+      }
 
 registerTexture ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   BindlessSet ->
   Vulkan.VkImageView ->
@@ -60,13 +62,13 @@ registerTexture dev bindlessSet textureView = do
         (bsSampler bindlessSet)
         textureView
         nextIdx
-      liftIO $ modifyIORef' (bsNextIndex bindlessSet) (+1)
+      liftIO $ modifyIORef' (bsNextIndex bindlessSet) (+ 1)
       logInfoIO LogRender $ "Registered texture at bindless index " <> showT nextIdx
       pure (Just nextIdx)
 
 -- Internal: allocate a descriptor set from pool + layout
 allocateDescriptorSet ::
-  MonadIO m =>
+  (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorPool ->
   [Vulkan.VkDescriptorSetLayout] ->
@@ -80,5 +82,9 @@ allocateDescriptorSet dev descriptorPool setLayouts = do
               &* Vulkan.set @"descriptorSetCount" (fromIntegral (length setLayouts))
               &* Vulkan.setListRef @"pSetLayouts" setLayouts
           )
-   in liftIO $ Vulkan.withPtr allocateInfo (\aiPtr ->
-        Graphics.Haskan.Resources.allocaAndPeek (Vulkan.vkAllocateDescriptorSets dev aiPtr))
+   in liftIO $
+        Vulkan.withPtr
+          allocateInfo
+          ( \aiPtr ->
+              Graphics.Haskan.Resources.allocaAndPeek (Vulkan.vkAllocateDescriptorSets dev aiPtr)
+          )

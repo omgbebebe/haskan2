@@ -11,14 +11,14 @@ import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
-managedShaderModule :: MonadManaged m => Vulkan.VkDevice -> FilePath -> m Vulkan.VkShaderModule
+managedShaderModule :: (MonadManaged m) => Vulkan.VkDevice -> FilePath -> m Vulkan.VkShaderModule
 managedShaderModule dev path =
   alloc
     "ShaderModule"
     (createShaderModule dev path)
     (\ptr -> Vulkan.vkDestroyShaderModule dev ptr Vulkan.vkNullPtr)
 
-createShaderModule :: MonadIO m => Vulkan.VkDevice -> FilePath -> m Vulkan.VkShaderModule
+createShaderModule :: (MonadIO m) => Vulkan.VkDevice -> FilePath -> m Vulkan.VkShaderModule
 createShaderModule dev path = liftIO $ do
   bytes <- BC.readFile path
   BC.useAsCStringLen bytes $ \(bytesPtr, len) ->

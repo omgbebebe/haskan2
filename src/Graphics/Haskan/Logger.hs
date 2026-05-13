@@ -4,34 +4,35 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Graphics.Haskan.Logger
-  ( LogLevel (..)
-  , LogCategory (..)
-  , LogEntry (..)
-  , LogFormatter
-  , LogBackend (..)
-  , defaultFormatter
-  , jsonFormatter
-  , stdoutBackend
-  , stderrBackend
-  , fileBackend
-  , setGlobalBackends
-  , getGlobalBackends
-  , Logger (..)
-  , runLogger
-  , logMessage
-  , logDebug
-  , logInfo
-  , logWarn
-  , logError
-  , logFatal
-  , logDebugIO
-  , logInfoIO
-  , logWarnIO
-  , logErrorIO
-  , logFatalIO
-  , traceM
-  , showT
-  ) where
+  ( LogLevel (..),
+    LogCategory (..),
+    LogEntry (..),
+    LogFormatter,
+    LogBackend (..),
+    defaultFormatter,
+    jsonFormatter,
+    stdoutBackend,
+    stderrBackend,
+    fileBackend,
+    setGlobalBackends,
+    getGlobalBackends,
+    Logger (..),
+    runLogger,
+    logMessage,
+    logDebug,
+    logInfo,
+    logWarn,
+    logError,
+    logFatal,
+    logDebugIO,
+    logInfoIO,
+    logWarnIO,
+    logErrorIO,
+    logFatalIO,
+    traceM,
+    showT,
+  )
+where
 
 import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -62,19 +63,19 @@ data LogCategory
   deriving (Eq, Show)
 
 data LogEntry = LogEntry
-  { leTimestamp :: !TimeSpec
-  , leLevel :: !LogLevel
-  , leCategory :: !LogCategory
-  , leMessage :: !Text
+  { leTimestamp :: !TimeSpec,
+    leLevel :: !LogLevel,
+    leCategory :: !LogCategory,
+    leMessage :: !Text
   }
 
 type LogFormatter = LogEntry -> Text
 
 data LogBackend = LogBackend
-  { lbName :: !Text
-  , lbMinLevel :: !LogLevel
-  , lbFormatter :: !LogFormatter
-  , lbWrite :: !(Text -> IO ())
+  { lbName :: !Text,
+    lbMinLevel :: !LogLevel,
+    lbFormatter :: !LogFormatter,
+    lbWrite :: !(Text -> IO ())
   }
 
 data Logger :: Effect where
@@ -82,22 +83,22 @@ data Logger :: Effect where
 
 type instance DispatchOf Logger = Dynamic
 
-logMessage :: Logger :> es => LogLevel -> LogCategory -> Text -> Eff es ()
+logMessage :: (Logger :> es) => LogLevel -> LogCategory -> Text -> Eff es ()
 logMessage level cat msg = send $ LogMessage level cat msg
 
-logDebug :: Logger :> es => LogCategory -> Text -> Eff es ()
+logDebug :: (Logger :> es) => LogCategory -> Text -> Eff es ()
 logDebug = logMessage Debug
 
-logInfo :: Logger :> es => LogCategory -> Text -> Eff es ()
+logInfo :: (Logger :> es) => LogCategory -> Text -> Eff es ()
 logInfo = logMessage Info
 
-logWarn :: Logger :> es => LogCategory -> Text -> Eff es ()
+logWarn :: (Logger :> es) => LogCategory -> Text -> Eff es ()
 logWarn = logMessage Warning
 
-logError :: Logger :> es => LogCategory -> Text -> Eff es ()
+logError :: (Logger :> es) => LogCategory -> Text -> Eff es ()
 logError = logMessage Error
 
-logFatal :: Logger :> es => LogCategory -> Text -> Eff es ()
+logFatal :: (Logger :> es) => LogCategory -> Text -> Eff es ()
 logFatal = logMessage Fatal
 
 traceM :: (Logger :> es, Show a) => LogCategory -> Text -> Eff es a -> Eff es a
@@ -107,7 +108,7 @@ traceM cat name action = do
   logDebug cat (name <> " { exit = " <> showT res <> " }")
   pure res
 
-showT :: Show a => a -> Text
+showT :: (Show a) => a -> Text
 showT = Text.pack . show
 
 formatTimestamp :: TimeSpec -> Text
@@ -124,20 +125,28 @@ defaultFormatter entry =
 
 jsonFormatter :: LogFormatter
 jsonFormatter entry =
-  "{\"timestamp\":\"" <> formatTimestamp (leTimestamp entry) <> "\","
-    <> "\"level\":\"" <> showT (leLevel entry) <> "\","
-    <> "\"category\":\"" <> showT (leCategory entry) <> "\","
-    <> "\"message\":\"" <> Text.replace "\"" "\\\"" (leMessage entry) <> "\"}"
+  "{\"timestamp\":\""
+    <> formatTimestamp (leTimestamp entry)
+    <> "\","
+    <> "\"level\":\""
+    <> showT (leLevel entry)
+    <> "\","
+    <> "\"category\":\""
+    <> showT (leCategory entry)
+    <> "\","
+    <> "\"message\":\""
+    <> Text.replace "\"" "\\\"" (leMessage entry)
+    <> "\"}"
 
 stdoutBackend :: LogLevel -> LogBackend
 stdoutBackend minLevel =
   let (logger, _) = unsafePerformIO $ newFastLogger (LogStdout 4096)
       fmt = defaultFormatter
    in LogBackend
-        { lbName = "stdout"
-        , lbMinLevel = minLevel
-        , lbFormatter = fmt
-        , lbWrite = \txt -> logger (toLogStr (txt <> "\n"))
+        { lbName = "stdout",
+          lbMinLevel = minLevel,
+          lbFormatter = fmt,
+          lbWrite = \txt -> logger (toLogStr (txt <> "\n"))
         }
 
 stderrBackend :: LogLevel -> LogBackend
@@ -145,23 +154,24 @@ stderrBackend minLevel =
   let (logger, _) = unsafePerformIO $ newFastLogger (LogStderr 4096)
       fmt = defaultFormatter
    in LogBackend
-        { lbName = "stderr"
-        , lbMinLevel = minLevel
-        , lbFormatter = fmt
-        , lbWrite = \txt -> logger (toLogStr (txt <> "\n"))
+        { lbName = "stderr",
+          lbMinLevel = minLevel,
+          lbFormatter = fmt,
+          lbWrite = \txt -> logger (toLogStr (txt <> "\n"))
         }
 
 fileBackend :: LogLevel -> FilePath -> IO LogBackend
 fileBackend minLevel path = do
   (logger, _) <- newFastLogger (LogFileNoRotate path 4096)
-  pure $ LogBackend
-    { lbName = Text.pack path
-    , lbMinLevel = minLevel
-    , lbFormatter = defaultFormatter
-    , lbWrite = \txt -> logger (toLogStr (txt <> "\n"))
-    }
+  pure $
+    LogBackend
+      { lbName = Text.pack path,
+        lbMinLevel = minLevel,
+        lbFormatter = defaultFormatter,
+        lbWrite = \txt -> logger (toLogStr (txt <> "\n"))
+      }
 
-runLogger :: IOE :> es => [LogBackend] -> Eff (Logger : es) a -> Eff es a
+runLogger :: (IOE :> es) => [LogBackend] -> Eff (Logger : es) a -> Eff es a
 runLogger backends = interpret $ \_ -> \case
   LogMessage level cat msg -> liftIO $ do
     ts <- getTime Realtime
@@ -183,7 +193,7 @@ setGlobalBackends = writeIORef globalBackends
 getGlobalBackends :: IO [LogBackend]
 getGlobalBackends = readIORef globalBackends
 
-logMessageIO :: MonadIO m => LogLevel -> LogCategory -> Text -> m ()
+logMessageIO :: (MonadIO m) => LogLevel -> LogCategory -> Text -> m ()
 logMessageIO level cat msg = liftIO $ do
   backends <- readIORef globalBackends
   ts <- getTime Realtime
@@ -193,17 +203,17 @@ logMessageIO level cat msg = liftIO $ do
       let formatted = lbFormatter backend entry
       lbWrite backend formatted
 
-logDebugIO :: MonadIO m => LogCategory -> Text -> m ()
+logDebugIO :: (MonadIO m) => LogCategory -> Text -> m ()
 logDebugIO = logMessageIO Debug
 
-logInfoIO :: MonadIO m => LogCategory -> Text -> m ()
+logInfoIO :: (MonadIO m) => LogCategory -> Text -> m ()
 logInfoIO = logMessageIO Info
 
-logWarnIO :: MonadIO m => LogCategory -> Text -> m ()
+logWarnIO :: (MonadIO m) => LogCategory -> Text -> m ()
 logWarnIO = logMessageIO Warning
 
-logErrorIO :: MonadIO m => LogCategory -> Text -> m ()
+logErrorIO :: (MonadIO m) => LogCategory -> Text -> m ()
 logErrorIO = logMessageIO Error
 
-logFatalIO :: MonadIO m => LogCategory -> Text -> m ()
+logFatalIO :: (MonadIO m) => LogCategory -> Text -> m ()
 logFatalIO = logMessageIO Fatal
