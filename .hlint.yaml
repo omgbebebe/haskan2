@@ -1,0 +1,6 @@
+# HLint configuration for haskan2
+# https://github.com/ndmitchell/hlint/blob/master/README.md#customizing-the-hints
+
+# FIR EDSL shader files use embedded DSL syntax that hlint cannot parse correctly
+# (e.g., guards instead of if chains, unary negation spacing).
+- ignore: {path: "src/Graphics/Haskan/Vulkan/Shaders"}
