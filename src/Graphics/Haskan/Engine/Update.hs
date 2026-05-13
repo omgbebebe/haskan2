@@ -1,5 +1,3 @@
-
-
 module Graphics.Haskan.Engine.Update
   ( stateUpdateLoop,
     updateCamera,

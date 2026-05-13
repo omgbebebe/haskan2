@@ -3,12 +3,11 @@ module Graphics.Haskan.Engine.Capabilities.Telemetry
   )
 where
 
+import Control.Monad.Managed (Managed)
 import Data.Maybe (Maybe)
 import Data.Text (Text)
 
-import Control.Monad.Managed (Managed)
-
-class Monad m => MonadTelemetry m where
+class (Monad m) => MonadTelemetry m where
   recordFrameTime :: Integer -> m ()
   getTelemetryMessage :: m (Maybe Text)
 

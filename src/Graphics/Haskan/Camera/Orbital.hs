@@ -157,7 +157,7 @@ orbitalModify cam@OrbitalCamera {..} mod =
           -- Elevation clamping
           rawForward = normalize (rotate rawTarget (V3 0 0 (-1)))
           rawEl = asin (rawForward ^. _y)
-          (V2 elMin elMax) = fromMaybe (V2 (- (pi / 2) + 0.01) (pi / 2 - 0.01)) elevationBounds
+          (V2 elMin elMax) = fromMaybe (V2 (-(pi / 2) + 0.01) (pi / 2 - 0.01)) elevationBounds
           clampedEl = max elMin (min elMax rawEl)
 
           newTarget =

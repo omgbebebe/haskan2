@@ -1,7 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-
 module Graphics.Haskan.Debug.Interface
   ( DebugMessage (..),
     DebugCommand (..),

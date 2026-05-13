@@ -203,11 +203,11 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac sunDirX,
                     realToFrac sunDirY,
                     realToFrac sunDirZ,
-                     realToFrac dpdCloudHeight,
-                     realToFrac dpdTime,
-                     realToFrac dpdBlendFactor
-                   ] ::
-                     [CFloat]
+                    realToFrac dpdCloudHeight,
+                    realToFrac dpdTime,
+                    realToFrac dpdBlendFactor
+                  ] ::
+                    [CFloat]
              in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdCloudLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 120 . Foreign.castPtr
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
             -- Copy current cloud result to history buffer for next frame

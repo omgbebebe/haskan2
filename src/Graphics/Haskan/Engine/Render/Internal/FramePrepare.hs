@@ -30,7 +30,6 @@ import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.Scene.Transform (tPosition)
 import Graphics.Haskan.Vulkan.Resources (MeshResource (..))
 import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Linear (M44, V2 (..), V3 (..), V4 (..))
 import Linear.Matrix (inv33, transpose, (!*), (!*!))

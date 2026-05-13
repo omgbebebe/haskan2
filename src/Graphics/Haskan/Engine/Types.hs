@@ -1,7 +1,3 @@
-
-
-
-
 module Graphics.Haskan.Engine.Types
   ( toListOfV4,
     forkIOWithHandler,

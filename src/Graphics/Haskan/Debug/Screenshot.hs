@@ -1,7 +1,5 @@
 {-# LANGUAGE BlockArguments #-}
 
-
-
 module Graphics.Haskan.Debug.Screenshot
   ( saveSwapchainScreenshot,
     saveGBufferStage,
@@ -192,8 +190,10 @@ saveImageToPng' device pdev commandPool queue image extent format currentLayout 
                 &* set @"pNext" Vulkan.VK_NULL
                 &* set @"flags" Vulkan.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
                 &* set @"pInheritanceInfo" Vulkan.VK_NULL
-      withPtr beginInfo $ (Vulkan.vkBeginCommandBuffer cmdBuf
-         Control.Monad.>=> throwVkResult)
+      withPtr beginInfo $
+        ( Vulkan.vkBeginCommandBuffer cmdBuf
+            Control.Monad.>=> throwVkResult
+        )
 
       -- For debug screenshots, use GENERAL layout to avoid layout transition issues
       -- The image should be in SHADER_READ_ONLY_OPTIMAL after rendering, but using
@@ -220,7 +220,8 @@ saveImageToPng' device pdev commandPool queue image extent format currentLayout 
                         &* set @"baseArrayLayer" 0
                         &* set @"layerCount" 1
                   )
-      withPtr barrier $ Vulkan.vkCmdPipelineBarrier
+      withPtr barrier $
+        Vulkan.vkCmdPipelineBarrier
           cmdBuf
           Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT
           Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT
@@ -256,7 +257,8 @@ saveImageToPng' device pdev commandPool queue image extent format currentLayout 
                         &* set @"y" 0
                         &* set @"z" 0
                   )
-      withPtr copy $ Vulkan.vkCmdCopyImageToBuffer
+      withPtr copy $
+        Vulkan.vkCmdCopyImageToBuffer
           cmdBuf
           image
           copyLayout
@@ -283,7 +285,8 @@ saveImageToPng' device pdev commandPool queue image extent format currentLayout 
                         &* set @"baseArrayLayer" 0
                         &* set @"layerCount" 1
                   )
-      withPtr barrierBack $ Vulkan.vkCmdPipelineBarrier
+      withPtr barrierBack $
+        Vulkan.vkCmdPipelineBarrier
           cmdBuf
           Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT
           Vulkan.VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT

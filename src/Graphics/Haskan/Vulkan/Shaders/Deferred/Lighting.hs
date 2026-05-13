@@ -77,10 +77,10 @@ type CameraPushConstant =
        "skyTintG" ':-> Float,
        "skyTintB" ':-> Float,
        "iblIntensity" ':-> Float,
-        "sunDir" ':-> V 3 Float,
-        "cloudHeight" ':-> Float,
-        "time" ':-> Float
-      ]
+       "sunDir" ':-> V 3 Float,
+       "cloudHeight" ':-> Float,
+       "time" ':-> Float
+     ]
 
 type FragmentDefs =
   '[ "in_uv" ':-> Input '[Location 0] (V 2 Float),
@@ -114,18 +114,18 @@ type FragmentDefs =
        ':-> Texture2D
               '[Binding 6, DescriptorSet 0]
               (RGBA8 UNorm),
-      "lights"
-        ':-> StorageBuffer
-               '[Binding 7, DescriptorSet 0]
-               LightsData,
-      "cloud_result"
-        ':-> Texture2D
-               '[Binding 8, DescriptorSet 0]
-               (RGBA16 F),
-      "cameraPos"
-        ':-> PushConstant
-               '[]
-               CameraPushConstant,
+     "lights"
+       ':-> StorageBuffer
+              '[Binding 7, DescriptorSet 0]
+              LightsData,
+     "cloud_result"
+       ':-> Texture2D
+              '[Binding 8, DescriptorSet 0]
+              (RGBA16 F),
+     "cameraPos"
+       ':-> PushConstant
+              '[]
+              CameraPushConstant,
      "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]

@@ -1,6 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-
 module Graphics.Haskan.Render.Graph
   ( -- * Resource IDs
     ResourceId (..),

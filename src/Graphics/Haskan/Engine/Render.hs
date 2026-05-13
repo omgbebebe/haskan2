@@ -19,6 +19,7 @@ import Control.Lens ((^.))
 import Control.Monad (forM, forM_, replicateM, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged, runManaged, with)
+import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, runReaderT)
 import Data.Foldable (for_, toList)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
@@ -46,20 +47,12 @@ import Graphics.Haskan.DayNight qualified as DayNight
 import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot (..), buildFrameSnapshot, defaultInspector)
 import Graphics.Haskan.Debug.Interface (DebugCameraSnapshot (..), DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), debugMessageToActionEvent, encodeDebugResponse, parseDebugMessage)
 import Graphics.Haskan.Debug.Screenshot qualified as Screenshot
-import Graphics.Haskan.Engine.Render.Internal.Setup
-  ( IBLTextures (..),
-    SceneLoadResult (..),
-    compileAllShaders,
-    createShaderModules,
-    loadIBLTextures,
-    loadScene,
-  )
-import Graphics.Haskan.Engine.Render.Internal.Screenshot
-  ( handleScreenshotAllStages,
-    handleScreenshotSingle,
-    handleScreenshotSwapchain,
-  )
 import Graphics.Haskan.Debug.Server (CommandQueue, DebugServerHandle, startDebugServer, stopDebugServer)
+import Graphics.Haskan.Engine.Capabilities.Clock (MonadClock (..))
+import Graphics.Haskan.Engine.Capabilities.Graphics (MonadGraphics (..))
+import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logDebug, logInfo)
+import Graphics.Haskan.Engine.Capabilities.StateReader (MonadStateReader (..), consumeTVar, readTVarIO)
+import Graphics.Haskan.Engine.Capabilities.Telemetry (MonadTelemetry (..))
 import Graphics.Haskan.Engine.Render.Internal.FramePrepare
   ( buildAllEntityData,
     buildCullData,
@@ -77,14 +70,22 @@ import Graphics.Haskan.Engine.Render.Internal.PassRecording
     buildRecordAction,
     buildRecordContext,
   )
+import Graphics.Haskan.Engine.Render.Internal.Screenshot
+  ( handleScreenshotAllStages,
+    handleScreenshotSingle,
+    handleScreenshotSwapchain,
+  )
+import Graphics.Haskan.Engine.Render.Internal.Setup
+  ( IBLTextures (..),
+    SceneLoadResult (..),
+    compileAllShaders,
+    createShaderModules,
+    loadIBLTextures,
+    loadScene,
+  )
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
-import Graphics.Haskan.Engine.Capabilities.Graphics (MonadGraphics (..))
-import Graphics.Haskan.Engine.Capabilities.Clock (MonadClock (..))
-import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logDebug, logInfo)
-import Graphics.Haskan.Engine.Capabilities.StateReader (MonadStateReader (..), consumeTVar, readTVarIO)
-import Graphics.Haskan.Engine.Capabilities.Telemetry (MonadTelemetry (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
@@ -129,8 +130,8 @@ import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
-import Graphics.Haskan.Window qualified as Window
 import Graphics.Haskan.Window (isWindowVisible)
+import Graphics.Haskan.Window qualified as Window
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
@@ -146,7 +147,6 @@ import SDL.Input.Mouse qualified as SDL.Mouse
 import System.Clock (TimeSpec, toNanoSecs)
 import System.Directory (doesFileExist)
 import System.IO.Unsafe (unsafePerformIO)
-import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, runReaderT)
 
 type RenderLoopM m = ReaderT RenderEnv m
 
@@ -253,7 +253,7 @@ handleInspector frameNumber drawList ctx camera rcSurfaceExtent = do
     liftIO $ insp snap
 
 -- | Handle termination control message
-terminateFrame :: MonadLog m => m (Bool, Bool)
+terminateFrame :: (MonadLog m) => m (Bool, Bool)
 terminateFrame = do
   logInfo LogGeneral "terminating render loop by signal"
   pure (True, True)
@@ -727,49 +727,49 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
         unless exit $ do
-            renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-              with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView) $ \dr -> do
-                -- Update lighting descriptor sets with light SSBO
-                for_ (drLightingDescriptorSets dr) $ \ds ->
-                  DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
-                let renderEnv =
-                      RenderEnv
-                        { reWindow = window,
-                          reContext = context,
-                          reDeferred = dr,
-                          reTargetFPS = targetFPS,
-                          reImageAvailableSemaphores = imageAvailableSemaphores,
-                          reControl = control,
-                          reFrameMvpMemories = frameMvpMemories,
-                          reTvCamera = tvCamera,
-                          reTvInspect = tvInspect,
-                          reTvInsp = tvInsp,
-                          reTvRenderDebug = tvRenderDebug,
-                          reECSWorld = ecsWorld,
-                          reResourceManager = rm,
-                          reTextureSampler = textureSampler,
-                          reFrameDescriptorSets = frameDescriptorSets,
-                          reTextureIndexMap = textureIndexMap,
-                          reTvWireframe = tvWireframe,
-                          reFrameStatsRef = frameStatsRef,
-                          reCullResources = computeCullResources,
-                          reTvDebugMode = tvDebugMode,
-                          reTvAxisOverlay = tvAxisOverlay,
-                          reTvGroundPlane = tvGroundPlane,
-                          reTvPendingScreenshot = tvPendingScreenshot,
-                          reTvPendingAllStages = tvPendingAllStages,
-                          reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
-                          rePhysicalDevice = physicalDevice,
-                          reLightSsboBuffer = lightSsboBuffer,
-                          reLightSsboMemory = lightSsboMemory,
-                          reTvLights = tvLights,
-                          reTvTimeOfDay = tvTimeOfDay,
-                          reTvTimeSpeed = tvTimeSpeed,
-                          reTvDayNightEnabled = tvDayNightEnabled,
-                          reTvCloudHeight = tvCloudHeight
-                        }
-                renderFrameLoop renderEnv 0
-            outerLoop renderFrameLoopFinished
+          renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
+            with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView) $ \dr -> do
+              -- Update lighting descriptor sets with light SSBO
+              for_ (drLightingDescriptorSets dr) $ \ds ->
+                DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
+              let renderEnv =
+                    RenderEnv
+                      { reWindow = window,
+                        reContext = context,
+                        reDeferred = dr,
+                        reTargetFPS = targetFPS,
+                        reImageAvailableSemaphores = imageAvailableSemaphores,
+                        reControl = control,
+                        reFrameMvpMemories = frameMvpMemories,
+                        reTvCamera = tvCamera,
+                        reTvInspect = tvInspect,
+                        reTvInsp = tvInsp,
+                        reTvRenderDebug = tvRenderDebug,
+                        reECSWorld = ecsWorld,
+                        reResourceManager = rm,
+                        reTextureSampler = textureSampler,
+                        reFrameDescriptorSets = frameDescriptorSets,
+                        reTextureIndexMap = textureIndexMap,
+                        reTvWireframe = tvWireframe,
+                        reFrameStatsRef = frameStatsRef,
+                        reCullResources = computeCullResources,
+                        reTvDebugMode = tvDebugMode,
+                        reTvAxisOverlay = tvAxisOverlay,
+                        reTvGroundPlane = tvGroundPlane,
+                        reTvPendingScreenshot = tvPendingScreenshot,
+                        reTvPendingAllStages = tvPendingAllStages,
+                        reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
+                        rePhysicalDevice = physicalDevice,
+                        reLightSsboBuffer = lightSsboBuffer,
+                        reLightSsboMemory = lightSsboMemory,
+                        reTvLights = tvLights,
+                        reTvTimeOfDay = tvTimeOfDay,
+                        reTvTimeSpeed = tvTimeSpeed,
+                        reTvDayNightEnabled = tvDayNightEnabled,
+                        reTvCloudHeight = tvCloudHeight
+                      }
+              renderFrameLoop renderEnv 0
+          outerLoop renderFrameLoopFinished
 
   logInfo LogGeneral "Starting render loop"
   outerLoop False

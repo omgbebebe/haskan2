@@ -9,14 +9,14 @@ import Control.Concurrent.STM qualified as STM
 import Control.Concurrent.STM.TChan (TChan)
 import Control.Concurrent.STM.TVar (TVar)
 import Control.Monad (when)
-import Control.Monad.Managed (Managed)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Managed (Managed)
 import Data.Word (Word32)
 import Graphics.Haskan.Camera (AnyCamera)
 import Graphics.Haskan.Debug.FrameInspector (FrameInspector)
 import Graphics.Haskan.Engine.Types (ControlMessage, LightData)
 
-class Monad m => MonadStateReader m where
+class (Monad m) => MonadStateReader m where
   readCamera :: m AnyCamera
   readControl :: m (Maybe ControlMessage)
   readWireframe :: m Bool

@@ -1,5 +1,3 @@
-
-
 module Graphics.Haskan.Render.Bindless
   ( BindlessSet (..),
     createBindlessSet,
@@ -85,5 +83,4 @@ allocateDescriptorSet dev descriptorPool setLayouts = do
    in liftIO $
         Vulkan.withPtr
           allocateInfo
-          ( Graphics.Haskan.Resources.allocaAndPeek . Vulkan.vkAllocateDescriptorSets dev
-          )
+          (Graphics.Haskan.Resources.allocaAndPeek . Vulkan.vkAllocateDescriptorSets dev)

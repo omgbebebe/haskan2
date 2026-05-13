@@ -21,15 +21,15 @@ import Data.Text qualified as Text
 import Data.Vector.Storable (Vector)
 import Data.Vector.Storable qualified as VS
 import Data.Word (Word32, Word8)
-import Graphics.Haskan.Assets.Cache (AssetCache)
-import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo)
-import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..))
+import FIR qualified
 import Foreign.C qualified
+import Graphics.Haskan.Assets.Cache (AssetCache)
 import Graphics.Haskan.BoundingBox (BBox (..), emptyBBox, fromPoints)
 import Graphics.Haskan.Camera (AnyCamera, Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.DayNight (computeSunState, defaultDayNightConfig)
 import Graphics.Haskan.DayNight qualified as DayNight
+import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo)
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
@@ -68,6 +68,7 @@ import Graphics.Haskan.Vulkan.Render (drawFrame, presentFrame, runRenderM)
 import Graphics.Haskan.Vulkan.Render qualified as Render
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Resources
+import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..))
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
@@ -91,7 +92,6 @@ import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
 import System.Clock (TimeSpec, toNanoSecs)
 import System.Directory (doesFileExist)
-import FIR qualified
 
 -- | Compile all FIR shaders to SPIR-V
 compileAllShaders :: (MonadLog m, MonadIO m) => m ()

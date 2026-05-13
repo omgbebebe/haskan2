@@ -14,11 +14,11 @@ import Control.Concurrent.STM qualified as STM
 import Control.Concurrent.STM.TQueue qualified as TQueue
 import Control.Exception (SomeException, bracket, handle)
 import Control.Monad (forever, unless, void)
-import Data.Foldable (for_)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Lazy qualified as LBS
+import Data.Foldable (for_)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Text.Encoding qualified as Text

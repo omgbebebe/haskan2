@@ -34,7 +34,7 @@ defaultFlyCamera :: FlyCamera
 defaultFlyCamera =
   FlyCamera
     { flyPosition = V3 0.0 5.0 20.0,
-      flyOrientation = axisAngle worldUp 0 * axisAngle (V3 1 0 0) (- (pi / 6)),
+      flyOrientation = axisAngle worldUp 0 * axisAngle (V3 1 0 0) (-(pi / 6)),
       flySpeed = 10.0,
       flyMaxDistance = 10000.0
     }

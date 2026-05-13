@@ -1,5 +1,3 @@
-
-
 module Graphics.Haskan.Vulkan.DeferredResources
   ( DeferredResources (..),
     createDeferredResources,

@@ -117,15 +117,20 @@ fromPie PieLevel {..} = do
           )
           triangles
       verts =
-        zipWith (curry ( \(i, (V3 x y z)) ->
-              let norm = fromMaybe (V3 0.0 0.0 0.0) (lookup i firstNormals)
-               in Vertex
-                    { vPos = V3 (realToFrac x) (realToFrac y) (realToFrac z),
-                      vTexUV = V2 0.0 0.0,
-                      vNorm = norm,
-                      vCol = V3 0.6 0.6 0.0
-                    }
-          )) [0 ..] vertices
+        zipWith
+          ( curry
+              ( \(i, (V3 x y z)) ->
+                  let norm = fromMaybe (V3 0.0 0.0 0.0) (lookup i firstNormals)
+                   in Vertex
+                        { vPos = V3 (realToFrac x) (realToFrac y) (realToFrac z),
+                          vTexUV = V2 0.0 0.0,
+                          vNorm = norm,
+                          vCol = V3 0.6 0.6 0.0
+                        }
+              )
+          )
+          [0 ..]
+          vertices
   Mesh verts indices
 
 calcNormal :: V3 Float -> V3 Float -> V3 Float -> V3 Foreign.C.CFloat

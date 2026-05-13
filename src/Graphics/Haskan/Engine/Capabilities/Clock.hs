@@ -10,7 +10,7 @@ import Control.Monad.Reader (ReaderT, lift)
 import Control.Monad.State (StateT)
 import System.Clock (Clock (..), TimeSpec, getTime)
 
-class Monad m => MonadClock m where
+class (Monad m) => MonadClock m where
   getMonotonicTime :: m TimeSpec
   delayMicros :: Int -> m ()
 
@@ -22,10 +22,10 @@ instance MonadClock Managed where
   getMonotonicTime = liftIO $ getTime Monotonic
   delayMicros us = liftIO $ threadDelay us
 
-instance MonadClock m => MonadClock (ReaderT r m) where
+instance (MonadClock m) => MonadClock (ReaderT r m) where
   getMonotonicTime = lift getMonotonicTime
   delayMicros us = lift $ delayMicros us
 
-instance MonadClock m => MonadClock (StateT s m) where
+instance (MonadClock m) => MonadClock (StateT s m) where
   getMonotonicTime = lift getMonotonicTime
   delayMicros us = lift $ delayMicros us

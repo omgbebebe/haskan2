@@ -12,9 +12,9 @@ import Graphics.Haskan.Vulkan.Types (RenderResult (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 
-class Monad m => MonadGraphics m where
-  uploadStorageBuffer :: Storable a => Vulkan.VkDeviceMemory -> Int -> [a] -> m ()
-  uploadUniformBuffer :: Storable a => Vulkan.VkDeviceMemory -> Int -> [a] -> m ()
+class (Monad m) => MonadGraphics m where
+  uploadStorageBuffer :: (Storable a) => Vulkan.VkDeviceMemory -> Int -> [a] -> m ()
+  uploadUniformBuffer :: (Storable a) => Vulkan.VkDeviceMemory -> Int -> [a] -> m ()
   deviceWaitIdle :: m ()
   drawFrameGraphics :: Vulkan.VkSemaphore -> Int -> (Vulkan.Word32 -> Int -> IO ()) -> m RenderResult
   presentFrameGraphics :: Vulkan.Word32 -> Vulkan.VkSemaphore -> m Vulkan.VkResult

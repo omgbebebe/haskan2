@@ -1,5 +1,3 @@
-
-
 module Graphics.Haskan.Scene.GLTF
   ( importGLTF,
     GLTFImportResult (..),

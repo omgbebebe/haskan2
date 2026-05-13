@@ -32,7 +32,7 @@ import Linear (V3 (..))
 
 -- | All values pre-computed before creating the IO callback
 data RecordContext = RecordContext
-  {     rcGraphicsCommandBuffers :: ![Vulkan.VkCommandBuffer],
+  { rcGraphicsCommandBuffers :: ![Vulkan.VkCommandBuffer],
     rcFrameDescriptorSets :: ![Vulkan.VkDescriptorSet],
     rcTextureSampler :: !Vulkan.VkSampler,
     rcLightSsboBuffer :: !Vulkan.VkBuffer,
@@ -147,7 +147,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
         Graph.execRenderGraphBuilder $
           buildDeferredGraph
             DeferredPassData
-              {                 dpdExtent = rcPassSurfaceExtent,
+              { dpdExtent = rcPassSurfaceExtent,
                 dpdGBufferRenderPass = drGBufferRenderPass rcDeferred,
                 dpdGBufferFramebuffer = gBufferFramebuffer,
                 dpdGBufferPipeline = drGBufferPipeline rcDeferred,

@@ -2,13 +2,13 @@ module Graphics.Haskan.Vulkan.CommandBuffer where
 
 import Control.Monad ((>=>))
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Bits ((.|.))
 import Data.Int (Int32)
 import Data.Word (Word32)
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
-import Data.Bits ((.|.))
 import Graphics.Vulkan.Marshal.Create (set, setAt, setListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
@@ -80,7 +80,7 @@ withCommandBuffer' commandBuffer flags action =
           withPtr
             commandBufferBeginInfo
             ( Vulkan.vkBeginCommandBuffer commandBuffer
-        Control.Monad.>=> throwVkResult
+                Control.Monad.>=> throwVkResult
             )
       end = liftIO $ Vulkan.vkEndCommandBuffer commandBuffer >>= throwVkResult
    in (begin *> action <* end)
@@ -181,11 +181,11 @@ copyBufferToImageLayer commandBuffer buffer image width height layer bufferOffse
     withPtr
       region
       ( Vulkan.vkCmdCopyBufferToImage
-            commandBuffer
-            buffer
-            image
-            Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-            1
+          commandBuffer
+          buffer
+          image
+          Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+          1
       )
 
 layerTransitionAll ::
@@ -244,15 +244,15 @@ layerTransitionAll commandBuffer image oldLayout newLayout layerCount = do
     withPtr
       barrier
       ( Vulkan.vkCmdPipelineBarrier
-            commandBuffer
-            srcStage
-            dstStage
-            Vulkan.VK_ZERO_FLAGS
-            0
-            Vulkan.vkNullPtr
-            0
-            Vulkan.vkNullPtr
-            1
+          commandBuffer
+          srcStage
+          dstStage
+          Vulkan.VK_ZERO_FLAGS
+          0
+          Vulkan.vkNullPtr
+          0
+          Vulkan.vkNullPtr
+          1
       )
 
 copyBuffer ::
@@ -348,15 +348,15 @@ mipLayerTransition commandBuffer image oldLayout newLayout baseMip levelCount la
     withPtr
       barrier
       ( Vulkan.vkCmdPipelineBarrier
-            commandBuffer
-            srcStage
-            dstStage
-            Vulkan.VK_ZERO_FLAGS
-            0
-            Vulkan.vkNullPtr
-            0
-            Vulkan.vkNullPtr
-            1
+          commandBuffer
+          srcStage
+          dstStage
+          Vulkan.VK_ZERO_FLAGS
+          0
+          Vulkan.vkNullPtr
+          0
+          Vulkan.vkNullPtr
+          1
       )
 
 layerTransition ::
@@ -436,15 +436,15 @@ layerTransition commandBuffer image oldLayout newLayout = do
     withPtr
       barrier
       ( Vulkan.vkCmdPipelineBarrier
-            commandBuffer
-            srcStage
-            dstStage
-            Vulkan.VK_ZERO_FLAGS
-            0
-            Vulkan.vkNullPtr
-            0
-            Vulkan.vkNullPtr
-            1
+          commandBuffer
+          srcStage
+          dstStage
+          Vulkan.VK_ZERO_FLAGS
+          0
+          Vulkan.vkNullPtr
+          0
+          Vulkan.vkNullPtr
+          1
       )
 
 cmdCopyImage ::
@@ -474,26 +474,26 @@ cmdCopyImage commandBuffer srcImage dstImage width height = do
         Vulkan.createVk
           ( set @"srcSubresource" srcSubresource
               &* set @"srcOffset"
-                (Vulkan.createVk
-                   ( set @"x" 0
-                       &* set @"y" 0
-                       &* set @"z" 0
-                   )
+                ( Vulkan.createVk
+                    ( set @"x" 0
+                        &* set @"y" 0
+                        &* set @"z" 0
+                    )
                 )
               &* set @"dstSubresource" dstSubresource
               &* set @"dstOffset"
-                (Vulkan.createVk
-                   ( set @"x" 0
-                       &* set @"y" 0
-                       &* set @"z" 0
-                   )
+                ( Vulkan.createVk
+                    ( set @"x" 0
+                        &* set @"y" 0
+                        &* set @"z" 0
+                    )
                 )
               &* set @"extent"
-                (Vulkan.createVk
-                   ( set @"width" width
-                       &* set @"height" height
-                       &* set @"depth" 1
-                   )
+                ( Vulkan.createVk
+                    ( set @"width" width
+                        &* set @"height" height
+                        &* set @"depth" 1
+                    )
                 )
           )
   liftIO $
@@ -549,11 +549,11 @@ copyBufferToImage commandBuffer buffer image width height = do
     withPtr
       region
       ( Vulkan.vkCmdCopyBufferToImage
-            commandBuffer
-            buffer
-            image
-            Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-            1
+          commandBuffer
+          buffer
+          image
+          Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+          1
       )
 
 copyBufferToImage3D ::
@@ -598,11 +598,11 @@ copyBufferToImage3D commandBuffer buffer image width height depth = do
     withPtr
       region
       ( Vulkan.vkCmdCopyBufferToImage
-            commandBuffer
-            buffer
-            image
-            Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-            1
+          commandBuffer
+          buffer
+          image
+          Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+          1
       )
 
 cmdBlitImageCubemapMip ::

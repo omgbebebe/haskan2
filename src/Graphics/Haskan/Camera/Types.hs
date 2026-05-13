@@ -1,5 +1,3 @@
-
-
 module Graphics.Haskan.Camera.Types
   ( InterpolationMethod (..),
     ViewMatrix (..),

@@ -19,7 +19,7 @@ data FrameState = FrameState
   }
   deriving (Show)
 
-readFrameState :: MonadStateReader m => m FrameState
+readFrameState :: (MonadStateReader m) => m FrameState
 readFrameState =
   FrameState
     <$> readWireframe

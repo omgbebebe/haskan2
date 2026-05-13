@@ -9,12 +9,12 @@ where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Word (Word32)
+import Graphics.Haskan.Debug.Screenshot qualified as Screenshot
 import Graphics.Haskan.Engine.Capabilities.Graphics (MonadGraphics (..))
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo)
 import Graphics.Haskan.Logger (LogCategory (..))
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
-import Graphics.Haskan.Debug.Screenshot qualified as Screenshot
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 
