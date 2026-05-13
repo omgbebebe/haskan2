@@ -30,7 +30,7 @@ import Linear (V3 (..), V4 (..))
 
 -- | All values pre-computed before creating the IO callback
 data RecordContext = RecordContext
-  { rcGraphicsCommandBuffers :: ![Vulkan.VkCommandBuffer],
+  {     prcGraphicsCommandBuffers :: ![Vulkan.VkCommandBuffer],
     rcFrameDescriptorSets :: ![Vulkan.VkDescriptorSet],
     rcTextureSampler :: !Vulkan.VkSampler,
     rcLightSsboBuffer :: !Vulkan.VkBuffer,
@@ -49,13 +49,13 @@ data RecordContext = RecordContext
     rcWireframeEnabled :: !Bool,
     rcDeferred :: !DeferredResources,
     rcCullResources :: !ComputeCullResources,
-    rcDevice :: !Vulkan.VkDevice,
-    rcSurfaceExtent :: !Vulkan.VkExtent2D
+    prcDevice :: !Vulkan.VkDevice,
+    prcSurfaceExtent :: !Vulkan.VkExtent2D
   }
 
 buildRecordAction :: RecordContext -> Vulkan.Word32 -> Int -> IO ()
 buildRecordAction RecordContext {..} imageIdx frameIdx = do
-  let commandBuffer = rcGraphicsCommandBuffers !! fromIntegral imageIdx
+  let commandBuffer = prcGraphicsCommandBuffers !! fromIntegral imageIdx
       gBufferFramebuffer = drGBufferFramebuffers rcDeferred !! fromIntegral imageIdx
       lightingFramebuffer = drLightingFramebuffers rcDeferred !! fromIntegral imageIdx
       frameDescriptorSet = rcFrameDescriptorSets !! frameIdx
@@ -69,7 +69,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
             pcDescriptorSet = Vulkan.vkNullPtr,
             pcFramebuffer = gBufferFramebuffer,
             pcRenderPass = drGBufferRenderPass rcDeferred,
-            pcExtent = rcSurfaceExtent
+            pcExtent = prcSurfaceExtent
           }
       lightingPassCtx =
         PassContext
@@ -79,14 +79,14 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
             pcDescriptorSet = lightingDescriptorSet,
             pcFramebuffer = lightingFramebuffer,
             pcRenderPass = drLightingRenderPass rcDeferred,
-            pcExtent = rcSurfaceExtent
+            pcExtent = prcSurfaceExtent
           }
 
       (graphRes, graphPasses) =
         Graph.execRenderGraphBuilder $
           buildDeferredGraph
             DeferredPassData
-              { dpdExtent = rcSurfaceExtent,
+              { dpdExtent = prcSurfaceExtent,
                 dpdGBufferRenderPass = drGBufferRenderPass rcDeferred,
                 dpdGBufferFramebuffer = gBufferFramebuffer,
                 dpdGBufferPipeline = drGBufferPipeline rcDeferred,
@@ -94,7 +94,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdGBufferDescriptor = frameDescriptorSet,
                 dpdGBufferSampler = rcTextureSampler,
                 dpdDrawList = rcDrawList,
-                dpdDevice = rcDevice,
+                dpdDevice = prcDevice,
                 dpdDrawCommandsBuffer = ccrDrawCommandsBuffer rcCullResources,
                 dpdEntityCount = fromIntegral (length rcDrawList),
                 dpdLightingRenderPass = drLightingRenderPass rcDeferred,

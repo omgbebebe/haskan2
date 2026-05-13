@@ -146,6 +146,7 @@ library
                       OverloadedStrings
                       DataKinds
                       BlockArguments
+                      LambdaCase
 
 executable haskan2
     if os(windows)

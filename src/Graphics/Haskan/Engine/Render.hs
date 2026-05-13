@@ -293,6 +293,189 @@ handleScreenshotSwapchain ctx device physicalDevice graphicsCommandPool graphics
   liftIO $ Screenshot.saveSwapchainScreenshot device physicalDevice graphicsCommandPool graphicsQueueHandler swapchainImage rcSurfaceExtent
   logInfo LogGeneral "swapchain screenshot saved"
 
+-- | Handle termination control message
+terminateFrame :: MonadLog m => m (Bool, Bool)
+terminateFrame = do
+  logInfo LogGeneral "terminating render loop by signal"
+  pure (True, True)
+
+-- | Main frame body: read state, compute, upload, render
+runFrame ::
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
+  Int ->
+  RenderLoopM m (Bool, Bool)
+runFrame frameNumber = do
+  env@RenderEnv {..} <- ask
+  let imageAvailableSemaphore = reImageAvailableSemaphores !! frameNumber
+      mvpMemory = reFrameMvpMemories !! frameNumber
+  camera <- readCamera
+  drawList <- extractDrawList reECSWorld reResourceManager reTextureIndexMap
+  logDebug LogRender $ "draw list: " <> showT (length drawList) <> " entities"
+  let camPos = realToFrac <$> Camera.cameraPosition camera
+      camTarget = realToFrac <$> Camera.cameraTarget camera
+      w = realToFrac $ Vulkan.getField @"width" (rcSurfaceExtent reContext) :: Float
+      h = realToFrac $ Vulkan.getField @"height" (rcSurfaceExtent reContext) :: Float
+      projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> makeProjectionMatrix w h :: M44 Float
+      viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
+      entityDebugInfos = computeEntityDebugInfos drawList projMat viewMat
+      renderDebugInfo = buildRenderDebugInfo frameNumber camPos camTarget projMat entityDebugInfos
+  liftIO $ STM.atomically $ STM.writeTVar reTvRenderDebug $ Just renderDebugInfo
+  let entityData = buildAllEntityData drawList
+      cullData = buildCullData w h camera drawList
+  uploadStorageBuffer (ccrEntityMemory reCullResources) 0 entityData
+  uploadUniformBuffer (ccrCullDataMemory reCullResources) 0 [cullData]
+  logDebug LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
+
+  lights' <- readLights
+  let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
+  uploadStorageBuffer reLightSsboMemory 0 lightsToUpload
+  let lightCount = fromIntegral (length lights') :: Word32
+  logDebug LogRender $ "lights uploaded: " <> showT (length lights')
+  case drawList of
+    [] -> pure (False, False)
+    _ -> renderAndPresent env frameNumber camera drawList lightCount mvpMemory imageAvailableSemaphore
+
+-- | Render and present a non-empty frame
+renderAndPresent ::
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
+  RenderEnv ->
+  Int ->
+  AnyCamera ->
+  [DrawCall] ->
+  Word32 ->
+  Vulkan.VkDeviceMemory ->
+  Vulkan.VkSemaphore ->
+  RenderLoopM m (Bool, Bool)
+renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMemory imageAvailableSemaphore = do
+  let ctx = reContext
+      dr = reDeferred
+      ccr = reCullResources
+      w = realToFrac $ Vulkan.getField @"width" (rcSurfaceExtent ctx) :: Float
+      h = realToFrac $ Vulkan.getField @"height" (rcSurfaceExtent ctx) :: Float
+      view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
+      projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
+      skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
+  uploadUniformBuffer mvpMemory 0 [view, projection]
+
+  wireframeEnabled' <- readWireframe
+  debugMode' <- readDebugMode
+  axisOverlay' <- readAxisOverlay
+  groundPlane' <- readGroundPlane
+  currentTime <- readTimeOfDay
+  dnEnabled <- readDayNightEnabled
+  cloudHeight' <- readCloudHeight
+  let (sunState, skyTint, iblInt, sunAzimuth, sunDir) = computeSkyParams dnEnabled currentTime
+
+  let recordCtx =
+        RecordContext
+          { prcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
+            rcFrameDescriptorSets = reFrameDescriptorSets,
+            rcTextureSampler = reTextureSampler,
+            rcLightSsboBuffer = reLightSsboBuffer,
+            rcDrawList = drawList,
+            rcCameraPos = realToFrac <$> Camera.cameraPosition camera,
+            rcSkyboxRays = skyboxRays,
+            rcDebugMode = debugMode',
+            rcAxisOverlay = axisOverlay',
+            rcGroundPlane = groundPlane',
+            rcLightCount = lightCount,
+            rcSkyTint = skyTint,
+            rcIBLIntensity = iblInt,
+            rcSunAzimuth = sunAzimuth,
+            rcSunDir = sunDir,
+            rcCloudHeight = cloudHeight',
+            rcWireframeEnabled = wireframeEnabled',
+            rcDeferred = dr,
+            rcCullResources = ccr,
+            prcDevice = device ctx,
+            prcSurfaceExtent = rcSurfaceExtent ctx
+          }
+      recordAction = buildRecordAction recordCtx
+
+  res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
+  handleFrameResult env frameNumber camera drawList res
+
+-- | Handle frame draw result
+handleFrameResult ::
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
+  RenderEnv ->
+  Int ->
+  AnyCamera ->
+  [DrawCall] ->
+  Render.RenderResult ->
+  RenderLoopM m (Bool, Bool)
+handleFrameResult env@RenderEnv {reContext = ctx, ..} frameNumber camera drawList = \case
+  Render.FrameOk imageIndex -> do
+    presentResult <- presentFrameGraphics imageIndex (renderFinishedSemaphores ctx !! fromIntegral imageIndex)
+    handlePresentResult env frameNumber camera drawList imageIndex presentResult
+  Render.FrameSuboptimal _ ->
+    fail "suboptimal"
+  Render.FrameOutOfDate -> do
+    logInfo LogGeneral "resizing swapchain"
+    pure (True, False)
+  Render.FrameTimeout -> do
+    delayMicros 16000
+    pure (False, False)
+  Render.FrameFailed err ->
+    fail err
+
+-- | Handle present result
+handlePresentResult ::
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
+  RenderEnv ->
+  Int ->
+  AnyCamera ->
+  [DrawCall] ->
+  Vulkan.Word32 ->
+  Vulkan.VkResult ->
+  RenderLoopM m (Bool, Bool)
+handlePresentResult env@RenderEnv {..} frameNumber camera drawList imageIndex = \case
+  Vulkan.VK_SUCCESS -> do
+    shouldInspect <- consumeInspectFlag
+    when shouldInspect $ do
+      handleInspector frameNumber drawList reContext camera (rcSurfaceExtent reContext)
+    shouldScreenshot <- consumeScreenshotFlag
+    shouldAllStages <- consumeAllStagesFlag
+    shouldSwapchain <- consumeSwapchainScreenshotFlag
+    when shouldScreenshot $ do
+      handleScreenshotSingle reDeferred (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
+    when shouldAllStages $ do
+      handleScreenshotAllStages reDeferred (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
+    when shouldSwapchain $ do
+      handleScreenshotSwapchain reContext (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
+    pure (False, False)
+  Vulkan.VK_SUBOPTIMAL_KHR ->
+    pure (True, False)
+  Vulkan.VK_ERROR_OUT_OF_DATE_KHR ->
+    pure (True, False)
+  _ ->
+    fail "presentFrame failed"
+
+-- | Handle frame timing and loop continuation
+handleFrameTiming ::
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadGraphics m, MonadStateReader m) =>
+  TimeSpec ->
+  Bool ->
+  Bool ->
+  Integer ->
+  Int ->
+  RenderLoopM m Bool
+handleFrameTiming frameStartTime needRestart terminating targetFPS frameNumber
+  | needRestart = do
+      deviceWaitIdle
+      logInfo LogGeneral "waiting IDLE state for device"
+      logInfo LogGeneral "terminating renderFrameLoop"
+      pure terminating
+  | otherwise = do
+      frameEndTime <- getMonotonicTime
+      let renderTime = toNanoSecs frameEndTime - toNanoSecs frameStartTime
+          delay = ((1000000000 `div` targetFPS) - renderTime) `div` 1000
+      recordFrameTime renderTime
+      mMsg <- getTelemetryMessage
+      for_ mMsg $ logInfo LogRender
+      delayMicros (fromIntegral delay)
+      renderFrameLoop' ((frameNumber + 1) `mod` Render.maxFramesInFlight)
+
 renderFrameLoop ::
   (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
   RenderEnv ->
@@ -305,166 +488,15 @@ renderFrameLoop' ::
   Int ->
   RenderLoopM m Bool
 renderFrameLoop' frameNumber = do
-  RenderEnv
-    { reContext = ctx@RenderContext {..},
-      reDeferred = dr@DeferredResources {..},
-      reCullResources = ccr@ComputeCullResources {..},
-      reTargetFPS = targetFPS,
-      reImageAvailableSemaphores = imageAvailableSemaphores,
-      reControl = control,
-      reFrameMvpMemories = frameMvpMemories,
-      reTvCamera = tvCamera,
-      reTvInspect = tvInspect,
-      reTvInsp = tvInsp,
-      reTvRenderDebug = tvRenderDebug,
-      reECSWorld = ecsWorld,
-      reResourceManager = rm,
-      reTextureSampler = textureSampler,
-      reFrameDescriptorSets = frameDescriptorSets,
-      reTextureIndexMap = textureIndexMap,
-      reTvWireframe = tvWireframe,
-      reFrameStatsRef = frameStatsRef,
-      reTvDebugMode = tvDebugMode,
-      reTvAxisOverlay = tvAxisOverlay,
-      reTvGroundPlane = tvGroundPlane,
-      reTvPendingScreenshot = tvPendingScreenshot,
-      reTvPendingAllStages = tvPendingAllStages,
-      reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
-      rePhysicalDevice = physicalDevice,
-      reLightSsboBuffer = lightSsboBuffer,
-      reLightSsboMemory = lightSsboMemory,
-      reTvLights = tvLights,
-      reTvTimeOfDay = tvTimeOfDay,
-      reTvTimeSpeed = tvTimeSpeed,
-      reTvDayNightEnabled = tvDayNightEnabled,
-      reTvCloudHeight = tvCloudHeight
-    } <- ask
+  env@RenderEnv {reTargetFPS = targetFPS} <- ask
   frameStartTime <- getMonotonicTime
   maybeControlMessage <- readControl
+
   (needRestart, terminating) <- case maybeControlMessage of
-    Nothing -> do
-      let imageAvailableSemaphore = imageAvailableSemaphores !! frameNumber
-          mvpMemory = frameMvpMemories !! frameNumber
-      camera <- readCamera
-      drawList <- extractDrawList ecsWorld rm textureIndexMap
-      logDebug LogRender $ "draw list: " <> showT (length drawList) <> " entities"
-      let camPos = realToFrac <$> Camera.cameraPosition camera
-          camTarget = realToFrac <$> Camera.cameraTarget camera
-          w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
-          h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
-          projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> makeProjectionMatrix w h :: M44 Float
-          viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
-          entityDebugInfos = computeEntityDebugInfos drawList projMat viewMat
-          renderDebugInfo = buildRenderDebugInfo frameNumber camPos camTarget projMat entityDebugInfos
-      liftIO $ STM.atomically $ STM.writeTVar tvRenderDebug $ Just renderDebugInfo
-      let entityData = buildAllEntityData drawList
-          cullData = buildCullData w h camera drawList
-      uploadStorageBuffer ccrEntityMemory 0 entityData
-      uploadUniformBuffer ccrCullDataMemory 0 [cullData]
-      logDebug LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
+    Just Terminate -> terminateFrame
+    Nothing -> runFrame frameNumber
 
-      -- Upload lights to SSBO
-      lights' <- readLights
-      let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
-      uploadStorageBuffer lightSsboMemory 0 lightsToUpload
-      let lightCount = fromIntegral (length lights') :: Word32
-      logDebug LogRender $ "lights uploaded: " <> showT (length lights')
-      case drawList of
-        [] -> pure (False, False)
-        _ -> do
-          let w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
-              h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
-              view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
-              projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
-              skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
-          uploadUniformBuffer mvpMemory 0 [view, projection]
-
-          -- Read all TVar state via capabilities before defining the IO callback
-          wireframeEnabled' <- readWireframe
-          debugMode' <- readDebugMode
-          axisOverlay' <- readAxisOverlay
-          groundPlane' <- readGroundPlane
-          currentTime <- readTimeOfDay
-          dnEnabled <- readDayNightEnabled
-          cloudHeight' <- readCloudHeight
-          let (sunState, skyTint, iblInt, sunAzimuth, sunDir) = computeSkyParams dnEnabled currentTime
-
-          let recordCtx =
-                RecordContext
-                  { rcGraphicsCommandBuffers = graphicsCommandBuffers,
-                    rcFrameDescriptorSets = frameDescriptorSets,
-                    rcTextureSampler = textureSampler,
-                    rcLightSsboBuffer = lightSsboBuffer,
-                    rcDrawList = drawList,
-                    rcCameraPos = realToFrac <$> Camera.cameraPosition camera,
-                    rcSkyboxRays = skyboxRays,
-                    rcDebugMode = debugMode',
-                    rcAxisOverlay = axisOverlay',
-                    rcGroundPlane = groundPlane',
-                    rcLightCount = lightCount,
-                    rcSkyTint = skyTint,
-                    rcIBLIntensity = iblInt,
-                    rcSunAzimuth = sunAzimuth,
-                    rcSunDir = sunDir,
-                    rcCloudHeight = cloudHeight',
-                    rcWireframeEnabled = wireframeEnabled',
-                    rcDeferred = dr,
-                    rcCullResources = ccr,
-                    rcDevice = device,
-                    rcSurfaceExtent = rcSurfaceExtent
-                  }
-              recordAction = buildRecordAction recordCtx
-
-          res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
-          case res of
-            Render.FrameOk imageIndex -> do
-              presentResult <- presentFrameGraphics imageIndex (renderFinishedSemaphores !! fromIntegral imageIndex)
-              case presentResult of
-                Vulkan.VK_SUCCESS -> do
-                   shouldInspect <- consumeInspectFlag
-                   when shouldInspect $ do
-                     handleInspector frameNumber drawList ctx camera rcSurfaceExtent
-                   shouldScreenshot <- consumeScreenshotFlag
-                   shouldAllStages <- consumeAllStagesFlag
-                   shouldSwapchain <- consumeSwapchainScreenshotFlag
-                   when shouldScreenshot $ do
-                     handleScreenshotSingle dr device physicalDevice rcGraphicsCommandPool graphicsQueueHandler rcSurfaceExtent imageIndex
-                   when shouldAllStages $ do
-                     handleScreenshotAllStages dr device physicalDevice rcGraphicsCommandPool graphicsQueueHandler rcSurfaceExtent imageIndex
-                   when shouldSwapchain $ do
-                     handleScreenshotSwapchain ctx device physicalDevice rcGraphicsCommandPool graphicsQueueHandler rcSurfaceExtent imageIndex
-                   pure (False, False)
-                Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
-                Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
-                _ -> fail "presentFrame failed"
-            Render.FrameSuboptimal _ -> do
-              fail "suboptimal"
-            Render.FrameOutOfDate -> do
-              logInfo LogGeneral "resizing swapchain"
-              pure (True, False)
-            Render.FrameTimeout -> do
-              delayMicros 16000
-              pure (False, False)
-            Render.FrameFailed err -> fail err
-    Just Terminate -> do
-      logInfo LogGeneral "terminating render loop by signal"
-      pure (True, True)
-
-  frameEndTime <- getMonotonicTime
-  if needRestart
-    then do
-      deviceWaitIdle
-      logInfo LogGeneral "waiting IDLE state for device"
-      logInfo LogGeneral "terminating renderFrameLoop"
-      pure terminating
-    else do
-      let renderTime = toNanoSecs frameEndTime - toNanoSecs frameStartTime
-          delay = ((1000000000 `div` targetFPS) - renderTime) `div` 1000
-      recordFrameTime renderTime
-      mMsg <- getTelemetryMessage
-      for_ mMsg $ logInfo LogRender
-      delayMicros (fromIntegral delay)
-      renderFrameLoop' ((frameNumber + 1) `mod` Render.maxFramesInFlight)
+  handleFrameTiming frameStartTime needRestart terminating targetFPS frameNumber
 
 renderLoop ::
   (MonadFail m, MonadManaged m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
