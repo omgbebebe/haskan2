@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards #-}
+
 
 module Graphics.Haskan.Scene.GLTF
   ( importGLTF,
@@ -204,7 +204,7 @@ loadTextures rm _pdev _dev _queue _cmdBuf cache gltf = do
 
   -- Phase 1: Decode all images concurrently (CPU-bound)
   decoded <- liftIO $ do
-    mvars <- mapM (\_ -> newEmptyMVar) images
+    mvars <- mapM (const newEmptyMVar) images
     for_ (zip images mvars) $ \(img, mvar) -> forkIO $ do
       result <- decodeImage cache img
       putMVar mvar result
@@ -349,7 +349,7 @@ loadMeshes rm pdev dev gltf = do
   logInfoIO LogGeneral $ "loading " <> showT numMeshes <> " meshes concurrently"
 
   liftIO $ do
-    mvars <- mapM (\_ -> newEmptyMVar) meshes
+    mvars <- mapM (const newEmptyMVar) meshes
     for_ (zip meshes mvars) $ \(mesh, mvar) -> forkIO $ do
       result <- loadMesh rm pdev dev mesh
       putMVar mvar result
@@ -456,7 +456,7 @@ buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNo
   let nodes = gltfNodes gltf
       -- Find root nodes (nodes that are not children of any other node)
       allChildren = concatMap (Vector.toList . nodeChildren) (Vector.toList nodes)
-      rootIndices = filter (\i -> i `notElem` allChildren) [0 .. Vector.length nodes - 1]
+      rootIndices = filter (`notElem` allChildren) [0 .. Vector.length nodes - 1]
 
   -- Create a root entity for the scene
   sceneRoot <- ECS.spawnEntity world

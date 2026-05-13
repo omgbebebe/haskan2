@@ -69,7 +69,7 @@ pieP = do
   _type <- intP <* newline
   _ <- string "TEXTURE" <* skipSpaces
   _tn <- intP
-  textureName <- takeWhile1P (Just "Texture name") (\x -> x /= ' ') <* skipSpaces
+  textureName <- takeWhile1P (Just "Texture name") (/= ' ') <* skipSpaces
   _ <- intP
   _ <- intP <* newline
   _ <- string "LEVELS" <* skipSpaces
@@ -108,7 +108,7 @@ polygonP pieVersion = do
   uv1 <- v2FloatP
   uv2 <- v2FloatP
   uv3 <- v2FloatP
-  (void newline <|> eof)
+  void newline <|> eof
   case pieVersion of
     3 -> pure $ Triangle indices (V3 uv1 uv2 uv3)
     2 -> pure $ Triangle indices (V3 (uv1 / 256.0) (uv2 / 256.0) (uv3 / 256.0))

@@ -42,7 +42,7 @@ instance Storable Vertex where
         vTangentSz = sizeOf (undefined :: V4 Foreign.C.CFloat)
      in do
           pokeByteOff ptr 0 vPos
-          pokeByteOff ptr (vPosSz) vTexUV
+          pokeByteOff ptr vPosSz vTexUV
           pokeByteOff ptr (vPosSz + vTexUVSz) vNorm
           pokeByteOff ptr (vPosSz + vTexUVSz + vNormSz) vTangent
           pokeByteOff ptr (vPosSz + vTexUVSz + vNormSz + vTangentSz) vCol

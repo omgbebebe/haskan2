@@ -64,7 +64,7 @@ instance Camera AnyCamera where
   animate (Fly c) dt = Fly (animate c dt)
 
 updateCamera :: (Camera c) => c -> [Modifier Foreign.C.CFloat] -> c
-updateCamera cam mods = update cam mods
+updateCamera = update
 
 -- | Convert between camera types while preserving position and orientation.
 toAnyCamera :: AnyCamera -> AnyCamera

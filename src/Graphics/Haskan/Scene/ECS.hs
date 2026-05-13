@@ -43,7 +43,7 @@ import Control.Concurrent.STM qualified as STM
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, isJust)
 import Data.Word (Word32)
 import Graphics.Haskan.Scene.Transform (Transform)
 import Graphics.Haskan.Vulkan.Resources (MeshHandle, TextureHandle)
@@ -115,7 +115,7 @@ getTransform World {..} eid =
   liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wTransforms
 
 hasTransform :: (MonadIO m) => World -> EntityId -> m Bool
-hasTransform world eid = maybe False (const True) <$> getTransform world eid
+hasTransform world eid = Data.Maybe.isJust <$> getTransform world eid
 
 setMesh :: (MonadIO m) => World -> EntityId -> MeshHandle -> m ()
 setMesh World {..} eid h =
@@ -126,7 +126,7 @@ getMesh World {..} eid =
   liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wMeshes
 
 hasMesh :: (MonadIO m) => World -> EntityId -> m Bool
-hasMesh world eid = maybe False (const True) <$> getMesh world eid
+hasMesh world eid = Data.Maybe.isJust <$> getMesh world eid
 
 setMaterial :: (MonadIO m) => World -> EntityId -> TextureHandle -> m ()
 setMaterial World {..} eid h =
@@ -137,7 +137,7 @@ getMaterial World {..} eid =
   liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wMaterials
 
 hasMaterial :: (MonadIO m) => World -> EntityId -> m Bool
-hasMaterial world eid = maybe False (const True) <$> getMaterial world eid
+hasMaterial world eid = Data.Maybe.isJust <$> getMaterial world eid
 
 setMetallicFactor :: (MonadIO m) => World -> EntityId -> Float -> m ()
 setMetallicFactor World {..} eid v =
@@ -204,7 +204,7 @@ getParent World {..} eid =
   liftIO $ STM.atomically $ IntMap.lookup (entityKey eid) <$> STM.readTVar wParents
 
 hasParent :: (MonadIO m) => World -> EntityId -> m Bool
-hasParent world eid = maybe False (const True) <$> getParent world eid
+hasParent world eid = Data.Maybe.isJust <$> getParent world eid
 
 getChildren :: (MonadIO m) => World -> EntityId -> m [EntityId]
 getChildren World {..} eid = liftIO $ STM.atomically $ do

@@ -27,7 +27,7 @@ allocateDescriptorSet dev descriptorPool setLayouts = do
               &* set @"descriptorSetCount" (fromIntegral (length setLayouts))
               &* setListRef @"pSetLayouts" setLayouts
           )
-   in liftIO $ withPtr allocateInfo (\aiPtr -> allocaAndPeek (Vulkan.vkAllocateDescriptorSets dev aiPtr))
+   in liftIO $ withPtr allocateInfo (allocaAndPeek . Vulkan.vkAllocateDescriptorSets dev)
 
 updateDescriptorSets ::
   (MonadIO m) =>

@@ -95,8 +95,7 @@ buildDeferredGraph DeferredPassData {..} = do
                     vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
                     idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
                 Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-                  Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
-                    Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
+                  Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
                 Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
             -- Bind descriptor set once (no dynamic offsets)
             Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
@@ -122,8 +121,7 @@ buildDeferredGraph DeferredPassData {..} = do
                       vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
                       idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
                   Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-                    Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
-                      Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr offsetPtr
+                    Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
                   Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
               -- Bind descriptor set for wireframe (shares layout)
               Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
@@ -202,8 +200,7 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac dpdCloudHeight
                   ] ::
                     [CFloat]
-             in Foreign.Marshal.Array.withArray camPosData $ \camPtr ->
-                  Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 112 (Foreign.castPtr camPtr)
+             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 112 . Foreign.castPtr
             -- Fullscreen triangle: 3 vertices, no indices
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
       }

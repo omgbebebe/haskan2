@@ -1,5 +1,6 @@
 module Graphics.Haskan.Vulkan.Buffer where
 
+import Control.Monad (unless)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
@@ -28,7 +29,7 @@ managedBuffer ::
   (MonadManaged m, Storable a) =>
   Vulkan.VkDevice ->
   [a] ->
-  (Vulkan.VkBufferUsageBitmask Vulkan.FlagMask) ->
+  Vulkan.VkBufferUsageBitmask Vulkan.FlagMask ->
   m (Vulkan.VkBuffer, Vulkan.VkMemoryRequirements)
 managedBuffer dev data' usage =
   alloc
@@ -40,7 +41,7 @@ createBuffer ::
   (MonadIO m, Storable a) =>
   Vulkan.VkDevice ->
   [a] ->
-  (Vulkan.VkBufferUsageBitmask Vulkan.FlagMask) ->
+  Vulkan.VkBufferUsageBitmask Vulkan.FlagMask ->
   m (Vulkan.VkBuffer, Vulkan.VkMemoryRequirements)
 createBuffer dev data' usage = do
   let size = case data' of
@@ -157,9 +158,7 @@ managedUniformBuffer pdev dev values = do
 updateUniformBuffer :: (MonadIO m, Storable a) => Vulkan.VkDevice -> Vulkan.VkDeviceMemory -> [a] -> m ()
 updateUniformBuffer dev memory uniformData = do
   let size = fromIntegral (sum (map Foreign.sizeOf uniformData))
-  if size == 0
-    then pure ()
-    else do
+  Control.Monad.unless (size == 0) $ do
       memPtr <-
         allocaAndPeek (Vulkan.vkMapMemory dev memory 0 size Vulkan.VK_ZERO_FLAGS)
       liftIO $ do
@@ -169,9 +168,7 @@ updateUniformBuffer dev memory uniformData = do
 updateUniformBufferRegion :: (MonadIO m, Storable a) => Vulkan.VkDevice -> Vulkan.VkDeviceMemory -> Int -> [a] -> m ()
 updateUniformBufferRegion dev memory offset uniformData = do
   let size = fromIntegral (sum (map Foreign.sizeOf uniformData))
-  if size == 0
-    then pure ()
-    else do
+  Control.Monad.unless (size == 0) $ do
       memPtr <-
         allocaAndPeek (Vulkan.vkMapMemory dev memory (fromIntegral offset) size Vulkan.VK_ZERO_FLAGS)
       liftIO $ do

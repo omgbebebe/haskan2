@@ -82,7 +82,7 @@ v3ToCFloat :: V3 Float -> V3 Foreign.C.CFloat
 v3ToCFloat (V3 a b c) = V3 (realToFrac a) (realToFrac b) (realToFrac c)
 
 variants :: (Foldable t) => t (QuadFace a) -> [QuadFace a]
-variants faces = concatMap (\(QuadFace f) -> map (\n -> QuadFace (rot4 n f)) [0 .. 3]) faces
+variants = concatMap (\(QuadFace f) -> map (\n -> QuadFace (rot4 n f)) [0 .. 3])
 
 rot4 :: Int -> (a, a, a, a) -> (a, a, a, a)
 rot4 n x@(a, b, c, d) = foldr id x (replicate n rot)
@@ -117,8 +117,7 @@ fromPie PieLevel {..} = do
           )
           triangles
       verts =
-        map
-          ( \(i, (V3 x y z)) ->
+        zipWith (curry ( \(i, (V3 x y z)) ->
               let norm = fromMaybe (V3 0.0 0.0 0.0) (lookup i firstNormals)
                in Vertex
                     { vPos = V3 (realToFrac x) (realToFrac y) (realToFrac z),
@@ -126,8 +125,7 @@ fromPie PieLevel {..} = do
                       vNorm = norm,
                       vCol = V3 0.6 0.6 0.0
                     }
-          )
-          (zip [0 ..] vertices)
+          )) [0 ..] vertices
   Mesh verts indices
 
 calcNormal :: V3 Float -> V3 Float -> V3 Float -> V3 Foreign.C.CFloat
@@ -145,10 +143,10 @@ verts =
     V3 (-1.0) (-1.0) (-1.0),
     V3 1.0 1.0 (-1.0),
     V3 1.0 (-1.0) (-1.0),
-    V3 (-1.0) 1.0 (1.0),
-    V3 (-1.0) (-1.0) (1.0),
-    V3 1.0 1.0 (1.0),
-    V3 1.0 (-1.0) (1.0)
+    V3 (-1.0) 1.0 1.0,
+    V3 (-1.0) (-1.0) 1.0,
+    V3 1.0 1.0 1.0,
+    V3 1.0 (-1.0) 1.0
   ]
 
 indxs :: [Int]
@@ -269,4 +267,4 @@ normPass faces = case faces of
   [] -> []
   x : xs -> scanl (\b a -> if compareFst3 a b == EQ then rotateFace 1 a else a) x xs
 
-isNormalized faces = all (EQ /=) $ zipWith compareFst3 faces (tail faces)
+isNormalized faces = notElem EQ $ zipWith compareFst3 faces (tail faces)

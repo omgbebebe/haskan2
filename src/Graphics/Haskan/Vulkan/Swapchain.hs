@@ -62,8 +62,7 @@ createSwapchain dev pdev surface extent = do
               &* set @"preTransform" preTransform
           )
 
-  swapchain <- liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateSwapchainKHR dev ptr Vulkan.vkNullPtr)
-  pure swapchain
+  liftIO $ withPtr createInfo $ \ptr -> allocaAndPeek (Vulkan.vkCreateSwapchainKHR dev ptr Vulkan.vkNullPtr)
 
 getSwapchainImages :: (MonadIO m) => Vulkan.VkDevice -> Vulkan.VkSwapchainKHR -> m [Vulkan.VkImage]
 getSwapchainImages dev swapchain = liftIO $ peekVkList (Vulkan.vkGetSwapchainImagesKHR dev swapchain)

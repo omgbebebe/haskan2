@@ -156,7 +156,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
     Nothing -> do
-      let imageAvailableSemaphore = imageAvailableSemaphores !! (frameNumber)
+      let imageAvailableSemaphore = imageAvailableSemaphores !! frameNumber
           mvpMemory = frameMvpMemories !! frameNumber
       camera <- liftIO $ STM.readTVarIO tvCamera
       drawList <- extractDrawList ecsWorld rm textureIndexMap
@@ -367,7 +367,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                   Left err -> liftIO $ logInfoIO LogRender $ "graph compilation failed: " <> Text.pack (show err)
                   Right compiled -> do
                     CommandBuffer.withCommandBuffer commandBuffer $ do
-                      let numWorkgroups = ((length drawList + 63) `div` 64)
+                      let numWorkgroups = (length drawList + 63) `div` 64
                       when (numWorkgroups > 0) $ do
                         liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE ccrPipeline
                         liftIO $ Foreign.Marshal.Array.withArray [ccrDescriptorSet] $ \dsPtr ->
@@ -401,7 +401,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
           res <- liftIO $ drawFrame ctx imageAvailableSemaphore frameNumber recordAction
           case res of
             Render.FrameOk imageIndex -> do
-              presentResult <- liftIO $ presentFrame ctx imageIndex (renderFinishedSemaphores !! (fromIntegral imageIndex))
+              presentResult <- liftIO $ presentFrame ctx imageIndex (renderFinishedSemaphores !! fromIntegral imageIndex)
               case presentResult of
                 Vulkan.VK_SUCCESS -> do
                   shouldInspect <- liftIO $ STM.atomically $ do
@@ -436,7 +436,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
                       Vulkan.vkDeviceWaitIdle device >>= throwVkResult
                       let gbufferImages = drGBufferImages !! fromIntegral imageIndex
                       logInfoIO LogGeneral "capturing all pipeline stages..."
-                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 0) rcSurfaceExtent Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT "position"
+                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (head gbufferImages) rcSurfaceExtent Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT "position"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 1) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "normal"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 3) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "emissive"
@@ -483,7 +483,7 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
         stats <- readIORef frameStatsRef
         let (newStats, mMsg) = updateFrameStats stats renderTime
         writeIORef frameStatsRef newStats
-        for_ mMsg $ \msg -> logInfoIO LogRender msg
+        for_ mMsg $ logInfoIO LogRender
       renderFrameLoop
         ctx
         dr
@@ -900,7 +900,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
           Just view -> pure [view]
           Nothing -> liftIO $ fail "failed to create white texture"
       else do
-        views <- forM uniqueTextures $ \texHandle -> do
+        forM uniqueTextures $ \texHandle -> do
           let hId = fromIntegral (unTextureHandle texHandle)
           (tw, th, pixelData) <- case IntMap.lookup hId texturePixelMap of
             Just (tw, th, pixelData) -> pure (tw, th, pixelData)
@@ -916,7 +916,6 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
           case mView of
             Just view -> pure view
             Nothing -> liftIO $ fail "failed to create texture view"
-        pure views
 
   logInfoIO LogTexture $ "bindless textures created: " <> showT (length bindlessTextureViews)
 
@@ -981,9 +980,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
-        if exit
-          then pure ()
-          else do
+        unless exit $ do
             renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
               with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader mRadianceView mIrradianceView mBrdfView lightingSampler cloudNoiseView) $ \dr -> do
                 -- Update lighting descriptor sets with light SSBO

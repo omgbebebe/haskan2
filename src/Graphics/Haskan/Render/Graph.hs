@@ -1,5 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE RecordWildCards #-}
+
 
 module Graphics.Haskan.Render.Graph
   ( -- * Resource IDs
@@ -167,7 +167,7 @@ transientImage name fmt extent usage = do
 transientBuffer ::
   Text ->
   Vulkan.VkDeviceSize ->
-  (Vulkan.VkBufferUsageBitmask Vulkan.FlagMask) ->
+  Vulkan.VkBufferUsageBitmask Vulkan.FlagMask ->
   RenderGraphBuilder ResourceId
 transientBuffer name size usage = do
   idx <- RenderGraphBuilder $ gets gbsNextId
@@ -205,7 +205,7 @@ compileGraph resources passes =
   case topologicalSort passes of
     Nothing -> Left "render graph contains a dependency cycle"
     Just sorted ->
-      let compiled = zipWith (\idx pass -> CompiledPass pass idx) [0 ..] sorted
+      let compiled = zipWith (flip CompiledPass) [0 ..] sorted
        in Right (CompiledGraph compiled)
 
 -- | Topological sort of passes: if Pass B reads a resource written by Pass A,

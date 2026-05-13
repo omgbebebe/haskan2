@@ -36,7 +36,7 @@ newtype CacheKey = CacheKey ByteString
 
 -- | Simple djb2 hash over a ByteString.
 djb2 :: ByteString -> Word32
-djb2 = BS.foldl' (\h b -> (h * 33 + fromIntegral b)) 5381
+djb2 = BS.foldl' (\h b -> h * 33 + fromIntegral b) 5381
 
 -- | Build a cache key from source bytes and a config tag.
 -- The config tag encodes preprocessing parameters (target format, dimensions, etc.)

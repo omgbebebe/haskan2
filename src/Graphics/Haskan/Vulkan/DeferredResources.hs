@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards #-}
+
 
 module Graphics.Haskan.Vulkan.DeferredResources
   ( DeferredResources (..),
@@ -120,8 +120,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
     ( for_ (concat gBufferImages) $ \img ->
         CommandBuffer.layerTransition tempCmdBuf img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     )
-  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBuf] $ \ptr ->
-    Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1 ptr
+  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBuf] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
   logDebugIO LogRender "g-buffer images transitioned to SHADER_READ_ONLY_OPTIMAL"
 
   -- Shared depth image for g-buffer
@@ -205,8 +204,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   swapchainImages <- Swapchain.getSwapchainImages device (swapchain ctx)
   let surfaceFormat' = Vulkan.getField @"format" surfaceFormat
   swapchainImageViews <- for swapchainImages (ImageView.managedImageView device surfaceFormat')
-  lightingFramebuffers <- for swapchainImageViews $ \view ->
-    Framebuffer.managedLightingFramebuffer device lightingRenderPass extent view
+  lightingFramebuffers <- for swapchainImageViews $ Framebuffer.managedLightingFramebuffer device lightingRenderPass extent
   logDebugIO LogRender $ "lighting framebuffers created: " <> showT (length lightingFramebuffers)
 
   -- Lighting descriptor pool and sets
@@ -219,7 +217,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   liftIO $ for_ (zip lightingDescriptorSets gBufferImageViews) $ \(ds, views) -> do
     let allViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
           (Just env, Just irr, Just brdf) -> views ++ [env, irr, brdf]
-          _ -> views ++ (replicate 3 Vulkan.VK_NULL_HANDLE)
+          _ -> views ++ replicate 3 Vulkan.VK_NULL_HANDLE
     DescriptorSet.updateLightingDescriptorSets device ds sampler allViews Nothing (Just cloudNoiseView)
   logDebugIO LogRender "lighting descriptor sets updated"
 

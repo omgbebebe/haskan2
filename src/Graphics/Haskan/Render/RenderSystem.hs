@@ -61,7 +61,7 @@ extractDrawList world rm texIndexMap = liftIO $ do
 
   let worldMatrices = computeWorldMatrices transforms parents
 
-  fmap catMaybes $ mapM (resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures occlusionTextures occlusionStrengths emissiveTextures worldMatrices texIndexMap) (IntMap.toList meshes)
+  catMaybes <$> mapM (resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures occlusionTextures occlusionStrengths emissiveTextures worldMatrices texIndexMap) (IntMap.toList meshes)
 
 computeWorldMatrices ::
   IntMap Transform ->

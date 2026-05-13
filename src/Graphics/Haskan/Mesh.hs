@@ -187,7 +187,7 @@ groundPlaneMeshGrid subdivisions size =
         [ let x = -s + fromIntegral i * step
               y = -s + fromIntegral j * step
               -- Checkerboard color
-              isDark = (i + j) `mod` 2 == 0
+              isDark = even (i + j)
               col = if isDark then V3 0.15 0.15 0.15 else V3 0.35 0.35 0.35
            in Vertex (V3 x y 0) (V2 (fromIntegral i) (fromIntegral j)) (V3 0 0 1) t col
         | j <- [0 .. n],

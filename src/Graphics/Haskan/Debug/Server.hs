@@ -14,6 +14,7 @@ import Control.Concurrent.STM qualified as STM
 import Control.Concurrent.STM.TQueue qualified as TQueue
 import Control.Exception (SomeException, bracket, handle)
 import Control.Monad (forever, unless, void)
+import Data.Foldable (for_)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
@@ -76,9 +77,7 @@ handleConnection sock writeAction cmdQueue = handle (\(_ :: SomeException) -> pu
           Right msg -> do
             case debugMessageToActionEvent msg of
               Right mAction -> do
-                case mAction of
-                  Nothing -> pure ()
-                  Just ev -> writeAction ev
+                Data.Foldable.for_ mAction writeAction
                 hPutStrLn hdl "{ \"status\": \"ok\" }"
                 hFlush hdl
                 loop hdl

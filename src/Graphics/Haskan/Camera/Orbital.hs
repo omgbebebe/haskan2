@@ -128,13 +128,13 @@ instance Camera OrbitalCamera where
   animate = animateOrbital
 
 updateOrbital :: OrbitalCamera -> [Modifier Foreign.C.CFloat] -> OrbitalCamera
-updateOrbital cam = foldl orbitalModify cam
+updateOrbital = foldl orbitalModify
 
 orbitalModify :: OrbitalCamera -> Modifier Foreign.C.CFloat -> OrbitalCamera
 orbitalModify cam@OrbitalCamera {..} mod =
   case mod of
-    (MoveX n) -> cam {target = target + (V3 n 0.0 0.0)}
-    (MoveY n) -> cam {target = target + (V3 0.0 n 0.0)}
+    (MoveX n) -> cam {target = target + V3 n 0.0 0.0}
+    (MoveY n) -> cam {target = target + V3 0.0 n 0.0}
     (MoveForward n) ->
       let fwd = orbitalCameraForward cam
           V3 fx _ fz = fwd
@@ -157,7 +157,7 @@ orbitalModify cam@OrbitalCamera {..} mod =
           -- Elevation clamping
           rawForward = normalize (rotate rawTarget (V3 0 0 (-1)))
           rawEl = asin (rawForward ^. _y)
-          (V2 elMin elMax) = fromMaybe (V2 (-pi / 2 + 0.01) (pi / 2 - 0.01)) elevationBounds
+          (V2 elMin elMax) = fromMaybe (V2 (- (pi / 2) + 0.01) (pi / 2 - 0.01)) elevationBounds
           clampedEl = max elMin (min elMax rawEl)
 
           newTarget =

@@ -128,7 +128,7 @@ imageToInternal img config =
         TextureMetadata
           { itmWidth = w,
             itmHeight = h,
-            itmMipLevels = if tcGenerateMips config then 1 else 1, -- placeholder
+            itmMipLevels = 1, -- placeholder
             itmFormat = tcTargetFormat config,
             itmArrayLayer = 0
           }

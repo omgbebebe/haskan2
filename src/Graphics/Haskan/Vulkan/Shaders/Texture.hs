@@ -79,7 +79,7 @@ fragment = shader do
       uv' :: Code (V 2 Float)
       uv' =
         if r < 0.01 || r > 0.99
-          then over @(Index 0) (\x -> 1 - x) uv
+          then over @(Index 0) (1 -) uv
           else uv
   tex <- use @(ImageTexel "logo") NilOps uv'
   let alpha = view @(Index 3) tex

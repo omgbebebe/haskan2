@@ -42,7 +42,7 @@ createRenderDevice pdev surface layers = do
 
   let graphicsQueueFamilies =
         filter
-          (\(_, p) -> (Vulkan.getField @"queueFlags" p) .&. Vulkan.VK_QUEUE_GRAPHICS_BIT /= Vulkan.VK_ZERO_FLAGS)
+          (\(_, p) -> Vulkan.getField @"queueFlags" p .&. Vulkan.VK_QUEUE_GRAPHICS_BIT /= Vulkan.VK_ZERO_FLAGS)
           queueFamilies
 
       queueFamilyIndices = case (graphicsQueueFamilies, presentQueueFamilies) of
@@ -94,7 +94,7 @@ createDevice dev queueFamilyIndices enabledLayers = do
                     &* set @"pNext" (castPtr $ Vulkan.unsafePtr diFeaturesQuery)
                     &* set @"features" availableFeatures
                 )
-        withPtr features2Query $ \f2Ptr -> Vulkan11.vkGetPhysicalDeviceFeatures2 dev f2Ptr
+        withPtr features2Query $ Vulkan11.vkGetPhysicalDeviceFeatures2 dev
         let nonUniform = Vulkan.getField @"shaderSampledImageArrayNonUniformIndexing" diFeaturesQuery == Vulkan.VK_TRUE
             updateAfterBind = Vulkan.getField @"descriptorBindingSampledImageUpdateAfterBind" diFeaturesQuery == Vulkan.VK_TRUE
             partiallyBound = Vulkan.getField @"descriptorBindingPartiallyBound" diFeaturesQuery == Vulkan.VK_TRUE

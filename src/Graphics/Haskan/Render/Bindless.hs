@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards #-}
+
 
 module Graphics.Haskan.Render.Bindless
   ( BindlessSet (..),
@@ -85,6 +85,5 @@ allocateDescriptorSet dev descriptorPool setLayouts = do
    in liftIO $
         Vulkan.withPtr
           allocateInfo
-          ( \aiPtr ->
-              Graphics.Haskan.Resources.allocaAndPeek (Vulkan.vkAllocateDescriptorSets dev aiPtr)
+          ( Graphics.Haskan.Resources.allocaAndPeek . Vulkan.vkAllocateDescriptorSets dev
           )

@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards #-}
+
 
 module Graphics.Haskan.Camera.Types
   ( InterpolationMethod (..),

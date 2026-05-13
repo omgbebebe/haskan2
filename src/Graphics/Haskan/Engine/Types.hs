@@ -1,6 +1,6 @@
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RecordWildCards #-}
+
+
+
 
 module Graphics.Haskan.Engine.Types
   ( toListOfV4,

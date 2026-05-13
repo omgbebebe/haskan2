@@ -32,7 +32,7 @@ import Control.Concurrent.STM.TVar (TVar)
 import Control.Monad (forM_, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (runManaged, with)
-import Data.Maybe (catMaybes, fromMaybe)
+import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Graphics.Haskan.Camera (Camera (..))
@@ -81,14 +81,14 @@ mainLoop meshName EngineConfig {..} = do
   camera <- liftIO $ STM.newTVarIO initialCam
   isRunning <- liftIO $ STM.newTVarIO True
 
-  controlChannel <- liftIO $ TChan.newBroadcastTChanIO
+  controlChannel <- liftIO TChan.newBroadcastTChanIO
   worldState <- liftIO $ STM.newTVarIO (WorldState camera)
   inputBuffer <- liftIO newInputBuffer
-  debugCmdQueue <- liftIO $ STM.newTQueueIO
-  tvMoveForward <- liftIO $ STM.newTVarIO (False)
-  tvMoveBackward <- liftIO $ STM.newTVarIO (False)
-  tvStrafeLeft <- liftIO $ STM.newTVarIO (False)
-  tvStrafeRight <- liftIO $ STM.newTVarIO (False)
+  debugCmdQueue <- liftIO STM.newTQueueIO
+  tvMoveForward <- liftIO $ STM.newTVarIO False
+  tvMoveBackward <- liftIO $ STM.newTVarIO False
+  tvStrafeLeft <- liftIO $ STM.newTVarIO False
+  tvStrafeRight <- liftIO $ STM.newTVarIO False
 
   tvInspectFrame <- liftIO $ STM.newTVarIO False
   tvInspector <- liftIO $ STM.newTVarIO (Just (defaultInspector "snapshots"))
@@ -154,7 +154,7 @@ mainLoop meshName EngineConfig {..} = do
 
   mDebugServer <- case debugSocketPath of
     Just path -> do
-      h <- startDebugServer path (\ev -> STM.atomically $ writeInputBuffer inputBuffer ev) debugCmdQueue
+      h <- startDebugServer path (STM.atomically . writeInputBuffer inputBuffer) debugCmdQueue
       logInfoIO LogGeneral $ "debug server listening on " <> Text.pack path
       pure (Just h)
     Nothing -> pure Nothing
@@ -171,8 +171,8 @@ mainLoop meshName EngineConfig {..} = do
   physicalDevice <- PhysicalDevice.selectPhysicalDevice inst
   Window.showWindow window
 
-  renderLoopFinished <- liftIO $ newEmptyMVar
-  renderLoopReady <- liftIO $ newEmptyMVar
+  renderLoopFinished <- liftIO newEmptyMVar
+  renderLoopReady <- liftIO newEmptyMVar
   liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop physicalDevice surface layers targetRenderFPS gameState renderLoopFinished renderLoopReady controlChannel meshName uvCheckMode envMapDir
 
   -- Wait for render loop to finish initialization before starting timeout
@@ -196,17 +196,17 @@ mainLoop meshName EngineConfig {..} = do
         pure ()
       _ -> pure ()
 
-  stateUpdateLoopFinished <- liftIO $ newEmptyMVar
+  stateUpdateLoopFinished <- liftIO newEmptyMVar
   liftIO $ forkIOWithHandler "stateUpdateLoop" stateUpdateLoopFinished $ stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished inputBuffer debugCmdQueue controlChannel
 
   when renderLoopOk $ do
     let inputLoop :: (MonadIO m) => m ()
         inputLoop = do
           events <- SDL.pollEvents
-          let actionEvents = catMaybes $ map (payloadToActionEvent . SDL.eventPayload) events
+          let actionEvents = mapMaybe (payloadToActionEvent . SDL.eventPayload) events
               quitting = any (\(a, p, _) -> a == Escape && p) actionEvents
           liftIO $ STM.atomically $ forM_ actionEvents $ writeInputBuffer inputBuffer
-          when (not (null actionEvents)) $ logDebugIO LogInput $ "input: " <> showT (length actionEvents) <> " events, first=" <> showT (head actionEvents)
+          unless (null actionEvents) $ logDebugIO LogInput $ "input: " <> showT (length actionEvents) <> " events, first=" <> showT (head actionEvents)
           running <- liftIO $ STM.readTVarIO isRunning
           let inputDelayMicros = max 1 (1000000 `div` fromIntegral targetInputFPS)
           liftIO $ threadDelay (fromIntegral inputDelayMicros)

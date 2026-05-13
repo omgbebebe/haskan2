@@ -23,28 +23,28 @@ v2_s32float :: VertexFormat (V2 Foreign.C.CFloat)
 v2_s32float =
   VertexFormat
     ( Const
-        ([Component {format = Vulkan.VK_FORMAT_R32G32_SFLOAT}])
+        [Component {format = Vulkan.VK_FORMAT_R32G32_SFLOAT}]
     )
 
 v3_s32float :: VertexFormat (V3 Foreign.C.CFloat)
 v3_s32float =
   VertexFormat
     ( Const
-        ([Component {format = Vulkan.VK_FORMAT_R32G32B32_SFLOAT}])
+        [Component {format = Vulkan.VK_FORMAT_R32G32B32_SFLOAT}]
     )
 
 v4_word8 :: VertexFormat (V4 Word8)
 v4_word8 =
   VertexFormat
     ( Const
-        ([Component {format = Vulkan.VK_FORMAT_R8G8B8A8_UINT}])
+        [Component {format = Vulkan.VK_FORMAT_R8G8B8A8_UINT}]
     )
 
 v4_s32float :: VertexFormat (V4 Foreign.C.CFloat)
 v4_s32float =
   VertexFormat
     ( Const
-        ([Component {format = Vulkan.VK_FORMAT_R32G32B32A32_SFLOAT}])
+        [Component {format = Vulkan.VK_FORMAT_R32G32B32A32_SFLOAT}]
     )
 
 strideSize :: VertexFormat v -> Int
@@ -61,7 +61,7 @@ componentSize c =
     Vulkan.VK_FORMAT_R32G32_SFLOAT ->
       2 * 4
     Vulkan.VK_FORMAT_R8G8B8A8_UINT ->
-      4 * 1
+      4
 
 attributeDescriptions :: Int -> VertexFormat v -> [Vulkan.VkVertexInputAttributeDescription]
 attributeDescriptions binding (VertexFormat (Const components)) =

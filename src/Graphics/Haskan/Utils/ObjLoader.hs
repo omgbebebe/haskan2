@@ -58,8 +58,7 @@ objP = do
   vts <- some uvP
   vns <- some normalP
   s <- sModeP
-  faces <- facesP
-  pure $ Obj vs vts vns faces
+  Obj vs vts vns <$> facesP
 
 objNameP :: Parser String
 objNameP = do
@@ -100,8 +99,7 @@ faceP = do
 faceTripletsP :: Parser [FaceTriplet]
 faceTripletsP = do
   void $ string "f " <* skipSpaces
-  triplets <- some faceTripletP
-  pure triplets
+  some faceTripletP
 
 faceTripletP :: Parser FaceTriplet
 faceTripletP = do

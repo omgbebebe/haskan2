@@ -56,7 +56,7 @@ import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 readImageFromFile ::
   (MonadIO m) =>
   FilePath ->
-  m ((Data.Vector.Storable.Vector Word8), Int, Int)
+  m (Data.Vector.Storable.Vector Word8, Int, Int)
 readImageFromFile filePath = do
   image <-
     liftIO $
@@ -72,7 +72,7 @@ readImageFromFile filePath = do
 decodeImageBytes ::
   (MonadIO m) =>
   ByteString ->
-  m ((Data.Vector.Storable.Vector Word8), Int, Int)
+  m (Data.Vector.Storable.Vector Word8, Int, Int)
 decodeImageBytes bs = do
   image <- case decodeImage bs of
     Right dynamicImage -> pure (convertRGBA8 dynamicImage)
@@ -165,8 +165,7 @@ managedTexture pdev dev filePath queue commandBuffer = do
       Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
 
   liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
-  imageView <- Haskan.managedImageView dev format image
-  pure imageView
+  Haskan.managedImageView dev format image
 
 -- | Load a 3D texture from raw binary RGBA8 data.
 -- Dimensions are width x height x depth, each pixel is 4 bytes (RGBA).
@@ -267,8 +266,7 @@ managedTexture3D pdev dev filePath width height depth queue commandBuffer = do
       Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
 
   liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
-  imageView <- Haskan.managedImageView3D dev format image
-  pure imageView
+  Haskan.managedImageView3D dev format image
 
 bindImageMemory ::
   (MonadIO m) =>
@@ -486,8 +484,7 @@ createTextureFromData ::
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   m TextureHandle
-createTextureFromData rm pdev dev width height imgData queue commandBuffer =
-  uploadTexture rm pdev dev width height imgData queue commandBuffer
+createTextureFromData = uploadTexture
 
 -- | Create and register a texture from raw bytes, using asset cache.
 createTextureFromBytesCached ::
@@ -536,7 +533,7 @@ generateCheckerboardTexture width height squareSize =
         y = pixel `div` width
         sqX = x `div` squareSize
         sqY = y `div` squareSize
-        isWhite = (sqX + sqY) `mod` 2 == 0
+        isWhite = even (sqX + sqY)
      in case idx `mod` 4 of
           0 -> if isWhite then 220 else 40 -- R
           1 -> if isWhite then 220 else 40 -- G

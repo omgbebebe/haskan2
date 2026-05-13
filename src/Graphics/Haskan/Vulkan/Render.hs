@@ -172,8 +172,8 @@ renderImage ::
   (Vulkan.Word32 -> Int -> IO ()) ->
   m Vulkan.Word32
 renderImage RenderContext {..} imageAvailableSemaphore fenceIndex imageIndex recordAction = do
-  let commandBuffer = graphicsCommandBuffers !! (fromIntegral imageIndex)
-      renderFinishedSemaphore = renderFinishedSemaphores !! (fromIntegral imageIndex)
+  let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIndex
+      renderFinishedSemaphore = renderFinishedSemaphores !! fromIntegral imageIndex
       renderFinishedFence = renderFinishedFences !! fenceIndex
 
   liftIO $ do
@@ -194,7 +194,7 @@ renderImage RenderContext {..} imageAvailableSemaphore fenceIndex imageIndex rec
             )
     withPtr submitInfo $ \siPtr ->
       Vulkan.vkQueueSubmit graphicsQueueHandler 1 siPtr renderFinishedFence >>= throwVkResult
-  pure (imageIndex)
+  pure imageIndex
 
 presentFrame :: (MonadIO m) => RenderContext -> Vulkan.Word32 -> Vulkan.VkSemaphore -> m Vulkan.VkResult
 presentFrame RenderContext {..} imageIndex renderFinishedSem = do
@@ -209,4 +209,4 @@ presentFrame RenderContext {..} imageIndex renderFinishedSem = do
               &* setListRef @"pImageIndices" [imageIndex]
               &* set @"pResults" Vulkan.vkNullPtr
           )
-  liftIO $ withPtr presentInfo (\piPtr -> Vulkan.vkQueuePresentKHR presentQueueHandler piPtr)
+  liftIO $ withPtr presentInfo (Vulkan.vkQueuePresentKHR presentQueueHandler)

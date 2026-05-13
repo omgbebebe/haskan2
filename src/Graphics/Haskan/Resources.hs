@@ -33,7 +33,7 @@ alloc resName create destroy =
     )
 
 alloc_ :: (MonadManaged m) => Text -> IO a -> IO b -> m a
-alloc_ resName create destroy = alloc resName create (\_ -> destroy)
+alloc_ resName create destroy = alloc resName create (const destroy)
 
 allocaAndPeek :: (MonadIO m, Storable a) => (Vulkan.Ptr a -> IO Vulkan.VkResult) -> m a
 allocaAndPeek f = liftIO $ Foreign.Marshal.Alloc.alloca (\ptr -> (f ptr >>= throwVkResult) *> Foreign.Storable.peek ptr)
