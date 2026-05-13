@@ -17,6 +17,9 @@ let
 in
 mkShell {
   name = "haskan-dev";
+  nativeBuildInputs = with pkgs; [
+    poppler_utils
+  ];
   buildInputs = [
     ghc
     cabal-install

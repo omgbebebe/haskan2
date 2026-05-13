@@ -29,7 +29,11 @@ type CloudPushConstant =
     '[ "cameraX" ':-> Float,
        "cameraY" ':-> Float,
        "cameraZ" ':-> Float,
+       "debugMode" ':-> Float,
+       "axisOverlay" ':-> Float,
+       "groundPlane" ':-> Float,
        "sunAzimuth" ':-> Float,
+       "lightCount" ':-> Float,
        "ray0" ':-> V 3 Float,
        "ray1" ':-> V 3 Float,
        "ray2" ':-> V 3 Float,
@@ -114,7 +118,7 @@ cloudFragment = shader do
 
   let cloudThickness = 800.0
       cloudTop = cloudBottom + cloudThickness
-      totalRayLength = cloudThickness / max 0.01 dirY
+      totalRayLength = min 10000.0 (cloudThickness / max 0.01 dirY)
       stepSize = totalRayLength / 6.0
 
       ditherHash = fract (sin (uvX * 12.9898 + uvY * 78.233) * 43758.5453)
@@ -262,8 +266,8 @@ cloudFragment = shader do
       ld5 = max 0 (ln5r * ln5a - (ln5g * 0.5 + ln5b * 0.25) * 0.8 - 0.25) * heightF5 * 4.0
 
       lightT d =
-        let b = exp (-d * 5.0)
-            p = 0.7 * exp (-d * 0.1)
+        let b = exp (-d * 1.5)
+            p = 0.7 * exp (-d * 0.25)
          in max b p
       lightT0 = lightT ld0
       lightT1 = lightT ld1
