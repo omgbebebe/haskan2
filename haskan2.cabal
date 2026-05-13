@@ -171,8 +171,15 @@ test-suite haskan2-test
     type:               exitcode-stdio-1.0
     main-is:            Tests.hs
     hs-source-dirs:     test
+    other-modules:      Graphics.Haskan.Engine.Capabilities.Test
     build-depends:      base >=4.17 && <4.24
                      , haskan2
                      , tasty
                      , tasty-hunit
+                     , mtl >=2.3 && <2.4
+                     , text >=2.0 && <2.2
+                     , vulkan-api >=1.4.0 && <1.4.1
+                     , linear >=1.23 && <1.24
     default-language:  GHC2021
+    default-extensions:
+                       OverloadedStrings
