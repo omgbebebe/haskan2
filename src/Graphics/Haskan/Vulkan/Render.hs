@@ -134,10 +134,11 @@ drawFrame ctx@RenderContext {..} imageAvailableSemaphore fenceIndex recordAction
   (imageIndex, vkResult) <-
     liftIO $
       allocaAndPeekVkResult $
-        Vulkan.vkAcquireNextImageKHR device swapchain maxBound imageAvailableSemaphore Vulkan.VK_NULL_HANDLE
+        Vulkan.vkAcquireNextImageKHR device swapchain 100000000 imageAvailableSemaphore Vulkan.VK_NULL_HANDLE
 
   case vkResult of
     Vulkan.VK_SUCCESS -> FrameOk <$> renderImage ctx imageAvailableSemaphore fenceIndex imageIndex recordAction
+    Vulkan.VK_TIMEOUT -> pure FrameTimeout
     Vulkan.VK_SUBOPTIMAL_KHR -> pure $ FrameSuboptimal imageIndex
     Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> do
       -- The acquire failed; the semaphore was never signaled.

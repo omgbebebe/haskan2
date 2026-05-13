@@ -430,6 +430,9 @@ renderFrameLoop ctx@RenderContext {..} dr@DeferredResources {..} frameNumber tar
             Render.FrameOutOfDate -> do
               liftIO $ logInfoIO LogGeneral "resizing swapchain"
               pure (True, False)
+            Render.FrameTimeout -> do
+              liftIO $ threadDelay 16000
+              pure (False, False)
             Render.FrameFailed err -> liftIO $ fail err
     Just Terminate -> do
       liftIO $ logInfoIO LogGeneral "terminating render loop by signal"

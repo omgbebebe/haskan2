@@ -1,7 +1,10 @@
+{-# LANGUAGE PatternSynonyms #-}
+
 module Graphics.Haskan.Window where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
+import Data.Bits
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Coerce
@@ -11,6 +14,9 @@ import Graphics.Haskan.Resources (alloc, alloc_)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Ext qualified as Vulkan
 import SDL qualified
+import SDL.Internal.Types (Window(..))
+import SDL.Raw qualified as Raw
+import SDL.Raw.Enum (pattern SDL_WINDOW_MINIMIZED, pattern SDL_WINDOW_HIDDEN)
 -- import SDL.Raw.Video (createWindowFrom)
 import SDL.Video.Vulkan qualified
 
@@ -83,3 +89,9 @@ createSurface inst window = liftIO $ Vulkan.VkPtr <$> SDL.Video.Vulkan.vkCreateS
 
 showWindow :: MonadIO m => SDL.Window -> m ()
 showWindow window = liftIO (SDL.showWindow window)
+
+isWindowVisible :: MonadIO m => SDL.Window -> m Bool
+isWindowVisible window = do
+  flags <- Raw.getWindowFlags (coerce window)
+  pure $ (flags .&. fromIntegral SDL_WINDOW_MINIMIZED) == 0
+      && (flags .&. fromIntegral SDL_WINDOW_HIDDEN) == 0

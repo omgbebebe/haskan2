@@ -42,5 +42,6 @@ data RenderResult
   = FrameOk ImageIndex
   | FrameSuboptimal ImageIndex
   | FrameOutOfDate
+  | FrameTimeout
   | FrameFailed String
   deriving (Eq, Show)
