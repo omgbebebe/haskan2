@@ -27,6 +27,7 @@ import Graphics.Haskan.Vulkan.Render qualified as Render
 import Graphics.Haskan.Vulkan.Types (RenderResult (..))
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Linear (V3 (..))
+import System.Clock (TimeSpec (..))
 
 data GraphicsCall
   = UploadStorageBuffer Int Int
@@ -99,7 +100,7 @@ instance MonadLog TestM where
     TestM $ modify $ \s -> s {tsLogs = tsLogs s ++ [(level, cat, msg)]}
 
 instance MonadClock TestM where
-  getMonotonicTime = TestM $ state $ \s -> let t = tsClockTime s in (t, s {tsClockTime = t + 16000000})
+  getMonotonicTime = TestM $ state $ \s -> let t = fromInteger (tsClockTime s) in (t, s {tsClockTime = tsClockTime s + 16000000})
   delayMicros us = TestM $ modify $ \s -> s {tsClockTime = tsClockTime s + fromIntegral us * 1000}
 
 instance MonadTelemetry TestM where

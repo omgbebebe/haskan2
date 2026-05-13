@@ -58,7 +58,7 @@ import Graphics.Haskan.Engine.Capabilities.Clock (MonadClock (..))
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logDebug, logInfo)
 import Graphics.Haskan.Engine.Capabilities.StateReader (MonadStateReader (..), consumeTVar, readTVarIO)
 import Graphics.Haskan.Engine.Capabilities.Telemetry (MonadTelemetry (..))
-import Graphics.Haskan.Logger (LogCategory (..), showT)
+import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
 import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
@@ -115,7 +115,7 @@ import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
 import SDL qualified
 import SDL.Input.Mouse qualified as SDL.Mouse
-import System.Clock (Clock (..), getTime)
+import System.Clock (TimeSpec, toNanoSecs)
 import System.Directory (doesFileExist)
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, runReaderT)
@@ -379,6 +379,23 @@ renderFrameLoop' frameNumber = do
               skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
           uploadUniformBuffer mvpMemory 0 [view, projection]
 
+          -- Read all TVar state via capabilities before defining the IO callback
+          wireframeEnabled' <- readWireframe
+          debugMode' <- readDebugMode
+          axisOverlay' <- readAxisOverlay
+          groundPlane' <- readGroundPlane
+          currentTime <- readTimeOfDay
+          dnEnabled <- readDayNightEnabled
+          cloudHeight' <- readCloudHeight
+          let sunState =
+                if dnEnabled
+                  then computeSunState defaultDayNightConfig currentTime
+                  else DayNight.SunState (V3 (-1) (-1) (-1)) 1.0 (V3 1 1 1) (V3 1 1 1) 0.3 0.0
+              skyTint = DayNight.ssSkyTint sunState
+              iblInt = DayNight.ssIBLIntensity sunState
+              sunAzimuth = DayNight.ssAzimuth sunState
+              sunDir = DayNight.ssDirection sunState
+
           let recordAction imageIdx frameIdx = do
                 let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIdx
                     gBufferFramebuffer = drGBufferFramebuffers !! fromIntegral imageIdx
@@ -406,24 +423,6 @@ renderFrameLoop' frameNumber = do
                           pcRenderPass = drLightingRenderPass,
                           pcExtent = rcSurfaceExtent
                         }
-                wireframeEnabled' <- liftIO $ STM.readTVarIO tvWireframe
-                debugMode' <- liftIO $ STM.readTVarIO tvDebugMode
-                axisOverlay' <- liftIO $ STM.readTVarIO tvAxisOverlay
-                groundPlane' <- liftIO $ STM.readTVarIO tvGroundPlane
-
-                -- Read day/night state for sky tint and IBL intensity
-                currentTime <- liftIO $ STM.readTVarIO tvTimeOfDay
-                dnEnabled <- liftIO $ STM.readTVarIO tvDayNightEnabled
-                let sunState =
-                      if dnEnabled
-                        then computeSunState defaultDayNightConfig currentTime
-                        else DayNight.SunState (V3 (-1) (-1) (-1)) 1.0 (V3 1 1 1) (V3 1 1 1) 0.3 0.0
-                    skyTint = DayNight.ssSkyTint sunState
-                    iblInt = DayNight.ssIBLIntensity sunState
-                    sunAzimuth = DayNight.ssAzimuth sunState
-                    sunDir = DayNight.ssDirection sunState
-
-                cloudHeight' <- liftIO $ STM.readTVarIO tvCloudHeight
 
                 let (graphRes, graphPasses) =
                       Graph.execRenderGraphBuilder $
@@ -463,7 +462,7 @@ renderFrameLoop' frameNumber = do
                               dpdWireframeEnabled = wireframeEnabled'
                             }
                 case Graph.compileGraph graphRes graphPasses of
-                  Left err -> liftIO $ logInfo LogRender $ "graph compilation failed: " <> Text.pack (show err)
+                  Left err -> liftIO $ logInfoIO LogRender $ "graph compilation failed: " <> Text.pack (show err)
                   Right compiled -> do
                     CommandBuffer.withCommandBuffer commandBuffer $ do
                       let numWorkgroups = (length drawList + 63) `div` 64
@@ -507,7 +506,7 @@ renderFrameLoop' frameNumber = do
                   when shouldInspect $ do
                     mInsp <- readInspector
                     for_ mInsp $ \insp -> do
-                      startTime <- liftIO $ getTime Monotonic
+                      startTime <- getMonotonicTime
                       let snapshots = map drawCallToSnapshot drawList
                           w = realToFrac $ Vulkan.getField @"width" rcSurfaceExtent :: Float
                           h = realToFrac $ Vulkan.getField @"height" rcSurfaceExtent :: Float
@@ -518,55 +517,52 @@ renderFrameLoop' frameNumber = do
                   shouldSwapchain <- consumeSwapchainScreenshotFlag
                   when shouldScreenshot $ do
                     deviceWaitIdle
-                    liftIO $ do
-                      let gbufferImages = drGBufferImages !! fromIntegral imageIndex
-                      logInfo LogGeneral "capturing screenshot..."
-                      Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
-                      logInfo LogGeneral "screenshot saved"
+                    let gbufferImages = drGBufferImages !! fromIntegral imageIndex
+                    logInfo LogGeneral "capturing screenshot..."
+                    liftIO $ Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
+                    logInfo LogGeneral "screenshot saved"
                   when shouldAllStages $ do
                     deviceWaitIdle
+                    let gbufferImages = drGBufferImages !! fromIntegral imageIndex
+                    logInfo LogGeneral "capturing all pipeline stages..."
                     liftIO $ do
-                      let gbufferImages = drGBufferImages !! fromIntegral imageIndex
-                      logInfo LogGeneral "capturing all pipeline stages..."
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (head gbufferImages) rcSurfaceExtent Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT "position"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 1) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "normal"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
                       Screenshot.saveGBufferStage device physicalDevice rcGraphicsCommandPool graphicsQueueHandler (gbufferImages !! 3) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "emissive"
-                      logInfo LogGeneral "all stages saved"
+                    logInfo LogGeneral "all stages saved"
                   when shouldSwapchain $ do
                     deviceWaitIdle
-                    liftIO $ do
-                      logInfo LogGeneral "capturing swapchain screenshot..."
-                      let swapchainImage = swapchainImages !! fromIntegral imageIndex
-                      Screenshot.saveSwapchainScreenshot device physicalDevice rcGraphicsCommandPool graphicsQueueHandler swapchainImage rcSurfaceExtent
-                      logInfo LogGeneral "swapchain screenshot saved"
+                    let swapchainImage = swapchainImages !! fromIntegral imageIndex
+                    logInfo LogGeneral "capturing swapchain screenshot..."
+                    liftIO $ Screenshot.saveSwapchainScreenshot device physicalDevice rcGraphicsCommandPool graphicsQueueHandler swapchainImage rcSurfaceExtent
+                    logInfo LogGeneral "swapchain screenshot saved"
                   pure (False, False)
                 Vulkan.VK_SUBOPTIMAL_KHR -> pure (True, False)
                 Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> pure (True, False)
-                _ -> liftIO $ fail "presentFrame failed"
+                _ -> fail "presentFrame failed"
             Render.FrameSuboptimal _ -> do
-              liftIO $ fail "suboptimal"
+              fail "suboptimal"
             Render.FrameOutOfDate -> do
-              liftIO $ logInfo LogGeneral "resizing swapchain"
+              logInfo LogGeneral "resizing swapchain"
               pure (True, False)
             Render.FrameTimeout -> do
               delayMicros 16000
               pure (False, False)
-            Render.FrameFailed err -> liftIO $ fail err
+            Render.FrameFailed err -> fail err
     Just Terminate -> do
-      liftIO $ logInfo LogGeneral "terminating render loop by signal"
+      logInfo LogGeneral "terminating render loop by signal"
       pure (True, True)
 
   frameEndTime <- getMonotonicTime
   if needRestart
     then do
       deviceWaitIdle
-      liftIO $ do
-        logInfo LogGeneral "waiting IDLE state for device"
-        logInfo LogGeneral "terminating renderFrameLoop"
+      logInfo LogGeneral "waiting IDLE state for device"
+      logInfo LogGeneral "terminating renderFrameLoop"
       pure terminating
     else do
-      let renderTime = frameEndTime - frameStartTime
+      let renderTime = toNanoSecs frameEndTime - toNanoSecs frameStartTime
           delay = ((1000000000 `div` targetFPS) - renderTime) `div` 1000
       recordFrameTime renderTime
       mMsg <- getTelemetryMessage
@@ -727,7 +723,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
           let whiteTexData = Texture.generateGridTexture 2 2 1
           whiteTexHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
 
-          liftIO $ logInfo LogGeneral "spawning 10000 stress test entities"
+          logInfo LogGeneral "spawning 10000 stress test entities"
           forM_ [0 .. 9999] $ \i -> do
             let x = fromIntegral (i `mod` 100) * 1.0 - 50.0
                 z = fromIntegral (i `div` 100) * 1.0 - 50.0
@@ -953,7 +949,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
         mView <- Texture.textureImageView rm whiteHandle
         case mView of
           Just view -> pure [view]
-          Nothing -> liftIO $ fail "failed to create white texture"
+          Nothing -> fail "failed to create white texture"
       else do
         forM uniqueTextures $ \texHandle -> do
           let hId = fromIntegral (unTextureHandle texHandle)
@@ -970,7 +966,7 @@ renderLoop physicalDevice surface layers targetFPS gameState finishedSemaphore r
           mView <- Texture.textureImageView rm texHandle'
           case mView of
             Just view -> pure view
-            Nothing -> liftIO $ fail "failed to create texture view"
+            Nothing -> fail "failed to create texture view"
 
   logInfo LogTexture $ "bindless textures created: " <> showT (length bindlessTextureViews)
 

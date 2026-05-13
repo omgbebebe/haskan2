@@ -8,18 +8,18 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (Managed)
 import Control.Monad.Reader (ReaderT, lift)
 import Control.Monad.State (StateT)
-import System.Clock (Clock (..), getTime, toNanoSecs)
+import System.Clock (Clock (..), TimeSpec, getTime)
 
 class Monad m => MonadClock m where
-  getMonotonicTime :: m Integer
+  getMonotonicTime :: m TimeSpec
   delayMicros :: Int -> m ()
 
 instance MonadClock IO where
-  getMonotonicTime = toNanoSecs <$> getTime Monotonic
+  getMonotonicTime = getTime Monotonic
   delayMicros = threadDelay
 
 instance MonadClock Managed where
-  getMonotonicTime = liftIO $ toNanoSecs <$> getTime Monotonic
+  getMonotonicTime = liftIO $ getTime Monotonic
   delayMicros us = liftIO $ threadDelay us
 
 instance MonadClock m => MonadClock (ReaderT r m) where
