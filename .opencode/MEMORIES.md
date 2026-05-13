@@ -439,3 +439,49 @@ camPosData = [ camX, camY, camZ, realToFrac dpdDebugMode
 
 **Files**: `src/Graphics/Haskan/Render/Deferred.hs` (push constant packing)
 
+### 2026-05-13: Cloud Shader Modularization + Quarter-Res + Temporal Accumulation
+**Cloud Shader Modularization (Phase 0)**:
+- Extracted cloud ray-marching from `Lighting.hs` into new `Clouds.hs` shader module
+- Created separate cloud render pass (RGBA16F intermediate, full-res)
+- Added cloud descriptor set layout/pool/updates
+- Lighting pass now samples `cloud_result` texture instead of computing inline
+- Added `CloudPushConstant` (116 bytes) with camera, rays, sky tint, sun dir, cloud height, time
+- Fixed `Half`/`Float` mismatches when sampling `RGBA16F` — used FIR `convert` primitive
+- Fixed per-frame cloud_result descriptor binding (was always using cloudImageViews !! 0)
+
+**Quarter-Resolution Rendering (Phase 8)**:
+- Cloud pass renders at half width/height of surface extent
+- Created `cloudExtent` in `DeferredResources` — all cloud images/views/framebuffers/pipeline use it
+- Lighting pass bilinearly upsamples low-res `cloud_result`
+- No shader changes needed (fullscreen triangle UVs are resolution-independent)
+
+**Temporal Accumulation (Phase 9)**:
+- Added `cloud_history` texture binding (binding 2) to cloud descriptor set
+- Added `blendFactor` to `CloudPushConstant` (120 bytes total)
+- Created cloud history images/views (one per swapchain image)
+- Cloud shader blends current frame with history: `result = hist*0.92 + current*0.08`
+- After cloud pass, `vkCmdCopyImage` copies current cloud image to history
+- Added layout transition cases for `SHADER_READ_ONLY_OPTIMAL <-> TRANSFER_SRC/DST_OPTIMAL`
+- Added `cmdCopyImage` helper to `CommandBuffer.hs`
+
+**Warning Cleanup**:
+- Replaced partial functions (`head`/`tail`) with safe alternatives across 7 files
+- Fixed missing `vTangent` field in `Model.hs` Vertex construction
+- Fixed `BS.hGetLine` deprecation → `BSC.hGetLine` in `Debug/Server.hs`
+- Suppressed `partial-type-signatures` in all FIR shader modules
+- Build and tests pass with no warnings in our code
+
+**Formatting**:
+- Applied `ormolu` to entire `src/` directory
+- `hlint --cross` reported no hints
+
+**Files Changed**:
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Clouds.hs` — new cloud ray-marching shader module
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Lighting.hs` — samples `cloud_result`, removed inline cloud code
+- `src/Graphics/Haskan/Render/Deferred.hs` — cloud pass integration, push constant packing
+- `src/Graphics/Haskan/Vulkan/DeferredResources.hs` — `cloudExtent`, cloud images/views/framebuffers/pipeline
+- `src/Graphics/Haskan/Vulkan/CommandBuffer.hs` — `cmdCopyImage` helper
+- `src/Graphics/Haskan/Vulkan/Pipeline.hs` — cloud pipeline creation
+- `src/Graphics/Haskan/Model.hs` — fixed `vTangent` field
+- `src/Graphics/Haskan/Debug/Server.hs` — `BSC.hGetLine`
+- Multiple files — partial function replacements, `{-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}`

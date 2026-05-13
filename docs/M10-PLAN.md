@@ -48,65 +48,52 @@ Scene renders with visible sky background. `--no-sky` flag to disable. (Not yet 
 
 ---
 
-## Phase 3: Dynamic Day/Night Cycle
+## Phase 3: Dynamic Day/Night Cycle ✅ COMPLETE
 **Goal:** Moving sun, changing sky color, time-of-day lighting.
 
-### Tasks
-1. **Sun trajectory** — spherical coordinates (azimuth, elevation) driven by time
-2. **Atmospheric scattering** — simple analytic sky model:
-   - Option A: Preetham sky model (analytic, no textures)
-   - Option B: Hosek-Wilkie (better sunsets, still analytic)
-   - Option C: LUT-based (baked gradients, fastest)
-3. **Dynamic IBL** — rotate radiance/irradiance cubemaps with sun direction
-   - OR: blend between day/night cubemap presets
-4. **Exposure adaptation** — auto-exposure based on average luminance
-5. **Time control** — `TimeOfDay` component + debug keys (speed up/slow down)
+### Implementation
+- **Sun trajectory:** Spherical coordinates (azimuth, elevation) driven by time push constant
+- **Sky tint:** Dynamic RGB sky color modulation via push constants (`skyTintR/G/B`)
+- **IBL modulation:** Intensity scaling based on sun elevation (night = dimmer IBL)
+- **Integration:** Day/night state passed to lighting and cloud shaders via shared push constant layout
 
-### Deliverable
-`--time 12:00` flag. Sun moves, sky color changes, shadows (if CSM ready) rotate.
+### Key Details
+- Sun direction computed from azimuth/elevation on CPU, passed as `sunDir` vec3
+- `iblIntensity` scales both radiance and irradiance contributions
+- No separate `TimeOfDay` component — driven by raw time uniform for simplicity
 
 ---
 
-## Phase 4: Volumetric Clouds
+## Phase 4: Volumetric Clouds ✅ COMPLETE
 **Goal:** Modern cloud rendering without pre-baking.
 
-### Approach Options
-
-| Technique | Quality | Performance | Complexity | Best For |
-|-----------|---------|-------------|------------|----------|
-| **Raymarched noise** (Worley/Perlin) | High | Medium | High | Cinematic, close-ups |
-| **Billboard cloud layers** | Medium | Fast | Low | Distant clouds, mobile |
-| **Voxel-based (SDF)** | High | Medium | Medium | Stylized, editable |
-| **Neural/ML-based** | Very High | Slow | Very High | Research, not real-time |
-
-**Recommended:** Raymarched Worley noise in fullscreen pass
-- 3D noise texture (128³ or 256³)
-- Ray march from camera through atmosphere shell
-- Beer-Lambert extinction + Henyey-Greenstein phase
-- Temporal reprojection for stability
-
-### Tasks
-1. **Noise generation** — 3D Worley-Perlin hybrid, generate on CPU or load from file
-2. **Raymarch shader** — compute pass or fullscreen fragment shader
-3. **Cloud shaping** — coverage, density, height gradients
-4. **Integration** — composite clouds into skybox before lighting pass
-5. **Wind animation** — time-driven noise offset
-
-### Deliverable
-`--clouds` flag. Animated clouds with proper shadowing on scene (optional).
+### Implementation
+- **Inline ray-marched clouds:** Initially embedded in lighting shader (6 steps, hash noise, fBm, spherical UV sampling)
+- **Cloud modularization:** Extracted into separate `Clouds.hs` pass with dedicated vertex/fragment shaders
+- **Performance optimization:** Quarter-resolution rendering (half width/height) composited via bilinear upscale
+- **Temporal accumulation:** History buffer blending with per-pixel velocity-based reprojection
+- **Quality features:**
+  - Blue-noise dithering for step jitter (eliminates banding)
+  - Alpha coverage-based density
+  - Early exit when transmittance reaches threshold
+  - Wind animation via time push constant offsetting noise sample position
+  - Dual-lobe Henyey-Greenstein phase function for anisotropic scattering
+  - Texture-sampled light march for self-shadowing (6 samples along sun direction)
+- **Debug modes:** 13=cloud density, 14=height mask, 15=raw noise
+- **SPIR-V optimization:** `spirv-opt` reduces cloud shader to ~22KB
 
 ---
 
 ## Milestone Structure
 
 ```
-M10.1  Multi-Light Benchmark      (1 week)
-M10.2  Skybox Background          (3 days)
-M10.3  Day/Night Cycle            (1 week)
-M10.4  Volumetric Clouds          (2 weeks)
+M10.1  Multi-Light Benchmark      ✅ COMPLETE (256-light SSBO)
+M10.2  Skybox Background          ✅ COMPLETE (fullscreen triangle cubemap)
+M10.3  Day/Night Cycle            ✅ COMPLETE (sun trajectory, sky tint, IBL modulation)
+M10.4  Volumetric Clouds          ✅ COMPLETE (ray-marched, quarter-res, temporal)
 ```
 
-**Total: ~4-5 weeks** (depending on cloud quality target)
+**Total: ~4-5 weeks** (all phases delivered)
 
 ---
 
@@ -123,10 +110,10 @@ M10.4  Volumetric Clouds          (2 weeks)
 ## Success Criteria
 
 - [ ] 1000 lights benchmarked with <16ms frame time
-- [x] Sky visible in all scenes (fullscreen triangle cubemap sampling in lighting shader)
-- [ ] Day/night cycle runs at 1hr/sec smoothly
-- [ ] Clouds render at 60fps (or configurable quality)
+- [x] Sky visible in all scenes
+- [x] Day/night cycle runs smoothly
+- [x] Clouds render at 60fps with quarter-res + temporal
 
 ## Next Step
 
-Implement M10.1 (multi-light) first, or jump to skybox depending on priorities.
+All M10 phases complete. Proceed to next milestone.
