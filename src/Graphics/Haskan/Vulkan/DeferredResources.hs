@@ -263,12 +263,11 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender $ "lighting descriptor sets allocated: " <> showT (length lightingDescriptorSets)
 
   -- Update lighting descriptor sets
-  liftIO $ for_ (zip lightingDescriptorSets gBufferImageViews) $ \(ds, views) -> do
+  liftIO $ for_ (zip3 lightingDescriptorSets gBufferImageViews cloudImageViews) $ \(ds, views, cloudView) -> do
     let allViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
           (Just env, Just irr, Just brdf) -> views ++ [env, irr, brdf]
           _ -> views ++ replicate 3 Vulkan.VK_NULL_HANDLE
-        cloudResultView = if null cloudImageViews then Nothing else Just (cloudImageViews !! 0)
-    DescriptorSet.updateLightingDescriptorSets device ds sampler allViews Nothing cloudResultView
+    DescriptorSet.updateLightingDescriptorSets device ds sampler allViews Nothing (Just cloudView)
   logDebugIO LogRender "lighting descriptor sets updated"
 
   -- Cloud descriptor pool and sets
