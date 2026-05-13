@@ -57,6 +57,10 @@ import Graphics.Haskan.Engine.Render.Internal.FramePrepare
     computeEntityDebugInfos,
     computeSkyParams,
   )
+import Graphics.Haskan.Engine.Render.Internal.PassRecording
+  ( RecordContext (..),
+    buildRecordAction,
+  )
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
@@ -385,105 +389,31 @@ renderFrameLoop' frameNumber = do
           cloudHeight' <- readCloudHeight
           let (sunState, skyTint, iblInt, sunAzimuth, sunDir) = computeSkyParams dnEnabled currentTime
 
-          let recordAction imageIdx frameIdx = do
-                let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIdx
-                    gBufferFramebuffer = drGBufferFramebuffers !! fromIntegral imageIdx
-                    lightingFramebuffer = drLightingFramebuffers !! fromIntegral imageIdx
-                    frameDescriptorSet = frameDescriptorSets !! frameIdx
-                    lightingDescriptorSet = drLightingDescriptorSets !! fromIntegral imageIdx
-                    gBufferImagesForFrame = drGBufferImages !! fromIntegral imageIdx
-                    gBufferPassCtx =
-                      PassContext
-                        { pcCommandBuffer = commandBuffer,
-                          pcPipeline = drGBufferPipeline,
-                          pcPipelineLayout = drGBufferPipelineLayout,
-                          pcDescriptorSet = Vulkan.vkNullPtr,
-                          pcFramebuffer = gBufferFramebuffer,
-                          pcRenderPass = drGBufferRenderPass,
-                          pcExtent = rcSurfaceExtent
-                        }
-                    lightingPassCtx =
-                      PassContext
-                        { pcCommandBuffer = commandBuffer,
-                          pcPipeline = drLightingPipeline,
-                          pcPipelineLayout = drLightingPipelineLayout,
-                          pcDescriptorSet = lightingDescriptorSet,
-                          pcFramebuffer = lightingFramebuffer,
-                          pcRenderPass = drLightingRenderPass,
-                          pcExtent = rcSurfaceExtent
-                        }
-
-                let (graphRes, graphPasses) =
-                      Graph.execRenderGraphBuilder $
-                        buildDeferredGraph
-                          DeferredPassData
-                            { dpdExtent = rcSurfaceExtent,
-                              dpdGBufferRenderPass = drGBufferRenderPass,
-                              dpdGBufferFramebuffer = gBufferFramebuffer,
-                              dpdGBufferPipeline = drGBufferPipeline,
-                              dpdGBufferLayout = drGBufferPipelineLayout,
-                              dpdGBufferDescriptor = frameDescriptorSet,
-                              dpdGBufferSampler = textureSampler,
-                              dpdDrawList = drawList,
-                              dpdDevice = device,
-                              dpdDrawCommandsBuffer = ccrDrawCommandsBuffer,
-                              dpdEntityCount = fromIntegral (length drawList),
-                              dpdLightingRenderPass = drLightingRenderPass,
-                              dpdLightingFramebuffer = lightingFramebuffer,
-                              dpdLightingPipeline = drLightingPipeline,
-                              dpdLightingLayout = drLightingPipelineLayout,
-                              dpdLightingDescriptor = lightingDescriptorSet,
-                              dpdCameraPos = realToFrac <$> Camera.cameraPosition camera,
-                              dpdSkyboxRays = skyboxRays,
-                              dpdDebugMode = debugMode',
-                              dpdAxisOverlay = axisOverlay',
-                              dpdGroundPlane = groundPlane',
-                              dpdLightCount = lightCount,
-                              dpdLightBuffer = lightSsboBuffer,
-                              dpdSkyTint = skyTint,
-                              dpdIBLIntensity = iblInt,
-                              dpdSunAzimuth = sunAzimuth,
-                              dpdSunDir = sunDir,
-                              dpdCloudHeight = cloudHeight',
-                              dpdGBufferImages = gBufferImagesForFrame,
-                              dpdWireframePipeline = drWireframePipeline,
-                              dpdWireframeLayout = drWireframePipelineLayout,
-                              dpdWireframeEnabled = wireframeEnabled'
-                            }
-                case Graph.compileGraph graphRes graphPasses of
-                  Left err -> liftIO $ logInfoIO LogRender $ "graph compilation failed: " <> Text.pack (show err)
-                  Right compiled -> do
-                    CommandBuffer.withCommandBuffer commandBuffer $ do
-                      let numWorkgroups = (length drawList + 63) `div` 64
-                      when (numWorkgroups > 0) $ do
-                        liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE ccrPipeline
-                        liftIO $ Foreign.Marshal.Array.withArray [ccrDescriptorSet] $ \dsPtr ->
-                          Vulkan.vkCmdBindDescriptorSets
-                            commandBuffer
-                            Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
-                            ccrPipelineLayout
-                            0
-                            1
-                            dsPtr
-                            0
-                            Vulkan.vkNullPtr
-                        liftIO $ CommandBuffer.cmdDispatch commandBuffer (fromIntegral numWorkgroups) 1 1
-                        liftIO $
-                          CommandBuffer.cmdBufferBarrier
-                            commandBuffer
-                            ccrDrawCommandsBuffer
-                            (fromIntegral (ccrMaxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)))
-                            Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-                            Vulkan.VK_ACCESS_SHADER_WRITE_BIT
-                            Vulkan.VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT
-                            Vulkan.VK_ACCESS_INDIRECT_COMMAND_READ_BIT
-
-                      let passes = Graph.cgPasses compiled
-                      for_ passes $ \cp -> do
-                        let pass = Graph.cpPass cp
-                            recordFn = unPassRecordFunc (rpRecord pass)
-                            passCtx = if rpName pass == "gbuffer" then gBufferPassCtx else lightingPassCtx
-                        liftIO $ recordFn passCtx
+          let recordCtx =
+                RecordContext
+                  { rcGraphicsCommandBuffers = graphicsCommandBuffers,
+                    rcFrameDescriptorSets = frameDescriptorSets,
+                    rcTextureSampler = textureSampler,
+                    rcLightSsboBuffer = lightSsboBuffer,
+                    rcDrawList = drawList,
+                    rcCameraPos = realToFrac <$> Camera.cameraPosition camera,
+                    rcSkyboxRays = skyboxRays,
+                    rcDebugMode = debugMode',
+                    rcAxisOverlay = axisOverlay',
+                    rcGroundPlane = groundPlane',
+                    rcLightCount = lightCount,
+                    rcSkyTint = skyTint,
+                    rcIBLIntensity = iblInt,
+                    rcSunAzimuth = sunAzimuth,
+                    rcSunDir = sunDir,
+                    rcCloudHeight = cloudHeight',
+                    rcWireframeEnabled = wireframeEnabled',
+                    rcDeferred = dr,
+                    rcCullResources = ccr,
+                    rcDevice = device,
+                    rcSurfaceExtent = rcSurfaceExtent
+                  }
+              recordAction = buildRecordAction recordCtx
 
           res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
           case res of
