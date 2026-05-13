@@ -36,6 +36,9 @@ mkShell {
     ]))
     ktx-tools
     openexr imagemagick # to work with exr (HDRi)
+    # Linting/formatting tools (built with ghc98 since ghc914 versions are broken)
+    haskell.packages.ghc98.hlint
+    haskell.packages.ghc98.apply-refact
   ] ++ nativeLibs;
   shellHook = ''
     export LD_LIBRARY_PATH="${lib.makeLibraryPath nativeLibs}:$LD_LIBRARY_PATH"
