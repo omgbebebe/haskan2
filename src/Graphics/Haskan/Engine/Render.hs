@@ -165,40 +165,40 @@ renderFrameLoop' ::
   Int ->
   RenderLoopM m Bool
 renderFrameLoop' frameNumber = do
-  env <- ask
-  let RenderContext {..} = reContext env
-      ctx = reContext env
-      DeferredResources {..} = reDeferred env
-      ComputeCullResources {..} = reCullResources env
-      targetFPS = reTargetFPS env
-      imageAvailableSemaphores = reImageAvailableSemaphores env
-      control = reControl env
-      frameMvpMemories = reFrameMvpMemories env
-      tvCamera = reTvCamera env
-      tvInspect = reTvInspect env
-      tvInsp = reTvInsp env
-      tvRenderDebug = reTvRenderDebug env
-      ecsWorld = reECSWorld env
-      rm = reResourceManager env
-      textureSampler = reTextureSampler env
-      frameDescriptorSets = reFrameDescriptorSets env
-      textureIndexMap = reTextureIndexMap env
-      tvWireframe = reTvWireframe env
-      frameStatsRef = reFrameStatsRef env
-      tvDebugMode = reTvDebugMode env
-      tvAxisOverlay = reTvAxisOverlay env
-      tvGroundPlane = reTvGroundPlane env
-      tvPendingScreenshot = reTvPendingScreenshot env
-      tvPendingAllStages = reTvPendingAllStages env
-      tvPendingSwapchainScreenshot = reTvPendingSwapchainScreenshot env
-      physicalDevice = rePhysicalDevice env
-      lightSsboBuffer = reLightSsboBuffer env
-      lightSsboMemory = reLightSsboMemory env
-      tvLights = reTvLights env
-      tvTimeOfDay = reTvTimeOfDay env
-      tvTimeSpeed = reTvTimeSpeed env
-      tvDayNightEnabled = reTvDayNightEnabled env
-      tvCloudHeight = reTvCloudHeight env
+  RenderEnv
+    { reContext = ctx@RenderContext {..},
+      reDeferred = dr@DeferredResources {..},
+      reCullResources = ccr@ComputeCullResources {..},
+      reTargetFPS = targetFPS,
+      reImageAvailableSemaphores = imageAvailableSemaphores,
+      reControl = control,
+      reFrameMvpMemories = frameMvpMemories,
+      reTvCamera = tvCamera,
+      reTvInspect = tvInspect,
+      reTvInsp = tvInsp,
+      reTvRenderDebug = tvRenderDebug,
+      reECSWorld = ecsWorld,
+      reResourceManager = rm,
+      reTextureSampler = textureSampler,
+      reFrameDescriptorSets = frameDescriptorSets,
+      reTextureIndexMap = textureIndexMap,
+      reTvWireframe = tvWireframe,
+      reFrameStatsRef = frameStatsRef,
+      reTvDebugMode = tvDebugMode,
+      reTvAxisOverlay = tvAxisOverlay,
+      reTvGroundPlane = tvGroundPlane,
+      reTvPendingScreenshot = tvPendingScreenshot,
+      reTvPendingAllStages = tvPendingAllStages,
+      reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
+      rePhysicalDevice = physicalDevice,
+      reLightSsboBuffer = lightSsboBuffer,
+      reLightSsboMemory = lightSsboMemory,
+      reTvLights = tvLights,
+      reTvTimeOfDay = tvTimeOfDay,
+      reTvTimeSpeed = tvTimeSpeed,
+      reTvDayNightEnabled = tvDayNightEnabled,
+      reTvCloudHeight = tvCloudHeight
+    } <- ask
   frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
@@ -531,7 +531,7 @@ renderFrameLoop' frameNumber = do
         let (newStats, mMsg) = updateFrameStats stats renderTime
         writeIORef frameStatsRef newStats
         for_ mMsg $ logInfoIO LogRender
-      renderFrameLoop env ((frameNumber + 1) `mod` Render.maxFramesInFlight)
+      renderFrameLoop' ((frameNumber + 1) `mod` Render.maxFramesInFlight)
 
 renderLoop ::
   (MonadFail m, MonadManaged m, MonadIO m) =>
