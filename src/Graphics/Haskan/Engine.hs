@@ -206,7 +206,7 @@ mainLoop meshName EngineConfig {..} = do
           let actionEvents = mapMaybe (payloadToActionEvent . SDL.eventPayload) events
               quitting = any (\(a, p, _) -> a == Escape && p) actionEvents
           liftIO $ STM.atomically $ forM_ actionEvents $ writeInputBuffer inputBuffer
-          unless (null actionEvents) $ logDebugIO LogInput $ "input: " <> showT (length actionEvents) <> " events, first=" <> showT (head actionEvents)
+          unless (null actionEvents) $ logDebugIO LogInput $ "input: " <> showT (length actionEvents) <> " events, first=" <> showT (take 1 actionEvents)
           running <- liftIO $ STM.readTVarIO isRunning
           let inputDelayMicros = max 1 (1000000 `div` fromIntegral targetInputFPS)
           liftIO $ threadDelay (fromIntegral inputDelayMicros)

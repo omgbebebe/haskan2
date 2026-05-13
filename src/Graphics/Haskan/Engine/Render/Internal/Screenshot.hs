@@ -52,7 +52,7 @@ handleScreenshotAllStages dr device physicalDevice graphicsCommandPool graphicsQ
   let gbufferImages = drGBufferImages dr !! fromIntegral imageIndex
   logInfo LogGeneral "capturing all pipeline stages..."
   liftIO $ do
-    Screenshot.saveGBufferStage device physicalDevice graphicsCommandPool graphicsQueueHandler (head gbufferImages) rcSurfaceExtent Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT "position"
+    Screenshot.saveGBufferStage device physicalDevice graphicsCommandPool graphicsQueueHandler (gbufferImages !! 0) rcSurfaceExtent Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT "position"
     Screenshot.saveGBufferStage device physicalDevice graphicsCommandPool graphicsQueueHandler (gbufferImages !! 1) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "normal"
     Screenshot.saveGBufferStage device physicalDevice graphicsCommandPool graphicsQueueHandler (gbufferImages !! 2) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
     Screenshot.saveGBufferStage device physicalDevice graphicsCommandPool graphicsQueueHandler (gbufferImages !! 3) rcSurfaceExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "emissive"

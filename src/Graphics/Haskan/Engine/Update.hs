@@ -47,7 +47,7 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
             let dtSeconds = min 0.1 (realToFrac (newTime - prevTime) / 1e9) :: Foreign.C.CFloat
             (actions, overflowCount) <- STM.atomically $ flushInputBuffer inputBuffer
             when (overflowCount > 0) $ logInfoIO LogGeneral $ "input buffer overflow: " <> showT overflowCount <> " events dropped"
-            unless (null actions) $ logInfoIO LogGeneral $ "stateUpdate: processing " <> showT (length actions) <> " actions, first=" <> showT (head actions)
+            unless (null actions) $ logInfoIO LogGeneral $ "stateUpdate: processing " <> showT (length actions) <> " actions, first=" <> showT (take 1 actions)
             debugCmds <- STM.atomically $ TQueue.flushTQueue debugCmdQueue
             worldState <- STM.readTVarIO (world gameState)
             let camera = activeCamera worldState

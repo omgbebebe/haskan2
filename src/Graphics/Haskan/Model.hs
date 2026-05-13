@@ -125,6 +125,7 @@ fromPie PieLevel {..} = do
                         { vPos = V3 (realToFrac x) (realToFrac y) (realToFrac z),
                           vTexUV = V2 0.0 0.0,
                           vNorm = norm,
+                          vTangent = V4 0.0 0.0 0.0 0.0,
                           vCol = V3 0.6 0.6 0.0
                         }
               )
@@ -272,4 +273,4 @@ normPass faces = case faces of
   [] -> []
   x : xs -> scanl (\b a -> if compareFst3 a b == EQ then rotateFace 1 a else a) x xs
 
-isNormalized faces = notElem EQ $ zipWith compareFst3 faces (tail faces)
+isNormalized faces = notElem EQ $ zipWith compareFst3 faces (drop 1 faces)

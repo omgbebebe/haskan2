@@ -1,6 +1,7 @@
 module Main where
 
 import Data.List (sort)
+import Data.Maybe (listToMaybe)
 import Graphics.Haskan.Engine.Capabilities.Clock (MonadClock (..))
 import Graphics.Haskan.Engine.Capabilities.Graphics (MonadGraphics (..))
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo, logDebug)
@@ -73,7 +74,7 @@ main = do
           vkRes <- presentFrameGraphics 0 undefined
           pure (res, vkRes)
   assertEq "graphics calls count" 5 (length (tsGraphicsCalls st5))
-  assertEq "first call" (UploadStorageBuffer 0 3) (head (tsGraphicsCalls st5))
+  assertEq "first call" (Just (UploadStorageBuffer 0 3)) (listToMaybe (tsGraphicsCalls st5))
   let (drawRes, _) = runTestM defaultTestState $ do
         uploadStorageBuffer undefined 0 ([1, 2, 3] :: [Int])
         uploadUniformBuffer undefined 0 ([4, 5] :: [Int])

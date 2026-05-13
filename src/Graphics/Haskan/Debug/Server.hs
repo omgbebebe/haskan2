@@ -17,6 +17,7 @@ import Control.Monad (forever, unless, void)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as BSC
 import Data.ByteString.Lazy qualified as LBS
 import Data.Foldable (for_)
 import Data.Text (Text)
@@ -66,7 +67,7 @@ handleConnection sock writeAction cmdQueue = handle (\(_ :: SomeException) -> pu
     loop hdl
   where
     loop hdl = do
-      line <- BS.hGetLine hdl
+      line <- BSC.hGetLine hdl
       unless (BS.null line) $ do
         case parseDebugMessage (Text.decodeUtf8 line) of
           Left err -> do

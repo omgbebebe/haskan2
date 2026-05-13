@@ -4,6 +4,7 @@
 {-# LANGUAGE RebindableSyntax #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
+{-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}
 
 module Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting where
 

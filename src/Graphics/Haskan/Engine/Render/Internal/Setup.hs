@@ -16,7 +16,7 @@ import Control.Monad.Managed (MonadManaged)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
 import Data.List (nub)
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import Data.Text qualified as Text
 import Data.Vector.Storable (Vector)
 import Data.Vector.Storable qualified as VS
@@ -184,8 +184,8 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
   irradianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile irradianceFacePaths
   let (radDatas, radWidths, _) = unzip3 radianceFaceDatas
       (irrDatas, irrWidths, _) = unzip3 irradianceFaceDatas
-      radSize = head radWidths
-      irrSize = head irrWidths
+      radSize = fromMaybe 0 (listToMaybe radWidths)
+      irrSize = fromMaybe 0 (listToMaybe irrWidths)
       radMipLevels = floor (logBase 2 (fromIntegral radSize :: Double)) + 1
   radianceCubemap <- Texture.createCubemapMips rm physicalDevice device radSize radDatas graphicsQueueHandler textureCommandBuffer
   irradianceCubemap <- Texture.createCubemap rm physicalDevice device irrSize irrDatas graphicsQueueHandler textureCommandBuffer
