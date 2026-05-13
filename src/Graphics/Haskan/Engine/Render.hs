@@ -6,7 +6,6 @@ module Graphics.Haskan.Engine.Render
   )
 where
 
-import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar, takeMVar)
 import Control.Concurrent.STM (STM)
 import Control.Concurrent.STM qualified as STM
@@ -54,6 +53,7 @@ import Graphics.Haskan.Debug.Server (CommandQueue, DebugServerHandle, startDebug
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
+import Graphics.Haskan.Engine.Capabilities.Clock (MonadClock (..))
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logDebug, logInfo)
 import Graphics.Haskan.Logger (LogCategory (..), showT)
 import Graphics.Haskan.Mesh qualified as Mesh
@@ -112,7 +112,7 @@ import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
 import SDL qualified
 import SDL.Input.Mouse qualified as SDL.Mouse
-import System.Clock (Clock (..), getTime, toNanoSecs)
+import System.Clock (Clock (..), getTime)
 import System.Directory (doesFileExist)
 import System.IO.Unsafe (unsafePerformIO)
 import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, runReaderT)
@@ -155,14 +155,14 @@ data RenderEnv = RenderEnv
   }
 
 renderFrameLoop ::
-  (MonadFail m, MonadIO m, MonadLog m) =>
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m) =>
   RenderEnv ->
   Int ->
   m Bool
 renderFrameLoop env frameNumber = runReaderT (renderFrameLoop' frameNumber) env
 
 renderFrameLoop' ::
-  (MonadFail m, MonadIO m, MonadLog m) =>
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m) =>
   Int ->
   RenderLoopM m Bool
 renderFrameLoop' frameNumber = do
@@ -200,7 +200,7 @@ renderFrameLoop' frameNumber = do
       reTvDayNightEnabled = tvDayNightEnabled,
       reTvCloudHeight = tvCloudHeight
     } <- ask
-  frameStartTime <- liftIO $ toNanoSecs <$> getTime Monotonic
+  frameStartTime <- getMonotonicTime
   maybeControlMessage <- liftIO $ STM.atomically $ TChan.tryReadTChan control
   (needRestart, terminating) <- case maybeControlMessage of
     Nothing -> do
@@ -509,14 +509,14 @@ renderFrameLoop' frameNumber = do
               liftIO $ logInfo LogGeneral "resizing swapchain"
               pure (True, False)
             Render.FrameTimeout -> do
-              liftIO $ threadDelay 16000
+              delayMicros 16000
               pure (False, False)
             Render.FrameFailed err -> liftIO $ fail err
     Just Terminate -> do
       liftIO $ logInfo LogGeneral "terminating render loop by signal"
       pure (True, True)
 
-  frameEndTime <- liftIO $ toNanoSecs <$> getTime Monotonic
+  frameEndTime <- getMonotonicTime
   if needRestart
     then liftIO $ do
       logInfo LogGeneral "waiting IDLE state for device"
@@ -527,15 +527,15 @@ renderFrameLoop' frameNumber = do
       let renderTime = frameEndTime - frameStartTime
           delay = ((1000000000 `div` targetFPS) - renderTime) `div` 1000
       liftIO $ do
-        threadDelay (fromIntegral delay)
         stats <- readIORef frameStatsRef
         let (newStats, mMsg) = updateFrameStats stats renderTime
         writeIORef frameStatsRef newStats
         for_ mMsg $ logInfo LogRender
+      delayMicros (fromIntegral delay)
       renderFrameLoop' ((frameNumber + 1) `mod` Render.maxFramesInFlight)
 
 renderLoop ::
-  (MonadFail m, MonadManaged m, MonadIO m, MonadLog m) =>
+  (MonadFail m, MonadManaged m, MonadIO m, MonadLog m, MonadClock m) =>
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
   [String] ->
