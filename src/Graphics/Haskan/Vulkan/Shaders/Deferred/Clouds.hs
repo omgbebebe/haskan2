@@ -252,11 +252,13 @@ cloudFragment = shader do
       tNear = max 0.0 (min tToBottom tToTop)
       tFar = max 0.0 (max tToBottom tToTop)
       totalRayLength = min 10000.0 (tFar - tNear)
-      stepCount = (24 :: Code Int32)
-      stepSize = totalRayLength / 24.0
+      absDirY = if dirY > 0.0 then dirY else 0.0 - dirY
+      stepCountF = 32.0 - 8.0 * step 0.3 absDirY - 8.0 * step 0.7 absDirY
+      adaptiveStepSize = totalRayLength / stepCountF
+      horizonSkip = 1.0 - step 0.05 absDirY
 
       ditherHash = fract (sin (fma uvY 78.233 (uvX * 12.9898)) * 43758.5453)
-      ditherOffset = ditherHash * stepSize
+      ditherOffset = ditherHash * adaptiveStepSize
       tEntry = tNear + ditherOffset
       entryPos = Vec3 (camX + dirX * tEntry) (camY + dirY * tEntry) (camZ + dirZ * tEntry)
 
@@ -269,8 +271,8 @@ cloudFragment = shader do
 
   -- Dynamic ray march: mutable accumulators
   _ <- def @"step" @RW @Int32 0
-  _ <- def @"rayPos" @RW @(V 3 Float) (entryPos ^+^ dir ^* (stepSize * 0.5))
-  _ <- def @"transmittance" @RW @Float 1.0
+  _ <- def @"rayPos" @RW @(V 3 Float) (entryPos ^+^ dir ^* (adaptiveStepSize * 0.5))
+  _ <- def @"transmittance" @RW @Float (1.0 - horizonSkip)
   _ <- def @"accR" @RW @Float 0.0
   _ <- def @"accG" @RW @Float 0.0
   _ <- def @"accB" @RW @Float 0.0
@@ -285,7 +287,7 @@ cloudFragment = shader do
 
   loop do
     s <- get @"step"
-    when (s >= 24) do
+    when (fromIntegral s >= stepCountF) do
       break @1
 
     t <- get @"transmittance"
@@ -343,15 +345,15 @@ cloudFragment = shader do
                        p = 0.7 * exp (-finalLightDensity * cloudAbsorption * 0.167)
                    in max b p
 
-    let s_scatter = cloudBase ^* (lightT_d * phase * density * stepSize)
-        t_new = exp (-density * stepSize)
+    let s_scatter = cloudBase ^* (lightT_d * phase * density * adaptiveStepSize)
+        t_new = exp (-density * adaptiveStepSize)
         ~(Vec3 srx sry srz) = s_scatter
 
     modify @"accR" (+ (srx * t))
     modify @"accG" (+ (sry * t))
     modify @"accB" (+ (srz * t))
     put @"transmittance" (t * t_new)
-    put @"rayPos" (rp ^+^ dir ^* stepSize)
+    put @"rayPos" (rp ^+^ dir ^* adaptiveStepSize)
     modify @"step" (+1)
 
   finalTransmittance <- get @"transmittance"
