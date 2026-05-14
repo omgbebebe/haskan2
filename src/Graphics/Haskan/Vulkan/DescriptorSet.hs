@@ -488,8 +488,10 @@ updateCloudDescriptorSets ::
   Maybe Vulkan.VkImageView ->
   -- | history texture view
   Maybe Vulkan.VkImageView ->
+  -- | blue noise texture view
+  Maybe Vulkan.VkImageView ->
   m ()
-updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView mCloudHistoryView = do
+updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView mCloudHistoryView mBlueNoiseView = do
   let mkTextureInfo imageView =
         Vulkan.createVk
           ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -518,7 +520,10 @@ updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView 
       historyWrite = case mCloudHistoryView of
         Just historyView -> [mkWrite 2 historyView]
         Nothing -> []
-      allWrites = envWrite ++ noiseWrite ++ historyWrite
+      blueNoiseWrite = case mBlueNoiseView of
+        Just blueView -> [mkWrite 3 blueView]
+        Nothing -> []
+      allWrites = envWrite ++ noiseWrite ++ historyWrite ++ blueNoiseWrite
   liftIO $
     Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
       Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr

@@ -13,12 +13,13 @@ where
 import Control.Monad (forM, forM_, replicateM, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
+import Data.ByteString qualified as BS
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
 import Data.List (nub)
 import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import Data.Text qualified as Text
-import Data.Vector.Storable (Vector)
+import Data.Vector.Storable (Vector, fromList)
 import Data.Vector.Storable qualified as VS
 import Data.Word (Word32, Word8)
 import FIR qualified
@@ -162,7 +163,8 @@ data IBLTextures = IBLTextures
     iblIrradianceView :: !(Maybe Vulkan.VkImageView),
     iblSampler :: !Vulkan.VkSampler,
     iblBrdfView :: !(Maybe Vulkan.VkImageView),
-    iblCloudNoiseView :: !(Maybe Vulkan.VkImageView)
+    iblCloudNoiseView :: !(Maybe Vulkan.VkImageView),
+    iblBlueNoiseView :: !(Maybe Vulkan.VkImageView)
   }
 
 -- | Load IBL cubemaps, BRDF LUT, and cloud noise texture
@@ -205,6 +207,13 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
   cloudNoiseView <- Texture.managedTexture3D physicalDevice device "data/textures/cloud_noise/cloud_noise_256.raw" 256 256 256 graphicsQueueHandler textureCommandBuffer
   logInfo LogGeneral "3D cloud noise texture loaded"
 
+  logInfo LogGeneral "loading blue noise texture..."
+  blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
+  let blueNoisePixels = Data.Vector.Storable.fromList (BS.unpack blueNoiseRaw)
+  blueNoiseHandle <- Texture.createTextureFromData rm physicalDevice device 64 64 blueNoisePixels graphicsQueueHandler textureCommandBuffer
+  mBlueNoiseView <- Texture.textureImageView rm blueNoiseHandle
+  logInfo LogGeneral "blue noise texture loaded"
+
   pure
     IBLTextures
       { iblRadianceCubemap = radianceCubemap,
@@ -213,7 +222,8 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
         iblIrradianceView = mIrradianceView,
         iblSampler = lightingSampler,
         iblBrdfView = mBrdfView,
-        iblCloudNoiseView = Just cloudNoiseView
+        iblCloudNoiseView = Just cloudNoiseView,
+        iblBlueNoiseView = mBlueNoiseView
       }
 
 data SceneLoadResult = SceneLoadResult

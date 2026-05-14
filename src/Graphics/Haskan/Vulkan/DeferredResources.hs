@@ -81,8 +81,9 @@ createDeferredResources ::
   Maybe Vulkan.VkImageView ->
   Vulkan.VkSampler ->
   Maybe Vulkan.VkImageView ->
+  Maybe Vulkan.VkImageView ->
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView = do
   let extent = rcSurfaceExtent ctx
       cloudExtent =
         Vulkan.createVk
@@ -296,7 +297,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
 
   -- Update cloud descriptor sets
   liftIO $ for_ (zip cloudDescriptorSets cloudHistoryImageViews) $ \(ds, histView) ->
-    DescriptorSet.updateCloudDescriptorSets device ds sampler mEnvMapView mCloudNoiseView (Just histView)
+    DescriptorSet.updateCloudDescriptorSets device ds sampler mEnvMapView mCloudNoiseView (Just histView) mBlueNoiseView
   logDebugIO LogRender "cloud descriptor sets updated"
 
   pure

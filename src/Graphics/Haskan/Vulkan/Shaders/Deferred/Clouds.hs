@@ -204,10 +204,14 @@ type CloudFragmentDefs =
        ':-> Texture3D
               '[Binding 1, DescriptorSet 0]
               (RGBA8 UNorm),
-     "cloud_history"
-       ':-> Texture2D
-              '[Binding 2, DescriptorSet 0]
-              (RGBA16 F),
+      "cloud_history"
+        ':-> Texture2D
+               '[Binding 2, DescriptorSet 0]
+               (RGBA16 F),
+      "blue_noise"
+        ':-> Texture2D
+               '[Binding 3, DescriptorSet 0]
+               (RGBA8 UNorm),
      "cameraPos"
        ':-> PushConstant
               '[]
@@ -257,8 +261,9 @@ cloudFragment = shader do
       adaptiveStepSize = totalRayLength / stepCountF
       horizonSkip = 1.0 - step 0.05 absDirY
 
-      ditherHash = fract (sin (fma uvY 78.233 (uvX * 12.9898)) * 43758.5453)
-      ditherOffset = ditherHash * adaptiveStepSize
+  -- Sample blue noise for dithered ray entry
+  ~(Vec4 blueR _ _ _) <- use @(ImageTexel "blue_noise") NilOps (Vec2 uvX uvY)
+  let ditherOffset = blueR * adaptiveStepSize
       tEntry = tNear + ditherOffset
       entryPos = Vec3 (camX + dirX * tEntry) (camY + dirY * tEntry) (camZ + dirZ * tEntry)
 
