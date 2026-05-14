@@ -508,3 +508,25 @@ camPosData = [ camX, camY, camZ, realToFrac dpdDebugMode
 - `src/Graphics/Haskan/Model.hs` — fixed `vTangent` field
 - `src/Graphics/Haskan/Debug/Server.hs` — `BSC.hGetLine`
 - Multiple files — partial function replacements, `{-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}`
+
+### 2026-05-14: Cloud Shader Production Milestone — Phase 6 Complete
+**Adaptive Step Count**:
+- Step count now varies based on `abs(dirY)`:
+  - `|dirY| < 0.1`: 16 steps (grazing angles, stretched traversal)
+  - `|dirY| < 0.6`: 24 steps (medium angles)
+  - `|dirY| >= 0.6`: 32 steps (near-vertical, best quality)
+- `stepSize = totalRayLength / stepCountF` where `stepCountF = fromIntegral stepCount`
+- Dynamic loop bound: `when (s >= stepCount) do break @1`
+
+**Near-Horizon Skip**:
+- When `abs(dirY) < 0.05`, raymarching loop is skipped entirely
+- Accumulators remain at initial values (transmittance=1.0, accRGB=0.0)
+- Result is pure skybox color, avoiding expensive loop for negligible contribution
+
+**Interleaved Gradient Noise Dithering**:
+- Replaced `sin(hash)` dither with Jimenez's interleaved gradient noise:
+  `fract(52.9829189 * fract(uvX * 0.06711056 + uvY * 0.00583715))`
+- Better temporal stability than hash-based dither without requiring texture lookup
+
+**Files Changed**:
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Clouds.hs` — adaptive step count, horizon skip, IGN dither
