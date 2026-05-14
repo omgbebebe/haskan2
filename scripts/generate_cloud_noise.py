@@ -9,18 +9,26 @@ Outputs:
     data/textures/cloud_noise/cloud_noise.ktx2 — KTX2 3D texture
     data/textures/cloud_noise/slices/ — PNG slices for inspection
 
-Channel layout (production standard):
-    R: Perlin-Worley blend (4 octaves Perlin + 4³ Worley) — macro cloud shape
+Channel layout (matches shader in Clouds.hs):
+    R: Perlin-Worley blend (4 octaves gradient Perlin + 4³ Worley) — macro cloud shape
     G: Worley 8³  — medium-frequency edge erosion
     B: Worley 16³ — high-frequency wispy detail
     A: Worley 32³ — ultra-high-frequency micro-detail
 
 All noise is tileable (toroidal distance wrapping).
 
-Shader usage:
-    shape   = texture.r
-    detail  = texture.g * 0.5 + texture.b * 0.25 + texture.a * 0.125
-    density = max(0, shape - detail * erosion - threshold)
+Shader usage (from Clouds.hs fragment shader):
+    -- Domain-warped UVW sampled from this 3D texture
+    noise = texture3D(cloud_noise, uvw)
+    
+    -- Detail channel: weighted combination of G/B/A
+    detail = noise.g * 0.3 + noise.b * 0.15 + noise.a * 0.075
+    
+    -- Base density: shape * (1 - detail) with threshold
+    density = max(0, noise.r * (1.0 - detail) - 0.15)
+    
+    -- Apply height mask (smoothstep at cloud bottom/top)
+    density = density * heightMask * 4.0
 """
 
 import os
@@ -28,12 +36,100 @@ import struct
 import time
 import numpy as np
 from PIL import Image
-from scipy.ndimage import zoom
 
 SIZE = 128
 CHANNELS = 4
 
 np.random.seed(42)
+
+# 12 gradient directions for 3D Perlin noise (edges of a cube)
+_GRAD3 = np.array([
+    [1,1,0], [-1,1,0], [1,-1,0], [-1,-1,0],
+    [1,0,1], [-1,0,1], [1,0,-1], [-1,0,-1],
+    [0,1,1], [0,-1,1], [0,1,-1], [0,-1,-1]
+], dtype=np.float32)
+
+
+def _fade(t):
+    return t * t * t * (t * (t * 6 - 15) + 10)
+
+
+def generate_perlin_3d_tileable(size, octaves=4):
+    """Generate tileable 3D Perlin gradient noise with fBm.
+
+    Uses proper gradient interpolation (not value noise), with the
+    6t^5-15t^4+10t^3 fade curve for C2-smooth results.
+    Tileable via modular gradient grid indexing.
+    """
+    t0 = time.perf_counter()
+    print(f"  Perlin fBm ({octaves} octaves)...", end="", flush=True)
+
+    coords = np.linspace(0, 1, size, endpoint=False, dtype=np.float32)
+    xx, yy, zz = np.meshgrid(coords, coords, coords, indexing='ij')
+
+    result = np.zeros((size, size, size), dtype=np.float32)
+    amplitude = 1.0
+    total_amp = 0.0
+    grid_size = 2
+
+    for _ in range(octaves):
+        grad_idx = np.random.randint(0, 12, (grid_size, grid_size, grid_size))
+        gx = _GRAD3[grad_idx, 0]
+        gy = _GRAD3[grad_idx, 1]
+        gz = _GRAD3[grad_idx, 2]
+
+        px = xx * grid_size
+        py = yy * grid_size
+        pz = zz * grid_size
+
+        ix = np.floor(px).astype(np.int32) % grid_size
+        iy = np.floor(py).astype(np.int32) % grid_size
+        iz = np.floor(pz).astype(np.int32) % grid_size
+
+        fx = px - np.floor(px)
+        fy = py - np.floor(py)
+        fz = pz - np.floor(pz)
+
+        u = _fade(fx)
+        v = _fade(fy)
+        w = _fade(fz)
+
+        ix1 = (ix + 1) % grid_size
+        iy1 = (iy + 1) % grid_size
+        iz1 = (iz + 1) % grid_size
+
+        def dot(ci, cj, ck, dx, dy, dz):
+            return gx[ci, cj, ck] * dx + gy[ci, cj, ck] * dy + gz[ci, cj, ck] * dz
+
+        n000 = dot(ix,  iy,  iz,  fx,     fy,     fz)
+        n100 = dot(ix1, iy,  iz,  fx - 1, fy,     fz)
+        n010 = dot(ix,  iy1, iz,  fx,     fy - 1, fz)
+        n110 = dot(ix1, iy1, iz,  fx - 1, fy - 1, fz)
+        n001 = dot(ix,  iy,  iz1, fx,     fy,     fz - 1)
+        n101 = dot(ix1, iy,  iz1, fx - 1, fy,     fz - 1)
+        n011 = dot(ix,  iy1, iz1, fx,     fy - 1, fz - 1)
+        n111 = dot(ix1, iy1, iz1, fx - 1, fy - 1, fz - 1)
+
+        x00 = n000 + u * (n100 - n000)
+        x10 = n010 + u * (n110 - n010)
+        x01 = n001 + u * (n101 - n001)
+        x11 = n011 + u * (n111 - n011)
+
+        y0 = x00 + v * (x10 - x00)
+        y1 = x01 + v * (x11 - x01)
+
+        z0 = y0 + w * (y1 - y0)
+
+        result += z0 * amplitude
+        total_amp += amplitude
+        amplitude *= 0.5
+        grid_size *= 2
+
+    result /= total_amp
+    result = (result - result.min()) / (result.max() - result.min() + 1e-8)
+    elapsed = time.perf_counter() - t0
+    print(f" {elapsed:.2f}s")
+    return result
 
 
 def generate_worley_3d_tileable(size, cells_per_axis):
@@ -53,9 +149,7 @@ def generate_worley_3d_tileable(size, cells_per_axis):
 
     cell_size = 1.0 / cells_per_axis
 
-    # One random point per cell, stored as 3D grid for direct lookup
     point_grid = np.random.rand(cells_per_axis, cells_per_axis, cells_per_axis, 3).astype(np.float32)
-    # Convert jittered offsets to world-space positions
     for cx in range(cells_per_axis):
         for cy in range(cells_per_axis):
             for cz in range(cells_per_axis):
@@ -63,20 +157,17 @@ def generate_worley_3d_tileable(size, cells_per_axis):
                 point_grid[cx, cy, cz, 1] = (cy + point_grid[cx, cy, cz, 1]) * cell_size
                 point_grid[cx, cy, cz, 2] = (cz + point_grid[cx, cy, cz, 2]) * cell_size
 
-    # Voxel coordinates
     x = np.linspace(0, 1, size, endpoint=False)
     y = np.linspace(0, 1, size, endpoint=False)
     z = np.linspace(0, 1, size, endpoint=False)
     xx, yy, zz = np.meshgrid(x, y, z, indexing='ij')
 
-    # Which cell does each voxel belong to?
     cell_x = np.floor(xx * cells_per_axis).astype(int) % cells_per_axis
     cell_y = np.floor(yy * cells_per_axis).astype(int) % cells_per_axis
     cell_z = np.floor(zz * cells_per_axis).astype(int) % cells_per_axis
 
     min_dist = np.ones((size, size, size), dtype=np.float32) * 2.0
 
-    # Only check 3×3×3 = 27 neighbor cells
     for di in range(-1, 2):
         for dj in range(-1, 2):
             for dk in range(-1, 2):
@@ -98,44 +189,6 @@ def generate_worley_3d_tileable(size, cells_per_axis):
     elapsed = time.perf_counter() - t0
     print(f" {elapsed:.2f}s")
     return 1.0 - min_dist
-
-
-def generate_perlin_3d_tileable(size, octaves=4):
-    """Generate tileable 3D Perlin-like noise using numpy interpolation."""
-    t0 = time.perf_counter()
-    print(f"  Perlin fBm ({octaves} octaves)...", end="", flush=True)
-
-    result = np.zeros((size, size, size), dtype=np.float32)
-    amplitude = 1.0
-    frequency = 1.0
-
-    for _ in range(octaves):
-        grid_size = max(2, int(frequency))
-        grid = np.random.randn(grid_size, grid_size, grid_size).astype(np.float32)
-
-        # Tile the grid for periodicity
-        tiled_grid = np.tile(grid, (2, 2, 2))
-
-        zoom_factor = (size * 2) / (grid_size * 2)
-        interp = zoom(tiled_grid, zoom_factor, order=1)
-
-        start = size // 2
-        interp = interp[start:start+size, start:start+size, start:start+size]
-
-        if interp.shape[0] > size:
-            interp = interp[:size, :size, :size]
-        elif interp.shape[0] < size:
-            pad = size - interp.shape[0]
-            interp = np.pad(interp, ((0, pad), (0, pad), (0, pad)), mode='wrap')
-
-        result += interp * amplitude
-        amplitude *= 0.5
-        frequency *= 2
-
-    result = (result - result.min()) / (result.max() - result.min() + 1e-8)
-    elapsed = time.perf_counter() - t0
-    print(f" {elapsed:.2f}s")
-    return result
 
 
 def save_slices(data, output_dir):
@@ -206,29 +259,21 @@ def main():
     t_start = time.perf_counter()
     print(f"Generating tileable 3D cloud noise ({SIZE}³)...")
 
-    # R: Perlin base blended with low-freq Worley — macro cloud shape
     perlin = generate_perlin_3d_tileable(SIZE, octaves=4)
     worley_low = generate_worley_3d_tileable(SIZE, cells_per_axis=4)
-
-    # G: Worley 8³ — medium-frequency edge erosion
     worley_mid = generate_worley_3d_tileable(SIZE, cells_per_axis=8)
-
-    # B: Worley 16³ — high-frequency wispy detail
     worley_high = generate_worley_3d_tileable(SIZE, cells_per_axis=16)
-
-    # A: Worley 32³ — ultra-high-frequency micro-detail
     worley_ultra = generate_worley_3d_tileable(SIZE, cells_per_axis=32)
 
     print("  Packing channels...")
 
-    # Perlin-Worley blend: billowy Perlin shapes that respect cellular boundaries
     perlin_worley = np.clip(perlin * 0.65 + worley_low * 0.35, 0, 1)
 
     texture = np.zeros((SIZE, SIZE, SIZE, CHANNELS), dtype=np.float32)
-    texture[..., 0] = perlin_worley  # R: macro shape
-    texture[..., 1] = worley_mid     # G: med erosion
-    texture[..., 2] = worley_high    # B: fine detail
-    texture[..., 3] = worley_ultra   # A: micro detail
+    texture[..., 0] = perlin_worley
+    texture[..., 1] = worley_mid
+    texture[..., 2] = worley_high
+    texture[..., 3] = worley_ultra
 
     out_dir = "data/textures/cloud_noise"
     os.makedirs(out_dir, exist_ok=True)
@@ -244,10 +289,9 @@ def main():
     print(f"  G Worley 8³:      [{worley_mid.min():.3f}, {worley_mid.max():.3f}]")
     print(f"  B Worley 16³:     [{worley_high.min():.3f}, {worley_high.max():.3f}]")
     print(f"  A Worley 32³:     [{worley_ultra.min():.3f}, {worley_ultra.max():.3f}]")
-    print(f"\nShader usage:")
-    print(f"  shape   = texture.r")
-    print(f"  detail  = texture.g * 0.5 + texture.b * 0.25 + texture.a * 0.125")
-    print(f"  density = max(0, shape - detail * erosion - threshold)")
+    print(f"\nShader usage (from Clouds.hs):")
+    print(f"  detail  = texture.g * 0.3 + texture.b * 0.15 + texture.a * 0.075")
+    print(f"  density = max(0, texture.r * (1.0 - detail) - 0.15) * heightMask * 4.0")
 
     total = time.perf_counter() - t_start
     print(f"\nTotal: {total:.2f}s")
