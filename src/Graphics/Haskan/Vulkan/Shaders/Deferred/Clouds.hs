@@ -262,14 +262,10 @@ cloudFragment = shader do
       tNear = max 0.0 (min tToBottom tToTop)
       tFar = max 0.0 (max tToBottom tToTop)
       totalRayLength = min 10000.0 (tFar - tNear)
-      absDirY = abs dirY
-      stepCount = if absDirY < 0.1
-        then (16 :: Code Int32)
-        else (if absDirY < 0.6 then (24 :: Code Int32) else (32 :: Code Int32))
-      stepCountF = fromIntegral stepCount :: Code Float
-      stepSize = totalRayLength / stepCountF
+      stepCount = (24 :: Code Int32)
+      stepSize = totalRayLength / 24.0
 
-      ditherHash = fract (52.9829189 * fract (uvX * 0.06711056 + uvY * 0.00583715))
+      ditherHash = fract (sin (fma uvY 78.233 (uvX * 12.9898)) * 43758.5453)
       ditherOffset = ditherHash * stepSize
       tEntry = tNear + ditherOffset
       entryPos = Vec3 (camX + dirX * tEntry) (camY + dirY * tEntry) (camZ + dirZ * tEntry)
@@ -297,77 +293,76 @@ cloudFragment = shader do
       phase = 0.7 * hgPhase 0.6 + 0.3 * hgPhase (-0.3)
       cloudBase = Vec3 1.0 0.98 0.95
 
-  when (absDirY >= 0.05) do
+  loop do
+    s <- get @"step"
+    when (s >= 24) do
+      break @1
+
+    t <- get @"transmittance"
+    when (t < 0.01) do
+      break @1
+
+    rp <- get @"rayPos"
+    let ~(Vec3 px py pz) = rp
+        wx = sin (py * warpFreq + pz * warpFreq * 0.7) * warpAmp
+        wy = cos (px * warpFreq + pz * warpFreq * 0.5) * warpAmp
+        wz = sin (pz * warpFreq * 0.7 + px * warpFreq * 0.6) * warpAmp
+        sx = fract ((px + wx) * noiseScale - windOffsetX)
+        sy = fract ((py + wy) * noiseScale)
+        sz = fract ((pz + wz) * noiseScale - windOffsetZ)
+
+    ~(Vec4 nr ng nb na) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 sx sy sz)
+
+    let h = (py - cloudBottom) / cloudThickness
+        heightMask = smoothstep 0.0 0.15 h * (1.0 - smoothstep 0.85 1.0 h)
+        density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - cloudCoverage)) * heightMask * 4.0
+
+    -- Nested light march: 4 steps toward sun for self-shadowing
+    _ <- def @"lightStep" @RW @Int32 0
+    _ <- def @"lightPos" @RW @(V 3 Float) rp
+    _ <- def @"lightDensity" @RW @Float 0.0
+
+    let lightStepSize = cloudThickness / 6.0
+
     loop do
-             s <- get @"step"
-             when (s >= stepCount) do
-               break @1
+      ls <- get @"lightStep"
+      when (ls >= 4) do
+        break @1
 
-             t <- get @"transmittance"
-             when (t < 0.01) do
-               break @1
+      lp <- get @"lightPos"
+      let ~(Vec3 lpx lpy lpz) = lp
+          lwx = sin (lpy * warpFreq + lpz * warpFreq * 0.7) * warpAmp
+          lwy = cos (lpx * warpFreq + lpz * warpFreq * 0.5) * warpAmp
+          lwz = sin (lpz * warpFreq * 0.7 + lpx * warpFreq * 0.6) * warpAmp
+          lsx = fract ((lpx + lwx) * noiseScale - windOffsetX)
+          lsy = fract ((lpy + lwy) * noiseScale)
+          lsz = fract ((lpz + lwz) * noiseScale - windOffsetZ)
 
-             rp <- get @"rayPos"
-             let ~(Vec3 px py pz) = rp
-                 wx = sin (py * warpFreq + pz * warpFreq * 0.7) * warpAmp
-                 wy = cos (px * warpFreq + pz * warpFreq * 0.5) * warpAmp
-                 wz = sin (pz * warpFreq * 0.7 + px * warpFreq * 0.6) * warpAmp
-                 sx = fract ((px + wx) * noiseScale - windOffsetX)
-                 sy = fract ((py + wy) * noiseScale)
-                 sz = fract ((pz + wz) * noiseScale - windOffsetZ)
+      ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 lsx lsy lsz)
 
-             ~(Vec4 nr ng nb na) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 sx sy sz)
+      let lh = (lpy - cloudBottom) / cloudThickness
+          lheightMask = smoothstep 0.0 0.15 lh * (1.0 - smoothstep 0.85 1.0 lh)
+          ld = max 0 (lnr * (1.0 - cloudDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - (1.0 - cloudCoverage)) * lheightMask * 4.0
 
-             let h = (py - cloudBottom) / cloudThickness
-                 heightMask = smoothstep 0.0 0.15 h * (1.0 - smoothstep 0.85 1.0 h)
-                 density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - cloudCoverage)) * heightMask * 4.0
+      modify @"lightDensity" (+ (ld * lightStepSize))
+      put @"lightPos" (lp ^+^ sunDir ^* lightStepSize)
+      modify @"lightStep" (+1)
 
-             -- Nested light march: 4 steps toward sun for self-shadowing
-             _ <- def @"lightStep" @RW @Int32 0
-             _ <- def @"lightPos" @RW @(V 3 Float) rp
-             _ <- def @"lightDensity" @RW @Float 0.0
+    finalLightDensity <- get @"lightDensity"
+    let lightT_d = let b = exp (-finalLightDensity * 1.5)
+                       p = 0.7 * exp (-finalLightDensity * 0.25)
+                   in max b p
 
-             let lightStepSize = cloudThickness / 6.0
+    let s_scatter = cloudBase ^* (lightT_d * phase * density * stepSize)
+        t_new = exp (-density * stepSize)
+        ~(Vec3 srx sry srz) = s_scatter
 
-             loop do
-               ls <- get @"lightStep"
-               when (ls >= 4) do
-                 break @1
-
-               lp <- get @"lightPos"
-               let ~(Vec3 lpx lpy lpz) = lp
-                   lwx = sin (lpy * warpFreq + lpz * warpFreq * 0.7) * warpAmp
-                   lwy = cos (lpx * warpFreq + lpz * warpFreq * 0.5) * warpAmp
-                   lwz = sin (lpz * warpFreq * 0.7 + lpx * warpFreq * 0.6) * warpAmp
-                   lsx = fract ((lpx + lwx) * noiseScale - windOffsetX)
-                   lsy = fract ((lpy + lwy) * noiseScale)
-                   lsz = fract ((lpz + lwz) * noiseScale - windOffsetZ)
-
-               ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 lsx lsy lsz)
-
-               let lh = (lpy - cloudBottom) / cloudThickness
-                   lheightMask = smoothstep 0.0 0.15 lh * (1.0 - smoothstep 0.85 1.0 lh)
-                   ld = max 0 (lnr * (1.0 - cloudDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - (1.0 - cloudCoverage)) * lheightMask * 4.0
-
-               modify @"lightDensity" (+ (ld * lightStepSize))
-               put @"lightPos" (lp ^+^ sunDir ^* lightStepSize)
-               modify @"lightStep" (+1)
-
-             finalLightDensity <- get @"lightDensity"
-             let lightT_d = let b = exp (-finalLightDensity * 1.5)
-                                p = 0.7 * exp (-finalLightDensity * 0.25)
-                            in max b p
-
-             let s_scatter = cloudBase ^* (lightT_d * phase * density * stepSize)
-                 t_new = exp (-density * stepSize)
-                 ~(Vec3 srx sry srz) = s_scatter
-
-             modify @"accR" (+ (srx * t))
-             modify @"accG" (+ (sry * t))
-             modify @"accB" (+ (srz * t))
-             put @"transmittance" (t * t_new)
-             put @"rayPos" (rp ^+^ dir ^* stepSize)
-             modify @"step" (+1)
+    modify @"accR" (+ (srx * t))
+    modify @"accG" (+ (sry * t))
+    modify @"accB" (+ (srz * t))
+    put @"transmittance" (t * t_new)
+    put @"rayPos" (rp ^+^ dir ^* stepSize)
+    modify @"step" (+1)
 
   finalTransmittance <- get @"transmittance"
   finalAccR <- get @"accR"

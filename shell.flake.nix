@@ -19,6 +19,8 @@ mkShell {
   name = "haskan-dev";
   nativeBuildInputs = with pkgs; [
     poppler-utils
+    gdb
+    tree
   ];
   buildInputs = [
     ghc
