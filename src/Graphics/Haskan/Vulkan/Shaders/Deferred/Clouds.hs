@@ -310,7 +310,7 @@ cloudFragment = shader do
     _ <- def @"lightPos" @RW @(V 3 Float) rp
     _ <- def @"lightDensity" @RW @Float 0.0
 
-    let lightStepSize = cloudThickness / 6.0
+    let lightStepSize = cloudThickness / 4.0
 
     loop do
       ls <- get @"lightStep"
