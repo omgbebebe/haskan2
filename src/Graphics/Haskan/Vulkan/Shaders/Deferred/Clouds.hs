@@ -180,7 +180,9 @@ type CloudPushConstant =
        "prevViewProj3" ':-> V 4 Float,
        "windDirX" ':-> Float,
        "windDirZ" ':-> Float,
-       "prevTime" ':-> Float
+       "prevTime" ':-> Float,
+       "cloudCoverage" ':-> Float,
+       "cloudDetail" ':-> Float
      ]
 
 cloudVertex :: ShaderModule "main" VertexShader CloudVertexDefs _
@@ -243,6 +245,8 @@ cloudFragment = shader do
       time = view @(Name "time") cameraPos
       windDirX = view @(Name "windDirX") cameraPos
       windDirZ = view @(Name "windDirZ") cameraPos
+      cloudCoverage = view @(Name "cloudCoverage") cameraPos
+      cloudDetail = view @(Name "cloudDetail") cameraPos
 
   ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps (Vec3 dirX dirY dirZ)
 
@@ -311,7 +315,7 @@ cloudFragment = shader do
 
     let h = (py - cloudBottom) / cloudThickness
         heightMask = smoothstep 0.0 0.15 h * (1.0 - smoothstep 0.85 1.0 h)
-        density = max 0 (nr * (1.0 - (ng * 0.3 + nb * 0.15 + na * 0.075)) - 0.15) * heightMask * 4.0
+        density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - cloudCoverage)) * heightMask * 4.0
 
     -- Nested light march: 4 steps toward sun for self-shadowing
     _ <- def @"lightStep" @RW @Int32 0
@@ -338,7 +342,7 @@ cloudFragment = shader do
 
       let lh = (lpy - cloudBottom) / cloudThickness
           lheightMask = smoothstep 0.0 0.15 lh * (1.0 - smoothstep 0.85 1.0 lh)
-          ld = max 0 (lnr * (1.0 - (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - 0.15) * lheightMask * 4.0
+          ld = max 0 (lnr * (1.0 - cloudDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - (1.0 - cloudCoverage)) * lheightMask * 4.0
 
       modify @"lightDensity" (+ (ld * lightStepSize))
       put @"lightPos" (lp ^+^ sunDir ^* lightStepSize)

@@ -413,6 +413,8 @@ data GameState cam = GameState
     cloudHeight :: TVar Float,
     windDirX :: TVar Float,
     windDirZ :: TVar Float,
+    cloudCoverage :: TVar Float,
+    cloudDetail :: TVar Float,
     cameraMode :: TVar CameraMode,
     orbitalCamera :: TVar cam,
     flyCamera :: TVar cam

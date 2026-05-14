@@ -151,6 +151,22 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                     STM.writeTVar (windDirZ gameState) newZ
                   logInfoIO LogGeneral $ "wind direction: " <> showT newX <> ", " <> showT newZ
                 (WindRotateRight, False, _) -> pure ()
+                (CloudPreset idx, True, _) -> do
+                  let presets =
+                        [ (0.45, 0.35),  -- Cumulus
+                          (0.85, 0.20),  -- Stratus
+                          (0.60, 0.30),  -- Stratocumulus
+                          (0.60, 0.50),  -- Cumulonimbus
+                          (0.30, 0.60)   -- Cirrus
+                        ]
+                      (cov, det) = if idx >= 0 && idx < length presets
+                        then presets !! idx
+                        else (0.45, 0.35)
+                  STM.atomically $ do
+                    STM.writeTVar (cloudCoverage gameState) cov
+                    STM.writeTVar (cloudDetail gameState) det
+                  logInfoIO LogGeneral $ "cloud preset " <> showT idx <> ": coverage=" <> showT cov <> " detail=" <> showT det
+                (CloudPreset _, False, _) -> pure ()
                 (SwitchCameraMode, True, _) -> do
                   currentMode <- STM.readTVarIO (cameraMode gameState)
                   let newMode = case currentMode of

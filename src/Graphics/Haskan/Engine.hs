@@ -124,6 +124,8 @@ mainLoop meshName EngineConfig {..} = do
   tvCloudHeight <- liftIO $ STM.newTVarIO 3500.0
   tvWindDirX <- liftIO $ STM.newTVarIO 1.0
   tvWindDirZ <- liftIO $ STM.newTVarIO 0.0
+  tvCloudCoverage <- liftIO $ STM.newTVarIO 0.45
+  tvCloudDetail <- liftIO $ STM.newTVarIO 0.35
   tvCameraMode <- liftIO $ STM.newTVarIO (if cloudTestMode then CameraModeFly else CameraModeOrbital)
   tvOrbitalCamera <- liftIO $ STM.newTVarIO initialCam
   tvFlyCamera <- liftIO $ STM.newTVarIO (Camera.Fly defaultFlyCamera)
@@ -154,6 +156,8 @@ mainLoop meshName EngineConfig {..} = do
           tvCloudHeight
           tvWindDirX
           tvWindDirZ
+          tvCloudCoverage
+          tvCloudDetail
           tvCameraMode
           tvOrbitalCamera
           tvFlyCamera

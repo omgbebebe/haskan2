@@ -186,6 +186,8 @@ data RenderEnv = RenderEnv
     reTvCloudHeight :: !(STM.TVar Float),
     reTvWindDirX :: !(STM.TVar Float),
     reTvWindDirZ :: !(STM.TVar Float),
+    reTvCloudCoverage :: !(STM.TVar Float),
+    reTvCloudDetail :: !(STM.TVar Float),
     rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat)),
     rePrevTime :: !(TVar Float)
   }
@@ -326,6 +328,8 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
 
   windDirXVal <- liftIO $ STM.readTVarIO reTvWindDirX
   windDirZVal <- liftIO $ STM.readTVarIO reTvWindDirZ
+  cloudCoverageVal <- liftIO $ STM.readTVarIO reTvCloudCoverage
+  cloudDetailVal <- liftIO $ STM.readTVarIO reTvCloudDetail
 
   currentTime <- getMonotonicTime
   let elapsedSeconds = fromIntegral (toNanoSecs currentTime) / 1e9
@@ -333,7 +337,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   prevTimeVal <- liftIO $ STM.readTVarIO rePrevTime
   liftIO $ STM.atomically $ STM.writeTVar rePrevTime elapsedSeconds
 
-  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal prevTimeVal
+  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal prevTimeVal cloudCoverageVal cloudDetailVal
       recordAction = buildRecordAction recordCtx
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
@@ -740,6 +744,8 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
       tvCloudHeight = cloudHeight gameState
       tvWindDirX = windDirX gameState
       tvWindDirZ = windDirZ gameState
+      tvCloudCoverage = cloudCoverage gameState
+      tvCloudDetail = cloudDetail gameState
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
@@ -788,6 +794,8 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
                           reTvCloudHeight = tvCloudHeight,
                           reTvWindDirX = tvWindDirX,
                           reTvWindDirZ = tvWindDirZ,
+                          reTvCloudCoverage = tvCloudCoverage,
+                          reTvCloudDetail = tvCloudDetail,
                           rePrevViewProj = prevViewProjTVar,
                           rePrevTime = prevTimeTVar
                         }
