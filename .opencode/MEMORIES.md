@@ -160,9 +160,19 @@
 - FIR submodule commit: `3322e26`
 - Main repo commit: `9f1f0c6`
 
+**Cloud noise generator optimized** (`2faa37e`):
+- Replaced O(27×N³) brute-force Worley with O(N³ log cells) scipy cKDTree
+- 128³: 8s → 4.7s, 512³: ~5.3 min (was hours)
+- 512³ textures available: 512MB per file, much finer detail
+- Default remains 128³ for git/repo size
+
 **Commits**:
 - `3322e26` — FIR: vector comparisons, FMA, pack/unpack, bit find
 - `9f1f0c6` — Update FIR submodule
+- `bdcf6c6` — Integrate fma into lighting/cloud shaders (30 Fma instructions)
+- `eb6602d` — Pipeline documentation in shader modules
+- `a5e20e0` — Fix cloud noise script docs to match shader
+- `2faa37e` — Optimize cloud noise generator with scipy cKDTree
 
 ## Open Issues
 1. **FIR SPIR-V Bloat — FIXED**: FIR generates 10.9MB raw SPIR-V (542k IDs) for the lighting fragment shader. **Phase 0 (spirv-opt) reduces this to ~22KB** (with clouds) / ~18KB (without). Driver pipeline creation now succeeds. M10.4 clouds unblocked.
