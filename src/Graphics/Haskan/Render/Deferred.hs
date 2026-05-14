@@ -76,6 +76,7 @@ data DeferredPassData = DeferredPassData
     dpdPrevTime :: !Float,
     dpdCloudCoverage :: !Float,
     dpdCloudDetail :: !Float,
+    dpdCloudAbsorption :: !Float,
     -- Cloud pass
     dpdCloudRenderPass :: !Vulkan.VkRenderPass,
     dpdCloudFramebuffer :: !Vulkan.VkFramebuffer,
@@ -241,10 +242,11 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac dpdWindDirZ,
                     realToFrac dpdPrevTime,
                     realToFrac dpdCloudCoverage,
-                    realToFrac dpdCloudDetail
+                    realToFrac dpdCloudDetail,
+                    realToFrac dpdCloudAbsorption
                   ] ::
                     [CFloat]
-             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdCloudLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 212 . Foreign.castPtr
+             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdCloudLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 216 . Foreign.castPtr
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
             -- Copy current cloud result to history buffer for next frame
             CommandBuffer.layerTransition commandBuffer dpdCloudImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL

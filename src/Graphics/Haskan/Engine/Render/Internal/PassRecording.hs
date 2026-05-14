@@ -55,6 +55,7 @@ data RecordContext = RecordContext
     rcPrevTime :: !Float,
     rcCloudCoverage :: !Float,
     rcCloudDetail :: !Float,
+    rcCloudAbsorption :: !Float,
     rcWireframeEnabled :: !Bool,
     rcDeferred :: !DeferredResources,
     rcCullResources :: !ComputeCullResources,
@@ -85,8 +86,9 @@ buildRecordContext ::
   Float ->
   Float ->
   Float ->
+  Float ->
   RecordContext
-buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProj windDirX windDirZ prevTime cloudCoverage cloudDetail =
+buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProj windDirX windDirZ prevTime cloudCoverage cloudDetail cloudAbsorption =
   RecordContext
     { rcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
       rcFrameDescriptorSets = frameDescriptorSets,
@@ -111,6 +113,7 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
       rcPrevTime = prevTime,
       rcCloudCoverage = cloudCoverage,
       rcCloudDetail = cloudDetail,
+      rcCloudAbsorption = cloudAbsorption,
       rcWireframeEnabled = fsWireframe frameState,
       rcDeferred = dr,
       rcCullResources = ccr,
@@ -201,6 +204,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdPrevTime = rcPrevTime,
                 dpdCloudCoverage = rcCloudCoverage,
                 dpdCloudDetail = rcCloudDetail,
+                dpdCloudAbsorption = rcCloudAbsorption,
                 dpdCloudRenderPass = drCloudRenderPass rcDeferred,
                 dpdCloudFramebuffer = cloudFramebuffer,
                 dpdCloudPipeline = drCloudPipeline rcDeferred,

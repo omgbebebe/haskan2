@@ -170,7 +170,8 @@ type CloudPushConstant =
        "windDirZ" ':-> Float,
        "prevTime" ':-> Float,
        "cloudCoverage" ':-> Float,
-       "cloudDetail" ':-> Float
+       "cloudDetail" ':-> Float,
+       "cloudAbsorption" ':-> Float
      ]
 
 cloudVertex :: ShaderModule "main" VertexShader CloudVertexDefs _
@@ -235,6 +236,7 @@ cloudFragment = shader do
       windDirZ = view @(Name "windDirZ") cameraPos
       cloudCoverage = view @(Name "cloudCoverage") cameraPos
       cloudDetail = view @(Name "cloudDetail") cameraPos
+      cloudAbsorption = view @(Name "cloudAbsorption") cameraPos
 
   ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps (Vec3 dirX dirY dirZ)
 
@@ -337,8 +339,8 @@ cloudFragment = shader do
       modify @"lightStep" (+1)
 
     finalLightDensity <- get @"lightDensity"
-    let lightT_d = let b = exp (-finalLightDensity * 1.5)
-                       p = 0.7 * exp (-finalLightDensity * 0.25)
+    let lightT_d = let b = exp (-finalLightDensity * cloudAbsorption)
+                       p = 0.7 * exp (-finalLightDensity * cloudAbsorption * 0.167)
                    in max b p
 
     let s_scatter = cloudBase ^* (lightT_d * phase * density * stepSize)

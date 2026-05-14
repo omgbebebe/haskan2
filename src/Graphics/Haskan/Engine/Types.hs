@@ -415,6 +415,7 @@ data GameState cam = GameState
     windDirZ :: TVar Float,
     cloudCoverage :: TVar Float,
     cloudDetail :: TVar Float,
+    cloudAbsorption :: TVar Float,
     cameraMode :: TVar CameraMode,
     orbitalCamera :: TVar cam,
     flyCamera :: TVar cam

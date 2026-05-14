@@ -153,19 +153,21 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                 (WindRotateRight, False, _) -> pure ()
                 (CloudPreset idx, True, _) -> do
                   let presets =
-                        [ (0.45, 0.35),  -- Cumulus
-                          (0.85, 0.20),  -- Stratus
-                          (0.60, 0.30),  -- Stratocumulus
-                          (0.60, 0.50),  -- Cumulonimbus
-                          (0.30, 0.60)   -- Cirrus
+                        [ (1500.0, 0.45, 0.35, 1.5),  -- Cumulus
+                          (800.0,  0.85, 0.20, 2.0),  -- Stratus
+                          (1000.0, 0.60, 0.30, 1.5),  -- Stratocumulus
+                          (1000.0, 0.60, 0.50, 3.0),  -- Cumulonimbus
+                          (8000.0, 0.30, 0.60, 0.4)   -- Cirrus
                         ]
-                      (cov, det) = if idx >= 0 && idx < length presets
+                      (baseH, cov, det, abso) = if idx >= 0 && idx < length presets
                         then presets !! idx
-                        else (0.45, 0.35)
+                        else (1500.0, 0.45, 0.35, 1.5)
                   STM.atomically $ do
+                    STM.writeTVar (cloudHeight gameState) baseH
                     STM.writeTVar (cloudCoverage gameState) cov
                     STM.writeTVar (cloudDetail gameState) det
-                  logInfoIO LogGeneral $ "cloud preset " <> showT idx <> ": coverage=" <> showT cov <> " detail=" <> showT det
+                    STM.writeTVar (cloudAbsorption gameState) abso
+                  logInfoIO LogGeneral $ "cloud preset " <> showT idx <> ": base=" <> showT baseH <> " coverage=" <> showT cov <> " detail=" <> showT det <> " absorption=" <> showT abso
                 (CloudPreset _, False, _) -> pure ()
                 (SwitchCameraMode, True, _) -> do
                   currentMode <- STM.readTVarIO (cameraMode gameState)
