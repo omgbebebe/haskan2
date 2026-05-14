@@ -71,6 +71,8 @@ data DeferredPassData = DeferredPassData
     dpdTime :: !Float,
     dpdPrevViewProj :: !(M44 Float),
     dpdBlendFactor :: !Float,
+    dpdWindDirX :: !Float,
+    dpdWindDirZ :: !Float,
     -- Cloud pass
     dpdCloudRenderPass :: !Vulkan.VkRenderPass,
     dpdCloudFramebuffer :: !Vulkan.VkFramebuffer,
@@ -231,7 +233,9 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac m03,
                     realToFrac m13,
                     realToFrac m23,
-                    realToFrac m33
+                    realToFrac m33,
+                    realToFrac dpdWindDirX,
+                    realToFrac dpdWindDirZ
                   ] ::
                     [CFloat]
              in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdCloudLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 192 . Foreign.castPtr

@@ -1,0 +1,157 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+
+\geometry{margin=1in}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstset{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{purple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single
+}
+
+\title{Code Review \& Architectural Analysis Report \\ \large File: \texttt{Deferred/Clouds.hs} (Haskan2 Vulkan Render Pipeline)}
+\author{Architectural Analysis Group}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Executive Summary}
+The analyzed shader implements a volumetric cloud rendering pass using a Haskell-based SPIR-V Domain Specific Language (\texttt{FIR}) [1]. While the mathematical foundations of density erosion (Schneider-Vollnov method) [1] and phase functions are architecturally correct [1], the core raymarching execution is fatally flawed. 
+
+By flattening the raymarching pipeline into a fixed 6-step unrolled sequence [1], the shader introduces severe visual artifacts, breaks camera-in-cloud traversal, and forces massive register pressure on the GPU.
+
+\textbf{Current Status:} Non-Production Ready (Prototype/Draft)
+
+---
+
+\section{Technical Breakdown of Fatal Issues}
+
+\subsection{1. Unrolled 6-Step Fixed Raymarching}
+\begin{itemize}
+    \item \textbf{The Code:} The shader samples density at precisely 6 hardcoded points ($p_0$ through $p_5$) along the view ray [1].
+    \item \textbf{The Issue:} The hardcoded layer thickness is $800.0\text{m}$ [1]. Spanning this distance in 6 steps means a massive step size of $\approx 133\text{m}$. Any high-frequency or detailed noise shape within that $133\text{m}$ interval is completely missed. This creates extreme banding, aliasing, and wood-grain artifacts.
+    \item \textbf{GPU Impact:} Unrolling forced-binds multiple sampler registers concurrently ($n_0$ to $n_5$) [1], spiking register pressure (VGPR usage) instead of reusing a single register across iterations.
+\end{itemize}
+
+\subsection{2. Fake Light Marching (Single-Sample Shadowing)}
+\begin{itemize}
+    \item \textbf{The Code:} To calculate lighting at each step, the shader offsets the texture lookup vector along the sun direction vector once (\texttt{sunTexOffsetX/Y/Z}) [1] and takes one sample ($ln_0$ to $ln_5$) [1].
+    \item \textbf{The Issue:} Real volumetric lighting requires calculating the optical depth from the current ray position \textit{all the way} to the edge of the cloud volume along the sun ray. Sampling just one neighbor pixel fails to account for self-shadowing deep within thick cloud structures. Beer's Law attenuation becomes mathematically meaningless here.
+\end{itemize}
+
+\subsection{3. Broken Camera Traversal (No Plane/AABB Intersector)}
+\begin{itemize}
+    \item \textbf{The Code:} The entry point distance $t_{\text{entry}}$ is computed under the static assumption that the camera is always below the cloud layer:
+    \begin{equation}
+        t_{\text{entry}} = \frac{\text{cloudBottom} - \text{camY}}{\max(0.01, \text{dirY})} + \text{ditherOffset}
+    \end{equation}
+    \item \textbf{The Issue:} If the camera flies into or above the cloud layer ($\text{camY} \ge \text{cloudBottom}$), $t_{\text{entry}}$ yields zero or negative values. The entry position \texttt{entryPos} instantly collapses or evaluates behind the camera view plane [1]. The shader cannot handle inside-cloud flight.
+\end{itemize}
+
+\subsection{4. Flawed Temporal Reprojection}
+\begin{itemize}
+    \item \textbf{The Code:} A historical reprojection step blends the current color with a \texttt{cloud\_history} texture using the previous frame's View-Projection matrix [1].
+    \item \textbf{The Issue:} Because the shader does not compute or read true \textbf{Motion Vectors} (velocity buffers) for the clouds---which shift dynamically via wind vectors (\texttt{windX}, \texttt{windZ}) [1]---the history lookup projects static world coordinates. Moving clouds will leave massive, ghosting trails across the screen.
+\end{itemize}
+
+---
+
+\section{Architectural Remediation Plan}
+
+To convert this prototype into a production-grade Vulkan volumetric cloud renderer, the following structural changes must be implemented.
+
+\subsection{Step 1: Reconstruct the Core Raymarching Loop}
+Replace the flat unrolled structure with a dynamic \texttt{while} loop containing a uniform step counter.
+
+\begin{lstlisting}[language=C, caption={Conceptual SPIR-V / HLSL Production Loop}]
+float3 rayPos = entryPos + dir * ditherOffset;
+float accumulatedOpacity = 0.0;
+float3 accumulatedLight = 0.0;
+
+[loop]
+for (int i = 0; i < MAX_STEPS; i++) {
+    if (accumulatedOpacity >= 0.99 || isOutsideVolume(rayPos)) break;
+
+    float density = sampleCloudDensity(rayPos);
+    if (density > 0.0) {
+        float shadowTransmittance = calculateLightEnergy(rayPos, sunDir);
+        // Integrate scattering and absorption here...
+    }
+    rayPos += dir * stepSize;
+}
+\end{lstlisting}
+
+\subsection{Step 2: Implement a Robust Ray-AABB / Dual-Plane Intersector}
+To allow the camera to move seamlessly from ground level up through the atmosphere, replace the native $t_{\text{entry}}$ math with a standard horizontal slab intersector.
+
+\begin{lstlisting}[language=C, caption={Dual-Plane Slab Intersection Optimization}]
+// Handles camera being below, inside, or above the volume
+float tTop = (cloudTop - camY) / dirY;
+float tBottom = (cloudBottom - camY) / dirY;
+
+float tNear = max(0.0, min(tTop, tBottom));
+float tFar = max(0.0, max(tTop, tBottom));
+
+if (camY >= cloudBottom && camY <= cloudTop) {
+    tNear = 0.0; // Camera is inside clouds; start marching immediately
+}
+\end{lstlisting}
+
+\subsection{Step 3: Implement Proper Light Integration (Beer-Powder Law)}
+Instead of a single texture sample for light, run a nested, low-step loop (typically 4--6 steps) toward the sun direction at each valid cloud point. Apply the Beer-Powder law to simulate multiple scattering effects inside dense pockets:
+\begin{equation}
+    \text{Transmittance} = e^{-\text{density} \cdot \sigma} \cdot (1.0 - e^{-\text{density} \cdot 2.0})
+\end{equation}
+
+\subsection{Step 4: Fix Wind Vector Temporal Reprojection}
+When pulling the history sample from \texttt{cloud\_history} [1], the pixel coordinate lookup must subtract the cumulative wind displacement vector accrued between the previous frame and the current frame. This ensures the historical validation pixel tracks the moving cloud mass instead of the static world geometry underneath it.
+
+---
+
+\section{Feature Comparison Matrix}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Feature} & \textbf{Current Implementation} & \textbf{Production Standard Requirement} \\ \midrule
+\textbf{Step Count} & Fixed (6 Steps) [1] & Dynamic (64 - 128 Steps) \\
+\textbf{Execution} & Unrolled ALU Block [1] & Reused Dynamic Loop Local Registers \\
+\textbf{Light Marching} & Single Sample Offset [1] & Multi-step Ray Integration to Sky \\
+\textbf{Camera Traversal} & Below clouds only [1] & Seamless Dual-Plane Intersection \\
+\textbf{Ghosting Control} & Static History Projection [1] & Wind-Velocity Adjusted Motion Vectors \\ \bottomrule
+\end{tabular}
+\caption{Comparison between \texttt{Clouds.hs} prototype and production standards.}
+\end{table}
+
+\end{document}
+

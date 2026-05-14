@@ -129,6 +129,28 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                   STM.atomically $ STM.writeTVar (cloudHeight gameState) newHeight
                   logInfoIO LogGeneral $ "cloud height: " <> showT newHeight
                 (CloudHeightDown, False, _) -> pure ()
+                (WindRotateLeft, True, _) -> do
+                  wx <- STM.readTVarIO (windDirX gameState)
+                  wz <- STM.readTVarIO (windDirZ gameState)
+                  let angle = pi / 12.0
+                      newX = wx * cos angle - wz * sin angle
+                      newZ = wx * sin angle + wz * cos angle
+                  STM.atomically $ do
+                    STM.writeTVar (windDirX gameState) newX
+                    STM.writeTVar (windDirZ gameState) newZ
+                  logInfoIO LogGeneral $ "wind direction: " <> showT newX <> ", " <> showT newZ
+                (WindRotateLeft, False, _) -> pure ()
+                (WindRotateRight, True, _) -> do
+                  wx <- STM.readTVarIO (windDirX gameState)
+                  wz <- STM.readTVarIO (windDirZ gameState)
+                  let angle = -pi / 12.0
+                      newX = wx * cos angle - wz * sin angle
+                      newZ = wx * sin angle + wz * cos angle
+                  STM.atomically $ do
+                    STM.writeTVar (windDirX gameState) newX
+                    STM.writeTVar (windDirZ gameState) newZ
+                  logInfoIO LogGeneral $ "wind direction: " <> showT newX <> ", " <> showT newZ
+                (WindRotateRight, False, _) -> pure ()
                 (SwitchCameraMode, True, _) -> do
                   currentMode <- STM.readTVarIO (cameraMode gameState)
                   let newMode = case currentMode of
@@ -201,7 +223,10 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
               e <- STM.readTVar (isRunning gameState)
               pure (a, b, c, d, e)
 
-            let camMove = camSpeed * dtSeconds
+            keyMod <- SDL.getModState
+            let shiftHeld = SDL.keyModifierLeftShift keyMod || SDL.keyModifierRightShift keyMod
+                speedMult = if shiftHeld then 10.0 else 1.0
+                camMove = camSpeed * speedMult * dtSeconds
             when fwd $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveForward camMove]
             when bwd $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveForward (-camMove)]
             when sl $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight (-camMove)]

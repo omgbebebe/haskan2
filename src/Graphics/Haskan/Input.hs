@@ -40,6 +40,8 @@ data Action
   | ToggleMouseCapture
   | CloudHeightUp
   | CloudHeightDown
+  | WindRotateLeft
+  | WindRotateRight
   | SwitchCameraMode
   deriving (Eq, Show, Generic)
 
@@ -103,6 +105,9 @@ defaultBindings =
       -- Cloud height adjustment
       (([], SDL.KeycodeRightBracket), CloudHeightUp),
       (([], SDL.KeycodeLeftBracket), CloudHeightDown),
+      -- Wind direction rotation
+      (([], SDL.KeycodeComma), WindRotateLeft),
+      (([], SDL.KeycodePeriod), WindRotateRight),
       (([], SDL.KeycodeC), SwitchCameraMode),
       (([], SDL.KeycodeM), ToggleMouseCapture)
     ]
@@ -145,4 +150,6 @@ keyToAction (SDL.KeyboardEventData _window motion isRepeated keysym) =
       key = SDL.keysymKeycode keysym
    in case HashMap.lookup (modifiers, key) defaultBindings of
         Just action -> Just (action, motion == SDL.Pressed, isRepeated)
-        Nothing -> Nothing
+        Nothing -> case HashMap.lookup ([], key) defaultBindings of
+          Just action -> Just (action, motion == SDL.Pressed, isRepeated)
+          Nothing -> Nothing

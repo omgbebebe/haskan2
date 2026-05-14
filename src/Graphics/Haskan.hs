@@ -6,8 +6,8 @@ import Graphics.Haskan.Engine (EngineConfig (..))
 import Graphics.Haskan.Engine qualified as Engine
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
 
-runHaskan :: Text -> String -> Maybe Integer -> Maybe FilePath -> Bool -> Bool -> Bool -> String -> Int -> Float -> Float -> Bool -> IO ()
-runHaskan title meshName mTimeout mDebugSocket uvCheckCube uvCheckSphere uvCheckPlane envDir numLights initialTime speed dayNight = do
+runHaskan :: Text -> String -> Maybe Integer -> Maybe FilePath -> Bool -> Bool -> Bool -> String -> Int -> Float -> Float -> Bool -> Bool -> IO ()
+runHaskan title meshName mTimeout mDebugSocket uvCheckCube uvCheckSphere uvCheckPlane envDir numLights initialTime speed dayNight cloudTest = do
   logInfoIO LogGeneral "Initializing Haskan Engine"
   logInfoIO LogGeneral "Starting Engine main loop"
   Engine.mainLoop
@@ -34,6 +34,7 @@ runHaskan title meshName mTimeout mDebugSocket uvCheckCube uvCheckSphere uvCheck
         lightCount = numLights,
         initialTimeOfDay = initialTime,
         timeSpeed = speed,
-        dayNightEnabled = dayNight
+        dayNightEnabled = dayNight,
+        cloudTestMode = cloudTest
       }
   logInfoIO LogGeneral "Shutting down Haskan"

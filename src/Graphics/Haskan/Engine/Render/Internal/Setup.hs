@@ -202,7 +202,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
   logInfo LogGeneral "BRDF LUT generated"
 
   logInfo LogGeneral "loading 3D cloud noise texture..."
-  cloudNoiseView <- Texture.managedTexture3D physicalDevice device "data/textures/cloud_noise/cloud_noise_128.raw" 128 128 128 graphicsQueueHandler textureCommandBuffer
+  cloudNoiseView <- Texture.managedTexture3D physicalDevice device "data/textures/cloud_noise/cloud_noise_512.raw" 512 512 512 graphicsQueueHandler textureCommandBuffer
   logInfo LogGeneral "3D cloud noise texture loaded"
 
   pure

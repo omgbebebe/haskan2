@@ -45,7 +45,7 @@ computeSkyboxRays view proj =
       ndcToDir :: V4 Float -> V3 Float
       ndcToDir (V4 x y _z _w) =
         let viewDir = V3 (x / fx) (y / fy) (-1)
-         in normalize (worldRot !* viewDir)
+         in worldRot !* viewDir
 
       bottomLeft = ndcToDir (V4 (-1) (-1) 0 1)
       bottomRight = ndcToDir (V4 1 (-1) 0 1)

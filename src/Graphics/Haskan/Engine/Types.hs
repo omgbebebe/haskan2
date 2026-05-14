@@ -324,7 +324,8 @@ data EngineConfig = EngineConfig
     lightCount :: !Int,
     initialTimeOfDay :: !Float,
     timeSpeed :: !Float,
-    dayNightEnabled :: !Bool
+    dayNightEnabled :: !Bool,
+    cloudTestMode :: !Bool
   }
   deriving (Show)
 
@@ -410,6 +411,8 @@ data GameState cam = GameState
     gameTimeSpeed :: TVar Float,
     gameDayNightEnabled :: TVar Bool,
     cloudHeight :: TVar Float,
+    windDirX :: TVar Float,
+    windDirZ :: TVar Float,
     cameraMode :: TVar CameraMode,
     orbitalCamera :: TVar cam,
     flyCamera :: TVar cam

@@ -27,6 +27,7 @@ data CliOpts = CliOpts
   , optTimeOfDay :: !Float
   , optTimeSpeed :: !Float
   , optDayNight :: !Bool
+  , optCloudTest :: !Bool
   }
 
 cliParser :: Parser CliOpts
@@ -104,7 +105,11 @@ cliParser =
     <*> switch
       ( long "day-night"
      <> help "Enable day/night cycle"
-       )
+        )
+    <*> switch
+      ( long "cloud-test"
+     <> help "Cloud test mode: fly camera, single sun, day-night enabled"
+        )
 
 opts :: ParserInfo CliOpts
 opts = info (cliParser <**> helper)
@@ -136,3 +141,4 @@ main = do
     (optTimeOfDay cli)
     (optTimeSpeed cli)
     (optDayNight cli)
+    (optCloudTest cli)

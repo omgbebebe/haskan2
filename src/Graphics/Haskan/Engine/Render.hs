@@ -184,6 +184,8 @@ data RenderEnv = RenderEnv
     reTvTimeSpeed :: !(STM.TVar Float),
     reTvDayNightEnabled :: !(STM.TVar Bool),
     reTvCloudHeight :: !(STM.TVar Float),
+    reTvWindDirX :: !(STM.TVar Float),
+    reTvWindDirZ :: !(STM.TVar Float),
     rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat))
   }
 
@@ -321,10 +323,13 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   frameState <- readFrameState
   let (sunState, skyTint, iblInt, sunAzimuth, sunDir) = computeSkyParams (fsDayNightEnabled frameState) (fsTimeOfDay frameState)
 
+  windDirXVal <- liftIO $ STM.readTVarIO reTvWindDirX
+  windDirZVal <- liftIO $ STM.readTVarIO reTvWindDirZ
+
   currentTime <- getMonotonicTime
   let elapsedSeconds = fromIntegral (toNanoSecs currentTime) / 1e9
 
-  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj)
+  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal
       recordAction = buildRecordAction recordCtx
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
@@ -450,8 +455,9 @@ renderLoop ::
   String ->
   Maybe String ->
   String ->
+  Bool ->
   m ()
-renderLoop window physicalDevice surface layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir = do
+renderLoop window physicalDevice surface layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir cloudTestMode = do
   control <- liftIO $ STM.atomically $ TChan.dupTChan controlChannel
 
   rm <- newResourceManager
@@ -498,15 +504,16 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
   worldState <- liftIO $ STM.readTVarIO (world gameState)
   let tvCamera = activeCamera worldState
   currentCam <- liftIO $ STM.readTVarIO tvCamera
-  let adjustedCam =
-        if isStressTest
-          then setDistance (setTarget currentCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) (150.0 :: Foreign.C.CFloat)
-          else adjustCameraForScene sceneBounds currentCam
-      finalCam = case uvCheckMode of
-        Just _ -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.0) 0.78 (realToFrac (pi / 6 :: Double))
-        Nothing -> setAngles adjustedCam 0 (realToFrac (pi / 6 :: Double))
-  liftIO $ STM.atomically $ STM.writeTVar tvCamera finalCam
-  logInfo LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance finalCam)
+  unless cloudTestMode $ do
+    let adjustedCam =
+          if isStressTest
+            then setDistance (setTarget currentCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) (150.0 :: Foreign.C.CFloat)
+            else adjustCameraForScene sceneBounds currentCam
+        finalCam = case uvCheckMode of
+          Just _ -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.0) 0.78 (realToFrac (pi / 6 :: Double))
+          Nothing -> setAngles adjustedCam 0 (realToFrac (pi / 6 :: Double))
+    liftIO $ STM.atomically $ STM.writeTVar tvCamera finalCam
+    logInfo LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance finalCam)
 
   when isStressTest $ liftIO $ STM.atomically $ STM.writeTVar (wireframeEnabled gameState) False
 
@@ -727,6 +734,8 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
       tvTimeSpeed = gameTimeSpeed gameState
       tvDayNightEnabled = gameDayNightEnabled gameState
       tvCloudHeight = cloudHeight gameState
+      tvWindDirX = windDirX gameState
+      tvWindDirZ = windDirZ gameState
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
@@ -770,10 +779,12 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
                          reTvLights = tvLights,
                          reTvTimeOfDay = tvTimeOfDay,
                          reTvTimeSpeed = tvTimeSpeed,
-                         reTvDayNightEnabled = tvDayNightEnabled,
-                         reTvCloudHeight = tvCloudHeight,
-                         rePrevViewProj = prevViewProjTVar
-                       }
+                          reTvDayNightEnabled = tvDayNightEnabled,
+                          reTvCloudHeight = tvCloudHeight,
+                          reTvWindDirX = tvWindDirX,
+                          reTvWindDirZ = tvWindDirZ,
+                          rePrevViewProj = prevViewProjTVar
+                        }
                renderFrameLoop renderEnv 0
           outerLoop renderFrameLoopFinished
 

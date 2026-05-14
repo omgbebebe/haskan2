@@ -144,16 +144,19 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       cloudHistoryImageViews = map snd cloudHistoryImagesAndViews
   logDebugIO LogRender $ "cloud history images created: " <> showT (length cloudHistoryImages) <> " sets"
 
-  -- Initial layout transition for g-buffer images
+  -- Initial layout transition for g-buffer images and cloud history images
   tempCmdBuf <- CommandBuffer.createCommandBuffer device (rcGraphicsCommandPool ctx)
   CommandBuffer.withCommandBufferOneTime
     (graphicsQueueHandler ctx)
     tempCmdBuf
-    ( for_ (concat gBufferImages) $ \img ->
-        CommandBuffer.layerTransition tempCmdBuf img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    ( do
+        for_ (concat gBufferImages) $ \img ->
+          CommandBuffer.layerTransition tempCmdBuf img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        for_ cloudHistoryImages $ \img ->
+          CommandBuffer.layerTransition tempCmdBuf img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     )
   liftIO $ Foreign.Marshal.Array.withArray [tempCmdBuf] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
-  logDebugIO LogRender "g-buffer images transitioned to SHADER_READ_ONLY_OPTIMAL"
+  logDebugIO LogRender "g-buffer and cloud history images transitioned to SHADER_READ_ONLY_OPTIMAL"
 
   -- Shared depth image for g-buffer
   depthImage <- Swapchain.managedDepthImage pdev device extent depthFormat
@@ -225,7 +228,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         Vulkan.createVk
           ( set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
               &* set @"offset" 0
-              &* set @"size" 192
+              &* set @"size" 200
           )
   cloudPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [cloudDescriptorSetLayout] [cloudPushConstantRange]
   logDebugIO LogRender "cloud pipeline layout created"

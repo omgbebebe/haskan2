@@ -16,11 +16,11 @@ Output is blended with history for temporal anti-aliasing.
   * cameraPos: CloudPushConstant struct containing:
     - cameraX/Y/Z      : Float — world-space camera position
     - ray0/ray1/ray2   : V3 Float — per-corner frustum rays
-    - sunAzimuth       : Float — sun rotation angle (radians)
     - sunDir           : V3 Float — normalized sun direction
     - cloudHeight      : Float — cloud layer bottom Y coordinate
     - time             : Float — animation time
     - blendFactor      : Float — temporal blend weight (0.92 = history)
+    - windDirX/Z       : Float — wind direction for noise animation
     - prevViewProj0-3  : V4 Float — previous frame view-projection matrix rows
 
 **Algorithm:** Same fullscreen triangle as Lighting pass.
@@ -39,7 +39,7 @@ Output is blended with history for temporal anti-aliasing.
   * env_map      (Binding 0, DS0): TextureCube RGBA8 UNorm
     - Skybox environment map for background color
   * cloud_noise  (Binding 1, DS0): Texture3D RGBA8 UNorm
-    - 3D noise texture (128^3) with 4 octaves:
+    - 3D noise texture (512^3) with 4 octaves:
       - R = Perlin-Worley blend (macro shape)
       - G = Worley 8^3  (medium erosion)
       - B = Worley 16^3 (high-frequency detail)
@@ -123,7 +123,7 @@ Output is blended with history for temporal anti-aliasing.
 
 **Texture Input Formats:**
   * env_map:     Cube map RGBA8 UNorm (6 faces, 512x512)
-  * cloud_noise: 3D RGBA8 UNorm (128x128x128)
+   * cloud_noise: 3D RGBA8 UNorm (512x512x512)
   * cloud_history: 2D RGBA16 F (quarter resolution)
 -}
 
@@ -171,14 +171,16 @@ type CloudPushConstant =
        "skyTintB" ':-> Float,
        "iblIntensity" ':-> Float,
        "sunDir" ':-> V 3 Float,
-        "cloudHeight" ':-> Float,
-        "time" ':-> Float,
-        "blendFactor" ':-> Float,
-        "prevViewProj0" ':-> V 4 Float,
-        "prevViewProj1" ':-> V 4 Float,
-        "prevViewProj2" ':-> V 4 Float,
-        "prevViewProj3" ':-> V 4 Float
-      ]
+       "cloudHeight" ':-> Float,
+       "time" ':-> Float,
+       "blendFactor" ':-> Float,
+       "prevViewProj0" ':-> V 4 Float,
+       "prevViewProj1" ':-> V 4 Float,
+       "prevViewProj2" ':-> V 4 Float,
+       "prevViewProj3" ':-> V 4 Float,
+       "windDirX" ':-> Float,
+       "windDirZ" ':-> Float
+     ]
 
 cloudVertex :: ShaderModule "main" VertexShader CloudVertexDefs _
 cloudVertex = shader do
@@ -231,36 +233,42 @@ cloudFragment = shader do
       ~(Vec3 dirX dirY dirZ) = dir
 
   cameraPos <- get @"cameraPos"
-  let sunAzimuth = view @(Name "sunAzimuth") cameraPos
-      camX = view @(Name "cameraX") cameraPos
+  let camX = view @(Name "cameraX") cameraPos
       camY = view @(Name "cameraY") cameraPos
       camZ = view @(Name "cameraZ") cameraPos
       sunDir = view @(Name "sunDir") cameraPos
       ~(Vec3 sunDirX sunDirY sunDirZ) = sunDir
       cloudBottom = view @(Name "cloudHeight") cameraPos
       time = view @(Name "time") cameraPos
-
-  let cosAz = cos sunAzimuth
-      sinAz = sin sunAzimuth
-      rotateY (Vec3 rx ry rz) = Vec3 (rx * cosAz - rz * sinAz) ry (rx * sinAz + rz * cosAz)
+      windDirX = view @(Name "windDirX") cameraPos
+      windDirZ = view @(Name "windDirZ") cameraPos
 
   ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps (Vec3 dirX dirY dirZ)
 
   let cloudThickness = 800.0
       cloudTop = cloudBottom + cloudThickness
-      totalRayLength = min 10000.0 (cloudThickness / max 0.01 dirY)
+
+      -- Slab intersector: handles camera below, inside, or above cloud layer
+      dirY_safe = if dirY > 0.001
+        then dirY
+        else (if dirY < (-0.001) then dirY else 0.001)
+      tToBottom = (cloudBottom - camY) / dirY_safe
+      tToTop = (cloudTop - camY) / dirY_safe
+      tNear = max 0.0 (min tToBottom tToTop)
+      tFar = max 0.0 (max tToBottom tToTop)
+      totalRayLength = min 10000.0 (tFar - tNear)
       stepSize = totalRayLength / 6.0
 
       ditherHash = fract (sin (fma uvY 78.233 (uvX * 12.9898)) * 43758.5453)
       ditherOffset = ditherHash * stepSize
-
-      tEntry = (cloudBottom - camY) / max 0.01 dirY + ditherOffset
-      entryPos = Vec3 (camX + dirX * tEntry) cloudBottom (camZ + dirZ * tEntry)
-      entryY = cloudBottom
+      tEntry = tNear + ditherOffset
+      entryPos = Vec3 (camX + dirX * tEntry) (camY + dirY * tEntry) (camZ + dirZ * tEntry)
+      entryY = camY + dirY * tEntry
 
       noiseScale = 0.003
       windSpeed = 0.05
-      windOffset = time * windSpeed
+      windOffsetX = time * windSpeed * windDirX
+      windOffsetZ = time * windSpeed * windDirZ
       warpFreq = 0.002
       warpAmp = 170.0
 
@@ -270,54 +278,54 @@ cloudFragment = shader do
       w0x = sin (p0y * warpFreq + p0z * warpFreq * 0.7) * warpAmp
       w0y = cos (p0x * warpFreq + p0z * warpFreq * 0.5) * warpAmp
       w0z = sin (p0z * warpFreq * 0.7 + p0x * warpFreq * 0.6) * warpAmp
-      s0x = fract ((p0x + w0x) * noiseScale - windOffset)
+      s0x = fract ((p0x + w0x) * noiseScale - windOffsetX)
       s0y = fract ((p0y + w0y) * noiseScale)
-      s0z = fract ((p0z + w0z) * noiseScale)
+      s0z = fract ((p0z + w0z) * noiseScale - windOffsetZ)
 
       p1 = entryPos ^+^ dir ^* (stepSize * 1.5)
       ~(Vec3 p1x p1y p1z) = p1
       w1x = sin (p1y * warpFreq + p1z * warpFreq * 0.7) * warpAmp
       w1y = cos (p1x * warpFreq + p1z * warpFreq * 0.5) * warpAmp
       w1z = sin (p1z * warpFreq * 0.7 + p1x * warpFreq * 0.6) * warpAmp
-      s1x = fract ((p1x + w1x) * noiseScale - windOffset)
+      s1x = fract ((p1x + w1x) * noiseScale - windOffsetX)
       s1y = fract ((p1y + w1y) * noiseScale)
-      s1z = fract ((p1z + w1z) * noiseScale)
+      s1z = fract ((p1z + w1z) * noiseScale - windOffsetZ)
 
       p2 = entryPos ^+^ dir ^* (stepSize * 2.5)
       ~(Vec3 p2x p2y p2z) = p2
       w2x = sin (p2y * warpFreq + p2z * warpFreq * 0.7) * warpAmp
       w2y = cos (p2x * warpFreq + p2z * warpFreq * 0.5) * warpAmp
       w2z = sin (p2z * warpFreq * 0.7 + p2x * warpFreq * 0.6) * warpAmp
-      s2x = fract ((p2x + w2x) * noiseScale - windOffset)
+      s2x = fract ((p2x + w2x) * noiseScale - windOffsetX)
       s2y = fract ((p2y + w2y) * noiseScale)
-      s2z = fract ((p2z + w2z) * noiseScale)
+      s2z = fract ((p2z + w2z) * noiseScale - windOffsetZ)
 
       p3 = entryPos ^+^ dir ^* (stepSize * 3.5)
       ~(Vec3 p3x p3y p3z) = p3
       w3x = sin (p3y * warpFreq + p3z * warpFreq * 0.7) * warpAmp
       w3y = cos (p3x * warpFreq + p3z * warpFreq * 0.5) * warpAmp
       w3z = sin (p3z * warpFreq * 0.7 + p3x * warpFreq * 0.6) * warpAmp
-      s3x = fract ((p3x + w3x) * noiseScale - windOffset)
+      s3x = fract ((p3x + w3x) * noiseScale - windOffsetX)
       s3y = fract ((p3y + w3y) * noiseScale)
-      s3z = fract ((p3z + w3z) * noiseScale)
+      s3z = fract ((p3z + w3z) * noiseScale - windOffsetZ)
 
       p4 = entryPos ^+^ dir ^* (stepSize * 4.5)
       ~(Vec3 p4x p4y p4z) = p4
       w4x = sin (p4y * warpFreq + p4z * warpFreq * 0.7) * warpAmp
       w4y = cos (p4x * warpFreq + p4z * warpFreq * 0.5) * warpAmp
       w4z = sin (p4z * warpFreq * 0.7 + p4x * warpFreq * 0.6) * warpAmp
-      s4x = fract ((p4x + w4x) * noiseScale - windOffset)
+      s4x = fract ((p4x + w4x) * noiseScale - windOffsetX)
       s4y = fract ((p4y + w4y) * noiseScale)
-      s4z = fract ((p4z + w4z) * noiseScale)
+      s4z = fract ((p4z + w4z) * noiseScale - windOffsetZ)
 
       p5 = entryPos ^+^ dir ^* (stepSize * 5.5)
       ~(Vec3 p5x p5y p5z) = p5
       w5x = sin (p5y * warpFreq + p5z * warpFreq * 0.7) * warpAmp
       w5y = cos (p5x * warpFreq + p5z * warpFreq * 0.5) * warpAmp
       w5z = sin (p5z * warpFreq * 0.7 + p5x * warpFreq * 0.6) * warpAmp
-      s5x = fract ((p5x + w5x) * noiseScale - windOffset)
+      s5x = fract ((p5x + w5x) * noiseScale - windOffsetX)
       s5y = fract ((p5y + w5y) * noiseScale)
-      s5z = fract ((p5z + w5z) * noiseScale)
+      s5z = fract ((p5z + w5z) * noiseScale - windOffsetZ)
 
       sunTexOffsetX = sunDirX * stepSize * noiseScale
       sunTexOffsetY = sunDirY * stepSize * noiseScale
@@ -432,15 +440,9 @@ cloudFragment = shader do
       ~(Vec3 cloudAccR cloudAccG cloudAccB) = a5
       cloudTransmittance = t5
 
-      cloudsMask = step 0.01 dirY
-      finalCloudR = cloudAccR * cloudsMask
-      finalCloudG = cloudAccG * cloudsMask
-      finalCloudB = cloudAccB * cloudsMask
-      finalTransmittance = mix 1.0 cloudTransmittance cloudsMask
-
-      cloudSkyR = skyR * finalTransmittance + finalCloudR
-      cloudSkyG = skyG * finalTransmittance + finalCloudG
-      cloudSkyB = skyB * finalTransmittance + finalCloudB
+      cloudSkyR = skyR * cloudTransmittance + cloudAccR
+      cloudSkyG = skyG * cloudTransmittance + cloudAccG
+      cloudSkyB = skyB * cloudTransmittance + cloudAccB
 
       -- Apply sky tint
       skyTintR = view @(Name "skyTintR") cameraPos

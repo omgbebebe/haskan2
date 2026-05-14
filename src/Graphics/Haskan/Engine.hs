@@ -77,7 +77,7 @@ import System.Timeout (timeout)
 mainLoop :: (MonadIO m) => String -> EngineConfig -> m ()
 mainLoop meshName EngineConfig {..} = do
   logInfoIO LogGeneral "starting mainLoop"
-  let initialCam = Camera.Orbital defaultOrbitalCamera
+  let initialCam = if cloudTestMode then Camera.Fly defaultFlyCamera else Camera.Orbital defaultOrbitalCamera
   camera <- liftIO $ STM.newTVarIO initialCam
   isRunning <- liftIO $ STM.newTVarIO True
 
@@ -104,23 +104,27 @@ mainLoop meshName EngineConfig {..} = do
   tvLights <-
     liftIO $
       STM.newTVarIO
-        ( take
-            lightCount
-            [ LightData (V3 1 1 1) 1.0 (V3 1 1 1) 0 (V3 (-1) (-1) (-1)) 0.0,
-              LightData (V3 (-1) 1 (-1)) 0.5 (V3 1 0.8 0.6) 0 (V3 1 (-1) 1) 0.0,
-              LightData (V3 0 (-1) 0) 0.3 (V3 0.4 0.4 0.6) 0 (V3 0 1 0) 0.0,
-              LightData (V3 1 0 0) 0.7 (V3 0.9 0.2 0.2) 0 (V3 (-1) 0 0) 0.0,
-              LightData (V3 0 1 0) 0.4 (V3 0.2 0.9 0.2) 0 (V3 0 (-1) 0) 0.0,
-              LightData (V3 0 0 1) 0.6 (V3 0.2 0.2 0.9) 0 (V3 0 0 (-1)) 0.0,
-              LightData (V3 1 1 (-1)) 0.5 (V3 0.8 0.8 0.2) 0 (V3 (-1) (-1) 1) 0.0,
-              LightData (V3 (-1) (-1) 1) 0.4 (V3 0.8 0.2 0.8) 0 (V3 1 1 (-1)) 0.0
-            ]
+        ( if cloudTestMode
+            then [LightData (V3 1 1 1) 1.0 (V3 1 1 1) 0 (V3 (-1) (-1) (-1)) 0.0]
+            else take
+              lightCount
+              [ LightData (V3 1 1 1) 1.0 (V3 1 1 1) 0 (V3 (-1) (-1) (-1)) 0.0,
+                LightData (V3 (-1) 1 (-1)) 0.5 (V3 1 0.8 0.6) 0 (V3 1 (-1) 1) 0.0,
+                LightData (V3 0 (-1) 0) 0.3 (V3 0.4 0.4 0.6) 0 (V3 0 1 0) 0.0,
+                LightData (V3 1 0 0) 0.7 (V3 0.9 0.2 0.2) 0 (V3 (-1) 0 0) 0.0,
+                LightData (V3 0 1 0) 0.4 (V3 0.2 0.9 0.2) 0 (V3 0 (-1) 0) 0.0,
+                LightData (V3 0 0 1) 0.6 (V3 0.2 0.2 0.9) 0 (V3 0 0 (-1)) 0.0,
+                LightData (V3 1 1 (-1)) 0.5 (V3 0.8 0.8 0.2) 0 (V3 (-1) (-1) 1) 0.0,
+                LightData (V3 (-1) (-1) 1) 0.4 (V3 0.8 0.2 0.8) 0 (V3 1 1 (-1)) 0.0
+              ]
         )
   tvTimeOfDay <- liftIO $ STM.newTVarIO initialTimeOfDay
   tvTimeSpeed <- liftIO $ STM.newTVarIO timeSpeed
-  tvDayNightEnabled <- liftIO $ STM.newTVarIO dayNightEnabled
+  tvDayNightEnabled <- liftIO $ STM.newTVarIO (dayNightEnabled || cloudTestMode)
   tvCloudHeight <- liftIO $ STM.newTVarIO 3500.0
-  tvCameraMode <- liftIO $ STM.newTVarIO CameraModeOrbital
+  tvWindDirX <- liftIO $ STM.newTVarIO 1.0
+  tvWindDirZ <- liftIO $ STM.newTVarIO 0.0
+  tvCameraMode <- liftIO $ STM.newTVarIO (if cloudTestMode then CameraModeFly else CameraModeOrbital)
   tvOrbitalCamera <- liftIO $ STM.newTVarIO initialCam
   tvFlyCamera <- liftIO $ STM.newTVarIO (Camera.Fly defaultFlyCamera)
 
@@ -148,6 +152,8 @@ mainLoop meshName EngineConfig {..} = do
           tvTimeSpeed
           tvDayNightEnabled
           tvCloudHeight
+          tvWindDirX
+          tvWindDirZ
           tvCameraMode
           tvOrbitalCamera
           tvFlyCamera
@@ -173,7 +179,7 @@ mainLoop meshName EngineConfig {..} = do
 
   renderLoopFinished <- liftIO newEmptyMVar
   renderLoopReady <- liftIO newEmptyMVar
-  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop window physicalDevice surface layers targetRenderFPS gameState renderLoopFinished renderLoopReady controlChannel meshName uvCheckMode envMapDir
+  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop window physicalDevice surface layers targetRenderFPS gameState renderLoopFinished renderLoopReady controlChannel meshName uvCheckMode envMapDir cloudTestMode
 
   -- Wait for render loop to finish initialization before starting timeout
   logInfoIO LogGeneral "waiting for render loop initialization..."
