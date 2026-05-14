@@ -37,7 +37,7 @@ import time
 import numpy as np
 from PIL import Image
 
-SIZE = 128
+SIZE = 512
 CHANNELS = 4
 
 np.random.seed(42)
@@ -133,59 +133,57 @@ def generate_perlin_3d_tileable(size, octaves=4):
 
 
 def generate_worley_3d_tileable(size, cells_per_axis):
-    """Generate tileable 3D Worley (cellular) noise.
+    """Generate tileable 3D Worley (cellular) noise using scipy cKDTree.
 
     One random feature point per cell, arranged in a cells_per_axis³ grid.
-    Distance computed with toroidal wrapping for seamless tiling.
+    Distance computed with toroidal wrapping via cKDTree periodic boundary.
 
-    Uses O(27 × N³) neighbor lookup instead of O(cells³ × N³) brute force.
-    Runs in constant time regardless of cell count.
+    Uses O(N³ log cells) nearest-neighbor queries — dramatically faster
+    than the O(27 × N³) brute-force approach for large volumes.
 
     Returns inverted distance: 1.0 at cell centers, 0.0 at boundaries.
     """
+    from scipy.spatial import cKDTree
+
     num_points = cells_per_axis ** 3
     t0 = time.perf_counter()
     print(f"  Worley {cells_per_axis}³ ({num_points} cells)...", end="", flush=True)
 
     cell_size = 1.0 / cells_per_axis
 
-    point_grid = np.random.rand(cells_per_axis, cells_per_axis, cells_per_axis, 3).astype(np.float32)
-    for cx in range(cells_per_axis):
-        for cy in range(cells_per_axis):
-            for cz in range(cells_per_axis):
-                point_grid[cx, cy, cz, 0] = (cx + point_grid[cx, cy, cz, 0]) * cell_size
-                point_grid[cx, cy, cz, 1] = (cy + point_grid[cx, cy, cz, 1]) * cell_size
-                point_grid[cx, cy, cz, 2] = (cz + point_grid[cx, cy, cz, 2]) * cell_size
+    # Vectorized point grid creation
+    cx, cy, cz = np.meshgrid(
+        np.arange(cells_per_axis, dtype=np.float32),
+        np.arange(cells_per_axis, dtype=np.float32),
+        np.arange(cells_per_axis, dtype=np.float32),
+        indexing='ij'
+    )
+    offsets = np.random.rand(cells_per_axis, cells_per_axis, cells_per_axis, 3).astype(np.float32)
+    points = np.stack([
+        (cx + offsets[..., 0]).ravel() * cell_size,
+        (cy + offsets[..., 1]).ravel() * cell_size,
+        (cz + offsets[..., 2]).ravel() * cell_size,
+    ], axis=1)
 
-    x = np.linspace(0, 1, size, endpoint=False)
-    y = np.linspace(0, 1, size, endpoint=False)
-    z = np.linspace(0, 1, size, endpoint=False)
-    xx, yy, zz = np.meshgrid(x, y, z, indexing='ij')
+    # Build periodic KD-tree (toroidal wrapping)
+    tree = cKDTree(points, boxsize=[1.0, 1.0, 1.0])
 
-    cell_x = np.floor(xx * cells_per_axis).astype(int) % cells_per_axis
-    cell_y = np.floor(yy * cells_per_axis).astype(int) % cells_per_axis
-    cell_z = np.floor(zz * cells_per_axis).astype(int) % cells_per_axis
+    # Query grid points in chunks to manage memory
+    chunk_size = max(1, (128 ** 3 * 8) // (size ** 2))  # aim for ~8MB chunks
+    total_pixels = size ** 3
+    num_chunks = (total_pixels + chunk_size - 1) // chunk_size
 
-    min_dist = np.ones((size, size, size), dtype=np.float32) * 2.0
+    coords = np.linspace(0, 1, size, endpoint=False, dtype=np.float32)
+    grid = np.stack(np.meshgrid(coords, coords, coords, indexing='ij'), axis=-1).reshape(-1, 3)
 
-    for di in range(-1, 2):
-        for dj in range(-1, 2):
-            for dk in range(-1, 2):
-                ni = (cell_x + di) % cells_per_axis
-                nj = (cell_y + dj) % cells_per_axis
-                nk = (cell_z + dk) % cells_per_axis
+    min_dist = np.empty(total_pixels, dtype=np.float32)
+    for i in range(num_chunks):
+        start = i * chunk_size
+        end = min(start + chunk_size, total_pixels)
+        min_dist[start:end] = tree.query(grid[start:end], k=1)[0]
 
-                px = point_grid[ni, nj, nk, 0]
-                py = point_grid[ni, nj, nk, 1]
-                pz = point_grid[ni, nj, nk, 2]
-
-                dx = np.minimum(np.abs(xx - px), 1.0 - np.abs(xx - px))
-                dy = np.minimum(np.abs(yy - py), 1.0 - np.abs(yy - py))
-                dz = np.minimum(np.abs(zz - pz), 1.0 - np.abs(zz - pz))
-                dist = np.sqrt(dx * dx + dy * dy + dz * dz)
-                min_dist = np.minimum(min_dist, dist)
-
-    min_dist = min_dist / min_dist.max()
+    min_dist = min_dist.reshape(size, size, size)
+    min_dist = min_dist / (min_dist.max() + 1e-8)
     elapsed = time.perf_counter() - t0
     print(f" {elapsed:.2f}s")
     return 1.0 - min_dist
