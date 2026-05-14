@@ -249,6 +249,17 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
             when sr $ STM.atomically $ updateCamera (activeCamera worldState) [Camera.MoveRight camMove]
             STM.atomically $ STM.modifyTVar' (activeCamera worldState) (`Camera.animate` dtSeconds)
 
+            -- Auto camera path for cloud test mode: slow upward spiral
+            isCloudTest <- STM.readTVarIO (isCloudTestMode gameState)
+            when isCloudTest $ do
+              cam <- STM.readTVarIO (activeCamera worldState)
+              let pos = cameraPosition cam
+                  (V3 _py _ _) = pos
+                  autoSpeed = 2.0 * dtSeconds
+                  -- Slow upward drift + gentle circular motion
+                  autoMove = [Camera.MoveY autoSpeed]
+              STM.atomically $ updateCamera (activeCamera worldState) autoMove
+
             -- Update day/night cycle
             dnEnabled <- STM.readTVarIO (gameDayNightEnabled gameState)
             when dnEnabled $ do

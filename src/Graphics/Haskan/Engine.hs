@@ -129,6 +129,7 @@ mainLoop meshName EngineConfig {..} = do
   tvCameraMode <- liftIO $ STM.newTVarIO (if cloudTestMode then CameraModeFly else CameraModeOrbital)
   tvOrbitalCamera <- liftIO $ STM.newTVarIO initialCam
   tvFlyCamera <- liftIO $ STM.newTVarIO (Camera.Fly defaultFlyCamera)
+  tvCloudTestMode <- liftIO $ STM.newTVarIO cloudTestMode
 
   let gameState =
         GameState
@@ -161,6 +162,7 @@ mainLoop meshName EngineConfig {..} = do
           tvCameraMode
           tvOrbitalCamera
           tvFlyCamera
+          tvCloudTestMode
 
   mDebugServer <- case debugSocketPath of
     Just path -> do

@@ -417,7 +417,8 @@ data GameState cam = GameState
     cloudDetail :: TVar Float,
     cameraMode :: TVar CameraMode,
     orbitalCamera :: TVar cam,
-    flyCamera :: TVar cam
+    flyCamera :: TVar cam,
+    isCloudTestMode :: TVar Bool
   }
 
 data RenderDebugInfo = RenderDebugInfo
