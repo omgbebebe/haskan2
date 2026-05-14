@@ -122,7 +122,7 @@ cloudFragment = shader do
       totalRayLength = min 10000.0 (cloudThickness / max 0.01 dirY)
       stepSize = totalRayLength / 6.0
 
-      ditherHash = fract (sin (uvX * 12.9898 + uvY * 78.233) * 43758.5453)
+      ditherHash = fract (sin (fma uvY 78.233 (uvX * 12.9898)) * 43758.5453)
       ditherOffset = ditherHash * stepSize
 
       tEntry = (cloudBottom - camY) / max 0.01 dirY + ditherOffset
@@ -226,12 +226,12 @@ cloudFragment = shader do
   ~(Vec4 ln4r ln4g ln4b ln4a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 ls4x ls4y ls4z)
   ~(Vec4 ln5r ln5g ln5b ln5a) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 ls5x ls5y ls5z)
 
-  let heightF0 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 0.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 0.5) - cloudBottom) / cloudThickness))
-      heightF1 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 1.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 1.5) - cloudBottom) / cloudThickness))
-      heightF2 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 2.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 2.5) - cloudBottom) / cloudThickness))
-      heightF3 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 3.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 3.5) - cloudBottom) / cloudThickness))
-      heightF4 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 4.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 4.5) - cloudBottom) / cloudThickness))
-      heightF5 = smoothstep 0.0 0.15 ((entryY + dirY * (stepSize * 5.5) - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 ((entryY + dirY * (stepSize * 5.5) - cloudBottom) / cloudThickness))
+  let heightF0 = smoothstep 0.0 0.15 (fma dirY (stepSize * 0.5) (entryY - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 (fma dirY (stepSize * 0.5) (entryY - cloudBottom) / cloudThickness))
+      heightF1 = smoothstep 0.0 0.15 (fma dirY (stepSize * 1.5) (entryY - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 (fma dirY (stepSize * 1.5) (entryY - cloudBottom) / cloudThickness))
+      heightF2 = smoothstep 0.0 0.15 (fma dirY (stepSize * 2.5) (entryY - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 (fma dirY (stepSize * 2.5) (entryY - cloudBottom) / cloudThickness))
+      heightF3 = smoothstep 0.0 0.15 (fma dirY (stepSize * 3.5) (entryY - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 (fma dirY (stepSize * 3.5) (entryY - cloudBottom) / cloudThickness))
+      heightF4 = smoothstep 0.0 0.15 (fma dirY (stepSize * 4.5) (entryY - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 (fma dirY (stepSize * 4.5) (entryY - cloudBottom) / cloudThickness))
+      heightF5 = smoothstep 0.0 0.15 (fma dirY (stepSize * 5.5) (entryY - cloudBottom) / cloudThickness) * (1.0 - smoothstep 0.85 1.0 (fma dirY (stepSize * 5.5) (entryY - cloudBottom) / cloudThickness))
 
       cosTheta = dir ^.^ sunDir
 
