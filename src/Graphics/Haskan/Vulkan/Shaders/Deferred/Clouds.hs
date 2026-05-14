@@ -1,3 +1,132 @@
+{-|
+Module: Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds
+
+=== Deferred Rendering Pipeline — Stage 3: Volumetric Cloud Pass ===
+
+This module implements a quarter-resolution volumetric cloud rendering pass
+that ray-marches through a procedural cloud volume and composites with the skybox.
+Output is blended with history for temporal anti-aliasing.
+
+=== Vertex Shader (Fullscreen Triangle) ===
+
+**Inputs:**
+  * gl_VertexIndex: implicit vertex index (0, 1, 2)
+
+**Push Constants:**
+  * cameraPos: CloudPushConstant struct containing:
+    - cameraX/Y/Z      : Float — world-space camera position
+    - ray0/ray1/ray2   : V3 Float — per-corner frustum rays
+    - sunAzimuth       : Float — sun rotation angle (radians)
+    - sunDir           : V3 Float — normalized sun direction
+    - cloudHeight      : Float — cloud layer bottom Y coordinate
+    - time             : Float — animation time
+    - blendFactor      : Float — temporal blend weight (0.92 = history)
+    - prevViewProj0-3  : V4 Float — previous frame view-projection matrix rows
+
+**Algorithm:** Same fullscreen triangle as Lighting pass.
+
+**Outputs:**
+  * out_uv  (Location 0): V2 Float — screen-space UVs
+  * out_ray (Location 1): V3 Float — world-space ray direction
+
+=== Fragment Shader ===
+
+**Inputs:**
+  * in_uv  (Location 0): V2 Float — interpolated screen UV
+  * in_ray (Location 1): V3 Float — interpolated world ray direction
+
+**Textures:**
+  * env_map      (Binding 0, DS0): TextureCube RGBA8 UNorm
+    - Skybox environment map for background color
+  * cloud_noise  (Binding 1, DS0): Texture3D RGBA8 UNorm
+    - 3D noise texture (128^3) with 4 octaves:
+      - R = Perlin-Worley blend (macro shape)
+      - G = Worley 8^3  (medium erosion)
+      - B = Worley 16^3 (high-frequency detail)
+      - A = Worley 32^3 (micro-detail)
+  * cloud_history(Binding 2, DS0): Texture2D RGBA16 F
+    - Previous frame cloud result for temporal accumulation
+
+**Algorithm — Volumetric Ray Marching:**
+
+1. **Ray Setup:**
+   - dir = normalize(rayDir)
+   - cloudThickness = 800.0
+   - cloudTop = cloudBottom + cloudThickness
+   - totalRayLength = min(10000, cloudThickness / max(0.01, dirY))
+   - stepSize = totalRayLength / 6.0
+
+2. **Dithered Entry Point:**
+   - hash = fract(sin(uv.x*12.9898 + uv.y*78.233) * 43758.5453)
+   - offset = hash * stepSize
+   - tEntry = (cloudBottom - camY) / max(0.01, dirY) + offset
+   - entryPos = camPos + dir * tEntry
+
+3. **6-Step Ray March (unrolled):**
+   For each step i (0..5):
+   
+   a. **Position:** p_i = entryPos + dir * (stepSize * (i + 0.5))
+   
+   b. **Domain Warping (Curl-like displacement):**
+      - w_x = sin(p_y*freq + p_z*freq*0.7) * warpAmp
+      - w_y = cos(p_x*freq + p_z*freq*0.5) * warpAmp
+      - w_z = sin(p_z*freq*0.7 + p_x*freq*0.6) * warpAmp
+   
+   c. **Noise Sampling:**
+      - uvw = fract((p + w) * noiseScale - windOffset)
+      - Sample cloud_noise at uvw
+   
+   d. **Density Composition:**
+      - density = max(0, noiseR * (1 - (noiseG*0.3 + noiseB*0.15 + noiseA*0.075)) - 0.15)
+      - * heightMask * 4.0
+   
+   e. **Height Mask:**
+      - h = (entryY + dirY*step - cloudBottom) / cloudThickness
+      - heightMask = smoothstep(0, 0.15, h) * (1 - smoothstep(0.85, 1, h))
+   
+   f. **Light Marching (single sample towards sun):**
+      - sunOffset = sunDir * stepSize * noiseScale
+      - lightUVW = uvw + sunOffset
+      - Sample cloud_noise at lightUVW
+      - lightDensity = same composition as step density
+      - lightTransmittance = exp(-lightDensity * stepSize * 0.5)
+
+4. **Henyey-Greenstein Phase Function:**
+   - cosTheta = dot(dir, sunDir)
+   - HG(g) = (1 - g^2) / (4*pi * (1 + g^2 - 2*g*cosTheta)^1.5)
+   - phase = 0.7 * HG(0.6) + 0.3 * HG(-0.3)
+   - Forward + backward scattering lobe combination
+
+5. **Radiance Accumulation (Beer-Lambert):**
+   - In-scattering at step i:
+     S_i = cloudBaseColor * lightT_i * phase * density_i * stepSize
+   - Transmittance:
+     T_i = T_{i-1} * exp(-density_i * stepSize)
+   - Total cloud radiance = sum(S_i)
+   - Final transmittance = T_final
+
+6. **Compositing:**
+   - skyColor = sample env_map at rayDir
+   - cloudColor = skyColor * cloudTransmittance + cloudRadiance
+   - Only compute for upward rays (dirY > 0.01)
+
+7. **Temporal Reprojection:**
+   - Reproject current pixel to previous frame using prevViewProj
+   - Sample cloud_history at reprojected UV
+   - Blend: result = history * blendFactor + current * (1 - blendFactor)
+   - Valid only if reprojected UV is inside [0,1]
+
+**Output:**
+  * out_colour (Location 0): V4 Float
+    - R,G,B = cloud color (skybox + clouds)
+    - A     = cloud transmittance (for lighting pass blending)
+
+**Texture Input Formats:**
+  * env_map:     Cube map RGBA8 UNorm (6 faces, 512x512)
+  * cloud_noise: 3D RGBA8 UNorm (128x128x128)
+  * cloud_history: 2D RGBA16 F (quarter resolution)
+-}
+
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PartialTypeSignatures #-}

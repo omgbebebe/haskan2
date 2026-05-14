@@ -1,3 +1,91 @@
+{-|
+Module: Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer
+
+=== Deferred Rendering Pipeline — Stage 1: G-Buffer Pass ===
+
+This module implements the geometry pass of a deferred renderer.
+It rasterizes scene geometry into a multi-target framebuffer (G-buffer)
+that stores per-pixel material properties for later lighting computation.
+
+=== Vertex Shader ===
+
+**Inputs:**
+  * Position       (Location 0): V3 Float — object-space vertex position
+  * UV             (Location 1): V2 Float — texture coordinates
+  * Normal         (Location 2): V3 Float — object-space normal vector
+  * Tangent        (Location 3): V4 Float — (xyz = tangent direction, w = handedness sign)
+  * Colour         (Location 4): V3 Float — per-vertex color (fallback when no texture)
+
+**Uniforms / Buffers:**
+  * UBO (Binding 0, DescriptorSet 0):
+    - view       : M 4 4 Float — camera view matrix
+    - projection : M 4 4 Float — perspective projection matrix
+  * Entities SSBO (Binding 2, DescriptorSet 0):
+    - Per-entity: transform (M 4 4), normalMatrix (M 4 4), materialIndex (Word32)
+
+**Algorithm — Vertex Transformation:**
+  1. Model matrix fetched from entity SSBO via gl_InstanceIndex
+  2. Normal matrix = transpose(inverse(model)) for correct normal transformation
+  3. MVP = projection * view * model
+  4. worldPos    = model * vec4(position, 1)
+  5. worldNorm   = normalMatrix * vec4(normal, 0)
+  6. worldTangent = normalMatrix * tangent
+
+**Outputs (interpolated to fragment stage):**
+  * out_position     (Location 0): V4 Float — world position (xyz) + metallic (w)
+  * out_normal       (Location 1): V4 Float — world normal (xyz) + roughness (w)
+  * out_albedo       (Location 2): V4 Float — base color (rgb) + ambient occlusion (a)
+  * out_uv           (Location 3): V2 Float — texture coordinates
+  * out_materialIndex(Location 4): Word32  — flat, bindless texture array index
+  * out_entityIndex  (Location 5): Word32  — flat, entity SSBO index
+  * out_tangent      (Location 6): V4 Float — world tangent (xyz) + handedness (w)
+
+=== Fragment Shader ===
+
+**Inputs:** All vertex outputs interpolated per-pixel.
+
+**Textures:**
+  * tex (Binding 1, DescriptorSet 0): BindlessTexture2D RGBA8 UNorm
+    - Indexable texture array. Index = materialIndex for albedo,
+      metallicRoughnessIndex for PBR map, normalIndex for normal map,
+      occlusionIndex for AO map, emissiveIndex for emissive map.
+
+**Algorithm — PBR Material Sampling:**
+  1. Sample albedo texture at UV (fallback to vertex color if unavailable)
+  2. Sample metallic-roughness map:
+     - G channel = roughness
+     - B channel = metallic
+     - Fallback to scalar metallicFactor / roughnessFactor from SSBO
+  3. Normal mapping (TBN reconstruction):
+     - Normalize interpolated normal and tangent
+     - bitangent = cross(normal, tangent) * handedness
+     - Sample normal map, decode [0,1] -> [-1,1]
+     - Transform from tangent space to world space: worldN = TBN * sampledNormal
+  4. Sample occlusion map (R channel), apply occlusionStrength
+  5. Sample emissive map (RGB)
+
+**G-Buffer Output Layout:**
+  * Position (Location 0): RGBA16F
+    - R,G,B = world position xyz
+    - A       = metallic factor
+  * Normal (Location 1): RGBA8 UNorm
+    - R,G,B = world normal encoded [-1,1] -> [0,1] (*0.5+0.5)
+    - A       = roughness
+  * Albedo (Location 2): RGBA8 UNorm
+    - R,G,B = base color
+    - A       = ambient occlusion
+  * Emissive (Location 3): RGBA8 UNorm
+    - R,G,B = emissive color
+    - A       = unused (1.0)
+
+**Texture Input Formats:**
+  * Albedo: RGBA8 UNorm (sRGB or linear depending on asset)
+  * Metallic-Roughness: RGBA8 UNorm (R=unused, G=roughness, B=metallic, A=unused)
+  * Normal: RGBA8 UNorm (R,G,B = normal XYZ, A=unused)
+  * Occlusion: RGBA8 UNorm (R=occlusion, GBA=unused)
+  * Emissive: RGBA8 UNorm (R,G,B = emissive)
+-}
+
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PartialTypeSignatures #-}
