@@ -137,7 +137,7 @@ createGBufferImage dev extent format = do
               &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
               &* set @"queueFamilyIndexCount" 0
               &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT .|. Vulkan.VK_IMAGE_USAGE_TRANSFER_SRC_BIT)
+              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT .|. Vulkan.VK_IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT)
               &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
               &* set @"format" format
               &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT

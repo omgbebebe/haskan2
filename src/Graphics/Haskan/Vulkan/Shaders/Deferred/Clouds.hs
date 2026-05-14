@@ -39,7 +39,7 @@ Output is blended with history for temporal anti-aliasing.
   * env_map      (Binding 0, DS0): TextureCube RGBA8 UNorm
     - Skybox environment map for background color
   * cloud_noise  (Binding 1, DS0): Texture3D RGBA8 UNorm
-    - 3D noise texture (512^3) with 4 octaves:
+    - 3D noise texture (256^3) with 4 octaves:
       - R = Perlin-Worley blend (macro shape)
       - G = Worley 8^3  (medium erosion)
       - B = Worley 16^3 (high-frequency detail)
@@ -123,7 +123,7 @@ Output is blended with history for temporal anti-aliasing.
 
 **Texture Input Formats:**
   * env_map:     Cube map RGBA8 UNorm (6 faces, 512x512)
-   * cloud_noise: 3D RGBA8 UNorm (512x512x512)
+   * cloud_noise: 3D RGBA8 UNorm (256x256x256)
   * cloud_history: 2D RGBA16 F (quarter resolution)
 -}
 

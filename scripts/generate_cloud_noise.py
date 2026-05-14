@@ -5,7 +5,7 @@ Usage:
     nix develop -c python scripts/generate_cloud_noise.py
 
 Outputs:
-    data/textures/cloud_noise/cloud_noise_128.raw — raw RGBA8 (128³)
+    data/textures/cloud_noise/cloud_noise_256.raw — raw RGBA8 (256³)
     data/textures/cloud_noise/cloud_noise.ktx2 — KTX2 3D texture
     data/textures/cloud_noise/slices/ — PNG slices for inspection
 
@@ -37,7 +37,7 @@ import time
 import numpy as np
 from PIL import Image
 
-SIZE = 512
+SIZE = 256
 CHANNELS = 4
 
 np.random.seed(42)
