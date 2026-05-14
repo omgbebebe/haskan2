@@ -179,7 +179,8 @@ type CloudPushConstant =
        "prevViewProj2" ':-> V 4 Float,
        "prevViewProj3" ':-> V 4 Float,
        "windDirX" ':-> Float,
-       "windDirZ" ':-> Float
+       "windDirZ" ':-> Float,
+       "prevTime" ':-> Float
      ]
 
 cloudVertex :: ShaderModule "main" VertexShader CloudVertexDefs _
@@ -378,11 +379,22 @@ cloudFragment = shader do
 
       -- Temporal accumulation with reprojection
       blendFactor = view @(Name "blendFactor") cameraPos
+      prevTime = view @(Name "prevTime") cameraPos
 
       -- World-space cloud entry point (undithered for reprojection)
       worldX = camX + dirX * tNear
       worldY = camY + dirY * tNear
       worldZ = camZ + dirZ * tNear
+
+      -- Wind-aware reprojection: subtract wind displacement from world position
+      -- so the history sample tracks the moving cloud mass
+      dt = max 0.0 (time - prevTime)
+      windSpeed = 0.05
+      windDeltaX = dt * windSpeed * windDirX
+      windDeltaZ = dt * windSpeed * windDirZ
+      windWorldX = worldX - windDeltaX
+      windWorldY = worldY
+      windWorldZ = worldZ - windDeltaZ
 
       -- Previous frame view-projection matrix columns
       prevVP0 = view @(Name "prevViewProj0") cameraPos
@@ -396,10 +408,10 @@ cloudFragment = shader do
       ~(Vec4 m02 m12 m22 m32) = prevVP2
       ~(Vec4 m03 m13 m23 m33) = prevVP3
 
-      prevClipX = m00 * worldX + m01 * worldY + m02 * worldZ + m03 * 1.0
-      prevClipY = m10 * worldX + m11 * worldY + m12 * worldZ + m13 * 1.0
-      prevClipZ = m20 * worldX + m21 * worldY + m22 * worldZ + m23 * 1.0
-      prevClipW = m30 * worldX + m31 * worldY + m32 * worldZ + m33 * 1.0
+      prevClipX = m00 * windWorldX + m01 * windWorldY + m02 * windWorldZ + m03 * 1.0
+      prevClipY = m10 * windWorldX + m11 * windWorldY + m12 * windWorldZ + m13 * 1.0
+      prevClipZ = m20 * windWorldX + m21 * windWorldY + m22 * windWorldZ + m23 * 1.0
+      prevClipW = m30 * windWorldX + m31 * windWorldY + m32 * windWorldZ + m33 * 1.0
 
       prevNDCX = prevClipX / max 0.0001 prevClipW
       prevNDCY = prevClipY / max 0.0001 prevClipW
@@ -415,7 +427,9 @@ cloudFragment = shader do
   let histR = convert histR_h
       histG = convert histG_h
       histB = convert histB_h
-      reprojBlend = blendFactor * validReproj
+      -- Reduced blend factor (0.85 vs 0.92) to reduce ghosting from
+      -- residual motion not captured by wind displacement
+      reprojBlend = 0.85 * blendFactor * validReproj
       accR = reprojBlend * histR + (1.0 - reprojBlend) * tintedSkyR
       accG = reprojBlend * histG + (1.0 - reprojBlend) * tintedSkyG
       accB = reprojBlend * histB + (1.0 - reprojBlend) * tintedSkyB

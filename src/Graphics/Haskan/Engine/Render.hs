@@ -186,7 +186,8 @@ data RenderEnv = RenderEnv
     reTvCloudHeight :: !(STM.TVar Float),
     reTvWindDirX :: !(STM.TVar Float),
     reTvWindDirZ :: !(STM.TVar Float),
-    rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat))
+    rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat)),
+    rePrevTime :: !(TVar Float)
   }
 
 instance (MonadIO m) => MonadTelemetry (ReaderT RenderEnv m) where
@@ -329,7 +330,10 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   currentTime <- getMonotonicTime
   let elapsedSeconds = fromIntegral (toNanoSecs currentTime) / 1e9
 
-  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal
+  prevTimeVal <- liftIO $ STM.readTVarIO rePrevTime
+  liftIO $ STM.atomically $ STM.writeTVar rePrevTime elapsedSeconds
+
+  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal prevTimeVal
       recordAction = buildRecordAction recordCtx
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
@@ -746,6 +750,7 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
                for_ (drLightingDescriptorSets dr) $ \ds ->
                  DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
                prevViewProjTVar <- STM.newTVarIO (identity :: M44 Foreign.C.CFloat)
+               prevTimeTVar <- STM.newTVarIO 0.0
                let renderEnv =
                      RenderEnv
                        { reWindow = window,
@@ -783,7 +788,8 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
                           reTvCloudHeight = tvCloudHeight,
                           reTvWindDirX = tvWindDirX,
                           reTvWindDirZ = tvWindDirZ,
-                          rePrevViewProj = prevViewProjTVar
+                          rePrevViewProj = prevViewProjTVar,
+                          rePrevTime = prevTimeTVar
                         }
                renderFrameLoop renderEnv 0
           outerLoop renderFrameLoopFinished

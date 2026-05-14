@@ -228,7 +228,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         Vulkan.createVk
           ( set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
               &* set @"offset" 0
-              &* set @"size" 200
+              &* set @"size" 204
           )
   cloudPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [cloudDescriptorSetLayout] [cloudPushConstantRange]
   logDebugIO LogRender "cloud pipeline layout created"

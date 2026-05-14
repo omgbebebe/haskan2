@@ -52,6 +52,7 @@ data RecordContext = RecordContext
     rcPrevViewProj :: !(M44 Float),
     rcWindDirX :: !Float,
     rcWindDirZ :: !Float,
+    rcPrevTime :: !Float,
     rcWireframeEnabled :: !Bool,
     rcDeferred :: !DeferredResources,
     rcCullResources :: !ComputeCullResources,
@@ -79,8 +80,9 @@ buildRecordContext ::
   M44 Float ->
   Float ->
   Float ->
+  Float ->
   RecordContext
-buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProj windDirX windDirZ =
+buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProj windDirX windDirZ prevTime =
   RecordContext
     { rcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
       rcFrameDescriptorSets = frameDescriptorSets,
@@ -102,6 +104,7 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
       rcPrevViewProj = prevViewProj,
       rcWindDirX = windDirX,
       rcWindDirZ = windDirZ,
+      rcPrevTime = prevTime,
       rcWireframeEnabled = fsWireframe frameState,
       rcDeferred = dr,
       rcCullResources = ccr,
@@ -189,6 +192,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdBlendFactor = 0.92,
                 dpdWindDirX = rcWindDirX,
                 dpdWindDirZ = rcWindDirZ,
+                dpdPrevTime = rcPrevTime,
                 dpdCloudRenderPass = drCloudRenderPass rcDeferred,
                 dpdCloudFramebuffer = cloudFramebuffer,
                 dpdCloudPipeline = drCloudPipeline rcDeferred,
