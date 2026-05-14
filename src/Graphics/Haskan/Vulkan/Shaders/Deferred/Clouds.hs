@@ -312,17 +312,40 @@ cloudFragment = shader do
         heightMask = smoothstep 0.0 0.15 h * (1.0 - smoothstep 0.85 1.0 h)
         density = max 0 (nr * (1.0 - (ng * 0.3 + nb * 0.15 + na * 0.075)) - 0.15) * heightMask * 4.0
 
-    -- Single-sample light march (Phase 3 upgrades to nested loop)
-    let lsx = fract (sx + sunDirX * stepSize * noiseScale)
-        lsy = fract (sy + sunDirY * stepSize * noiseScale)
-        lsz = fract (sz + sunDirZ * stepSize * noiseScale)
+    -- Nested light march: 4 steps toward sun for self-shadowing
+    _ <- def @"lightStep" @RW @Int32 0
+    _ <- def @"lightPos" @RW @(V 3 Float) rp
+    _ <- def @"lightDensity" @RW @Float 0.0
 
-    ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 lsx lsy lsz)
-    let lh = ((py + sunDirY * stepSize) - cloudBottom) / cloudThickness
-        lheightMask = smoothstep 0.0 0.15 lh * (1.0 - smoothstep 0.85 1.0 lh)
-        ldensity = max 0 (lnr * (1.0 - (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - 0.15) * lheightMask * 4.0
-        lightT_d = let b = exp (-ldensity * 1.5)
-                       p = 0.7 * exp (-ldensity * 0.25)
+    let lightStepSize = cloudThickness / 6.0
+
+    loop do
+      ls <- get @"lightStep"
+      when (ls >= 4) do
+        break @1
+
+      lp <- get @"lightPos"
+      let ~(Vec3 lpx lpy lpz) = lp
+          lwx = sin (lpy * warpFreq + lpz * warpFreq * 0.7) * warpAmp
+          lwy = cos (lpx * warpFreq + lpz * warpFreq * 0.5) * warpAmp
+          lwz = sin (lpz * warpFreq * 0.7 + lpx * warpFreq * 0.6) * warpAmp
+          lsx = fract ((lpx + lwx) * noiseScale - windOffsetX)
+          lsy = fract ((lpy + lwy) * noiseScale)
+          lsz = fract ((lpz + lwz) * noiseScale - windOffsetZ)
+
+      ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 lsx lsy lsz)
+
+      let lh = (lpy - cloudBottom) / cloudThickness
+          lheightMask = smoothstep 0.0 0.15 lh * (1.0 - smoothstep 0.85 1.0 lh)
+          ld = max 0 (lnr * (1.0 - (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - 0.15) * lheightMask * 4.0
+
+      modify @"lightDensity" (+ (ld * lightStepSize))
+      put @"lightPos" (lp ^+^ sunDir ^* lightStepSize)
+      modify @"lightStep" (+1)
+
+    finalLightDensity <- get @"lightDensity"
+    let lightT_d = let b = exp (-finalLightDensity * 1.5)
+                       p = 0.7 * exp (-finalLightDensity * 0.25)
                    in max b p
 
     let s_scatter = cloudBase ^* (lightT_d * phase * density * stepSize)
