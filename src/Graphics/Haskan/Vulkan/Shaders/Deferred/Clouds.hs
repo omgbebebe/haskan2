@@ -47,84 +47,72 @@ Output is blended with history for temporal anti-aliasing.
   * cloud_history(Binding 2, DS0): Texture2D RGBA16 F
     - Previous frame cloud result for temporal accumulation
 
-**Algorithm — Volumetric Ray Marching:**
+lgorithm — Volumetric Ray Marching:**
 
-1. **Ray Setup:**
-   - dir = normalize(rayDir)
-   - cloudThickness = 800.0
-   - cloudTop = cloudBottom + cloudThickness
-   - totalRayLength = min(10000, cloudThickness / max(0.01, dirY))
-   - stepSize = totalRayLength / 6.0
+**Ray Setup:**
+- dir = normalize(rayDir)
+- cloudThickness = 800.0
+- cloudTop = cloudBottom + cloudThickness
+- Dual-plane slab intersection for camera below/inside/above cloud layer
+- stepSize = totalRayLength / 24.0
 
-2. **Dithered Entry Point:**
-   - hash = fract(sin(uv.x*12.9898 + uv.y*78.233) * 43758.5453)
-   - offset = hash * stepSize
-   - tEntry = (cloudBottom - camY) / max(0.01, dirY) + offset
-   - entryPos = camPos + dir * tEntry
+**Dithered Entry Point:**
+- hash = fract(sin(uv.x*12.9898 + uv.y*78.233) * 43758.5453)
+- offset = hash * stepSize
+- tEntry = tNear + offset
 
-3. **6-Step Ray March (unrolled):**
-   For each step i (0..5):
+**24-Step Dynamic Ray March (loop with early exit):**
+Mutable accumulators: step, rayPos, transmittance, accR/G/B.
+Loop breaks when step >= 24 or transmittance < 0.01.
    
-   a. **Position:** p_i = entryPos + dir * (stepSize * (i + 0.5))
+Per step:
    
-   b. **Domain Warping (Curl-like displacement):**
-      - w_x = sin(p_y*freq + p_z*freq*0.7) * warpAmp
-      - w_y = cos(p_x*freq + p_z*freq*0.5) * warpAmp
-      - w_z = sin(p_z*freq*0.7 + p_x*freq*0.6) * warpAmp
+a. **Domain Warping (Curl-like displacement):**
+   - w_x = sin(p_y*freq + p_z*freq*0.7) * warpAmp
+   - w_y = cos(p_x*freq + p_z*freq*0.5) * warpAmp
+   - w_z = sin(p_z*freq*0.7 + p_x*freq*0.6) * warpAmp
    
-   c. **Noise Sampling:**
-      - uvw = fract((p + w) * noiseScale - windOffset)
-      - Sample cloud_noise at uvw
+b. **Noise Sampling:**
+   - uvw = fract((p + w) * noiseScale - windOffset)
+   - Sample cloud_noise at uvw
    
-   d. **Density Composition:**
-      - density = max(0, noiseR * (1 - (noiseG*0.3 + noiseB*0.15 + noiseA*0.075)) - 0.15)
-      - * heightMask * 4.0
+c. **Density Composition:**
+   - density = max(0, noiseR*(1 - cloudDetail*(noiseG*0.3+noiseB*0.15+noiseA*0.075)) - (1-cloudCoverage))
+   - * heightMask * 4.0
    
-   e. **Height Mask:**
-      - h = (entryY + dirY*step - cloudBottom) / cloudThickness
-      - heightMask = smoothstep(0, 0.15, h) * (1 - smoothstep(0.85, 1, h))
-   
-   f. **Light Marching (single sample towards sun):**
-      - sunOffset = sunDir * stepSize * noiseScale
-      - lightUVW = uvw + sunOffset
-      - Sample cloud_noise at lightUVW
-      - lightDensity = same composition as step density
-      - lightTransmittance = exp(-lightDensity * stepSize * 0.5)
+d. **Height Mask:**
+   - h = (pY - cloudBottom) / cloudThickness
+   - heightMask = smoothstep(0, 0.15, h) * (1 - smoothstep(0.85, 1, h))
 
-4. **Henyey-Greenstein Phase Function:**
-   - cosTheta = dot(dir, sunDir)
-   - HG(g) = (1 - g^2) / (4*pi * (1 + g^2 - 2*g*cosTheta)^1.5)
-   - phase = 0.7 * HG(0.6) + 0.3 * HG(-0.3)
-   - Forward + backward scattering lobe combination
+**Nested 4-Step Light March (per primary step):**
+- Secondary ray toward sun, 4 samples
+- Accumulates light density along sun direction
+- Beer-Powder: lightT = max(exp(-d*1.5), 0.7*exp(-d*0.25))
 
-5. **Radiance Accumulation (Beer-Lambert):**
-   - In-scattering at step i:
-     S_i = cloudBaseColor * lightT_i * phase * density_i * stepSize
-   - Transmittance:
-     T_i = T_{i-1} * exp(-density_i * stepSize)
-   - Total cloud radiance = sum(S_i)
-   - Final transmittance = T_final
+**Henyey-Greenstein Phase Function:**
+- cosTheta = dot(dir, sunDir)
+- HG(g) = (1 - g²) / (4π * (1 + g² - 2*g*cosTheta)^1.5)
+- phase = 0.7 * HG(0.6) + 0.3 * HG(-0.3)
 
-6. **Compositing:**
-   - skyColor = sample env_map at rayDir
-   - cloudColor = skyColor * cloudTransmittance + cloudRadiance
-   - Only compute for upward rays (dirY > 0.01)
+**Radiance Accumulation (Beer-Lambert):**
+- In-scattering: S_i = cloudBase * lightT * phase * density * stepSize
+- Transmittance: T_i = T_{i-1} * exp(-density * stepSize)
 
-7. **Temporal Reprojection:**
-   - Reproject current pixel to previous frame using prevViewProj
-   - Sample cloud_history at reprojected UV
-   - Blend: result = history * blendFactor + current * (1 - blendFactor)
-   - Valid only if reprojected UV is inside [0,1]
+**Wind-Aware Temporal Reprojection:**
+- World-space entry offset by wind displacement (dt * windSpeed * windDir)
+- Reproject to previous frame using prevViewProj
+- Blend: result = history * 0.85 * blendFactor + current * (1 - 0.85*blendFactor)
+- Valid only if reprojected UV is inside [0,1]
 
-**Output:**
-  * out_colour (Location 0): V4 Float
-    - R,G,B = cloud color (skybox + clouds)
-    - A     = cloud transmittance (for lighting pass blending)
+utput:**
+* out_colour (Location 0): V4 Float
+  - R,G,B = temporally blended cloud color
+  - A     = 1.0
 
-**Texture Input Formats:**
-  * env_map:     Cube map RGBA8 UNorm (6 faces, 512x512)
-   * cloud_noise: 3D RGBA8 UNorm (256x256x256)
-  * cloud_history: 2D RGBA16 F (quarter resolution)
+exture Input Formats:**
+* env_map:     Cube map RGBA8 UNorm (6 faces, 512x512)
+* cloud_noise: 3D RGBA8 UNorm (256x256x256)
+   * cloud_history: 2D RGBA16 F (quarter resolution)
 -}
 
 {-# LANGUAGE BlockArguments #-}
