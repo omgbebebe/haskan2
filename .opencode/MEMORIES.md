@@ -25,6 +25,8 @@
 ## Current Status
 - **M9 COMPLETE**: PBR deferred rendering, normal mapping, AO, emissive, IBL split-sum with BRDF LUT
 - **M10 COMPLETE**: Phase 1 (multi-light) DONE, Phase 2 (skybox) DONE, Phase 3 (day/night) DONE, Phase 4 (volumetric clouds) DONE
+- **FIR Loop Codegen**: FIXED — three critical bugs in `while` loop code generation (see 2026-05-14 session below)
+- **App Status**: Crashes during SDL/Vulkan initialization (`SDL_Vulkan_GetInstanceExtensions_REAL` segfault) — NOT related to FIR fixes
 - **Milestone plan**: `docs/M10-PLAN.md`
 - **FIR optimization roadmap**: `3rdparty/fir/.opencode/roadmap/optimization/README.md`
 
@@ -179,12 +181,15 @@
    - **Phase 0 DONE**: `spirv-opt -O` integrated into FIR `compileTo` via `Optimize` flag
    - **Phase 1.3 DONE**: Vectorized `SelectionF`/`IfF` in applicative context (single `OpSelect`)
    - **Phase 1.1/1.2 CANCELLED**: Loop-based stores/concatenation. Too complex for monadic `CGMonad`; spirv-opt already handles via DCE/scalar-replacement. See `.opencode/FIR_OPTIMIZATION_REPORT.md`.
+   - **FIR Loop Codegen FIXED**: Three bugs in `while` loop (see 2026-05-14 session below)
    - **Roadmap**: `3rdparty/fir/.opencode/roadmap/optimization/README.md`
-2. **UV texturing of procedural cube/sphere**: `unitCube` and `uvSphere` UV orientation still incorrect. Vision model confirms upside-down text on all faces. Deferred to future session.
-3. **IBL dynamic sky**: Deferred until FIR math functions available. **NOW UNBLOCKED** — `sin`/`cos` available. **BUT** HDRI rotation looks weird with current env1 (sunset with sun at horizon). Need better HDRI or procedural sky.
-4. **Shadows for sun**: Blocked until CSM implemented; shadowless day/night acceptable for M10.
-5. **Day/night IBL cubemap rotation**: **FIXED** — `sunAzimuth` passed via push constant. Fragment shader rotates sampling directions around Y. Cubemap rotates with sun. **Limitation**: Current env1 HDRI has sun baked at horizon; rotating makes it orbit like lighthouse. Need better HDRI or separate cubemap sets for dawn/noon/dusk/night.
-6. **M10.4 Volumetric Clouds**: **DONE** — Procedural clouds in lighting shader. Hash noise, value noise, 3-octave fBm, spherical UV, height mask, smoothstep density, sun-based shading. Optimized SPIR-V: ~22KB. Background pixels only.
+2. **SDL/Vulkan Initialization Crash**: App segfaults in `SDL_Vulkan_GetInstanceExtensions_REAL` during engine init. GDB backtrace shows SDL2-compat → SDL3 call. NOT related to FIR fixes (occurs before any shader compilation). Needs SDL/Vulkan driver investigation.
+3. **Cloud Shader SSA Dominance (Pre-existing)**: `spirv-val` reports: "ID '386[%386]' defined in block '193[%193]' does not dominate its use in block '120[%120]'". `%386` is defined in inner loop merge block, used in outer loop merge block without phi. Exists in BOTH original and fixed FIR output. Needs cloud shader code review or nested loop phi fix.
+4. **UV texturing of procedural cube/sphere**: `unitCube` and `uvSphere` UV orientation still incorrect. Vision model confirms upside-down text on all faces. Deferred to future session.
+5. **IBL dynamic sky**: Deferred until FIR math functions available. **NOW UNBLOCKED** — `sin`/`cos` available. **BUT** HDRI rotation looks weird with current env1 (sunset with sun at horizon). Need better HDRI or procedural sky.
+6. **Shadows for sun**: Blocked until CSM implemented; shadowless day/night acceptable for M10.
+7. **Day/night IBL cubemap rotation**: **FIXED** — `sunAzimuth` passed via push constant. Fragment shader rotates sampling directions around Y. Cubemap rotates with sun. **Limitation**: Current env1 HDRI has sun baked at horizon; rotating makes it orbit like lighthouse. Need better HDRI or separate cubemap sets for dawn/noon/dusk/night.
+8. **M10.4 Volumetric Clouds**: **DONE** — Procedural clouds in lighting shader. Hash noise, value noise, 3-octave fBm, spherical UV, height mask, smoothstep density, sun-based shading. Optimized SPIR-V: ~22KB. Background pixels only.
    - **Bug fix**: Original code had `smoothstep 0.85 0.65` (reversed edges = undefined behavior in SPIR-V), causing clouds to appear at top/bottom instead of horizon band. Fixed to `smoothstep 0.5 0.52 * (1.0 - smoothstep 0.7 0.9)`.
    - **Tuning**: Normalized fBm to [0,1], widened density threshold to `smoothstep 0.35 0.65` for softer edges.
    - **Debug modes**: 13.0=cloud density (Shift+F1), 14.0=height mask (Shift+F2), 15.0=raw noise (Shift+F3).
@@ -509,24 +514,43 @@ camPosData = [ camX, camY, camZ, realToFrac dpdDebugMode
 - `src/Graphics/Haskan/Debug/Server.hs` — `BSC.hGetLine`
 - Multiple files — partial function replacements, `{-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}`
 
-### 2026-05-14: Cloud Shader Production Milestone — Phase 6 Complete
-**Adaptive Step Count**:
-- Step count now varies based on `abs(dirY)`:
-  - `|dirY| < 0.1`: 16 steps (grazing angles, stretched traversal)
-  - `|dirY| < 0.6`: 24 steps (medium angles)
-  - `|dirY| >= 0.6`: 32 steps (near-vertical, best quality)
-- `stepSize = totalRayLength / stepCountF` where `stepCountF = fromIntegral stepCount`
-- Dynamic loop bound: `when (s >= stepCount) do break @1`
+### 2026-05-14: FIR Loop Codegen Bug Fixes — Critical
+**Three bugs fixed in FIR `while` loop code generation**:
 
-**Near-Horizon Skip**:
-- When `abs(dirY) < 0.05`, raymarching loop is skipped entirely
-- Accumulators remain at initial values (transmittance=1.0, accRGB=0.0)
-- Result is pure skybox color, avoiding expensive loop for negligible contribution
+**Bug 1 — OpLoopMerge/OpBranchConditional emission timing (CFG.hs:511-524)**:
+- `headerEndState <- get` was captured **before** `loopMerge` and `branchConditional` calls
+- This caused the loop control instructions (`OpLoopMerge`, `OpBranchConditional`) to be discarded when `put headerEndState` restored state after loop body
+- **Fix**: Move `get` to AFTER `loopMerge`/`branchConditional` in both `Just cond` and `Nothing` branches
+- **Impact**: `spirv-val` now sees `OpLoopMerge` in all loop headers; NVIDIA driver no longer crashes on startup
 
-**Interleaved Gradient Noise Dithering**:
-- Replaced `sin(hash)` dither with Jimenez's interleaved gradient noise:
-  `fract(52.9829189 * fract(uvX * 0.06711056 + uvY * 0.00583715))`
-- Better temporal stability than hash-based dither without requiring texture lookup
+**Bug 2 — compactIDs currentID remapping (Binary.hs:489)**:
+- `rewriteCGState remap (state { currentID = ID newBound })` remapped the newly-set `currentID` because `newBound` was in `allUsedIDs`
+- Result: `currentID` pointed to an already-used ID after compaction
+- **Fix**: Set `currentID` AFTER remapping: `(rewriteCGState remap state) { currentID = ID newBound }`
+- **Impact**: No more ID collisions; compacted SPIR-V has correct bound
 
-**Files Changed**:
-- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Clouds.hs` — adaptive step count, horizon skip, IGN dither
+**Bug 3 — Block ordering: body before header (CFG.hs:487-536)**:
+- Dry-run loop body was injected into real `emittedInstructions` via `put dryRunLoopEndState`, placing body BEFORE header in SPIR-V
+- `spirv-val` error: "Block X appears before its dominator Y"
+- **Fix**: 
+  1. Extract only the dry-run body instructions (after original prefix) into `dryRunBody`
+  2. After header block + loop control, run real `codeGenLoop` 
+  3. Append `dryRunBody` to `headerEndState.emittedInstructions` so body follows header
+- **Impact**: All loop validation tests pass; block ordering satisfies SPIR-V dominator rules
+
+**Test Infrastructure**:
+- Replaced legacy Cabal-based `test/CabalTests.hs` with `tasty`-based runner (`test/Main.hs`, `test/Runner.hs`)
+- Added loop validation tests: `Loop1`, `Loop2`, `Loop3`, `SimpleLoop`, `WhenLoop`, `DynamicLoopBound`, `CloudRaymarch`
+- All 11 Control validation tests now pass
+
+**Commits**:
+- FIR submodule: `1823736` (loop codegen fixes + test infrastructure)
+- FIR submodule: `c2cf37a` (.gitignore for local env files)
+- Main repo: `a19d0c3` (submodule bump + regenerated shaders + engine cleanup)
+
+**Pre-existing issue discovered**:
+- Cloud shader has SSA dominance violation: `%386` defined in inner loop merge block `%193`, used in outer merge block `%120` without phi
+- This exists in BOTH original and fixed FIR code — not caused by my changes
+- Needs separate investigation in cloud shader code or nested loop phi generation
+
+---
