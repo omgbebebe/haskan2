@@ -187,8 +187,8 @@ data RenderEnv = RenderEnv
     reTvTimeSpeed :: !(STM.TVar Float),
     reTvDayNightEnabled :: !(STM.TVar Bool),
     reTvCloudHeight :: !(STM.TVar Float),
-    reTvWindDirX :: !(STM.TVar Float),
-    reTvWindDirZ :: !(STM.TVar Float),
+    reTvWindDirection :: !(STM.TVar Float),
+    reTvWindSpeed :: !(STM.TVar Float),
     reTvCloudCoverage :: !(STM.TVar Float),
     reTvCloudDetail :: !(STM.TVar Float),
     reTvCloudAbsorption :: !(STM.TVar Float),
@@ -340,8 +340,11 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   frameState <- readFrameState
   let (sunState, skyTint, iblInt, sunAzimuth, sunDir) = computeSkyParams (fsDayNightEnabled frameState) (fsTimeOfDay frameState)
 
-  windDirXVal <- liftIO $ STM.readTVarIO reTvWindDirX
-  windDirZVal <- liftIO $ STM.readTVarIO reTvWindDirZ
+  windDirDeg <- liftIO $ STM.readTVarIO reTvWindDirection
+  windSpeedVal <- liftIO $ STM.readTVarIO reTvWindSpeed
+  let windDirRad = windDirDeg * pi / 180.0
+      windDirXVal = cos windDirRad * windSpeedVal / 10.0
+      windDirZVal = sin windDirRad * windSpeedVal / 10.0
   cloudCoverageVal <- liftIO $ STM.readTVarIO reTvCloudCoverage
   cloudDetailVal <- liftIO $ STM.readTVarIO reTvCloudDetail
   cloudAbsorptionVal <- liftIO $ STM.readTVarIO reTvCloudAbsorption
@@ -364,8 +367,8 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
               { Backend.dpeCloud =
                   Backend.CloudPanel
                     { Backend.cpHeight = reTvCloudHeight,
-                      Backend.cpWindX = reTvWindDirX,
-                      Backend.cpWindZ = reTvWindDirZ,
+                      Backend.cpWindDirection = reTvWindDirection,
+                      Backend.cpWindSpeed = reTvWindSpeed,
                       Backend.cpDetail = reTvCloudDetail,
                       Backend.cpAbsorption = reTvCloudAbsorption
                     },
@@ -799,8 +802,8 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
       tvTimeSpeed = gameTimeSpeed gameState
       tvDayNightEnabled = gameDayNightEnabled gameState
       tvCloudHeight = cloudHeight gameState
-      tvWindDirX = windDirX gameState
-      tvWindDirZ = windDirZ gameState
+      tvWindDirection = windDirection gameState
+      tvWindSpeed = windSpeed gameState
       tvCloudCoverage = cloudCoverage gameState
       tvCloudDetail = cloudDetail gameState
       tvCloudAbsorption = cloudAbsorption gameState
@@ -854,8 +857,8 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                          reTvTimeSpeed = tvTimeSpeed,
                           reTvDayNightEnabled = tvDayNightEnabled,
                           reTvCloudHeight = tvCloudHeight,
-                          reTvWindDirX = tvWindDirX,
-                          reTvWindDirZ = tvWindDirZ,
+                          reTvWindDirection = tvWindDirection,
+                          reTvWindSpeed = tvWindSpeed,
                             reTvCloudCoverage = tvCloudCoverage,
                             reTvCloudDetail = tvCloudDetail,
                             reTvCloudAbsorption = tvCloudAbsorption,

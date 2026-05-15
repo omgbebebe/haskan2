@@ -123,8 +123,8 @@ mainLoop meshName EngineConfig {..} = do
   tvTimeSpeed <- liftIO $ STM.newTVarIO timeSpeed
   tvDayNightEnabled <- liftIO $ STM.newTVarIO (dayNightEnabled || cloudTestMode)
   tvCloudHeight <- liftIO $ STM.newTVarIO 3500.0
-  tvWindDirX <- liftIO $ STM.newTVarIO 1.0
-  tvWindDirZ <- liftIO $ STM.newTVarIO 0.0
+  tvWindDirection <- liftIO $ STM.newTVarIO 0.0
+  tvWindSpeed <- liftIO $ STM.newTVarIO 10.0
   tvCloudCoverage <- liftIO $ STM.newTVarIO 0.45
   tvCloudDetail <- liftIO $ STM.newTVarIO 0.35
   tvCloudAbsorption <- liftIO $ STM.newTVarIO 1.5
@@ -160,8 +160,8 @@ mainLoop meshName EngineConfig {..} = do
           tvTimeSpeed
           tvDayNightEnabled
            tvCloudHeight
-           tvWindDirX
-           tvWindDirZ
+           tvWindDirection
+           tvWindSpeed
             tvCloudCoverage
             tvCloudDetail
             tvCloudAbsorption

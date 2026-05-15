@@ -254,8 +254,8 @@ weatherStateText c
 -- | Parameters for the Cloud section of the debug panel.
 data CloudPanel = CloudPanel
   { cpHeight :: !(STM.TVar Float),
-    cpWindX :: !(STM.TVar Float),
-    cpWindZ :: !(STM.TVar Float),
+    cpWindDirection :: !(STM.TVar Float),
+    cpWindSpeed :: !(STM.TVar Float),
     cpDetail :: !(STM.TVar Float),
     cpAbsorption :: !(STM.TVar Float)
   }
@@ -293,8 +293,8 @@ buildDebugPanel = do
       cloudOpen <- ImGui.Raw.collapsingHeader cloudLabel Foreign.Ptr.nullPtr zeroBits
       when cloudOpen $ do
         withCString "Height" $ \label -> sliderFloatTVar label 0.0 10000.0 cpHeight
-        withCString "Wind X" $ \label -> sliderFloatTVar label (-5.0) 5.0 cpWindX
-        withCString "Wind Z" $ \label -> sliderFloatTVar label (-5.0) 5.0 cpWindZ
+        withCString "Wind Direction" $ \label -> sliderFloatTVar label 0.0 360.0 cpWindDirection
+        withCString "Wind Speed" $ \label -> sliderFloatTVar label 0.0 100.0 cpWindSpeed
         withCString "Detail" $ \label -> sliderFloatTVar label 0.0 1.0 cpDetail
         withCString "Absorption" $ \label -> sliderFloatTVar label 0.0 10.0 cpAbsorption
     -- Weather section

@@ -130,26 +130,16 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                   logInfoIO LogGeneral $ "cloud height: " <> showT newHeight
                 (CloudHeightDown, False, _) -> pure ()
                 (WindRotateLeft, True, _) -> do
-                  wx <- STM.readTVarIO (windDirX gameState)
-                  wz <- STM.readTVarIO (windDirZ gameState)
-                  let angle = pi / 12.0
-                      newX = wx * cos angle - wz * sin angle
-                      newZ = wx * sin angle + wz * cos angle
-                  STM.atomically $ do
-                    STM.writeTVar (windDirX gameState) newX
-                    STM.writeTVar (windDirZ gameState) newZ
-                  logInfoIO LogGeneral $ "wind direction: " <> showT newX <> ", " <> showT newZ
+                  dir <- STM.readTVarIO (windDirection gameState)
+                  let newDir = dir + 15.0
+                  STM.atomically $ STM.writeTVar (windDirection gameState) newDir
+                  logInfoIO LogGeneral $ "wind direction: " <> showT newDir <> " deg"
                 (WindRotateLeft, False, _) -> pure ()
                 (WindRotateRight, True, _) -> do
-                  wx <- STM.readTVarIO (windDirX gameState)
-                  wz <- STM.readTVarIO (windDirZ gameState)
-                  let angle = -pi / 12.0
-                      newX = wx * cos angle - wz * sin angle
-                      newZ = wx * sin angle + wz * cos angle
-                  STM.atomically $ do
-                    STM.writeTVar (windDirX gameState) newX
-                    STM.writeTVar (windDirZ gameState) newZ
-                  logInfoIO LogGeneral $ "wind direction: " <> showT newX <> ", " <> showT newZ
+                  dir <- STM.readTVarIO (windDirection gameState)
+                  let newDir = dir - 15.0
+                  STM.atomically $ STM.writeTVar (windDirection gameState) newDir
+                  logInfoIO LogGeneral $ "wind direction: " <> showT newDir <> " deg"
                 (WindRotateRight, False, _) -> pure ()
                 (CloudPreset idx, True, _) -> do
                   let presets =
