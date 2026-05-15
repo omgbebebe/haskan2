@@ -329,6 +329,11 @@ cloudFragment = shader do
         heightMask = smoothstep 0.0 0.15 h * (1.0 - smoothstep 0.85 1.0 h)
         density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - cloudCoverage)) * heightMask
 
+    -- Height-graded ambient: warm ground bounce at bottom, cool sky scatter at top
+        groundAmbient = Vec3 0.35 0.30 0.25
+        skyAmbient    = Vec3 0.50 0.60 0.80
+        ambientTerm   = (groundAmbient ^* (1.0 - h) ^+^ skyAmbient ^* h) ^* 0.18
+
     -- Nested light march: 4 steps toward sun for self-shadowing
     _ <- def @"lightStep" @RW @Int32 0
     _ <- def @"lightPos" @RW @(V 3 Float) rp
@@ -370,11 +375,14 @@ cloudFragment = shader do
       modify @"lightStep" (+1)
 
     finalLightDensity <- get @"lightDensity"
-    let lightT_d = let b = exp (-finalLightDensity * cloudAbsorption)
-                       p = 0.7 * exp (-finalLightDensity * cloudAbsorption * 0.167)
-                   in max b p
+    let d = finalLightDensity * cloudAbsorption
+        ms0 = exp (-d * 1.0)           -- primary scatter
+        ms1 = exp (-d * 0.25) * 0.5    -- secondary scatter
+        ms2 = exp (-d * 0.05) * 0.25   -- tertiary scatter
+        lightT_d = ms0 + ms1 + ms2
 
-    let s_scatter = cloudBase ^* (lightT_d * phase * density * jitteredStep)
+    let directLight = cloudBase ^* (lightT_d * phase)
+        s_scatter = (directLight ^+^ ambientTerm) ^* (density * jitteredStep)
         t_new = exp (-density * jitteredStep)
         ~(Vec3 srx sry srz) = s_scatter
 
