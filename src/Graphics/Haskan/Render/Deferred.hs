@@ -21,6 +21,7 @@ import Foreign.Storable (sizeOf)
 import Graphics.Haskan.Render.Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
+import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
@@ -98,12 +99,18 @@ data DeferredPassData = DeferredPassData
 
 buildDeferredGraph :: DeferredPassData -> RenderGraphBuilder ()
 buildDeferredGraph DeferredPassData {..} = do
+  let gbufPosOut = resourceId "gbuffer_position"
+      gbufNormOut = resourceId "gbuffer_normal"
+      gbufAlbedoOut = resourceId "gbuffer_albedo"
+      gbufEmissiveOut = resourceId "gbuffer_emissive"
+      cloudOut = resourceId "cloud_result"
+      litOut = resourceId "lighting_output"
   -- G-buffer pass: render scene geometry to MRT
   addPass
     RenderPassNode
       { rpName = "gbuffer",
         rpInputs = [],
-        rpOutputs = [],
+        rpOutputs = [gbufPosOut, gbufNormOut, gbufAlbedoOut, gbufEmissiveOut],
         rpRecord = PassRecordFunc $ \ctx -> do
           let commandBuffer = pcCommandBuffer ctx
           RenderPass.withGBufferRenderPass commandBuffer dpdGBufferRenderPass dpdGBufferFramebuffer dpdExtent $ do
@@ -166,7 +173,7 @@ buildDeferredGraph DeferredPassData {..} = do
     RenderPassNode
       { rpName = "clouds",
         rpInputs = [],
-        rpOutputs = [],
+        rpOutputs = [cloudOut],
         rpRecord = PassRecordFunc $ \ctx -> do
           let commandBuffer = pcCommandBuffer ctx
           RenderPass.withCloudRenderPass commandBuffer dpdCloudRenderPass dpdCloudFramebuffer dpdCloudExtent $ do
@@ -252,8 +259,8 @@ buildDeferredGraph DeferredPassData {..} = do
   addPass
     RenderPassNode
       { rpName = "lighting",
-        rpInputs = [],
-        rpOutputs = [],
+        rpInputs = [gbufPosOut, gbufNormOut, gbufAlbedoOut, gbufEmissiveOut, cloudOut],
+        rpOutputs = [litOut],
         rpRecord = PassRecordFunc $ \ctx -> do
           let commandBuffer = pcCommandBuffer ctx
           RenderPass.withLightingRenderPass commandBuffer dpdLightingRenderPass dpdLightingFramebuffer dpdExtent $ do
