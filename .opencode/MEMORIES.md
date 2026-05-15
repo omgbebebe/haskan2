@@ -620,8 +620,34 @@ camPosData = [ camX, camY, camZ, realToFrac dpdDebugMode
 - `src/Graphics/Haskan/Engine.hs` — pass VkInstance to renderLoop
 - `haskan2.cabal` — dear-imgui, vulkan deps; UI.Backend module
 
-**Open Issues**:
-- Phase 3: Replace `SDL.pollEvents` with `DearImGui.SDL.pollEventWithImGui` for proper input forwarding
-- Phase 4: Build first debug panel (cloud parameter UI)
+---
+
+### 2026-05-15 (continued): Dear ImGui Phase 3 & 4 DONE
+
+**Phase 3 — Input Forwarding** (`2cfa84d`):
+- Replaced `SDL.pollEvents` with `DearImGui.SDL.pollEventWithImGui` in input loop
+- `pollEventsWithImGui` helper collects all pending events one at a time
+- All SDL events processed by ImGui first via `ImGui_ImplSDL2_ProcessEvent`
+- Events still forwarded to engine; camera controls and keybindings work alongside ImGui
+- File: `src/Graphics/Haskan/Engine.hs`
+
+**Phase 4 — Cloud Debug Panel** (`8ea368d`):
+- Added `buildCloudDebugPanel` to `UI.Backend`:
+  - `sliderFloatTVar` helper: reads TVar, shows ImGui `sliderFloat`, writes back via STM
+  - 4 sliders: Height (0-2000), Coverage (0-1), Detail (0-1), Absorption (0-10)
+- Replaced `showDemoWindow` with `buildCloudDebugPanel` in `renderAndPresent`
+- Panel reads/writes `reTvCloudHeight`, `reTvCloudCoverage`, `reTvCloudDetail`, `reTvCloudAbsorption` directly
+- File: `src/Graphics/Haskan/UI/Backend.hs`, `src/Graphics/Haskan/Engine/Render.hs`
+
+**Dear ImGui Integration Complete** (Phases 1-4):
+- Phase 1: Render pass + descriptor pool
+- Phase 2: Vulkan backend module with proper handle conversion
+- Phase 3: Input forwarding
+- Phase 4: First debug panel (cloud parameters)
+
+**Next Steps**:
+- Phase 5: Multiple debug panels (lighting, camera, performance)
+- Phase 6: ImGui theming/styling
+- Phase 7: Advanced widgets (plots, color pickers, texture previews)
 
 ---

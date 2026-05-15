@@ -350,7 +350,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
 
   -- Build Dear ImGui frame
   mDrawData <- liftIO $ case reImGuiBackend of
-    Just _ -> Backend.buildImGuiFrame $ Backend.buildCloudDebugPanel reTvCloudHeight reTvCloudCoverage reTvCloudDetail reTvCloudAbsorption
+    Just _ -> Backend.buildImGuiFrame $ Backend.buildDebugPanel reTvCloudHeight reTvCloudCoverage reTvCloudDetail reTvCloudAbsorption reTvDebugMode reTvWireframe
     Nothing -> pure Nothing
 
   let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal prevTimeVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal mDrawData

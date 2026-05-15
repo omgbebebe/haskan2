@@ -8,7 +8,7 @@ module Graphics.Haskan.UI.Backend
     newImGuiFrame,
     renderImGuiFrame,
     buildImGuiFrame,
-    buildCloudDebugPanel,
+    buildDebugPanel,
     recordImGuiDrawData,
   )
 where
@@ -16,11 +16,13 @@ where
 import Control.Concurrent.STM qualified as STM
 import Control.Monad (unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Data.Bits (zeroBits)
 import Data.Coerce (coerce)
 import Data.Word (Word32)
-import Foreign.C (CFloat (..))
+import Foreign.C (CFloat (..), CBool)
 import Foreign.C.String (CString, withCString)
 import Foreign.Marshal.Alloc qualified
+import Foreign.Marshal.Utils (fromBool, toBool)
 import Foreign.Ptr (FunPtr, Ptr, castPtr, nullPtr)
 import Foreign.Storable qualified
 import qualified DearImGui.Raw as ImGui.Raw
@@ -35,7 +37,7 @@ import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
-
+import Unsafe.Coerce (unsafeCoerce)
 -- ---------------------------------------------------------------------------
 -- Vulkan interop: convert vulkan-api handles to vulkan package handles
 -- ---------------------------------------------------------------------------
@@ -183,7 +185,7 @@ renderImGuiFrame :: IO () -> IO (Maybe ImGui.Raw.DrawData)
 renderImGuiFrame = buildImGuiFrame
 
 -- ---------------------------------------------------------------------------
--- Cloud Debug Panel
+-- Debug Panel
 -- ---------------------------------------------------------------------------
 
 sliderFloatTVar ::
@@ -200,15 +202,83 @@ sliderFloatTVar label minVal maxVal tv = do
     Foreign.C.CFloat newVal <- Foreign.Storable.peek ptr
     STM.atomically $ STM.writeTVar tv (realToFrac newVal)
 
-buildCloudDebugPanel :: STM.TVar Float -> STM.TVar Float -> STM.TVar Float -> STM.TVar Float -> IO ()
-buildCloudDebugPanel tvHeight tvCoverage tvDetail tvAbsorption =
-  withCString "Cloud Debug" $ \windowTitle -> do
-    open <- ImGui.Raw.begin windowTitle Nothing Nothing
-    when open $ do
-      withCString "Height" $ \label -> sliderFloatTVar label 0.0 2000.0 tvHeight
-      withCString "Coverage" $ \label -> sliderFloatTVar label 0.0 1.0 tvCoverage
-      withCString "Detail" $ \label -> sliderFloatTVar label 0.0 1.0 tvDetail
-      withCString "Absorption" $ \label -> sliderFloatTVar label 0.0 10.0 tvAbsorption
+checkboxTVar :: CString -> STM.TVar Bool -> IO ()
+checkboxTVar label tv = do
+  currentVal <- STM.readTVarIO tv
+  Foreign.Marshal.Alloc.alloca $ \ptr -> do
+    Foreign.Storable.poke ptr (fromBool currentVal)
+    _changed <- ImGui.Raw.checkbox label ptr
+    newVal <- Foreign.Storable.peek ptr
+    STM.atomically $ STM.writeTVar tv (toBool newVal)
+
+radioButtonMode :: CString -> Word32 -> STM.TVar Word32 -> IO ()
+radioButtonMode label mode tv = do
+  currentMode <- STM.readTVarIO tv
+  _clicked <- ImGui.Raw.radioButton label (fromBool (mode == currentMode))
+  when (mode == currentMode) $ pure ()
+  -- Note: radioButton returns whether it was clicked, but we need to handle
+  -- the mode change. In ImGui, radio buttons are typically grouped and the
+  -- user clicks one to select it. We handle this by checking if ANY radio
+  -- button in the group was clicked and updating accordingly.
+  -- However, radioButtonI is easier for this pattern:
+  -- radioButtonI label ptr mode
+  -- where ptr points to the current mode value.
+  --
+  -- Actually, let me simplify: use a single alloca for the mode and call
+  -- radioButtonI for each option. This is cleaner.
+  pure ()
+
+buildDebugPanel ::
+  STM.TVar Float ->
+  STM.TVar Float ->
+  STM.TVar Float ->
+  STM.TVar Float ->
+  STM.TVar Word32 ->
+  STM.TVar Bool ->
+  IO ()
+buildDebugPanel tvHeight tvCoverage tvDetail tvAbsorption tvDebugMode tvWireframe = do
+  withCString "Debug Panels" $ \windowTitle -> do
+    _open <- ImGui.Raw.begin windowTitle Nothing Nothing
+    -- Cloud section
+    withCString "Cloud" $ \cloudLabel -> do
+      cloudOpen <- ImGui.Raw.collapsingHeader cloudLabel Foreign.Ptr.nullPtr zeroBits
+      when cloudOpen $ do
+        withCString "Height" $ \label -> sliderFloatTVar label 0.0 2000.0 tvHeight
+        withCString "Coverage" $ \label -> sliderFloatTVar label 0.0 1.0 tvCoverage
+        withCString "Detail" $ \label -> sliderFloatTVar label 0.0 1.0 tvDetail
+        withCString "Absorption" $ \label -> sliderFloatTVar label 0.0 10.0 tvAbsorption
+    -- Render Debug section
+    withCString "Render Debug" $ \renderLabel -> do
+      renderOpen <- ImGui.Raw.collapsingHeader renderLabel Foreign.Ptr.nullPtr zeroBits
+      when renderOpen $ do
+        -- Use radioButtonI with a single shared pointer
+        Foreign.Marshal.Alloc.alloca $ \modePtr -> do
+          currentMode <- STM.readTVarIO tvDebugMode
+          Foreign.Storable.poke modePtr (fromIntegral currentMode)
+          withCString "Final" $ \label -> ImGui.Raw.radioButtonI label modePtr 0
+          withCString "Albedo" $ \label -> ImGui.Raw.radioButtonI label modePtr 1
+          withCString "Normals" $ \label -> ImGui.Raw.radioButtonI label modePtr 2
+          withCString "Roughness" $ \label -> ImGui.Raw.radioButtonI label modePtr 3
+          withCString "Metallic" $ \label -> ImGui.Raw.radioButtonI label modePtr 4
+          withCString "Position" $ \label -> ImGui.Raw.radioButtonI label modePtr 5
+          withCString "Emissive" $ \label -> ImGui.Raw.radioButtonI label modePtr 6
+          withCString "AO" $ \label -> ImGui.Raw.radioButtonI label modePtr 7
+          withCString "NdotL" $ \label -> ImGui.Raw.radioButtonI label modePtr 8
+          withCString "Irradiance" $ \label -> ImGui.Raw.radioButtonI label modePtr 9
+          withCString "Specular IBL" $ \label -> ImGui.Raw.radioButtonI label modePtr 10
+          withCString "Fresnel" $ \label -> ImGui.Raw.radioButtonI label modePtr 11
+          withCString "Skybox" $ \label -> ImGui.Raw.radioButtonI label modePtr 12
+          withCString "Cloud Density" $ \label -> ImGui.Raw.radioButtonI label modePtr 13
+          withCString "Height Mask" $ \label -> ImGui.Raw.radioButtonI label modePtr 14
+          withCString "Raw Noise" $ \label -> ImGui.Raw.radioButtonI label modePtr 15
+          newMode <- Foreign.Storable.peek modePtr
+          STM.atomically $ STM.writeTVar tvDebugMode (fromIntegral newMode)
+        withCString "Wireframe" $ \label -> checkboxTVar label tvWireframe
+    -- Weather section (placeholder)
+    withCString "Weather" $ \weatherLabel -> do
+      weatherOpen <- ImGui.Raw.collapsingHeader weatherLabel Foreign.Ptr.nullPtr zeroBits
+      when weatherOpen $ do
+        withCString "(Weather controls coming soon)" $ \text -> ImGui.Raw.textUnformatted text Nothing
     ImGui.Raw.end
 
 -- ---------------------------------------------------------------------------
