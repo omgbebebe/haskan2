@@ -25,17 +25,19 @@ import Foreign.Marshal.Alloc qualified
 import Foreign.Marshal.Utils (fromBool, toBool)
 import Foreign.Ptr (FunPtr, Ptr, castPtr, nullPtr)
 import Foreign.Storable qualified
+import qualified DearImGui as ImGui
 import qualified DearImGui.Raw as ImGui.Raw
 import qualified DearImGui.SDL as ImGui.SDL
 import qualified DearImGui.SDL.Vulkan as ImGui.SDL.Vulkan
 import qualified DearImGui.Vulkan as ImGui.Vulkan
 import qualified SDL
+import qualified SDL.Raw.Video as SDL.Raw.Video
 import qualified Vulkan as Vk
 import qualified Vulkan.Core10.Handles as Vk
 import qualified Vulkan.Zero as Vk
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
+import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Unsafe.Coerce (unsafeCoerce)
 -- ---------------------------------------------------------------------------
@@ -101,6 +103,15 @@ initImGuiBackend window vkInstance vkPhysicalDevice vkDevice queueFamily vkQueue
   -- Create ImGui context
   ctx <- ImGui.Raw.createContext
   logInfoIO LogGeneral "Dear ImGui context created"
+
+  -- Set font global scale based on display DPI
+  Foreign.Marshal.Alloc.alloca $ \dpiPtr -> do
+    ret <- SDL.Raw.Video.getDisplayDPI 0 dpiPtr nullPtr nullPtr
+    when (ret == 0) $ do
+      CFloat dpi <- Foreign.Storable.peek dpiPtr
+      let scale = max 1.0 (dpi / 96.0)
+      logInfoIO LogGeneral $ "Display DPI: " <> showT dpi <> ", ImGui font scale: " <> showT scale
+      ImGui.setFontGlobalScale scale
 
   -- Initialize SDL backend for Vulkan
   sdlOk <- ImGui.SDL.Vulkan.sdl2InitForVulkan window

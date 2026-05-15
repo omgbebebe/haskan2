@@ -9,4 +9,5 @@
 	url = https://github.com/ocornut/imgui
 [submodule "3rdparty/dear-imgui"]
 	path = 3rdparty/dear-imgui
-	url = https://github.com/haskell-game/dear-imgui.hs
+	url = git@github.com:omgbebebe/dear-imgui.hs.git
+	branch = haskan2

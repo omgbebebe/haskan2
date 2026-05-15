@@ -5,7 +5,8 @@
 {-# LANGUAGE TypeOperators #-}
 
 module Graphics.Haskan.Vulkan.Shaders.Compute.Cull
-  ( program,
+  ( Defs,
+    program,
   )
 where
 
