@@ -1,8 +1,9 @@
 {-# LANGUAGE TemplateHaskell #-}
 
 module Graphics.Haskan.Vulkan.DescriptorSetLayout.TH
-  ( descriptorSetLayoutBindings
-  ) where
+  ( descriptorSetLayoutBindings,
+  )
+where
 
 import Control.Monad (when)
 import Language.Haskell.TH
@@ -17,7 +18,6 @@ import Language.Haskell.TH
 --
 -- Only processes Global-like entries (Texture*, Image*, Uniform, StorageBuffer).
 -- Skips Input, Output, EntryPoint, PushConstant.
---
 descriptorSetLayoutBindings :: (Integer -> Q Exp) -> Maybe Integer -> Name -> Q Exp
 descriptorSetLayoutBindings stageFlagsFn mBindlessCount defsName = do
   info <- reify defsName
@@ -56,51 +56,54 @@ processDefType stageFlagsFn mBindlessCount ty =
       | isTextureSyn conName -> do
           (binding, _ds) <- extractDecorations decs
           stageFlags <- stageFlagsFn binding
-          let count = if isBindlessSyn conName
-                      then maybe 1 id mBindlessCount
-                      else 1
+          let count =
+                if isBindlessSyn conName
+                  then maybe 1 id mBindlessCount
+                  else 1
           pure [mkLayoutBindingExp binding count combinedImageSampler stageFlags]
-
       | nameBase conName == "Uniform" -> do
           (binding, _ds) <- extractDecorations decs
           stageFlags <- stageFlagsFn binding
           pure [mkLayoutBindingExp binding count uniformBuffer stageFlags]
-
       | nameBase conName == "StorageBuffer" -> do
           (binding, _ds) <- extractDecorations decs
           stageFlags <- stageFlagsFn binding
           pure [mkLayoutBindingExp binding count storageBuffer stageFlags]
-
       | nameBase conName == "Input" || nameBase conName == "Output" || nameBase conName == "PushConstant" ->
-          pure []  -- not descriptor bindings
-
+          pure [] -- not descriptor bindings
       | otherwise -> fail $ "Unknown definition type: " ++ show conName
-
     -- Three-argument texture synonyms (Texture2D')
     AppT (AppT (AppT (ConT conName) decs) _sampledFmt) _imageFmt
       | isTextureSyn conName -> do
           (binding, _ds) <- extractDecorations decs
           stageFlags <- stageFlagsFn binding
-          let count = if isBindlessSyn conName
-                      then maybe 1 id mBindlessCount
-                      else 1
+          let count =
+                if isBindlessSyn conName
+                  then maybe 1 id mBindlessCount
+                  else 1
           pure [mkLayoutBindingExp binding count combinedImageSampler stageFlags]
 
     -- EntryPoint has a different shape
     AppT (AppT (PromotedT entryPoint) _) _
       | nameBase entryPoint == "EntryPoint" -> pure []
-
     _ ->
       fail $ "Unexpected definition type: " ++ show ty ++ " (pprint: " ++ pprint ty ++ ")"
   where
     count = 1
 
 isTextureSyn :: Name -> Bool
-isTextureSyn n = nameBase n `elem`
-  [ "Texture1D", "Texture2D", "Texture2D'", "Texture3D"
-  , "TextureCube", "Texture1DArray", "Texture2DArray", "Texture3DArray"
-  , "Texture"
-  ]
+isTextureSyn n =
+  nameBase n
+    `elem` [ "Texture1D",
+             "Texture2D",
+             "Texture2D'",
+             "Texture3D",
+             "TextureCube",
+             "Texture1DArray",
+             "Texture2DArray",
+             "Texture3DArray",
+             "Texture"
+           ]
 
 isBindlessSyn :: Name -> Bool
 isBindlessSyn n = nameBase n == "BindlessTexture2D"
@@ -108,9 +111,9 @@ isBindlessSyn n = nameBase n == "BindlessTexture2D"
 extractDecorations :: Type -> Q (Integer, Integer)
 extractDecorations decs = do
   let go (AppT (AppT PromotedConsT (AppT (PromotedT dec) (LitT (NumTyLit n)))) tl)
-        | nameBase dec == "Binding"       = first (const n) <$> go tl
+        | nameBase dec == "Binding" = first (const n) <$> go tl
         | nameBase dec == "DescriptorSet" = second (const n) <$> go tl
-        | otherwise                       = go tl
+        | otherwise = go tl
       go (SigT PromotedNilT _) = pure (-1, -1)
       go PromotedNilT = pure (-1, -1)
       go (SigT t _) = go t
@@ -125,11 +128,18 @@ extractDecorations decs = do
 -- Emit: layoutBinding binding count descriptorType stageFlags
 mkLayoutBindingExp :: Integer -> Integer -> Exp -> Exp -> Exp
 mkLayoutBindingExp binding count descriptorType stageFlags =
-  AppE (AppE (AppE (AppE (VarE (mkName "layoutBinding"))
-                         (LitE (IntegerL binding)))
-                  (LitE (IntegerL count)))
-           descriptorType)
-       stageFlags
+  AppE
+    ( AppE
+        ( AppE
+            ( AppE
+                (VarE (mkName "layoutBinding"))
+                (LitE (IntegerL binding))
+            )
+            (LitE (IntegerL count))
+        )
+        descriptorType
+    )
+    stageFlags
 
 combinedImageSampler :: Exp
 combinedImageSampler = VarE (mkName "vkCombinedImageSampler")

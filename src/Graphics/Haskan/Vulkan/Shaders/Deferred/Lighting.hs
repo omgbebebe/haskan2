@@ -1,149 +1,3 @@
-{-|
-Module: Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting
-
-=== Deferred Rendering Pipeline — Stage 2: Lighting Pass ===
-
-This module implements the fullscreen lighting pass of a deferred renderer.
-It samples the G-buffer and computes physically-based lighting per pixel.
-
-=== Vertex Shader (Fullscreen Triangle) ===
-
-**Inputs:**
-  * gl_VertexIndex: implicit vertex index (0, 1, 2)
-
-**Push Constants:**
-  * cameraPos: CameraPushConstant struct containing:
-    - cameraX/Y/Z   : Float — world-space camera position
-    - ray0/ray1/ray2: V3 Float — per-corner view frustum rays
-
-**Algorithm:**
-  Generates a single large triangle covering the entire screen:
-    vert 0: (-1, -1) clip -> UV (0, 1)
-    vert 1: ( 3, -1) clip -> UV (2, 1)
-    vert 2: (-1,  3) clip -> UV (0,-1)
-  Works with negative viewport height (Vulkan 1.1+ core feature).
-  Each vertex gets its corresponding frustum ray direction.
-
-**Outputs:**
-  * out_uv  (Location 0): V2 Float — screen-space UVs for G-buffer sampling
-  * out_ray (Location 1): V3 Float — world-space ray direction (interpolated)
-
-=== Fragment Shader ===
-
-**Inputs:**
-  * in_uv  (Location 0): V2 Float — interpolated screen UV
-  * in_ray (Location 1): V3 Float — interpolated world ray direction
-
-**Textures / Buffers:**
-  * gbuf_position   (Binding 0, DS0): Texture2D' RGBA32 sampled / RGBA16 image format
-    - World position (xyz) + metallic (a)
-  * gbuf_normal     (Binding 1, DS0): Texture2D RGBA8 UNorm
-    - World normal encoded [0,1] (decode: *2-1)
-  * gbuf_albedo     (Binding 2, DS0): Texture2D RGBA8 UNorm
-    - Base color (rgb) + AO (a)
-  * gbuf_emissive   (Binding 3, DS0): Texture2D RGBA8 UNorm
-    - Emissive color (rgb)
-  * env_map         (Binding 4, DS0): TextureCube RGBA8 UNorm
-    - Prefiltered specular environment map, 512px, 10 mip levels
-  * irradiance_map  (Binding 5, DS0): TextureCube RGBA8 UNorm
-    - Diffuse irradiance map (low frequency)
-  * brdf_lut        (Binding 6, DS0): Texture2D RGBA8 UNorm
-    - 2D BRDF lookup table (scale,bias) for split-sum approximation
-  * lights          (Binding 7, DS0): StorageBuffer LightsData
-    - SSBO with up to 256 directional lights
-  * cloud_result    (Binding 8, DS0): Texture2D RGBA16 F
-    - Pre-computed cloud/sky color from cloud pass
-
-**Algorithm — Deferred Lighting with PBR:**
-
-1. **G-Buffer Decode:**
-   - Sample G-buffer at UV
-   - Decode normal: normal = normal_raw * 2.0 - 1.0
-   - Extract: position, metallic, roughness, albedo, AO, emissive
-
-2. **Background Detection:**
-   - hasGeometry = |posX| + |posY| + |posZ| > 0.001
-   - Background pixels skip PBR and show skybox/clouds
-
-3. **View Direction:**
-   - V = normalize(cameraPos - worldPos)
-
-4. **PBR Per Light (4 unrolled directional lights):**
-   For each light i:
-   
-   a. **Light vector:** L = normalize(lightDir)
-   
-   b. **Half vector:** H = normalize(L + V)
-   
-   c. **Dot products:**
-      - NdotL = max(0, dot(N, L))
-      - NdotH = max(0, dot(N, H))
-      - VdotH = max(0, dot(V, H))
-      - NdotV = max(0, dot(N, V))
-   
-   d. **Fresnel (Schlick approximation):**
-      - F0 = mix(vec3(0.04), albedo, metallic)
-      - F = F0 + (1 - F0) * (1 - VdotH)^5
-   
-   e. **Normal Distribution (GGX/Trowbridge-Reitz):**
-      - alpha = roughness^2
-      - D = alpha^2 / (pi * ((NdotH^2)*(alpha^2-1)+1)^2)
-   
-   f. **Geometric Shadowing (Smith GGX):**
-      - k = (alpha + 1)^2 / 8
-      - G1L = NdotL / (NdotL*(1-k) + k)
-      - G1V = NdotV / (NdotV*(1-k) + k)
-      - G = G1L * G1V
-   
-   g. **Specular BRDF:**
-      - spec = D * F * G / (4 * NdotL * NdotV + 0.001)
-   
-   h. **Diffuse BRDF (Lambert):**
-      - diff = albedo * (1 - metallic) / pi
-   
-   i. **Combined:**
-      - brdf = diff + spec
-      - lit = brdf * NdotL * intensity * color
-
-5. **IBL (Image-Based Lighting):**
-   
-   a. **Reflection vector:**
-      - R = reflect(-V, N) = 2*NdotV*N - V
-   
-   b. **Fresnel for IBL (Schlick with NdotV):**
-      - F_IBL = F0 + (1 - F0) * (1 - NdotV)^5
-   
-   c. **Diffuse IBL:**
-      - Sample irradiance_map with rotated normal
-      - diffIBL = irradiance * albedo * (1-metallic) * AO * iblIntensity
-   
-   d. **Specular IBL (Split-Sum Approximation):**
-      - Sample env_map at reflection vector with LOD = roughness * maxMip
-      - Sample brdf_lut at (NdotV, roughness) for (scale, bias)
-      - specIBL = env * (F_IBL * scale + bias) * iblIntensity
-   
-   e. **Combined IBL:** IBL = diffIBL + specIBL
-
-6. **Final Composition:**
-   - color = sum(lights) + emissive + IBL
-   - Tone mapping: Reinhard — color / (color + 1)
-   - Gamma correction: sqrt (approx gamma 2.0)
-
-7. **Skybox / Clouds:**
-   - Background: sample cloud_result texture
-   - Apply sky tint (day/night cycle)
-   - Blend clouds over skybox
-
-**Output:**
-  * out_colour (Location 0): V4 Float — final HDR color
-
-**Debug Modes:**
-  1.0 = albedo    2.0 = normals    3.0 = roughness    4.0 = metallic
-  5.0 = position  6.0 = emissive   7.0 = AO           8.0 = NdotL
-  9.0 = irradiance 10.0 = specular 11.0 = fresnel    12.0 = skybox
-  13.0 = cloud    14.0 = height    15.0 = noise
--}
-
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PartialTypeSignatures #-}
@@ -152,6 +6,150 @@ It samples the G-buffer and computes physically-based lighting per pixel.
 {-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}
 
+-- |
+-- Module: Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting
+--
+-- === Deferred Rendering Pipeline — Stage 2: Lighting Pass ===
+--
+-- This module implements the fullscreen lighting pass of a deferred renderer.
+-- It samples the G-buffer and computes physically-based lighting per pixel.
+--
+-- === Vertex Shader (Fullscreen Triangle) ===
+--
+-- **Inputs:**
+--   * gl_VertexIndex: implicit vertex index (0, 1, 2)
+--
+-- **Push Constants:**
+--   * cameraPos: CameraPushConstant struct containing:
+--     - cameraX/Y/Z   : Float — world-space camera position
+--     - ray0/ray1/ray2: V3 Float — per-corner view frustum rays
+--
+-- **Algorithm:**
+--   Generates a single large triangle covering the entire screen:
+--     vert 0: (-1, -1) clip -> UV (0, 1)
+--     vert 1: ( 3, -1) clip -> UV (2, 1)
+--     vert 2: (-1,  3) clip -> UV (0,-1)
+--   Works with negative viewport height (Vulkan 1.1+ core feature).
+--   Each vertex gets its corresponding frustum ray direction.
+--
+-- **Outputs:**
+--   * out_uv  (Location 0): V2 Float — screen-space UVs for G-buffer sampling
+--   * out_ray (Location 1): V3 Float — world-space ray direction (interpolated)
+--
+-- === Fragment Shader ===
+--
+-- **Inputs:**
+--   * in_uv  (Location 0): V2 Float — interpolated screen UV
+--   * in_ray (Location 1): V3 Float — interpolated world ray direction
+--
+-- **Textures / Buffers:**
+--   * gbuf_position   (Binding 0, DS0): Texture2D' RGBA32 sampled / RGBA16 image format
+--     - World position (xyz) + metallic (a)
+--   * gbuf_normal     (Binding 1, DS0): Texture2D RGBA8 UNorm
+--     - World normal encoded [0,1] (decode: *2-1)
+--   * gbuf_albedo     (Binding 2, DS0): Texture2D RGBA8 UNorm
+--     - Base color (rgb) + AO (a)
+--   * gbuf_emissive   (Binding 3, DS0): Texture2D RGBA8 UNorm
+--     - Emissive color (rgb)
+--   * env_map         (Binding 4, DS0): TextureCube RGBA8 UNorm
+--     - Prefiltered specular environment map, 512px, 10 mip levels
+--   * irradiance_map  (Binding 5, DS0): TextureCube RGBA8 UNorm
+--     - Diffuse irradiance map (low frequency)
+--   * brdf_lut        (Binding 6, DS0): Texture2D RGBA8 UNorm
+--     - 2D BRDF lookup table (scale,bias) for split-sum approximation
+--   * lights          (Binding 7, DS0): StorageBuffer LightsData
+--     - SSBO with up to 256 directional lights
+--   * cloud_result    (Binding 8, DS0): Texture2D RGBA16 F
+--     - Pre-computed cloud/sky color from cloud pass
+--
+-- **Algorithm — Deferred Lighting with PBR:**
+--
+-- 1. **G-Buffer Decode:**
+--    - Sample G-buffer at UV
+--    - Decode normal: normal = normal_raw * 2.0 - 1.0
+--    - Extract: position, metallic, roughness, albedo, AO, emissive
+--
+-- 2. **Background Detection:**
+--    - hasGeometry = |posX| + |posY| + |posZ| > 0.001
+--    - Background pixels skip PBR and show skybox/clouds
+--
+-- 3. **View Direction:**
+--    - V = normalize(cameraPos - worldPos)
+--
+-- 4. **PBR Per Light (4 unrolled directional lights):**
+--    For each light i:
+--
+--    a. **Light vector:** L = normalize(lightDir)
+--
+--    b. **Half vector:** H = normalize(L + V)
+--
+--    c. **Dot products:**
+--       - NdotL = max(0, dot(N, L))
+--       - NdotH = max(0, dot(N, H))
+--       - VdotH = max(0, dot(V, H))
+--       - NdotV = max(0, dot(N, V))
+--
+--    d. **Fresnel (Schlick approximation):**
+--       - F0 = mix(vec3(0.04), albedo, metallic)
+--       - F = F0 + (1 - F0) * (1 - VdotH)^5
+--
+--    e. **Normal Distribution (GGX/Trowbridge-Reitz):**
+--       - alpha = roughness^2
+--       - D = alpha^2 / (pi * ((NdotH^2)*(alpha^2-1)+1)^2)
+--
+--    f. **Geometric Shadowing (Smith GGX):**
+--       - k = (alpha + 1)^2 / 8
+--       - G1L = NdotL / (NdotL*(1-k) + k)
+--       - G1V = NdotV / (NdotV*(1-k) + k)
+--       - G = G1L * G1V
+--
+--    g. **Specular BRDF:**
+--       - spec = D * F * G / (4 * NdotL * NdotV + 0.001)
+--
+--    h. **Diffuse BRDF (Lambert):**
+--       - diff = albedo * (1 - metallic) / pi
+--
+--    i. **Combined:**
+--       - brdf = diff + spec
+--       - lit = brdf * NdotL * intensity * color
+--
+-- 5. **IBL (Image-Based Lighting):**
+--
+--    a. **Reflection vector:**
+--       - R = reflect(-V, N) = 2*NdotV*N - V
+--
+--    b. **Fresnel for IBL (Schlick with NdotV):**
+--       - F_IBL = F0 + (1 - F0) * (1 - NdotV)^5
+--
+--    c. **Diffuse IBL:**
+--       - Sample irradiance_map with rotated normal
+--       - diffIBL = irradiance * albedo * (1-metallic) * AO * iblIntensity
+--
+--    d. **Specular IBL (Split-Sum Approximation):**
+--       - Sample env_map at reflection vector with LOD = roughness * maxMip
+--       - Sample brdf_lut at (NdotV, roughness) for (scale, bias)
+--       - specIBL = env * (F_IBL * scale + bias) * iblIntensity
+--
+--    e. **Combined IBL:** IBL = diffIBL + specIBL
+--
+-- 6. **Final Composition:**
+--    - color = sum(lights) + emissive + IBL
+--    - Tone mapping: Reinhard — color / (color + 1)
+--    - Gamma correction: sqrt (approx gamma 2.0)
+--
+-- 7. **Skybox / Clouds:**
+--    - Background: sample cloud_result texture
+--    - Apply sky tint (day/night cycle)
+--    - Blend clouds over skybox
+--
+-- **Output:**
+--   * out_colour (Location 0): V4 Float — final HDR color
+--
+-- **Debug Modes:**
+--   1.0 = albedo    2.0 = normals    3.0 = roughness    4.0 = metallic
+--   5.0 = position  6.0 = emissive   7.0 = AO           8.0 = NdotL
+--   9.0 = irradiance 10.0 = specular 11.0 = fresnel    12.0 = skybox
+--   13.0 = cloud    14.0 = height    15.0 = noise
 module Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting where
 
 import FIR

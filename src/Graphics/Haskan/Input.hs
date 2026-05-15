@@ -106,17 +106,17 @@ defaultBindings =
       -- Cloud height adjustment
       (([], SDL.KeycodeRightBracket), CloudHeightUp),
       (([], SDL.KeycodeLeftBracket), CloudHeightDown),
-       -- Wind direction rotation
-       (([], SDL.KeycodeComma), WindRotateLeft),
-       (([], SDL.KeycodePeriod), WindRotateRight),
-       -- Cloud genus presets
-       (([LShift], SDL.Keycode1), CloudPreset 0),  -- Cumulus
-       (([LShift], SDL.Keycode2), CloudPreset 1),  -- Stratus
-       (([LShift], SDL.Keycode3), CloudPreset 2),  -- Stratocumulus
-       (([LShift], SDL.Keycode4), CloudPreset 3),  -- Cumulonimbus
-       (([LShift], SDL.Keycode5), CloudPreset 4),  -- Cirrus
-       (([], SDL.KeycodeC), SwitchCameraMode),
-       (([], SDL.KeycodeM), ToggleMouseCapture)
+      -- Wind direction rotation
+      (([], SDL.KeycodeComma), WindRotateLeft),
+      (([], SDL.KeycodePeriod), WindRotateRight),
+      -- Cloud genus presets
+      (([LShift], SDL.Keycode1), CloudPreset 0), -- Cumulus
+      (([LShift], SDL.Keycode2), CloudPreset 1), -- Stratus
+      (([LShift], SDL.Keycode3), CloudPreset 2), -- Stratocumulus
+      (([LShift], SDL.Keycode4), CloudPreset 3), -- Cumulonimbus
+      (([LShift], SDL.Keycode5), CloudPreset 4), -- Cirrus
+      (([], SDL.KeycodeC), SwitchCameraMode),
+      (([], SDL.KeycodeM), ToggleMouseCapture)
     ]
 
 modifiersToList :: SDL.KeyModifier -> [KeyModifier]
