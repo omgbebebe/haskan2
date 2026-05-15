@@ -111,15 +111,20 @@ createCloudDescriptorPool dev numSets = do
   let samplerPoolSize =
         Vulkan.createVk
           ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-              &* set @"descriptorCount" (fromIntegral (numSets * 3))
+              &* set @"descriptorCount" (fromIntegral (numSets * 4))
+          )
+      uboPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"descriptorCount" (fromIntegral numSets)
           )
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
               &* set @"pNext" Vulkan.VK_NULL
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"poolSizeCount" 1
-              &* setListRef @"pPoolSizes" [samplerPoolSize]
+              &* set @"poolSizeCount" 2
+              &* setListRef @"pPoolSizes" [samplerPoolSize, uboPoolSize]
               &* set @"maxSets" (fromIntegral numSets)
           )
    in liftIO $

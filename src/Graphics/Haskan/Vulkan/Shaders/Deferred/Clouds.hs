@@ -256,7 +256,6 @@ cloudFragment = shader do
       absDirY = if dirY > 0.0 then dirY else 0.0 - dirY
       stepCountF = 32.0 - 8.0 * step 0.3 absDirY - 8.0 * step 0.7 absDirY
       adaptiveStepSize = totalRayLength / stepCountF
-      horizonSkip = 1.0 - step 0.05 absDirY
 
   -- Sample blue noise for dithered ray entry
   ~(Vec4 blueR _ _ _) <- use @(ImageTexel "blue_noise") NilOps (Vec2 uvX uvY)
@@ -276,7 +275,7 @@ cloudFragment = shader do
   -- Dynamic ray march: mutable accumulators
   _ <- def @"step" @RW @Int32 0
   _ <- def @"rayPos" @RW @(V 3 Float) (entryPos ^+^ dir ^* (adaptiveStepSize * 0.5))
-  _ <- def @"transmittance" @RW @Float (1.0 - horizonSkip)
+  _ <- def @"transmittance" @RW @Float 1.0
   _ <- def @"accR" @RW @Float 0.0
   _ <- def @"accG" @RW @Float 0.0
   _ <- def @"accB" @RW @Float 0.0

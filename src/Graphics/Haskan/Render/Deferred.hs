@@ -220,7 +220,7 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac dpdCloudHeight, -- 76
                     realToFrac dpdTime,   -- 80
                     realToFrac dpdBlendFactor, -- 84
-                    0,                    -- 88 pad
+                    0, 0,                  -- 88-95: TWO pads for 16-align to 96
                     realToFrac m00,       -- 96
                     realToFrac m10,       -- 100
                     realToFrac m20,       -- 104
