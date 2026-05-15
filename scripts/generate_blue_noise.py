@@ -81,9 +81,10 @@ def main():
     # Normalize to [0, 1]
     result = (result - result.min()) / (result.max() - result.min())
     
-    # Tileable: ensure wrap-around continuity by blending edges
-    # (For 64x64 blue noise, tileability is less critical since
-    #  we sample with fractional UVs anyway)
+    # Tileable: ensure wrap-around continuity by copying first row/col to last
+    # This makes the texture seamless when sampled with VK_SAMPLER_ADDRESS_MODE_REPEAT
+    result[-1, :] = result[0, :]
+    result[:, -1] = result[:, 0]
     
     # Convert to uint8
     raw_u8 = (result * 255).astype(np.uint8)
