@@ -79,6 +79,10 @@ data DeferredPassData = DeferredPassData
     dpdCloudCoverage :: !Float,
     dpdCloudDetail :: !Float,
     dpdCloudAbsorption :: !Float,
+    dpdWeatherCoverageScale :: !Float,
+    dpdWeatherTypeBias :: !Float,
+    dpdStormIntensity :: !Float,
+    dpdWeatherAnimSpeed :: !Float,
     dpdCloudFrameDataMemory :: !Vulkan.VkDeviceMemory,
     -- Cloud pass
     dpdCloudRenderPass :: !Vulkan.VkRenderPass,
@@ -243,7 +247,11 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac dpdCloudCoverage, -- 172
                     realToFrac dpdCloudDetail,   -- 176
                     realToFrac dpdCloudAbsorption, -- 180
-                    0, 0, 0                      -- 184-192 pad to 256
+                    realToFrac dpdWeatherCoverageScale, -- 184
+                    realToFrac dpdWeatherTypeBias,      -- 188
+                    realToFrac dpdStormIntensity,       -- 192
+                    realToFrac dpdWeatherAnimSpeed,     -- 196
+                    0, 0, 0                             -- 200-208 pad to 208
                   ] :: [CFloat]
              in liftIO $ Buffer.copyDataToDeviceMemory dpdDevice dpdCloudFrameDataMemory cloudFrameData
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0

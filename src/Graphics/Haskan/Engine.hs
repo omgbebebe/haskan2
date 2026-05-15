@@ -128,6 +128,10 @@ mainLoop meshName EngineConfig {..} = do
   tvCloudCoverage <- liftIO $ STM.newTVarIO 0.45
   tvCloudDetail <- liftIO $ STM.newTVarIO 0.35
   tvCloudAbsorption <- liftIO $ STM.newTVarIO 1.5
+  tvWeatherCoverageScale <- liftIO $ STM.newTVarIO 1.0
+  tvWeatherTypeBias <- liftIO $ STM.newTVarIO 0.0
+  tvStormIntensity <- liftIO $ STM.newTVarIO 1.0
+  tvWeatherAnimSpeed <- liftIO $ STM.newTVarIO 1.0
   tvCameraMode <- liftIO $ STM.newTVarIO (if cloudTestMode then CameraModeFly else CameraModeOrbital)
   tvOrbitalCamera <- liftIO $ STM.newTVarIO initialCam
   tvFlyCamera <- liftIO $ STM.newTVarIO (Camera.Fly defaultFlyCamera)
@@ -155,13 +159,17 @@ mainLoop meshName EngineConfig {..} = do
           tvTimeOfDay
           tvTimeSpeed
           tvDayNightEnabled
-          tvCloudHeight
-          tvWindDirX
-          tvWindDirZ
-           tvCloudCoverage
-           tvCloudDetail
-           tvCloudAbsorption
-          tvCameraMode
+           tvCloudHeight
+           tvWindDirX
+           tvWindDirZ
+            tvCloudCoverage
+            tvCloudDetail
+            tvCloudAbsorption
+            tvWeatherCoverageScale
+            tvWeatherTypeBias
+            tvStormIntensity
+            tvWeatherAnimSpeed
+           tvCameraMode
           tvOrbitalCamera
           tvFlyCamera
 

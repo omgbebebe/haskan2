@@ -192,6 +192,10 @@ data RenderEnv = RenderEnv
     reTvCloudCoverage :: !(STM.TVar Float),
     reTvCloudDetail :: !(STM.TVar Float),
     reTvCloudAbsorption :: !(STM.TVar Float),
+    reTvWeatherCoverageScale :: !(STM.TVar Float),
+    reTvWeatherTypeBias :: !(STM.TVar Float),
+    reTvStormIntensity :: !(STM.TVar Float),
+    reTvWeatherAnimSpeed :: !(STM.TVar Float),
    rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat)),
    rePrevTime :: !(TVar Float),
    reImGuiBackend :: !(Maybe Backend.ImGuiBackend)
@@ -341,6 +345,10 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   cloudCoverageVal <- liftIO $ STM.readTVarIO reTvCloudCoverage
   cloudDetailVal <- liftIO $ STM.readTVarIO reTvCloudDetail
   cloudAbsorptionVal <- liftIO $ STM.readTVarIO reTvCloudAbsorption
+  weatherCoverageScaleVal <- liftIO $ STM.readTVarIO reTvWeatherCoverageScale
+  weatherTypeBiasVal <- liftIO $ STM.readTVarIO reTvWeatherTypeBias
+  stormIntensityVal <- liftIO $ STM.readTVarIO reTvStormIntensity
+  weatherAnimSpeedVal <- liftIO $ STM.readTVarIO reTvWeatherAnimSpeed
 
   currentTime <- getMonotonicTime
   let elapsedSeconds = fromIntegral (toNanoSecs currentTime) / 1e9
@@ -350,10 +358,10 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
 
   -- Build Dear ImGui frame
   mDrawData <- liftIO $ case reImGuiBackend of
-    Just _ -> Backend.buildImGuiFrame $ Backend.buildDebugPanel reTvCloudHeight reTvWindDirX reTvWindDirZ reTvCloudCoverage reTvCloudDetail reTvCloudAbsorption reTvDebugMode reTvWireframe
+    Just _ -> Backend.buildImGuiFrame $ Backend.buildDebugPanel reTvCloudHeight reTvWindDirX reTvWindDirZ reTvCloudCoverage reTvCloudDetail reTvCloudAbsorption reTvWeatherCoverageScale reTvWeatherTypeBias reTvStormIntensity reTvWeatherAnimSpeed reTvDebugMode reTvWireframe
     Nothing -> pure Nothing
 
-  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal prevTimeVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal mDrawData
+  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal prevTimeVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal weatherCoverageScaleVal weatherTypeBiasVal stormIntensityVal weatherAnimSpeedVal mDrawData
       recordAction = buildRecordAction recordCtx
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
@@ -774,6 +782,10 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
       tvCloudCoverage = cloudCoverage gameState
       tvCloudDetail = cloudDetail gameState
       tvCloudAbsorption = cloudAbsorption gameState
+      tvWeatherCoverageScale = weatherCoverageScale gameState
+      tvWeatherTypeBias = weatherTypeBias gameState
+      tvStormIntensity = stormIntensity gameState
+      tvWeatherAnimSpeed = weatherAnimSpeed gameState
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
@@ -822,10 +834,14 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                           reTvCloudHeight = tvCloudHeight,
                           reTvWindDirX = tvWindDirX,
                           reTvWindDirZ = tvWindDirZ,
-                           reTvCloudCoverage = tvCloudCoverage,
-                           reTvCloudDetail = tvCloudDetail,
-                           reTvCloudAbsorption = tvCloudAbsorption,
-                           rePrevViewProj = prevViewProjTVar,
+                            reTvCloudCoverage = tvCloudCoverage,
+                            reTvCloudDetail = tvCloudDetail,
+                            reTvCloudAbsorption = tvCloudAbsorption,
+                            reTvWeatherCoverageScale = tvWeatherCoverageScale,
+                            reTvWeatherTypeBias = tvWeatherTypeBias,
+                            reTvStormIntensity = tvStormIntensity,
+                            reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
+                            rePrevViewProj = prevViewProjTVar,
                            rePrevTime = prevTimeTVar,
                            reImGuiBackend = mImGuiBackend
                          }

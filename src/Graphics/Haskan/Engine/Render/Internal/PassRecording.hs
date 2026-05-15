@@ -58,6 +58,10 @@ data RecordContext = RecordContext
     rcCloudCoverage :: !Float,
     rcCloudDetail :: !Float,
     rcCloudAbsorption :: !Float,
+    rcWeatherCoverageScale :: !Float,
+    rcWeatherTypeBias :: !Float,
+    rcStormIntensity :: !Float,
+    rcWeatherAnimSpeed :: !Float,
     rcWireframeEnabled :: !Bool,
     rcDeferred :: !DeferredResources,
     rcCullResources :: !ComputeCullResources,
@@ -92,9 +96,13 @@ buildRecordContext ::
   Float ->
   Float ->
   Float ->
+  Float ->
+  Float ->
+  Float ->
+  Float ->
   Maybe DearImGui.Raw.DrawData ->
   RecordContext
-buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProj windDirX windDirZ prevTime cloudCoverage cloudDetail cloudAbsorption mDrawData =
+buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProj windDirX windDirZ prevTime cloudCoverage cloudDetail cloudAbsorption weatherCoverageScale weatherTypeBias stormIntensity weatherAnimSpeed mDrawData =
   RecordContext
     { rcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
       rcFrameDescriptorSets = frameDescriptorSets,
@@ -120,6 +128,10 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
       rcCloudCoverage = cloudCoverage,
       rcCloudDetail = cloudDetail,
       rcCloudAbsorption = cloudAbsorption,
+      rcWeatherCoverageScale = weatherCoverageScale,
+      rcWeatherTypeBias = weatherTypeBias,
+      rcStormIntensity = stormIntensity,
+      rcWeatherAnimSpeed = weatherAnimSpeed,
       rcWireframeEnabled = fsWireframe frameState,
       rcDeferred = dr,
       rcCullResources = ccr,
@@ -211,10 +223,14 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdWindDirX = rcWindDirX,
                 dpdWindDirZ = rcWindDirZ,
                 dpdPrevTime = rcPrevTime,
-                dpdCloudCoverage = rcCloudCoverage,
-                dpdCloudDetail = rcCloudDetail,
-                dpdCloudAbsorption = rcCloudAbsorption,
-                dpdCloudFrameDataMemory = drCloudFrameDataMemory rcDeferred,
+                 dpdCloudCoverage = rcCloudCoverage,
+                 dpdCloudDetail = rcCloudDetail,
+                 dpdCloudAbsorption = rcCloudAbsorption,
+                 dpdWeatherCoverageScale = rcWeatherCoverageScale,
+                 dpdWeatherTypeBias = rcWeatherTypeBias,
+                 dpdStormIntensity = rcStormIntensity,
+                 dpdWeatherAnimSpeed = rcWeatherAnimSpeed,
+                 dpdCloudFrameDataMemory = drCloudFrameDataMemory rcDeferred,
                 dpdCloudRenderPass = drCloudRenderPass rcDeferred,
                 dpdCloudFramebuffer = cloudFramebuffer,
                 dpdCloudPipeline = drCloudPipeline rcDeferred,

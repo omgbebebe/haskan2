@@ -254,10 +254,14 @@ buildDebugPanel ::
   STM.TVar Float ->
   STM.TVar Float ->
   STM.TVar Float ->
+  STM.TVar Float ->
+  STM.TVar Float ->
+  STM.TVar Float ->
+  STM.TVar Float ->
   STM.TVar Word32 ->
   STM.TVar Bool ->
   IO ()
-buildDebugPanel tvHeight tvWindX tvWindZ tvCoverage tvDetail tvAbsorption tvDebugMode tvWireframe = do
+buildDebugPanel tvHeight tvWindX tvWindZ tvCoverage tvDetail tvAbsorption tvWeatherScale tvTypeBias tvStorm tvAnimSpeed tvDebugMode tvWireframe = do
   withCString "Debug Panels" $ \windowTitle -> do
     _open <- ImGui.Raw.begin windowTitle Nothing Nothing
     -- Cloud section
@@ -267,9 +271,18 @@ buildDebugPanel tvHeight tvWindX tvWindZ tvCoverage tvDetail tvAbsorption tvDebu
         withCString "Height" $ \label -> sliderFloatTVar label 0.0 10000.0 tvHeight
         withCString "Wind X" $ \label -> sliderFloatTVar label (-5.0) 5.0 tvWindX
         withCString "Wind Z" $ \label -> sliderFloatTVar label (-5.0) 5.0 tvWindZ
-        withCString "Coverage" $ \label -> sliderFloatTVar label 0.0 1.0 tvCoverage
         withCString "Detail" $ \label -> sliderFloatTVar label 0.0 1.0 tvDetail
         withCString "Absorption" $ \label -> sliderFloatTVar label 0.0 10.0 tvAbsorption
+    -- Weather section
+    withCString "Weather" $ \weatherLabel -> do
+      weatherOpen <- ImGui.Raw.collapsingHeader weatherLabel Foreign.Ptr.nullPtr zeroBits
+      when weatherOpen $ do
+        covVal <- STM.readTVarIO tvCoverage
+        withCString (weatherStateText covVal) $ \text -> ImGui.Raw.textUnformatted text Nothing
+        withCString "Coverage Scale" $ \label -> sliderFloatTVar label 0.0 2.0 tvWeatherScale
+        withCString "Type Bias" $ \label -> sliderFloatTVar label (-1.0) 1.0 tvTypeBias
+        withCString "Storm Intensity" $ \label -> sliderFloatTVar label 0.0 2.0 tvStorm
+        withCString "Anim Speed" $ \label -> sliderFloatTVar label 0.0 2.0 tvAnimSpeed
     -- Render Debug section
     withCString "Render Debug" $ \renderLabel -> do
       renderOpen <- ImGui.Raw.collapsingHeader renderLabel Foreign.Ptr.nullPtr zeroBits
@@ -297,17 +310,6 @@ buildDebugPanel tvHeight tvWindX tvWindZ tvCoverage tvDetail tvAbsorption tvDebu
           newMode <- Foreign.Storable.peek modePtr
           STM.atomically $ STM.writeTVar tvDebugMode (fromIntegral newMode)
         withCString "Wireframe" $ \label -> checkboxTVar label tvWireframe
-    -- Weather section
-    withCString "Weather" $ \weatherLabel -> do
-      weatherOpen <- ImGui.Raw.collapsingHeader weatherLabel Foreign.Ptr.nullPtr zeroBits
-      when weatherOpen $ do
-        covVal <- STM.readTVarIO tvCoverage
-        withCString (weatherStateText covVal) $ \text -> ImGui.Raw.textUnformatted text Nothing
-        withCString "Weather map channels:" $ \text -> ImGui.Raw.textUnformatted text Nothing
-        withCString "  R: Coverage (clear -> overcast)" $ \text -> ImGui.Raw.textUnformatted text Nothing
-        withCString "  G: Cloud type (stratus -> cumulonimbus)" $ \text -> ImGui.Raw.textUnformatted text Nothing
-        withCString "  B: Storm darkness" $ \text -> ImGui.Raw.textUnformatted text Nothing
-        withCString "Weather zones drift with wind" $ \text -> ImGui.Raw.textUnformatted text Nothing
     ImGui.Raw.end
 
 -- ---------------------------------------------------------------------------

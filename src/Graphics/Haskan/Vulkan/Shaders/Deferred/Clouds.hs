@@ -156,10 +156,14 @@ type CloudFrameData =
        "windDirX" ':-> Float,
        "windDirZ" ':-> Float,
        "prevTime" ':-> Float,
-       "cloudCoverage" ':-> Float,
-       "cloudDetail" ':-> Float,
-       "cloudAbsorption" ':-> Float
-     ]
+        "cloudCoverage" ':-> Float,
+        "cloudDetail" ':-> Float,
+        "cloudAbsorption" ':-> Float,
+        "weatherCoverageScale" ':-> Float,
+        "weatherTypeBias" ':-> Float,
+        "stormIntensity" ':-> Float,
+        "weatherAnimSpeed" ':-> Float
+      ]
 
 type CloudVertexDefs =
   '[ "out_uv" ':-> Output '[Location 0] (V 2 Float),
@@ -242,6 +246,10 @@ cloudFragment = shader do
       cloudCoverage = view @(Name "cloudCoverage") frameData
       cloudDetail = view @(Name "cloudDetail") frameData
       cloudAbsorption = view @(Name "cloudAbsorption") frameData
+      weatherCoverageScale = view @(Name "weatherCoverageScale") frameData
+      weatherTypeBias = view @(Name "weatherTypeBias") frameData
+      stormIntensity = view @(Name "stormIntensity") frameData
+      weatherAnimSpeed = view @(Name "weatherAnimSpeed") frameData
 
   ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps (Vec3 dirX dirY dirZ)
 
@@ -330,14 +338,14 @@ cloudFragment = shader do
 
     -- Sample weather map for spatial cloud variation
     let weatherScale = 0.00005
-        weatherWindOffsetX = time * 0.002 * windDirX
-        weatherWindOffsetZ = time * 0.002 * windDirZ
+        weatherWindOffsetX = time * 0.002 * windDirX * weatherAnimSpeed
+        weatherWindOffsetZ = time * 0.002 * windDirZ * weatherAnimSpeed
         weatherUV = Vec2 (px * weatherScale - weatherWindOffsetX) (pz * weatherScale - weatherWindOffsetZ)
     ~(Vec4 weatherR weatherG weatherB _weatherA) <- use @(ImageTexel "weather_map") NilOps weatherUV
 
-    let combinedCoverage = clamp (weatherR * cloudCoverage) 0.0 1.0
-        cloudType = weatherG
-        stormDarkness = weatherB
+    let combinedCoverage = clamp (weatherR * cloudCoverage * weatherCoverageScale) 0.0 1.0
+        cloudType = clamp (weatherG + weatherTypeBias) 0.0 1.0
+        stormDarkness = weatherB * stormIntensity
         hMin = mix 0.1 0.0 cloudType
         hMax = mix 0.4 1.0 cloudType
         h = (curvedY - cloudBottom) / cloudThickness
@@ -398,11 +406,11 @@ cloudFragment = shader do
       ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 lsx lsy lsz)
 
       -- Sample weather map at light march position for consistent shadows
-      let lweatherUV = Vec2 (lpx * weatherScale) (lpz * weatherScale)
+      let lweatherUV = Vec2 (lpx * weatherScale - weatherWindOffsetX) (lpz * weatherScale - weatherWindOffsetZ)
       ~(Vec4 lweatherR lweatherG _lweatherB _lweatherA) <- use @(ImageTexel "weather_map") NilOps lweatherUV
 
-      let lcombinedCoverage = clamp (lweatherR * cloudCoverage) 0.0 1.0
-          lcloudType = lweatherG
+      let lcombinedCoverage = clamp (lweatherR * cloudCoverage * weatherCoverageScale) 0.0 1.0
+          lcloudType = clamp (lweatherG + weatherTypeBias) 0.0 1.0
           lhMin = mix 0.1 0.0 lcloudType
           lhMax = mix 0.4 1.0 lcloudType
           lh = (lcurvedY - cloudBottom) / cloudThickness

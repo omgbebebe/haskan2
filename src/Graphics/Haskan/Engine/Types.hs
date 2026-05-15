@@ -416,6 +416,10 @@ data GameState cam = GameState
     cloudCoverage :: TVar Float,
     cloudDetail :: TVar Float,
     cloudAbsorption :: TVar Float,
+    weatherCoverageScale :: TVar Float,
+    weatherTypeBias :: TVar Float,
+    stormIntensity :: TVar Float,
+    weatherAnimSpeed :: TVar Float,
     cameraMode :: TVar CameraMode,
     orbitalCamera :: TVar cam,
     flyCamera :: TVar cam
