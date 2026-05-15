@@ -164,7 +164,8 @@ data IBLTextures = IBLTextures
     iblSampler :: !Vulkan.VkSampler,
     iblBrdfView :: !(Maybe Vulkan.VkImageView),
     iblCloudNoiseView :: !(Maybe Vulkan.VkImageView),
-    iblBlueNoiseView :: !(Maybe Vulkan.VkImageView)
+    iblBlueNoiseView :: !(Maybe Vulkan.VkImageView),
+    iblBlueNoiseSampler :: !Vulkan.VkSampler
   }
 
 -- | Load IBL cubemaps, BRDF LUT, and cloud noise texture
@@ -212,6 +213,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
   let blueNoisePixels = Data.Vector.Storable.fromList (BS.unpack blueNoiseRaw)
   blueNoiseHandle <- Texture.createTextureFromData rm physicalDevice device 64 64 blueNoisePixels graphicsQueueHandler textureCommandBuffer
   mBlueNoiseView <- Texture.textureImageView rm blueNoiseHandle
+  blueNoiseSampler <- Texture.managedSamplerNearest device
   logInfo LogGeneral "blue noise texture loaded"
 
   pure
@@ -223,7 +225,8 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
         iblSampler = lightingSampler,
         iblBrdfView = mBrdfView,
         iblCloudNoiseView = Just cloudNoiseView,
-        iblBlueNoiseView = mBlueNoiseView
+        iblBlueNoiseView = mBlueNoiseView,
+        iblBlueNoiseSampler = blueNoiseSampler
       }
 
 data SceneLoadResult = SceneLoadResult

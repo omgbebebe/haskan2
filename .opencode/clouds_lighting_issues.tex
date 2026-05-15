@@ -1,0 +1,140 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+
+\geometry{margin=1in}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstset{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{purple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single
+}
+
+\title{Volumetric Cloud Illumination Report \\ \large Ambient Energy and Multiple Scattering Integration for \texttt{Clouds.hs}}
+\author{Advanced Graphics Engine Group}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Diagnostic: Why the Clouds Render Too Dark}
+The current single-source light model relying strictly on single-scattering Beer's Law ($\text{Transmittance} = e^{-\text{density} \cdot \sigma}$) forces premature light extinction. In real world physics, clouds do not just absorb light; they are highly scattering media with an albedo close to $0.99$. 
+
+When photon units strike a cloud mass, they bounce inward multiple times, illuminating the internal structural cavities. Single-scattering models treat this bouncing energy as lost, causing thick cloud bellies to immediately render jet-black. To resolve this, you must implement two decoupled ambient illumination systems: **Directional Ambient Scattering** and a **Multiple Scattering Octave Approximation**.
+
+---
+
+\section{The Production Solution: Dual-Component Ambient Model}
+
+\subsection{1. Height-Graded Ambient / Sky Term}
+Instead of adding physical light entities, sample a vertical gradient ambient term based on the current ray sample height $h$ ($0.0$ at bottom, $1.0$ at top). This simulates the ground-reflected light hitting the bottom and the ambient sky light tinting the top.
+
+\begin{equation}
+    I_{\text{ambient}}(h) = \text{lerp}(I_{\text{ground\_albedo}}, I_{\text{sky\_color}}, h) \cdot \text{AmbientStrength}
+\end{equation}
+
+Integrate this into the master illumination accumulation loop without running any additional shadow steps:
+\begin{equation}
+    I_{\text{step}} = (I_{\text{sun}} \cdot \text{Phase}(\theta) \cdot \text{ShadowTransmittance}) + (I_{\text{ambient}}(h) \cdot \text{Density})
+\end{equation}
+
+\subsection{2. Multiple Scattering Approximation (The Schneider-Vollnov Trick)}
+To simulate light bouncing deeply inside the volume without path-tracing, compute an attenuation profile using three distinct cascading attenuation octaves. Each octave represents a deeper layer of scattering where the cloud density feels effectively lower, and the light attenuation constant decreases:
+
+\begin{equation}
+    E_{\text{multi}} = \sum_{k=0}^{2} a^k \cdot e^{-\text{density} \cdot \sigma \cdot b^k}
+\end{equation}
+
+Where $a = 0.5$ (energy attenuation per bounce) and $b = 0.25$ (density attenuation per bounce). This mathematically forces thin and medium cloud sections to illuminate from within, mimicking real physical cloud translucency.
+
+---
+
+\section{Haskell FIR Light Loop Adaptation}
+Below is the mathematical execution layout transformed into production-grade Haskell \texttt{FIR} syntax to augment the lighting pipeline inside the core loop.
+
+\begin{lstlisting}[language=Haskell, caption={Haskell FIR DSL Multiple Scattering Light Integration}]
+-- Multi-Scattering and Ambient Illumination implementation block
+calculateVolumetricLighting :: Vec3 Float -> Float -> Float -> Vec3 Float -> Program Pipeline (Vec3 Float)
+calculateVolumetricLighting currPos density heightNorm sunDir = do
+    sunColor  <- use @"sun_color"
+    skyColor  <- use @"sky_ambient_color"
+    groundCol <- use @"ground_ambient_color"
+    
+    -- 1. Compute Height-Graded Ambient Base
+    let ambientTerm = lerp groundCol skyColor heightNorm * 0.18
+    
+    -- Execute standard low-step light march toward sun to find base shadow depth
+    shadowDepth <- evaluateLightMarchRay currPos sunDir
+    
+    -- 2. Three-Octave Multiple Scattering Approximation Array
+    let d = shadowDepth * density
+    let octave0 = exp (-d * 1.0)
+    let octave1 = exp (-d * 0.25) * 0.5
+    let octave2 = exp (-d * 0.05) * 0.25
+    let totalTransmittance = octave0 + octave1 + octave2
+    
+    -- 3. Phase functions for forward scattering edge-glow
+    let phaseTerm = computeHenyeyGreensteinPhase 0.82
+    
+    -- Combine Direct Sun Energy and Scattered Atmospheric Ambient
+    let directLight  = sunColor * phaseTerm * totalTransmittance
+    let indirectLight = ambientTerm * density
+    
+    return (directLight + indirectLight)
+\end{lstlisting}
+
+---
+
+\section{Day-Night Cycle Considerations}
+Because your rendering pipeline implements a dynamic day-night cycle, your script parameters must update uniform buffers globally over time:
+\begin{itemize}
+    \item \textbf{Golden Hour / Sunset:} As the sun passes below the horizon plane, the direct \texttt{sunColor} vector must approach \texttt{Vec3 0.0 0.0 0.0}, while the ambient terms (\texttt{skyColor}) shift from bright cyan to deep twilight navy blue.
+    \item \textbf{Night Phase:} The moon can replace the sun vector configuration entirely using a lower global intensity scaling factor ($\approx 0.05$), allowing the clouds to be lit softly by moonlight.
+\end{itemize}
+
+---
+
+\section{Feature Evaluation Matrix}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{Technique} & \textbf{GPU Performance Cost} & \textbf{Visual Realism Quality} & \textbf{Implementation Risk} \\ \midrule
+\textbf{More Light Entities} & High ($\mathcal{O}(N \times M)$ loops) & Poor (Looks like plastic) & Disrupts pipeline clusters \\
+\textbf{Flat Base Ambient} & Negligible ($\mathcal{O}(1)$ ALU) & Medium (Flat shapes) & Low (Lacks cloud depth) \\
+\textbf{Height-Graded Ambient} & Very Low ($\mathcal{O}(1)$ ALU) & High (Anchors clouds to sky) & Low (Highly recommended) \\
+\textbf{Multiple Scattering Octaves} & Low (3 additional ALU exp operations) & Maximum (Photorealistic glow) & Medium (Needs exact tuning) \\ \bottomrule
+\end{tabular}
+\caption{Illumination technique tradeoff configuration analysis matrix.}
+\end{table}
+
+\end{document}
+

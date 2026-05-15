@@ -1,0 +1,178 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+
+\geometry{margin=1in}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstset{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{purple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single
+}
+
+\title{Code Optimization Report: Volumetric Solidification \\ \large Architectural Enhancements for Haskell-Vulkan \texttt{Clouds.hs}}
+\author{Advanced Graphics Engine Group}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Diagnostic: The Multi-Layer Slicing Phenomenon}
+When volumetric media resembles discrete parallel slices rather than a contiguous solid structure, it indicates that the raymarch step increment matches or beats the spatial frequencies of the 3D texture lookup. 
+
+\begin{enumerate}
+    \item \textbf{Deterministic Phase Alignment:} If view rays iterate over fixed spatial deltas ($\Delta t$), every neighbor screen pixel samples identical offsets relative to the voxel grid boundaries. This shifts the perceptual shape into a series of transparent topological shell steps.
+    \item \textbf{Missing Spatial Interleaving:} Without randomizing the origin or evaluation points along individual projection arcs, the underlying voxel texture bounds project flat lines over perspective depth changes.
+\end{enumerate}
+
+To turn these shells into solid shapes, we inject \textbf{Blue Noise Interleaved Jittering} into the entry point calculation and leverage \textbf{Temporal Reprojection Matrices} to smooth out the grain across frames.
+
+---
+
+\section{Mathematical Matrix Operations for Temporal Reprojection}
+To achieve high-fidelity solidification without massive sample counts, the shader scales to quarter-resolution and reprojects history. This relies on tracking individual positions backwards through time via custom matrix operations.
+
+\subsection{Matrix Reprojection Pipeline}
+Let $P_{\text{curr}}$ be the reconstructed 3D World Space position where the ray terminates or samples a cloud boundary during the current frame. To retrieve the matching pixel coordinate from the previous frame ($UV_{\text{prev}}$):
+
+\begin{equation}
+    X_{\text{clip\_prev}} = \mathbf{M_{\text{PrevViewProj}}} \cdot \begin{bmatrix} P_{\text{curr}.x} - W_{\text{offset}.x} \\ P_{\text{curr}.y} \\ P_{\text{curr}.z} - W_{\text{offset}.z} \\ 1.0 \end{bmatrix}
+\end{equation}
+
+Where $\mathbf{M_{\text{PrevViewProj}}}$ is the non-reversed view-projection transform tracking the position of the camera in the previous frame, and $W_{\text{offset}}$ accounts for the global translation displacement induced by the wind velocity vector accumulated across the delta time interval $\Delta t$.
+
+\subsection{Perspective Projection Space Normalization}
+The tracking space must transition from Homogeneous 4D Clip Coordinates to Normalized Device Coordinates (NDC) via the perspective divide:
+
+\begin{equation}
+    X_{\text{ndc\_prev}} = \frac{X_{\text{clip\_prev}.xyz}}{X_{\text{clip\_prev}.w}}
+\end{equation}
+
+Finally, map the range $[-1.0, 1.0]^2$ into standard screen coordinate space $[0.0, 1.0]^2$ to fetch historical data inputs:
+
+\begin{equation}
+    UV_{\text{prev}} = X_{\text{ndc\_prev}.xy} \cdot \begin{bmatrix} 0.5 \\ 0.5 \end{bmatrix} + \begin{bmatrix} 0.5 \\ 0.5 \end{bmatrix}
+\end{equation}
+
+---
+
+\section{Haskell FIR Code Implementation Example}
+Below is the optimized source block rewritten for the Haskell \texttt{FIR} Vulkan pipeline DSL. It includes **Spherical Earth Curvature**, **Dynamic Jittering offsets**, and **Nested Raymarching structures**.
+
+\begin{lstlisting}[language=Haskell, caption={Haskell FIR DSL Implementation for Curved Volumetric Shells}]
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeOperators #-}
+
+module Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds where
+
+-- Conceptual representation of the dynamic raymarching pipeline stage
+type CloudShaderPipeline = '[
+    "world_pos"    ':-> Input  (Vec 3 Float),
+    "blue_noise"   ':-> Texture2D (Vec 4 Float),
+    "cloud_noise"  ':-> Texture3D (Vec 4 Float),
+    "out_color"    ':-> Output (Vec 4 Float)
+  ]
+
+-- Realization of curved earth surface offsets and dynamic loop execution
+traceCurvedClouds :: Program CloudShaderPipeline ()
+traceCurvedClouds = do
+    camPos   <- use @"camera_pos"
+    viewDir  <- use @"view_direction"
+    uvCoords <- use @"screen_uv"
+    
+    -- Fetch spatial blue noise to break slice layers
+    noiseSample <- sample @"blue_noise" uvCoords
+    let jitter = noiseSample .& R -- Extract red channel seed scalar
+
+    -- Earth planetary scale dimensions
+    let earthRadius    = 6371000.0
+    let cloudBottom    = 2500.0
+    let cloudThickness = 800.0
+    
+    -- Spherical atmospheric intersection logic
+    let camHeightCurved = camPos .& Y + earthRadius
+    let tNear = computeSphericalShellIntersection camHeightCurved viewDir cloudBottom
+    
+    -- Inject stochastic jitter into starting path
+    let stepSize = 16.0
+    let startPos = camPos + viewDir * (tNear + (jitter * stepSize))
+    
+    -- Dynamic Loop variable configuration
+    accumOpacity <- lit 0.0
+    accumLight   <- lit (Vec3 0.0 0.0 0.0)
+    rayDistance  <- lit 0.0
+    
+    loop do
+        -- Terminate if ray leaves bounds or opacity saturates
+        isSaturated  <- accumOpacity >=. 0.99
+        isPastVolume <- rayDistance  >=. cloudThickness
+        
+        breakIf (isSaturated ||. isPastVolume)
+        
+        let currPos = startPos + viewDir * rayDistance
+        
+        -- Apply Curvature Matrix shift along horizontal trajectory planes
+        let distHorizSq = (currPos.&X - camPos.&X)^2 + (currPos.&Z - camPos.&Z)^2
+        let curvedY     = currPos.&Y - (distHorizSq / (2.0 * earthRadius))
+        
+        -- Sample Density Mapping with height mask filters
+        let heightNorm = (curvedY - cloudBottom) / cloudThickness
+        density <- sampleDensityField currPos heightNorm
+        
+        when (density >. 0.0) $ do
+            -- In-scatter illumination calculations (Beer-Powder integration)
+            transmittance <- calculateBeerPowderLight currPos density
+            accumLight   .= accumLight + (transmittance * density * stepSize)
+            accumOpacity .= accumOpacity + ((1.0 - accumOpacity) * density * stepSize)
+            
+        rayDistance .= rayDistance + stepSize
+        
+    write @"out_color" (Vec4 (accumLight.&X) (accumLight.&Y) (accumLight.&Z) accumOpacity)
+\end{lstlisting}
+
+---
+
+\section{Summary of Parameter Configuration Shifts}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{lll}
+\toprule
+\textbf{Pipeline Element} & \textbf{Layered/Slicing Setup} & \textbf{Solidified Volume Setup} \\ \midrule
+\textbf{Ray Start Offset} & Absolute \texttt{tNear} Step Grid & Blue Noise Stochastic Ray Jitter \\
+\textbf{Atmosphere Plane} & Flat Box Bounds Matrix & Curved Earth Coordinates Displacement \\
+\textbf{History Filter} & Raw Texel Blending & Velocity and Wind Corrected Matrix Pull \\
+\textbf{Light Absorption} & Beer's Law (Linear Linear) & Beer-Powder Attenuation Curve \\ \bottomrule
+\end{tabular}
+\caption{Architectural changes implemented to enforce volume cohesion.}
+\end{table}
+
+\end{document}
+

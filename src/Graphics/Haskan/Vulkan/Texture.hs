@@ -6,6 +6,7 @@ module Graphics.Haskan.Vulkan.Texture
     managedTexture,
     managedTexture3D,
     managedSampler,
+    managedSamplerNearest,
     createSamplerWithLod,
     createTextureResource,
     textureImageView,
@@ -343,6 +344,43 @@ createSamplerWithLod dev maxLod =
               &* set @"mipLodBias" 0.0
               &* set @"minLod" 0.0
               &* set @"maxLod" maxLod
+          )
+   in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateSampler dev ciPtr Vulkan.vkNullPtr))
+
+managedSamplerNearest ::
+  (MonadManaged m) =>
+  Vulkan.VkDevice ->
+  m Vulkan.VkSampler
+managedSamplerNearest dev =
+  alloc
+    "SamplerNearest"
+    (createSamplerNearest dev)
+    (\ptr -> Vulkan.vkDestroySampler dev ptr Vulkan.vkNullPtr)
+
+createSamplerNearest ::
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  m Vulkan.VkSampler
+createSamplerNearest dev =
+  let createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"magFilter" Vulkan.VK_FILTER_NEAREST
+              &* set @"minFilter" Vulkan.VK_FILTER_NEAREST
+              &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
+              &* set @"anisotropyEnable" Vulkan.VK_FALSE
+              &* set @"maxAnisotropy" 1.0
+              &* set @"borderColor" Vulkan.VK_BORDER_COLOR_INT_OPAQUE_BLACK
+              &* set @"unnormalizedCoordinates" Vulkan.VK_FALSE
+              &* set @"compareEnable" Vulkan.VK_FALSE
+              &* set @"compareOp" Vulkan.VK_COMPARE_OP_ALWAYS
+              &* set @"mipmapMode" Vulkan.VK_SAMPLER_MIPMAP_MODE_NEAREST
+              &* set @"mipLodBias" 0.0
+              &* set @"minLod" 0.0
+              &* set @"maxLod" 0.0
           )
    in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateSampler dev ciPtr Vulkan.vkNullPtr))
 

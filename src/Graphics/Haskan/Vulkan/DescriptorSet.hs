@@ -481,6 +481,7 @@ updateCloudDescriptorSets ::
   (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
+  -- | Linear sampler for env/noise/history
   Vulkan.VkSampler ->
   -- | env cubemap view
   Maybe Vulkan.VkImageView ->
@@ -490,15 +491,17 @@ updateCloudDescriptorSets ::
   Maybe Vulkan.VkImageView ->
   -- | blue noise texture view
   Maybe Vulkan.VkImageView ->
+  -- | Nearest sampler for blue noise
+  Vulkan.VkSampler ->
   m ()
-updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView mCloudHistoryView mBlueNoiseView = do
-  let mkTextureInfo imageView =
+updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView mCloudHistoryView mBlueNoiseView blueNoiseSampler = do
+  let mkTextureInfo imageView s =
         Vulkan.createVk
           ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
               &* set @"imageView" imageView
-              &* set @"sampler" sampler
+              &* set @"sampler" s
           )
-      mkWrite bindingIdx imageView =
+      mkWrite bindingIdx imageView s =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
@@ -507,21 +510,21 @@ updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView 
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
               &* set @"pBufferInfo" Vulkan.VK_NULL
               &* set @"pTexelBufferView" Vulkan.VK_NULL
-              &* setVkRef @"pImageInfo" (mkTextureInfo imageView)
+              &* setVkRef @"pImageInfo" (mkTextureInfo imageView s)
               &* set @"descriptorCount" 1
               &* set @"dstArrayElement" 0
           )
       envWrite = case mEnvMapView of
-        Just envView -> [mkWrite 0 envView]
+        Just envView -> [mkWrite 0 envView sampler]
         Nothing -> []
       noiseWrite = case mCloudNoiseView of
-        Just noiseView -> [mkWrite 1 noiseView]
+        Just noiseView -> [mkWrite 1 noiseView sampler]
         Nothing -> []
       historyWrite = case mCloudHistoryView of
-        Just historyView -> [mkWrite 2 historyView]
+        Just historyView -> [mkWrite 2 historyView sampler]
         Nothing -> []
       blueNoiseWrite = case mBlueNoiseView of
-        Just blueView -> [mkWrite 3 blueView]
+        Just blueView -> [mkWrite 3 blueView blueNoiseSampler]
         Nothing -> []
       allWrites = envWrite ++ noiseWrite ++ historyWrite ++ blueNoiseWrite
   liftIO $

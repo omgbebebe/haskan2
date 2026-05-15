@@ -759,7 +759,7 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
       outerLoop exit = do
         unless exit $ do
           renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-            with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView) $ \dr -> do
+            with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView iblBlueNoiseSampler) $ \dr -> do
                -- Update lighting descriptor sets with light SSBO
                for_ (drLightingDescriptorSets dr) $ \ds ->
                  DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
