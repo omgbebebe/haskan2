@@ -29,6 +29,9 @@ Shader usage (from Clouds.hs fragment shader):
     
     -- Apply height mask (smoothstep at cloud bottom/top)
     density = density * heightMask * 4.0
+
+    -- Note: noiseScale is set in the shader, not here.
+    -- Current shader value: 0.0003 (was 0.0008 in earlier versions)
 """
 
 import os

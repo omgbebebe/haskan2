@@ -245,16 +245,15 @@ cloudFragment = shader do
       cloudTop = cloudBottom + cloudThickness
 
       -- Slab intersector: handles camera below, inside, or above cloud layer
-      dirY_safe = if dirY > 0.001
-        then dirY
-        else (if dirY < (-0.001) then dirY else 0.001)
+      -- Smooth clamp to epsilon: no dead zone discontinuity
+      dirY_safe = if dirY > 0.0 then max 0.001 dirY else min (-0.001) dirY
       tToBottom = (cloudBottom - camY) / dirY_safe
       tToTop = (cloudTop - camY) / dirY_safe
       tNear = max 0.0 (min tToBottom tToTop)
       tFar = max 0.0 (max tToBottom tToTop)
-      totalRayLength = min 10000.0 (tFar - tNear)
+      totalRayLength = min 5000.0 (tFar - tNear)
       absDirY = step 0.0 dirY * dirY + step dirY 0.0 * (0.0 - dirY)
-      stepCountF = max 32.0 (min 64.0 (totalRayLength / 120.0))
+      stepCountF = max 32.0 (min 128.0 (totalRayLength / 80.0))
       adaptiveStepSize = totalRayLength / stepCountF
 
   -- Sample blue noise for dithered ray entry
@@ -268,7 +267,7 @@ cloudFragment = shader do
       windOffsetX = time * windSpeed * windDirX
       windOffsetZ = time * windSpeed * windDirZ
       -- Primary domain warp: large amplitude to break up noise tiling
-      warpAmp1 = 300.0
+      warpAmp1 = 150.0
       warpFreq1 = 0.0015
       -- Secondary warp: higher frequency, smaller amplitude for detail
       warpAmp2 = 80.0
