@@ -210,7 +210,7 @@ compileGraph resources passes =
 -- | Topological sort of passes: if Pass B reads a resource written by Pass A,
 -- A must come before B.
 topologicalSort :: [RenderPassNode] -> Maybe [RenderPassNode]
-topologicalSort passes = go queue [] []
+topologicalSort passes = go inDegrees queue [] []
   where
     -- Build write map: resource -> index of pass that writes it
     writeMap =
@@ -236,15 +236,15 @@ topologicalSort passes = go queue [] []
     inDegrees = foldl' incDegree (HashMap.fromList [(i, 0) | i <- [0 .. n - 1]]) edges
     adjList = HashMap.fromListWith (++) [(src, [dst]) | (src, dst) <- edges]
     queue = [i | i <- [0 .. n - 1], HashMap.lookupDefault 0 i inDegrees == 0]
-    go [] visited result
+    go _ [] visited result
       | length result == n = Just (reverse result)
       | otherwise = Nothing
-    go (u : q) visited result =
+    go indeg (u : q) visited result =
       let neighbors = HashMap.lookupDefault [] u adjList
           processNeighbor (qAcc, m) v =
             let deg = HashMap.lookupDefault 0 v m - 1
                 m' = HashMap.insert v deg m
                 qAcc' = if deg == 0 then v : qAcc else qAcc
              in (qAcc', m')
-          (q', inDegs') = foldl' processNeighbor (q, inDegrees) neighbors
-       in go q' (u : visited) (passes !! u : result)
+          (q', indeg') = foldl' processNeighbor (q, indeg) neighbors
+       in go indeg' q' (u : visited) (passes !! u : result)
