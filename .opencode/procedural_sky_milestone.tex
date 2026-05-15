@@ -1,0 +1,182 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english,russian]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+
+\geometry{margin=1in}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstset{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{purple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single
+}
+
+\title{Технический отчет: Оптимизация Атмосферы Hosek-Wilkie \\ \large Интеграция Sky LUT и HDR-Tonemapping для \texttt{Clouds.hs}}
+\author{Группа разработки графических систем}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Проблема производительности при прямом расчете}
+Модель Hosek-Wilkie содержит тяжелые трансцендентные функции ($\exp$, $\text{pow}$, $\text{acos}$). Вычисление этой модели напрямую внутри основного цикла маршинга облаков (\texttt{Clouds.hs}) для каждого шага луча драматически снижает производительность (ALU-bound). При 64 шагах маршинга для экрана 1080p это потребует миллиардов вычислений экспонент за кадр.
+
+Решение заключается в разделении расчетов: модель Hosek-Wilkie вычисляется один раз за кадр в текстуру-таблицу **Sky LUT**, а шейдер облаков выполняет быструю выборку (\texttt{Texture Fetch}) за константное время $\mathcal{O}(1)$.
+
+---
+
+\section{Математика и структура Sky LUT}
+Sky LUT представляет собой двухмерную текстуру (рекомендуемый размер $200 \times 200$ пикселей) в формате высокой точности \texttt{VK\_FORMAT\_R16G16B16A16\_SFLOAT}. Карта координат текстуры ($U, V$) кодирует сферическую геометрию купола неба.
+
+\subsection{Координатная параметризация (UV Mapping)}
+Чтобы эффективно распределить пиксели и избежать искажений у горизонта, координаты текстуры $U$ и $V$ отображаются на углы неба следующим образом:
+
+\begin{equation}
+    U = \frac{1 + \cos\gamma}{2} \iff \cos\gamma = 2U - 1
+\end{equation}
+\begin{equation}
+    V = \sqrt{\max(0.0, \cos\theta)} \iff \cos\theta = V^2
+\end{equation}
+
+Где:
+\begin{itemize}
+    \item $\cos\gamma$ --- скалярное произведение вектора взгляда и вектора солнца (\texttt{dot(viewDir, sunDir)}).
+    \item $\cos\theta$ --- вертикальный компонент вектора взгляда (\texttt{viewDir.y}). Использование квадратного корня при кодировании $V$ дает более высокую плотность пикселей вблизи горизонта, где градиенты атмосферы наиболее резкие.
+\end{itemize}
+
+---
+
+\section{Математика HDR-Тонирования (Tonemapping)}
+Физические модели атмосферы оперируют реальными значениями энергетической яркости (\textit{Radiance}), которые в полдень могут превышать значения $100.0$ единиц, в то время как стандартные мониторы отображают диапазон $[0.0, 1.0]$. Прямое отсечение (\texttt{clamp}) уничтожит детали и сделает края облаков «выжженными».
+
+\subsection{1. Экспоненциальная коррекция экспозиции}
+Перед тонированием выполняется масштабирование физической яркости $L_{\text{raw}}$ с помощью параметра экспозиции ($E$), который динамически адаптируется в зависимости от времени суток:
+\begin{equation}
+    L_{\text{exposed}} = L_{\text{raw}} \cdot e^{E}
+\end{equation}
+
+\subsection{2. Оператор ACES Filmic Tonemapping}
+Для кинематографического сжатия динамического диапазона и сохранения насыщенности в полутонах применяется аппроксимация кривой ACES (Academy Color Encoding System):
+
+\begin{equation}
+    \text{ACES}(x) = \frac{x \cdot (ax + b)}{x \cdot (cx + d) + e}
+\end{equation}
+
+Где эмпирические коэффициенты для стандартизированного перевода в sRGB равны:\\
+$a = 2.51$, $b = 0.03$, $c = 2.43$, $d = 0.59$, $e = 0.14$.
+
+---
+
+\section{Реализация в шейдерном коде Vulkan}
+
+\subsection{Генерация Sky LUT (Compute или Fragment Шейдер)}
+Этот шейдер выполняется один раз в начале кадра для заполнения LUT-текстуры.
+
+\begin{lstlisting}[language=C, caption={Запекание физической модели в Sky LUT}]
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(set = 0, binding = 0, rgba16f) writeonly image2D skyLutImage;
+
+void main() {
+    ivec2 texEL = ivec2(gl_GlobalInvocationID.xy);
+    vec2 size = vec2(imageSize(skyLutImage));
+    if (texEL.x >= size.x || texEL.y >= size.y) return;
+
+    vec2 uv = vec2(texEL) / (size - 1.0);
+
+    // Декодирование UV в физические углы
+    float cosGamma = uv.x * 2.0 - 1.0;
+    float cosTheta = uv.y * uv.y; // Восстановление из нелинейного V
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    
+    // Восстановление фиктивного вектора направления взгляда
+    vec3 viewDir = vec3(sinTheta, cosTheta, 0.0); 
+    // Направление на солнце передается из Uniform Buffer
+    
+    vec3 radiance = evaluateHosekWilkieInternal(viewDir, sunDir, params);
+    imageStore(skyLutImage, texEL, vec4(radiance, 1.0));
+}
+\end{lstlisting}
+
+\subsection{Выборка из LUT внутри маршинга облаков (\texttt{Clouds.hs})}
+Теперь шейдер облаков осуществляет моментальный доступ к предрассчитанным данным рассеивания.
+
+\begin{lstlisting}[language=Haskell, caption={Выборка освещения неба в Haskell FIR DSL}]
+-- Быстрая выборка рассеивания атмосферы из LUT
+lookupSkyAmbient :: Vec3 Float -> Vec3 Float -> Program Pipeline (Vec3 Float)
+lookupSkyAmbient viewDir sunDir = do
+    let cosGamma = dot viewDir sunDir
+    let cosTheta = viewDir.&Y -- Направление вверх (Зенит)
+    
+    -- Перевод в координаты LUT по формулам нелинейного распределения
+    let u = (cosGamma + 1.0) * 0.5
+    let v = sqrt (max 0.0 cosTheta)
+    
+    skyRadiance <- sample @"sky_lut_texture" (Vec2 u v)
+    return (skyRadiance.&XYZ)
+\end{lstlisting}
+
+\subsection{Финальный вывод кадра с ACES Tonemapping}
+Применяется в самом конце графического пайплайна (Post-Processing) к совмещенному буферу облаков и ландшафта.
+
+\begin{lstlisting}[language=C, caption={Реализация ACES Tonemapping}]
+vec3 applyAcesTonemap(vec3 rawLinearColor, float exposure) {
+    // Применение экспозиции
+    vec3 x = rawLinearColor * exp(exposure);
+    
+    // Математическая аппроксимация кривой ACES
+    vec3 a = vec3(2.51);
+    vec3 b = vec3(0.03);
+    vec3 c = vec3(2.43);
+    vec3 d = vec3(0.59);
+    vec3 e = vec3(0.14);
+    
+    vec3 mapped = (x * (a * x + b)) / (x * (c * x + d) + e);
+    return clamp(mapped, 0.0, 1.0);
+}
+\end{lstlisting}
+
+---
+
+\section{Сравнительный анализ архитектуры пайплайнов}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{Метрика} & \textbf{Прямой расчет (Инлайн)} & \textbf{Оптимизированный Sky LUT} \\ \midrule
+\textbf{Сложность вычислений} & $\mathcal{O}(\text{Pixels} \times \text{Steps} \times \text{ALU}_{\text{heavy}})$ & $\mathcal{O}(\text{Pixels} \times \text{Steps} \times \text{Fetch}_{\text{fast}})$ \\
+\textbf{Затраты VRAM} & 0 КБ & $\approx 156$ КБ ($200 \times 200$ RGBA16F) \\
+\textbf{Качество заката (HDR)} & Склонность к артефактам \texttt{NaN} & Стабильное распределение энергии \\
+\textbf{Нагрузка на регистры GPU} & Критическая (Register Spilling) & Минимальная (Один текстурный дескриптор) \\ \bottomrule
+\end{tabular}
+\caption{Оценка эффективности перехода на архитектуру Sky LUT.}
+\end{table}
+
+\end{document}
+

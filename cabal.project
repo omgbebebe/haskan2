@@ -2,6 +2,7 @@ packages:
   ./
   ./3rdparty/fir/
   ./3rdparty/gltf-loader/
+  ./3rdparty/dear-imgui/
 
 write-ghc-environment-files: always
 
