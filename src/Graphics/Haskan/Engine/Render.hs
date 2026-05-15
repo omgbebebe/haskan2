@@ -358,7 +358,29 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
 
   -- Build Dear ImGui frame
   mDrawData <- liftIO $ case reImGuiBackend of
-    Just _ -> Backend.buildImGuiFrame $ Backend.buildDebugPanel reTvCloudHeight reTvWindDirX reTvWindDirZ reTvCloudCoverage reTvCloudDetail reTvCloudAbsorption reTvWeatherCoverageScale reTvWeatherTypeBias reTvStormIntensity reTvWeatherAnimSpeed reTvDebugMode reTvWireframe
+    Just _ -> do
+      let panelEnv =
+            Backend.DebugPanelEnv
+              { Backend.dpeCloud =
+                  Backend.CloudPanel
+                    { Backend.cpHeight = reTvCloudHeight,
+                      Backend.cpWindX = reTvWindDirX,
+                      Backend.cpWindZ = reTvWindDirZ,
+                      Backend.cpDetail = reTvCloudDetail,
+                      Backend.cpAbsorption = reTvCloudAbsorption
+                    },
+                Backend.dpeWeather =
+                  Backend.WeatherPanel
+                    { Backend.wpCoverage = reTvCloudCoverage,
+                      Backend.wpCoverageScale = reTvWeatherCoverageScale,
+                      Backend.wpTypeBias = reTvWeatherTypeBias,
+                      Backend.wpStormIntensity = reTvStormIntensity,
+                      Backend.wpAnimSpeed = reTvWeatherAnimSpeed
+                    },
+                Backend.dpeDebugMode = reTvDebugMode,
+                Backend.dpeWireframe = reTvWireframe
+              }
+      Backend.buildImGuiFrame (runReaderT Backend.buildDebugPanel panelEnv)
     Nothing -> pure Nothing
 
   let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal prevTimeVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal weatherCoverageScaleVal weatherTypeBiasVal stormIntensityVal weatherAnimSpeedVal mDrawData

@@ -8,6 +8,9 @@ module Graphics.Haskan.UI.Backend
     newImGuiFrame,
     renderImGuiFrame,
     buildImGuiFrame,
+    CloudPanel (..),
+    WeatherPanel (..),
+    DebugPanelEnv (..),
     buildDebugPanel,
     recordImGuiDrawData,
   )
@@ -16,6 +19,7 @@ where
 import Control.Concurrent.STM qualified as STM
 import Control.Monad (unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Reader (ReaderT, ask, runReaderT)
 import Data.Bits (zeroBits)
 import Data.Coerce (coerce)
 import Data.Word (Word32)
@@ -247,47 +251,67 @@ weatherStateText c
   | c < 0.80 = "Weather: Overcast"
   | otherwise = "Weather: Storm"
 
-buildDebugPanel ::
-  STM.TVar Float ->
-  STM.TVar Float ->
-  STM.TVar Float ->
-  STM.TVar Float ->
-  STM.TVar Float ->
-  STM.TVar Float ->
-  STM.TVar Float ->
-  STM.TVar Float ->
-  STM.TVar Float ->
-  STM.TVar Float ->
-  STM.TVar Word32 ->
-  STM.TVar Bool ->
-  IO ()
-buildDebugPanel tvHeight tvWindX tvWindZ tvCoverage tvDetail tvAbsorption tvWeatherScale tvTypeBias tvStorm tvAnimSpeed tvDebugMode tvWireframe = do
-  withCString "Debug Panels" $ \windowTitle -> do
+-- | Parameters for the Cloud section of the debug panel.
+data CloudPanel = CloudPanel
+  { cpHeight :: !(STM.TVar Float),
+    cpWindX :: !(STM.TVar Float),
+    cpWindZ :: !(STM.TVar Float),
+    cpDetail :: !(STM.TVar Float),
+    cpAbsorption :: !(STM.TVar Float)
+  }
+
+-- | Parameters for the Weather section of the debug panel.
+data WeatherPanel = WeatherPanel
+  { wpCoverage :: !(STM.TVar Float),
+    wpCoverageScale :: !(STM.TVar Float),
+    wpTypeBias :: !(STM.TVar Float),
+    wpStormIntensity :: !(STM.TVar Float),
+    wpAnimSpeed :: !(STM.TVar Float)
+  }
+
+-- | Environment for building the entire debug panel.
+-- Composes Cloud, Weather, and global debug controls.
+data DebugPanelEnv = DebugPanelEnv
+  { dpeCloud :: !CloudPanel,
+    dpeWeather :: !WeatherPanel,
+    dpeDebugMode :: !(STM.TVar Word32),
+    dpeWireframe :: !(STM.TVar Bool)
+  }
+
+-- | Build the debug panel using ReaderT for clean parameter access.
+buildDebugPanel :: ReaderT DebugPanelEnv IO ()
+buildDebugPanel = do
+  env <- ask
+  let CloudPanel{..} = dpeCloud env
+      WeatherPanel{..} = dpeWeather env
+      tvDebugMode = dpeDebugMode env
+      tvWireframe = dpeWireframe env
+  liftIO $ withCString "Debug Panels" $ \windowTitle -> do
     _open <- ImGui.Raw.begin windowTitle Nothing Nothing
     -- Cloud section
     withCString "Cloud" $ \cloudLabel -> do
       cloudOpen <- ImGui.Raw.collapsingHeader cloudLabel Foreign.Ptr.nullPtr zeroBits
       when cloudOpen $ do
-        withCString "Height" $ \label -> sliderFloatTVar label 0.0 10000.0 tvHeight
-        withCString "Wind X" $ \label -> sliderFloatTVar label (-5.0) 5.0 tvWindX
-        withCString "Wind Z" $ \label -> sliderFloatTVar label (-5.0) 5.0 tvWindZ
-        withCString "Detail" $ \label -> sliderFloatTVar label 0.0 1.0 tvDetail
-        withCString "Absorption" $ \label -> sliderFloatTVar label 0.0 10.0 tvAbsorption
+        withCString "Height" $ \label -> sliderFloatTVar label 0.0 10000.0 cpHeight
+        withCString "Wind X" $ \label -> sliderFloatTVar label (-5.0) 5.0 cpWindX
+        withCString "Wind Z" $ \label -> sliderFloatTVar label (-5.0) 5.0 cpWindZ
+        withCString "Detail" $ \label -> sliderFloatTVar label 0.0 1.0 cpDetail
+        withCString "Absorption" $ \label -> sliderFloatTVar label 0.0 10.0 cpAbsorption
     -- Weather section
     withCString "Weather" $ \weatherLabel -> do
       weatherOpen <- ImGui.Raw.collapsingHeader weatherLabel Foreign.Ptr.nullPtr zeroBits
       when weatherOpen $ do
-        covVal <- STM.readTVarIO tvCoverage
+        covVal <- STM.readTVarIO wpCoverage
         withCString (weatherStateText covVal) $ \text -> ImGui.Raw.textUnformatted text Nothing
-        withCString "Coverage Scale" $ \label -> sliderFloatTVar label 0.0 2.0 tvWeatherScale
-        withCString "Type Bias" $ \label -> sliderFloatTVar label (-1.0) 1.0 tvTypeBias
-        withCString "Storm Intensity" $ \label -> sliderFloatTVar label 0.0 2.0 tvStorm
-        withCString "Anim Speed" $ \label -> sliderFloatTVar label 0.0 2.0 tvAnimSpeed
+        withCString "Coverage" $ \label -> sliderFloatTVar label 0.0 1.0 wpCoverage
+        withCString "Coverage Scale" $ \label -> sliderFloatTVar label 0.0 2.0 wpCoverageScale
+        withCString "Type Bias" $ \label -> sliderFloatTVar label (-1.0) 1.0 wpTypeBias
+        withCString "Storm Intensity" $ \label -> sliderFloatTVar label 0.0 2.0 wpStormIntensity
+        withCString "Anim Speed" $ \label -> sliderFloatTVar label 0.0 2.0 wpAnimSpeed
     -- Render Debug section
     withCString "Render Debug" $ \renderLabel -> do
       renderOpen <- ImGui.Raw.collapsingHeader renderLabel Foreign.Ptr.nullPtr zeroBits
       when renderOpen $ do
-        -- Use radioButtonI with a single shared pointer
         Foreign.Marshal.Alloc.alloca $ \modePtr -> do
           currentMode <- STM.readTVarIO tvDebugMode
           Foreign.Storable.poke modePtr (fromIntegral currentMode)
