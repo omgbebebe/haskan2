@@ -420,7 +420,7 @@ cloudFragment = shader do
       histB = convert histB_h
       -- Reduced blend factor (0.85 vs 0.92) to reduce ghosting from
       -- residual motion not captured by wind displacement
-      reprojBlend = 0.85 * blendFactor * validReproj
+      reprojBlend = 0.0 * blendFactor * validReproj
       accR = reprojBlend * histR + (1.0 - reprojBlend) * cloudSkyR
       accG = reprojBlend * histG + (1.0 - reprojBlend) * cloudSkyG
       accB = reprojBlend * histB + (1.0 - reprojBlend) * cloudSkyB
