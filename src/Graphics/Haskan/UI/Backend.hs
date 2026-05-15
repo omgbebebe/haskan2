@@ -8,15 +8,21 @@ module Graphics.Haskan.UI.Backend
     newImGuiFrame,
     renderImGuiFrame,
     buildImGuiFrame,
+    buildCloudDebugPanel,
     recordImGuiDrawData,
   )
 where
 
+import Control.Concurrent.STM qualified as STM
 import Control.Monad (unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Coerce (coerce)
 import Data.Word (Word32)
+import Foreign.C (CFloat (..))
+import Foreign.C.String (CString, withCString)
+import Foreign.Marshal.Alloc qualified
 import Foreign.Ptr (FunPtr, Ptr, castPtr, nullPtr)
+import Foreign.Storable qualified
 import qualified DearImGui.Raw as ImGui.Raw
 import qualified DearImGui.SDL as ImGui.SDL
 import qualified DearImGui.SDL.Vulkan as ImGui.SDL.Vulkan
@@ -175,6 +181,35 @@ newImGuiFrame = do
 -- | Deprecated: use 'buildImGuiFrame' instead
 renderImGuiFrame :: IO () -> IO (Maybe ImGui.Raw.DrawData)
 renderImGuiFrame = buildImGuiFrame
+
+-- ---------------------------------------------------------------------------
+-- Cloud Debug Panel
+-- ---------------------------------------------------------------------------
+
+sliderFloatTVar ::
+  CString ->
+  Float ->
+  Float ->
+  STM.TVar Float ->
+  IO ()
+sliderFloatTVar label minVal maxVal tv = do
+  currentVal <- STM.readTVarIO tv
+  Foreign.Marshal.Alloc.alloca $ \ptr -> do
+    Foreign.Storable.poke ptr (Foreign.C.CFloat currentVal)
+    _changed <- ImGui.Raw.sliderFloat label ptr (Foreign.C.CFloat minVal) (Foreign.C.CFloat maxVal) Foreign.Ptr.nullPtr
+    Foreign.C.CFloat newVal <- Foreign.Storable.peek ptr
+    STM.atomically $ STM.writeTVar tv (realToFrac newVal)
+
+buildCloudDebugPanel :: STM.TVar Float -> STM.TVar Float -> STM.TVar Float -> STM.TVar Float -> IO ()
+buildCloudDebugPanel tvHeight tvCoverage tvDetail tvAbsorption =
+  withCString "Cloud Debug" $ \windowTitle -> do
+    open <- ImGui.Raw.begin windowTitle Nothing Nothing
+    when open $ do
+      withCString "Height" $ \label -> sliderFloatTVar label 0.0 2000.0 tvHeight
+      withCString "Coverage" $ \label -> sliderFloatTVar label 0.0 1.0 tvCoverage
+      withCString "Detail" $ \label -> sliderFloatTVar label 0.0 1.0 tvDetail
+      withCString "Absorption" $ \label -> sliderFloatTVar label 0.0 10.0 tvAbsorption
+      ImGui.Raw.end
 
 -- ---------------------------------------------------------------------------
 -- Command buffer recording
