@@ -320,8 +320,11 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
       viewProj = projection !*! view
       skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
+      -- prevViewProj for cloud reprojection: must be actual proj*view (not transposed)
+      -- because the cloud shader reads it as a raw mat4 and does manual multiplication
+      cloudPrevViewProj = makeProjectionMatrix w h !*! Camera.unViewMatrix (Camera.toMatrix camera)
   prevViewProj <- liftIO $ STM.readTVarIO rePrevViewProj
-  liftIO $ STM.atomically $ STM.writeTVar rePrevViewProj viewProj
+  liftIO $ STM.atomically $ STM.writeTVar rePrevViewProj cloudPrevViewProj
   uploadUniformBuffer mvpMemory 0 [view, projection]
 
   frameState <- readFrameState
