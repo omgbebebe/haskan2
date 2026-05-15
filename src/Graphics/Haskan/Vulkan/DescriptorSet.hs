@@ -491,10 +491,12 @@ updateCloudDescriptorSets ::
   Maybe Vulkan.VkImageView ->
   -- | blue noise texture view
   Maybe Vulkan.VkImageView ->
+  -- | weather map texture view
+  Maybe Vulkan.VkImageView ->
   -- | Nearest sampler for blue noise
   Vulkan.VkSampler ->
   m ()
-updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView mCloudHistoryView mBlueNoiseView blueNoiseSampler = do
+updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView mCloudHistoryView mBlueNoiseView mWeatherMapView blueNoiseSampler = do
   let mkTextureInfo imageView s =
         Vulkan.createVk
           ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -526,7 +528,10 @@ updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView 
       blueNoiseWrite = case mBlueNoiseView of
         Just blueView -> [mkWrite 3 blueView blueNoiseSampler]
         Nothing -> []
-      allWrites = envWrite ++ noiseWrite ++ historyWrite ++ blueNoiseWrite
+      weatherMapWrite = case mWeatherMapView of
+        Just weatherView -> [mkWrite 5 weatherView sampler]
+        Nothing -> []
+      allWrites = envWrite ++ noiseWrite ++ historyWrite ++ blueNoiseWrite ++ weatherMapWrite
   liftIO $
     Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
       Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr

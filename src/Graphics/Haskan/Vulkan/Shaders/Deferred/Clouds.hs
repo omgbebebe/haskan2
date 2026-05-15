@@ -213,6 +213,10 @@ type CloudFragmentDefs =
         ':-> Uniform
                '[Binding 4, DescriptorSet 0]
                CloudFrameData,
+      "weather_map"
+        ':-> Texture2D
+               '[Binding 5, DescriptorSet 0]
+               (RGBA8 UNorm),
       "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
@@ -324,11 +328,23 @@ cloudFragment = shader do
 
     ~(Vec4 nr ng nb na) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 sx sy sz)
 
-    let h = (curvedY - cloudBottom) / cloudThickness
-        heightMask = smoothstep 0.0 0.15 h * (1.0 - smoothstep 0.85 1.0 h)
-        density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - cloudCoverage)) * heightMask
+    -- Sample weather map for spatial cloud variation
+    let weatherScale = 0.00005
+        weatherWindOffsetX = time * 0.002 * windDirX
+        weatherWindOffsetZ = time * 0.002 * windDirZ
+        weatherUV = Vec2 (px * weatherScale - weatherWindOffsetX) (pz * weatherScale - weatherWindOffsetZ)
+    ~(Vec4 weatherR weatherG weatherB _weatherA) <- use @(ImageTexel "weather_map") NilOps weatherUV
 
-    -- Height-graded ambient with day-night cycle
+    let combinedCoverage = clamp (weatherR * cloudCoverage) 0.0 1.0
+        cloudType = weatherG
+        stormDarkness = weatherB
+        hMin = mix 0.1 0.0 cloudType
+        hMax = mix 0.4 1.0 cloudType
+        h = (curvedY - cloudBottom) / cloudThickness
+        heightMask = smoothstep hMin (hMin + 0.05) h * (1.0 - smoothstep (hMax - 0.1) hMax h)
+        density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - combinedCoverage)) * heightMask
+
+    -- Height-graded ambient with day-night cycle and storm modulation
     -- sunDirY encodes elevation: 1.0 = zenith, 0.0 = horizon, <0 = below horizon
         dayFactor = smoothstep (-0.1) 0.3 sunDirY
         nightFactor = smoothstep (-0.2) 0.0 sunDirY
@@ -345,7 +361,9 @@ cloudFragment = shader do
         groundAmbient = (nightGround ^* (1.0 - nightFactor) ^+^ sunsetGround ^* nightFactor) ^* (1.0 - dayFactor) ^+^ noonGround ^* dayFactor
         skyAmbient    = (nightSky    ^* (1.0 - nightFactor) ^+^ sunsetSky    ^* nightFactor) ^* (1.0 - dayFactor) ^+^ noonSky    ^* dayFactor
         ambientStrength = 0.18 * max 0.05 dayFactor
-        ambientTerm   = (groundAmbient ^* (1.0 - h) ^+^ skyAmbient ^* h) ^* ambientStrength
+        rawAmbientTerm   = (groundAmbient ^* (1.0 - h) ^+^ skyAmbient ^* h) ^* ambientStrength
+        -- Darken ambient in storm regions
+        ambientTerm = rawAmbientTerm ^* (1.0 - stormDarkness * 0.6)
 
     -- Nested light march: 4 steps toward sun for self-shadowing
     _ <- def @"lightStep" @RW @Int32 0
@@ -379,9 +397,17 @@ cloudFragment = shader do
 
       ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 lsx lsy lsz)
 
-      let lh = (lcurvedY - cloudBottom) / cloudThickness
-          lheightMask = smoothstep 0.0 0.15 lh * (1.0 - smoothstep 0.85 1.0 lh)
-          ld = max 0 (lnr * (1.0 - cloudDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - (1.0 - cloudCoverage)) * lheightMask
+      -- Sample weather map at light march position for consistent shadows
+      let lweatherUV = Vec2 (lpx * weatherScale) (lpz * weatherScale)
+      ~(Vec4 lweatherR lweatherG _lweatherB _lweatherA) <- use @(ImageTexel "weather_map") NilOps lweatherUV
+
+      let lcombinedCoverage = clamp (lweatherR * cloudCoverage) 0.0 1.0
+          lcloudType = lweatherG
+          lhMin = mix 0.1 0.0 lcloudType
+          lhMax = mix 0.4 1.0 lcloudType
+          lh = (lcurvedY - cloudBottom) / cloudThickness
+          lheightMask = smoothstep lhMin (lhMin + 0.05) lh * (1.0 - smoothstep (lhMax - 0.1) lhMax lh)
+          ld = max 0 (lnr * (1.0 - cloudDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - (1.0 - lcombinedCoverage)) * lheightMask
 
       modify @"lightDensity" (+ (ld * lightStepSize))
       put @"lightPos" (lp ^+^ sunDir ^* lightStepSize)
@@ -394,7 +420,7 @@ cloudFragment = shader do
         ms2 = exp (-d * 0.05) * 0.25   -- tertiary scatter
         lightT_d = ms0 + ms1 + ms2
 
-    let directLight = cloudBase ^* (lightT_d * phase)
+    let directLight = cloudBase ^* (lightT_d * phase * (1.0 - stormDarkness * 0.4))
         s_scatter = (directLight ^+^ ambientTerm) ^* (density * jitteredStep)
         t_new = exp (-density * jitteredStep)
         ~(Vec3 srx sry srz) = s_scatter

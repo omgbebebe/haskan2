@@ -57,6 +57,7 @@ data DeferredResources = DeferredResources
     drCloudHistoryImages :: ![Vulkan.VkImage],
     drCloudHistoryImageViews :: ![Vulkan.VkImageView],
     drCloudExtent :: !Vulkan.VkExtent2D,
+    drWeatherMapView :: !(Maybe Vulkan.VkImageView),
     drGBufferImages :: ![[Vulkan.VkImage]],
     drGBufferImageViews :: ![[Vulkan.VkImageView]],
     drSampler :: !Vulkan.VkSampler,
@@ -88,10 +89,11 @@ createDeferredResources ::
   Vulkan.VkSampler ->
   Maybe Vulkan.VkImageView ->
   Maybe Vulkan.VkImageView ->
+  Maybe Vulkan.VkImageView ->
   Vulkan.VkSampler ->
   Vulkan.VkRenderPass ->
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView blueNoiseSampler imGuiRenderPass = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView mWeatherMapView blueNoiseSampler imGuiRenderPass = do
   let extent = rcSurfaceExtent ctx
       cloudExtent =
         Vulkan.createVk
@@ -311,7 +313,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
 
   -- Update cloud descriptor sets
   liftIO $ for_ (zip cloudDescriptorSets cloudHistoryImageViews) $ \(ds, histView) -> do
-    DescriptorSet.updateCloudDescriptorSets device ds sampler mEnvMapView mCloudNoiseView (Just histView) mBlueNoiseView blueNoiseSampler
+    DescriptorSet.updateCloudDescriptorSets device ds sampler mEnvMapView mCloudNoiseView (Just histView) mBlueNoiseView mWeatherMapView blueNoiseSampler
     DescriptorSet.updateCloudFrameDataBuffer device ds cloudFrameDataBuffer
   logDebugIO LogRender "cloud descriptor sets updated"
 
@@ -338,6 +340,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         drCloudHistoryImages = cloudHistoryImages,
         drCloudHistoryImageViews = cloudHistoryImageViews,
         drCloudExtent = cloudExtent,
+        drWeatherMapView = mWeatherMapView,
         drGBufferImages = gBufferImages,
         drGBufferImageViews = gBufferImageViews,
         drSampler = sampler,

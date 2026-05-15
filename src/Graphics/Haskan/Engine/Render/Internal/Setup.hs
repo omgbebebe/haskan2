@@ -165,7 +165,8 @@ data IBLTextures = IBLTextures
     iblBrdfView :: !(Maybe Vulkan.VkImageView),
     iblCloudNoiseView :: !(Maybe Vulkan.VkImageView),
     iblBlueNoiseView :: !(Maybe Vulkan.VkImageView),
-    iblBlueNoiseSampler :: !Vulkan.VkSampler
+    iblBlueNoiseSampler :: !Vulkan.VkSampler,
+    iblWeatherMapView :: !(Maybe Vulkan.VkImageView)
   }
 
 -- | Load IBL cubemaps, BRDF LUT, and cloud noise texture
@@ -216,6 +217,13 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
   blueNoiseSampler <- Texture.managedSamplerNearest device
   logInfo LogGeneral "blue noise texture loaded"
 
+  logInfo LogGeneral "loading weather map texture..."
+  weatherMapRaw <- liftIO $ BS.readFile "data/textures/weather/weather_map.raw"
+  let weatherMapPixels = Data.Vector.Storable.fromList (BS.unpack weatherMapRaw)
+  weatherMapHandle <- Texture.createTextureFromData rm physicalDevice device 512 512 weatherMapPixels graphicsQueueHandler textureCommandBuffer
+  mWeatherMapView <- Texture.textureImageView rm weatherMapHandle
+  logInfo LogGeneral "weather map texture loaded"
+
   pure
     IBLTextures
       { iblRadianceCubemap = radianceCubemap,
@@ -226,7 +234,8 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
         iblBrdfView = mBrdfView,
         iblCloudNoiseView = Just cloudNoiseView,
         iblBlueNoiseView = mBlueNoiseView,
-        iblBlueNoiseSampler = blueNoiseSampler
+        iblBlueNoiseSampler = blueNoiseSampler,
+        iblWeatherMapView = mWeatherMapView
       }
 
 data SceneLoadResult = SceneLoadResult
