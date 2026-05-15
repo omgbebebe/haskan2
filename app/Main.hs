@@ -1,5 +1,6 @@
 module Main where
 
+import Graphics.Haskan.Engine.Render.Internal.Setup (compileAllShaders)
 import Graphics.Haskan qualified as Haskan
 import Graphics.Haskan.Logger
   ( LogBackend
@@ -28,6 +29,7 @@ data CliOpts = CliOpts
   , optTimeSpeed :: !Float
   , optDayNight :: !Bool
   , optCloudTest :: !Bool
+  , optCompileShaders :: !Bool
   }
 
 cliParser :: Parser CliOpts
@@ -109,7 +111,11 @@ cliParser =
     <*> switch
       ( long "cloud-test"
      <> help "Cloud test mode: fly camera, single sun, day-night enabled"
-        )
+         )
+    <*> switch
+      ( long "compile-shaders"
+     <> help "Compile FIR shaders to SPIR-V and exit"
+         )
 
 opts :: ParserInfo CliOpts
 opts = info (cliParser <**> helper)
@@ -127,18 +133,24 @@ main = do
   let backends :: [LogBackend]
       backends = stdoutBackend Info : maybe [] pure fileBackendMb
   setGlobalBackends backends
-  putStrLn ("Loading model: " ++ optModelName cli)
-  Haskan.runHaskan
-    (optTitle cli)
-    (optModelName cli)
-    (optTimeout cli)
-    (optDebugSocket cli)
-    (optUVCheckCube cli)
-    (optUVCheckSphere cli)
-    (optUVCheckPlane cli)
-    (optEnvDir cli)
-    (optLights cli)
-    (optTimeOfDay cli)
-    (optTimeSpeed cli)
-    (optDayNight cli)
-    (optCloudTest cli)
+  if optCompileShaders cli
+    then do
+      putStrLn "Compiling FIR shaders to SPIR-V..."
+      compileAllShaders
+      putStrLn "Done."
+    else do
+      putStrLn ("Loading model: " ++ optModelName cli)
+      Haskan.runHaskan
+        (optTitle cli)
+        (optModelName cli)
+        (optTimeout cli)
+        (optDebugSocket cli)
+        (optUVCheckCube cli)
+        (optUVCheckSphere cli)
+        (optUVCheckPlane cli)
+        (optEnvDir cli)
+        (optLights cli)
+        (optTimeOfDay cli)
+        (optTimeSpeed cli)
+        (optDayNight cli)
+        (optCloudTest cli)
