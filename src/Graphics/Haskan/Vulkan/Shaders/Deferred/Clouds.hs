@@ -329,10 +329,24 @@ cloudFragment = shader do
         heightMask = smoothstep 0.0 0.15 h * (1.0 - smoothstep 0.85 1.0 h)
         density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - cloudCoverage)) * heightMask
 
-    -- Height-graded ambient: warm ground bounce at bottom, cool sky scatter at top
-        groundAmbient = Vec3 0.35 0.30 0.25
-        skyAmbient    = Vec3 0.50 0.60 0.80
-        ambientTerm   = (groundAmbient ^* (1.0 - h) ^+^ skyAmbient ^* h) ^* 0.18
+    -- Height-graded ambient with day-night cycle
+    -- sunDirY encodes elevation: 1.0 = zenith, 0.0 = horizon, <0 = below horizon
+        dayFactor = smoothstep (-0.1) 0.3 sunDirY
+        nightFactor = smoothstep (-0.2) 0.0 sunDirY
+        -- Noon ambient
+        noonGround  = Vec3 0.35 0.30 0.25
+        noonSky     = Vec3 0.50 0.60 0.80
+        -- Sunset ambient
+        sunsetGround = Vec3 0.50 0.25 0.10
+        sunsetSky    = Vec3 0.40 0.25 0.35
+        -- Night ambient (moonlight)
+        nightGround = Vec3 0.02 0.02 0.04
+        nightSky    = Vec3 0.03 0.04 0.08
+        -- Interpolate through night -> sunset -> noon
+        groundAmbient = (nightGround ^* (1.0 - nightFactor) ^+^ sunsetGround ^* nightFactor) ^* (1.0 - dayFactor) ^+^ noonGround ^* dayFactor
+        skyAmbient    = (nightSky    ^* (1.0 - nightFactor) ^+^ sunsetSky    ^* nightFactor) ^* (1.0 - dayFactor) ^+^ noonSky    ^* dayFactor
+        ambientStrength = 0.18 * max 0.05 dayFactor
+        ambientTerm   = (groundAmbient ^* (1.0 - h) ^+^ skyAmbient ^* h) ^* ambientStrength
 
     -- Nested light march: 4 steps toward sun for self-shadowing
     _ <- def @"lightStep" @RW @Int32 0
