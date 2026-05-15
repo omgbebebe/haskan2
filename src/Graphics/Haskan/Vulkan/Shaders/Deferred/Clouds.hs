@@ -1,126 +1,3 @@
-{-|
-Module: Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds
-
-=== Deferred Rendering Pipeline — Stage 3: Volumetric Cloud Pass ===
-
-This module implements a quarter-resolution volumetric cloud rendering pass
-that ray-marches through a procedural cloud volume and composites with the skybox.
-Output is blended with history for temporal anti-aliasing.
-
-=== Vertex Shader (Fullscreen Triangle) ===
-
-**Inputs:**
-  * gl_VertexIndex: implicit vertex index (0, 1, 2)
-
-**Push Constants:**
-  * cameraPos: V3 Float — world-space camera position (minimal, 12 bytes)
-
-**Uniform Buffer (Binding 4, DS0):**
-  * cloud_frame_data: CloudFrameData struct containing:
-    - cameraX/Y/Z      : Float — world-space camera position
-    - ray0/ray1/ray2   : V3 Float — per-corner frustum rays
-    - sunDir           : V3 Float — normalized sun direction
-    - cloudHeight      : Float — cloud layer bottom Y coordinate
-    - time             : Float — animation time
-    - blendFactor      : Float — temporal blend weight
-    - windDirX/Z       : Float — wind direction for noise animation
-    - prevViewProj0-3  : V4 Float — previous frame view-projection matrix rows
-    - cloudCoverage    : Float — coverage threshold
-    - cloudDetail      : Float — detail strength
-    - cloudAbsorption  : Float — light absorption coefficient
-
-**Algorithm:** Same fullscreen triangle as Lighting pass.
-
-**Outputs:**
-  * out_uv  (Location 0): V2 Float — screen-space UVs
-  * out_ray (Location 1): V3 Float — world-space ray direction
-
-=== Fragment Shader ===
-
-**Inputs:**
-  * in_uv  (Location 0): V2 Float — interpolated screen UV
-  * in_ray (Location 1): V3 Float — interpolated world ray direction
-
-**Textures:**
-  * env_map      (Binding 0, DS0): TextureCube RGBA8 UNorm
-    - Skybox environment map for background color
-  * cloud_noise  (Binding 1, DS0): Texture3D RGBA8 UNorm
-    - 3D noise texture (256^3) with 4 octaves:
-      - R = Perlin-Worley blend (macro shape)
-      - G = Worley 8^3  (medium erosion)
-      - B = Worley 16^3 (high-frequency detail)
-      - A = Worley 32^3 (micro-detail)
-  * cloud_history(Binding 2, DS0): Texture2D RGBA16 F
-    - Previous frame cloud result for temporal accumulation
-
-lgorithm — Volumetric Ray Marching:**
-
-**Ray Setup:**
-- dir = normalize(rayDir)
-- cloudThickness = 800.0
-- cloudTop = cloudBottom + cloudThickness
-- Dual-plane slab intersection for camera below/inside/above cloud layer
-- stepSize = totalRayLength / 24.0
-
-**Dithered Entry Point:**
-- hash = fract(sin(uv.x*12.9898 + uv.y*78.233) * 43758.5453)
-- offset = hash * stepSize
-- tEntry = tNear + offset
-
-**24-Step Dynamic Ray March (loop with early exit):**
-Mutable accumulators: step, rayPos, transmittance, accR/G/B.
-Loop breaks when step >= 24 or transmittance < 0.01.
-   
-Per step:
-   
-a. **Domain Warping (Curl-like displacement):**
-   - w_x = sin(p_y*freq + p_z*freq*0.7) * warpAmp
-   - w_y = cos(p_x*freq + p_z*freq*0.5) * warpAmp
-   - w_z = sin(p_z*freq*0.7 + p_x*freq*0.6) * warpAmp
-   
-b. **Noise Sampling:**
-   - uvw = fract((p + w) * noiseScale - windOffset)
-   - Sample cloud_noise at uvw
-   
-c. **Density Composition:**
-   - density = max(0, noiseR*(1 - cloudDetail*(noiseG*0.3+noiseB*0.15+noiseA*0.075)) - (1-cloudCoverage))
-   - * heightMask * 4.0
-   
-d. **Height Mask:**
-   - h = (pY - cloudBottom) / cloudThickness
-   - heightMask = smoothstep(0, 0.15, h) * (1 - smoothstep(0.85, 1, h))
-
-**Nested 4-Step Light March (per primary step):**
-- Secondary ray toward sun, 4 samples
-- Accumulates light density along sun direction
-- Beer-Powder: lightT = max(exp(-d*1.5), 0.7*exp(-d*0.25))
-
-**Henyey-Greenstein Phase Function:**
-- cosTheta = dot(dir, sunDir)
-- HG(g) = (1 - g²) / (4π * (1 + g² - 2*g*cosTheta)^1.5)
-- phase = 0.7 * HG(0.6) + 0.3 * HG(-0.3)
-
-**Radiance Accumulation (Beer-Lambert):**
-- In-scattering: S_i = cloudBase * lightT * phase * density * stepSize
-- Transmittance: T_i = T_{i-1} * exp(-density * stepSize)
-
-**Wind-Aware Temporal Reprojection:**
-- World-space entry offset by wind displacement (dt * windSpeed * windDir)
-- Reproject to previous frame using prevViewProj
-- Blend: result = history * 0.85 * blendFactor + current * (1 - 0.85*blendFactor)
-- Valid only if reprojected UV is inside [0,1]
-
-utput:**
-* out_colour (Location 0): V4 Float
-  - R,G,B = temporally blended cloud color
-  - A     = 1.0
-
-exture Input Formats:**
-* env_map:     Cube map RGBA8 UNorm (6 faces, 512x512)
-* cloud_noise: 3D RGBA8 UNorm (256x256x256)
-   * cloud_history: 2D RGBA16 F (quarter resolution)
--}
-
 {-# LANGUAGE BlockArguments #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PartialTypeSignatures #-}
@@ -129,6 +6,127 @@ exture Input Formats:**
 {-# LANGUAGE TypeOperators #-}
 {-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}
 
+-- |
+-- Module: Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds
+--
+-- === Deferred Rendering Pipeline — Stage 3: Volumetric Cloud Pass ===
+--
+-- This module implements a quarter-resolution volumetric cloud rendering pass
+-- that ray-marches through a procedural cloud volume and composites with the skybox.
+-- Output is blended with history for temporal anti-aliasing.
+--
+-- === Vertex Shader (Fullscreen Triangle) ===
+--
+-- **Inputs:**
+--   * gl_VertexIndex: implicit vertex index (0, 1, 2)
+--
+-- **Push Constants:**
+--   * cameraPos: V3 Float — world-space camera position (minimal, 12 bytes)
+--
+-- **Uniform Buffer (Binding 4, DS0):**
+--   * cloud_frame_data: CloudFrameData struct containing:
+--     - cameraX/Y/Z      : Float — world-space camera position
+--     - ray0/ray1/ray2   : V3 Float — per-corner frustum rays
+--     - sunDir           : V3 Float — normalized sun direction
+--     - cloudHeight      : Float — cloud layer bottom Y coordinate
+--     - time             : Float — animation time
+--     - blendFactor      : Float — temporal blend weight
+--     - windDirX/Z       : Float — wind direction for noise animation
+--     - prevViewProj0-3  : V4 Float — previous frame view-projection matrix rows
+--     - cloudCoverage    : Float — coverage threshold
+--     - cloudDetail      : Float — detail strength
+--     - cloudAbsorption  : Float — light absorption coefficient
+--
+-- **Algorithm:** Same fullscreen triangle as Lighting pass.
+--
+-- **Outputs:**
+--   * out_uv  (Location 0): V2 Float — screen-space UVs
+--   * out_ray (Location 1): V3 Float — world-space ray direction
+--
+-- === Fragment Shader ===
+--
+-- **Inputs:**
+--   * in_uv  (Location 0): V2 Float — interpolated screen UV
+--   * in_ray (Location 1): V3 Float — interpolated world ray direction
+--
+-- **Textures:**
+--   * env_map      (Binding 0, DS0): TextureCube RGBA8 UNorm
+--     - Skybox environment map for background color
+--   * cloud_noise  (Binding 1, DS0): Texture3D RGBA8 UNorm
+--     - 3D noise texture (256^3) with 4 octaves:
+--       - R = Perlin-Worley blend (macro shape)
+--       - G = Worley 8^3  (medium erosion)
+--       - B = Worley 16^3 (high-frequency detail)
+--       - A = Worley 32^3 (micro-detail)
+--   * cloud_history(Binding 2, DS0): Texture2D RGBA16 F
+--     - Previous frame cloud result for temporal accumulation
+--
+-- lgorithm — Volumetric Ray Marching:**
+--
+-- **Ray Setup:**
+-- - dir = normalize(rayDir)
+-- - cloudThickness = 800.0
+-- - cloudTop = cloudBottom + cloudThickness
+-- - Dual-plane slab intersection for camera below/inside/above cloud layer
+-- - stepSize = totalRayLength / 24.0
+--
+-- **Dithered Entry Point:**
+-- - hash = fract(sin(uv.x*12.9898 + uv.y*78.233) * 43758.5453)
+-- - offset = hash * stepSize
+-- - tEntry = tNear + offset
+--
+-- **24-Step Dynamic Ray March (loop with early exit):**
+-- Mutable accumulators: step, rayPos, transmittance, accR/G/B.
+-- Loop breaks when step >= 24 or transmittance < 0.01.
+--
+-- Per step:
+--
+-- a. **Domain Warping (Curl-like displacement):**
+--    - w_x = sin(p_y*freq + p_z*freq*0.7) * warpAmp
+--    - w_y = cos(p_x*freq + p_z*freq*0.5) * warpAmp
+--    - w_z = sin(p_z*freq*0.7 + p_x*freq*0.6) * warpAmp
+--
+-- b. **Noise Sampling:**
+--    - uvw = fract((p + w) * noiseScale - windOffset)
+--    - Sample cloud_noise at uvw
+--
+-- c. **Density Composition:**
+--    - density = max(0, noiseR*(1 - cloudDetail*(noiseG*0.3+noiseB*0.15+noiseA*0.075)) - (1-cloudCoverage))
+--    - * heightMask * 4.0
+--
+-- d. **Height Mask:**
+--    - h = (pY - cloudBottom) / cloudThickness
+--    - heightMask = smoothstep(0, 0.15, h) * (1 - smoothstep(0.85, 1, h))
+--
+-- **Nested 4-Step Light March (per primary step):**
+-- - Secondary ray toward sun, 4 samples
+-- - Accumulates light density along sun direction
+-- - Beer-Powder: lightT = max(exp(-d*1.5), 0.7*exp(-d*0.25))
+--
+-- **Henyey-Greenstein Phase Function:**
+-- - cosTheta = dot(dir, sunDir)
+-- - HG(g) = (1 - g²) / (4π * (1 + g² - 2*g*cosTheta)^1.5)
+-- - phase = 0.7 * HG(0.6) + 0.3 * HG(-0.3)
+--
+-- **Radiance Accumulation (Beer-Lambert):**
+-- - In-scattering: S_i = cloudBase * lightT * phase * density * stepSize
+-- - Transmittance: T_i = T_{i-1} * exp(-density * stepSize)
+--
+-- **Wind-Aware Temporal Reprojection:**
+-- - World-space entry offset by wind displacement (dt * windSpeed * windDir)
+-- - Reproject to previous frame using prevViewProj
+-- - Blend: result = history * 0.85 * blendFactor + current * (1 - 0.85*blendFactor)
+-- - Valid only if reprojected UV is inside [0,1]
+--
+-- utput:**
+-- * out_colour (Location 0): V4 Float
+--   - R,G,B = temporally blended cloud color
+--   - A     = 1.0
+--
+-- exture Input Formats:**
+-- * env_map:     Cube map RGBA8 UNorm (6 faces, 512x512)
+-- * cloud_noise: 3D RGBA8 UNorm (256x256x256)
+--    * cloud_history: 2D RGBA16 F (quarter resolution)
 module Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds where
 
 import FIR
@@ -156,14 +154,14 @@ type CloudFrameData =
        "windDirX" ':-> Float,
        "windDirZ" ':-> Float,
        "prevTime" ':-> Float,
-        "cloudCoverage" ':-> Float,
-        "cloudDetail" ':-> Float,
-        "cloudAbsorption" ':-> Float,
-        "weatherCoverageScale" ':-> Float,
-        "weatherTypeBias" ':-> Float,
-        "stormIntensity" ':-> Float,
-        "weatherAnimSpeed" ':-> Float
-      ]
+       "cloudCoverage" ':-> Float,
+       "cloudDetail" ':-> Float,
+       "cloudAbsorption" ':-> Float,
+       "weatherCoverageScale" ':-> Float,
+       "weatherTypeBias" ':-> Float,
+       "stormIntensity" ':-> Float,
+       "weatherAnimSpeed" ':-> Float
+     ]
 
 type CloudVertexDefs =
   '[ "out_uv" ':-> Output '[Location 0] (V 2 Float),
@@ -205,23 +203,23 @@ type CloudFragmentDefs =
        ':-> Texture3D
               '[Binding 1, DescriptorSet 0]
               (RGBA8 UNorm),
-      "cloud_history"
-        ':-> Texture2D
-               '[Binding 2, DescriptorSet 0]
-               (RGBA16 F),
-      "blue_noise"
-        ':-> Texture2D
-               '[Binding 3, DescriptorSet 0]
-               (RGBA8 UNorm),
-      "cloud_frame_data"
-        ':-> Uniform
-               '[Binding 4, DescriptorSet 0]
-               CloudFrameData,
-      "weather_map"
-        ':-> Texture2D
-               '[Binding 5, DescriptorSet 0]
-               (RGBA8 UNorm),
-      "out_colour" ':-> Output '[Location 0] (V 4 Float),
+     "cloud_history"
+       ':-> Texture2D
+              '[Binding 2, DescriptorSet 0]
+              (RGBA16 F),
+     "blue_noise"
+       ':-> Texture2D
+              '[Binding 3, DescriptorSet 0]
+              (RGBA8 UNorm),
+     "cloud_frame_data"
+       ':-> Uniform
+              '[Binding 4, DescriptorSet 0]
+              CloudFrameData,
+     "weather_map"
+       ':-> Texture2D
+              '[Binding 5, DescriptorSet 0]
+              (RGBA8 UNorm),
+     "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
 
@@ -352,24 +350,24 @@ cloudFragment = shader do
         heightMask = smoothstep hMin (hMin + 0.05) h * (1.0 - smoothstep (hMax - 0.1) hMax h)
         density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - combinedCoverage)) * heightMask
 
-    -- Height-graded ambient with day-night cycle and storm modulation
-    -- sunDirY encodes elevation: 1.0 = zenith, 0.0 = horizon, <0 = below horizon
+        -- Height-graded ambient with day-night cycle and storm modulation
+        -- sunDirY encodes elevation: 1.0 = zenith, 0.0 = horizon, <0 = below horizon
         dayFactor = smoothstep (-0.1) 0.3 sunDirY
         nightFactor = smoothstep (-0.2) 0.0 sunDirY
         -- Noon ambient
-        noonGround  = Vec3 0.35 0.30 0.25
-        noonSky     = Vec3 0.50 0.60 0.80
+        noonGround = Vec3 0.35 0.30 0.25
+        noonSky = Vec3 0.50 0.60 0.80
         -- Sunset ambient
         sunsetGround = Vec3 0.50 0.25 0.10
-        sunsetSky    = Vec3 0.40 0.25 0.35
+        sunsetSky = Vec3 0.40 0.25 0.35
         -- Night ambient (moonlight)
         nightGround = Vec3 0.02 0.02 0.04
-        nightSky    = Vec3 0.03 0.04 0.08
+        nightSky = Vec3 0.03 0.04 0.08
         -- Interpolate through night -> sunset -> noon
         groundAmbient = (nightGround ^* (1.0 - nightFactor) ^+^ sunsetGround ^* nightFactor) ^* (1.0 - dayFactor) ^+^ noonGround ^* dayFactor
-        skyAmbient    = (nightSky    ^* (1.0 - nightFactor) ^+^ sunsetSky    ^* nightFactor) ^* (1.0 - dayFactor) ^+^ noonSky    ^* dayFactor
+        skyAmbient = (nightSky ^* (1.0 - nightFactor) ^+^ sunsetSky ^* nightFactor) ^* (1.0 - dayFactor) ^+^ noonSky ^* dayFactor
         ambientStrength = 0.18 * max 0.05 dayFactor
-        rawAmbientTerm   = (groundAmbient ^* (1.0 - h) ^+^ skyAmbient ^* h) ^* ambientStrength
+        rawAmbientTerm = (groundAmbient ^* (1.0 - h) ^+^ skyAmbient ^* h) ^* ambientStrength
         -- Darken ambient in storm regions
         ambientTerm = rawAmbientTerm ^* (1.0 - stormDarkness * 0.6)
 
@@ -419,13 +417,13 @@ cloudFragment = shader do
 
       modify @"lightDensity" (+ (ld * lightStepSize))
       put @"lightPos" (lp ^+^ sunDir ^* lightStepSize)
-      modify @"lightStep" (+1)
+      modify @"lightStep" (+ 1)
 
     finalLightDensity <- get @"lightDensity"
     let d = finalLightDensity * cloudAbsorption
-        ms0 = exp (-d * 1.0)           -- primary scatter
-        ms1 = exp (-d * 0.25) * 0.5    -- secondary scatter
-        ms2 = exp (-d * 0.05) * 0.25   -- tertiary scatter
+        ms0 = exp (-d * 1.0) -- primary scatter
+        ms1 = exp (-d * 0.25) * 0.5 -- secondary scatter
+        ms2 = exp (-d * 0.05) * 0.25 -- tertiary scatter
         lightT_d = ms0 + ms1 + ms2
 
     let directLight = cloudBase ^* (lightT_d * phase * (1.0 - stormDarkness * 0.4))
@@ -438,7 +436,7 @@ cloudFragment = shader do
     modify @"accB" (+ (srz * t))
     put @"transmittance" (t * t_new)
     put @"rayPos" (rp ^+^ dir ^* jitteredStep)
-    modify @"step" (+1)
+    modify @"step" (+ 1)
 
   finalTransmittance <- get @"transmittance"
   finalAccR <- get @"accR"

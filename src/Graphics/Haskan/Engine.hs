@@ -107,17 +107,18 @@ mainLoop meshName EngineConfig {..} = do
       STM.newTVarIO
         ( if cloudTestMode
             then [LightData (V3 1 1 1) 1.0 (V3 1 1 1) 0 (V3 (-1) (-1) (-1)) 0.0]
-            else take
-              lightCount
-              [ LightData (V3 1 1 1) 1.0 (V3 1 1 1) 0 (V3 (-1) (-1) (-1)) 0.0,
-                LightData (V3 (-1) 1 (-1)) 0.5 (V3 1 0.8 0.6) 0 (V3 1 (-1) 1) 0.0,
-                LightData (V3 0 (-1) 0) 0.3 (V3 0.4 0.4 0.6) 0 (V3 0 1 0) 0.0,
-                LightData (V3 1 0 0) 0.7 (V3 0.9 0.2 0.2) 0 (V3 (-1) 0 0) 0.0,
-                LightData (V3 0 1 0) 0.4 (V3 0.2 0.9 0.2) 0 (V3 0 (-1) 0) 0.0,
-                LightData (V3 0 0 1) 0.6 (V3 0.2 0.2 0.9) 0 (V3 0 0 (-1)) 0.0,
-                LightData (V3 1 1 (-1)) 0.5 (V3 0.8 0.8 0.2) 0 (V3 (-1) (-1) 1) 0.0,
-                LightData (V3 (-1) (-1) 1) 0.4 (V3 0.8 0.2 0.8) 0 (V3 1 1 (-1)) 0.0
-              ]
+            else
+              take
+                lightCount
+                [ LightData (V3 1 1 1) 1.0 (V3 1 1 1) 0 (V3 (-1) (-1) (-1)) 0.0,
+                  LightData (V3 (-1) 1 (-1)) 0.5 (V3 1 0.8 0.6) 0 (V3 1 (-1) 1) 0.0,
+                  LightData (V3 0 (-1) 0) 0.3 (V3 0.4 0.4 0.6) 0 (V3 0 1 0) 0.0,
+                  LightData (V3 1 0 0) 0.7 (V3 0.9 0.2 0.2) 0 (V3 (-1) 0 0) 0.0,
+                  LightData (V3 0 1 0) 0.4 (V3 0.2 0.9 0.2) 0 (V3 0 (-1) 0) 0.0,
+                  LightData (V3 0 0 1) 0.6 (V3 0.2 0.2 0.9) 0 (V3 0 0 (-1)) 0.0,
+                  LightData (V3 1 1 (-1)) 0.5 (V3 0.8 0.8 0.2) 0 (V3 (-1) (-1) 1) 0.0,
+                  LightData (V3 (-1) (-1) 1) 0.4 (V3 0.8 0.2 0.8) 0 (V3 1 1 (-1)) 0.0
+                ]
         )
   tvTimeOfDay <- liftIO $ STM.newTVarIO initialTimeOfDay
   tvTimeSpeed <- liftIO $ STM.newTVarIO timeSpeed
@@ -159,17 +160,17 @@ mainLoop meshName EngineConfig {..} = do
           tvTimeOfDay
           tvTimeSpeed
           tvDayNightEnabled
-           tvCloudHeight
-           tvWindDirection
-           tvWindSpeed
-            tvCloudCoverage
-            tvCloudDetail
-            tvCloudAbsorption
-            tvWeatherCoverageScale
-            tvWeatherTypeBias
-            tvStormIntensity
-            tvWeatherAnimSpeed
-           tvCameraMode
+          tvCloudHeight
+          tvWindDirection
+          tvWindSpeed
+          tvCloudCoverage
+          tvCloudDetail
+          tvCloudAbsorption
+          tvWeatherCoverageScale
+          tvWeatherTypeBias
+          tvStormIntensity
+          tvWeatherAnimSpeed
+          tvCameraMode
           tvOrbitalCamera
           tvFlyCamera
 
@@ -221,12 +222,13 @@ mainLoop meshName EngineConfig {..} = do
   liftIO $ forkIOWithHandler "stateUpdateLoop" stateUpdateLoopFinished $ stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished inputBuffer debugCmdQueue controlChannel
 
   when renderLoopOk $ do
-    let pollEventsWithImGui :: MonadIO m => m [SDL.Event]
+    let pollEventsWithImGui :: (MonadIO m) => m [SDL.Event]
         pollEventsWithImGui = go []
           where
-            go acc = ImGuiSDL.pollEventWithImGui >>= \case
-              Nothing -> pure (reverse acc)
-              Just e -> go (e : acc)
+            go acc =
+              ImGuiSDL.pollEventWithImGui >>= \case
+                Nothing -> pure (reverse acc)
+                Just e -> go (e : acc)
 
         inputLoop :: (MonadIO m) => m ()
         inputLoop = do

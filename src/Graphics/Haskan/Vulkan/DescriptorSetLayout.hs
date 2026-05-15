@@ -1,4 +1,5 @@
 {-# LANGUAGE TemplateHaskell #-}
+
 module Graphics.Haskan.Vulkan.DescriptorSetLayout
   ( managedDescriptorSetLayout,
     createDescriptorSetLayout,

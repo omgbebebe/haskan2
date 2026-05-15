@@ -20,7 +20,6 @@ import Control.Monad (forM, forM_, replicateM, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged, runManaged, with)
 import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, runReaderT)
-import qualified DearImGui.Raw as ImGui.Raw
 import Data.Foldable (for_, toList)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
@@ -33,6 +32,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word32, Word64, Word8)
+import DearImGui.Raw qualified as ImGui.Raw
 import FIR qualified
 import Foreign.C qualified
 import Foreign.Marshal.Array qualified
@@ -96,11 +96,11 @@ import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), Rend
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
 import Graphics.Haskan.Resources (alloc, allocaAndPeekVkResult, throwVkResult)
-import Graphics.Haskan.UI.Backend qualified as Backend
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
 import Graphics.Haskan.Scene.Transform qualified as Transform
+import Graphics.Haskan.UI.Backend qualified as Backend
 import Graphics.Haskan.Utils.ObjLoader qualified as ObjLoader
 import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.BRDF qualified as BRDF
@@ -122,7 +122,6 @@ import Graphics.Haskan.Vulkan.PipelineLayout qualified as PipelineLayout
 import Graphics.Haskan.Vulkan.Render (drawFrame, presentFrame, runRenderM)
 import Graphics.Haskan.Vulkan.Render qualified as Render
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
-import Graphics.Haskan.Vulkan.Swapchain qualified as Swapchain
 import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
@@ -131,6 +130,7 @@ import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShade
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
+import Graphics.Haskan.Vulkan.Swapchain qualified as Swapchain
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Haskan.Window (isWindowVisible)
@@ -196,10 +196,10 @@ data RenderEnv = RenderEnv
     reTvWeatherTypeBias :: !(STM.TVar Float),
     reTvStormIntensity :: !(STM.TVar Float),
     reTvWeatherAnimSpeed :: !(STM.TVar Float),
-   rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat)),
-   rePrevTime :: !(TVar Float),
-   reImGuiBackend :: !(Maybe Backend.ImGuiBackend)
- }
+    rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat)),
+    rePrevTime :: !(TVar Float),
+    reImGuiBackend :: !(Maybe Backend.ImGuiBackend)
+  }
 
 instance (MonadIO m) => MonadTelemetry (ReaderT RenderEnv m) where
   recordFrameTime rt = do
@@ -553,9 +553,11 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
   imGuiRenderPass <- RenderPass.managedImGuiRenderPass device imGuiSurfaceFormat
   imGuiDescriptorPool <- DescriptorPool.managedImGuiDescriptorPool device
   mImGuiBackend <-
-    Just <$> alloc "ImGuiBackend"
-      (Backend.initImGuiBackend window inst physicalDevice device (fromIntegral graphicsQueueFamilyIndex) graphicsQueueHandler imGuiDescriptorPool imGuiRenderPass 2 3)
-      Backend.shutdownImGuiBackend
+    Just
+      <$> alloc
+        "ImGuiBackend"
+        (Backend.initImGuiBackend window inst physicalDevice device (fromIntegral graphicsQueueFamilyIndex) graphicsQueueHandler imGuiDescriptorPool imGuiRenderPass 2 3)
+        Backend.shutdownImGuiBackend
   logInfo LogGeneral "Dear ImGui initialized"
 
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
@@ -821,60 +823,60 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
         unless exit $ do
           renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
             with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView iblWeatherMapView iblBlueNoiseSampler imGuiRenderPass) $ \dr -> do
-               -- Update lighting descriptor sets with light SSBO
-               for_ (drLightingDescriptorSets dr) $ \ds ->
-                 DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
-               prevViewProjTVar <- STM.newTVarIO (identity :: M44 Foreign.C.CFloat)
-               prevTimeTVar <- STM.newTVarIO 0.0
-               let renderEnv =
-                     RenderEnv
-                       { reWindow = window,
-                         reContext = context,
-                         reDeferred = dr,
-                         reTargetFPS = targetFPS,
-                         reImageAvailableSemaphores = imageAvailableSemaphores,
-                         reControl = control,
-                         reFrameMvpMemories = frameMvpMemories,
-                         reTvCamera = tvCamera,
-                         reTvInspect = tvInspect,
-                         reTvInsp = tvInsp,
-                         reTvRenderDebug = tvRenderDebug,
-                         reECSWorld = ecsWorld,
-                         reResourceManager = rm,
-                         reTextureSampler = textureSampler,
-                         reFrameDescriptorSets = frameDescriptorSets,
-                         reTextureIndexMap = textureIndexMap,
-                         reTvWireframe = tvWireframe,
-                         reFrameStatsRef = frameStatsRef,
-                         reCullResources = computeCullResources,
-                         reTvDebugMode = tvDebugMode,
-                         reTvAxisOverlay = tvAxisOverlay,
-                         reTvGroundPlane = tvGroundPlane,
-                         reTvPendingScreenshot = tvPendingScreenshot,
-                         reTvPendingAllStages = tvPendingAllStages,
-                         reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
-                         rePhysicalDevice = physicalDevice,
-                         reLightSsboBuffer = lightSsboBuffer,
-                         reLightSsboMemory = lightSsboMemory,
-                         reTvLights = tvLights,
-                         reTvTimeOfDay = tvTimeOfDay,
-                         reTvTimeSpeed = tvTimeSpeed,
-                          reTvDayNightEnabled = tvDayNightEnabled,
-                          reTvCloudHeight = tvCloudHeight,
-                          reTvWindDirection = tvWindDirection,
-                          reTvWindSpeed = tvWindSpeed,
-                            reTvCloudCoverage = tvCloudCoverage,
-                            reTvCloudDetail = tvCloudDetail,
-                            reTvCloudAbsorption = tvCloudAbsorption,
-                            reTvWeatherCoverageScale = tvWeatherCoverageScale,
-                            reTvWeatherTypeBias = tvWeatherTypeBias,
-                            reTvStormIntensity = tvStormIntensity,
-                            reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
-                            rePrevViewProj = prevViewProjTVar,
-                           rePrevTime = prevTimeTVar,
-                           reImGuiBackend = mImGuiBackend
-                         }
-               renderFrameLoop renderEnv 0
+              -- Update lighting descriptor sets with light SSBO
+              for_ (drLightingDescriptorSets dr) $ \ds ->
+                DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
+              prevViewProjTVar <- STM.newTVarIO (identity :: M44 Foreign.C.CFloat)
+              prevTimeTVar <- STM.newTVarIO 0.0
+              let renderEnv =
+                    RenderEnv
+                      { reWindow = window,
+                        reContext = context,
+                        reDeferred = dr,
+                        reTargetFPS = targetFPS,
+                        reImageAvailableSemaphores = imageAvailableSemaphores,
+                        reControl = control,
+                        reFrameMvpMemories = frameMvpMemories,
+                        reTvCamera = tvCamera,
+                        reTvInspect = tvInspect,
+                        reTvInsp = tvInsp,
+                        reTvRenderDebug = tvRenderDebug,
+                        reECSWorld = ecsWorld,
+                        reResourceManager = rm,
+                        reTextureSampler = textureSampler,
+                        reFrameDescriptorSets = frameDescriptorSets,
+                        reTextureIndexMap = textureIndexMap,
+                        reTvWireframe = tvWireframe,
+                        reFrameStatsRef = frameStatsRef,
+                        reCullResources = computeCullResources,
+                        reTvDebugMode = tvDebugMode,
+                        reTvAxisOverlay = tvAxisOverlay,
+                        reTvGroundPlane = tvGroundPlane,
+                        reTvPendingScreenshot = tvPendingScreenshot,
+                        reTvPendingAllStages = tvPendingAllStages,
+                        reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
+                        rePhysicalDevice = physicalDevice,
+                        reLightSsboBuffer = lightSsboBuffer,
+                        reLightSsboMemory = lightSsboMemory,
+                        reTvLights = tvLights,
+                        reTvTimeOfDay = tvTimeOfDay,
+                        reTvTimeSpeed = tvTimeSpeed,
+                        reTvDayNightEnabled = tvDayNightEnabled,
+                        reTvCloudHeight = tvCloudHeight,
+                        reTvWindDirection = tvWindDirection,
+                        reTvWindSpeed = tvWindSpeed,
+                        reTvCloudCoverage = tvCloudCoverage,
+                        reTvCloudDetail = tvCloudDetail,
+                        reTvCloudAbsorption = tvCloudAbsorption,
+                        reTvWeatherCoverageScale = tvWeatherCoverageScale,
+                        reTvWeatherTypeBias = tvWeatherTypeBias,
+                        reTvStormIntensity = tvStormIntensity,
+                        reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
+                        rePrevViewProj = prevViewProjTVar,
+                        rePrevTime = prevTimeTVar,
+                        reImGuiBackend = mImGuiBackend
+                      }
+              renderFrameLoop renderEnv 0
           outerLoop renderFrameLoopFinished
 
   logInfo LogGeneral "Starting render loop"

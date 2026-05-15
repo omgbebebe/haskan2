@@ -143,15 +143,16 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
                 (WindRotateRight, False, _) -> pure ()
                 (CloudPreset idx, True, _) -> do
                   let presets =
-                        [ (1500.0, 0.45, 0.35, 1.5),  -- Cumulus
-                          (800.0,  0.85, 0.20, 2.0),  -- Stratus
-                          (1000.0, 0.60, 0.30, 1.5),  -- Stratocumulus
-                          (1000.0, 0.60, 0.50, 3.0),  -- Cumulonimbus
-                          (8000.0, 0.30, 0.60, 0.4)   -- Cirrus
+                        [ (1500.0, 0.45, 0.35, 1.5), -- Cumulus
+                          (800.0, 0.85, 0.20, 2.0), -- Stratus
+                          (1000.0, 0.60, 0.30, 1.5), -- Stratocumulus
+                          (1000.0, 0.60, 0.50, 3.0), -- Cumulonimbus
+                          (8000.0, 0.30, 0.60, 0.4) -- Cirrus
                         ]
-                      (baseH, cov, det, abso) = if idx >= 0 && idx < length presets
-                        then presets !! idx
-                        else (1500.0, 0.45, 0.35, 1.5)
+                      (baseH, cov, det, abso) =
+                        if idx >= 0 && idx < length presets
+                          then presets !! idx
+                          else (1500.0, 0.45, 0.35, 1.5)
                   STM.atomically $ do
                     STM.writeTVar (cloudHeight gameState) baseH
                     STM.writeTVar (cloudCoverage gameState) cov

@@ -24,31 +24,32 @@ import Data.Bits (zeroBits)
 import Data.Coerce (coerce)
 import Data.IORef (IORef, readIORef)
 import Data.Word (Word32)
-import Foreign.C (CFloat (..), CBool)
-import Linear (V3 (..))
-import Numeric (showFFloat)
+import DearImGui qualified as ImGui
+import DearImGui.Raw qualified as ImGui.Raw
+import DearImGui.SDL qualified as ImGui.SDL
+import DearImGui.SDL.Vulkan qualified as ImGui.SDL.Vulkan
+import DearImGui.Vulkan qualified as ImGui.Vulkan
+import Foreign.C (CBool, CFloat (..))
 import Foreign.C.String (CString, withCString)
 import Foreign.Marshal.Alloc qualified
 import Foreign.Marshal.Utils (fromBool, toBool)
 import Foreign.Ptr (FunPtr, Ptr, castPtr, nullPtr)
 import Foreign.Storable qualified
-import qualified DearImGui as ImGui
-import qualified DearImGui.Raw as ImGui.Raw
-import qualified DearImGui.SDL as ImGui.SDL
-import qualified DearImGui.SDL.Vulkan as ImGui.SDL.Vulkan
-import qualified DearImGui.Vulkan as ImGui.Vulkan
-import qualified SDL
-import qualified SDL.Raw.Video as SDL.Raw.Video
-import qualified Vulkan as Vk
-import qualified Vulkan.Core10.Handles as Vk
-import qualified Vulkan.Zero as Vk
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Haskan.Camera (AnyCamera, cameraDistance, cameraPosition)
 import Graphics.Haskan.Engine.Types (FrameStats (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
+import Graphics.Vulkan qualified as Vulkan
+import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Linear (V3 (..))
+import Numeric (showFFloat)
+import SDL qualified
+import SDL.Raw.Video qualified as SDL.Raw.Video
 import Unsafe.Coerce (unsafeCoerce)
+import Vulkan qualified as Vk
+import Vulkan.Core10.Handles qualified as Vk
+import Vulkan.Zero qualified as Vk
+
 -- ---------------------------------------------------------------------------
 -- Vulkan interop: convert vulkan-api handles to vulkan package handles
 -- ---------------------------------------------------------------------------
@@ -58,7 +59,6 @@ import Unsafe.Coerce (unsafeCoerce)
 -- dear-imgui only uses the *Handle accessors, never the Cmds fields,
 -- so 'zero' is safe for Cmds.
 -- castPtr converts between phantom-tagged pointer types (same runtime rep).
-
 toVulkanDevice :: Vulkan.VkDevice -> Vk.Device
 toVulkanDevice ptr = Vk.Device (castPtr ptr) Vk.zero
 
@@ -162,7 +162,8 @@ initImGuiBackend window vkInstance vkPhysicalDevice vkDevice queueFamily vkQueue
     checkVkResult :: Vk.Result -> IO ()
     checkVkResult res =
       unless (res == Vk.SUCCESS) $
-        putStrLn $ "Dear ImGui Vulkan error: " <> show res
+        putStrLn $
+          "Dear ImGui Vulkan error: " <> show res
 
 -- ---------------------------------------------------------------------------
 -- Shutdown
@@ -291,8 +292,8 @@ data DebugPanelEnv = DebugPanelEnv
 buildDebugPanel :: ReaderT DebugPanelEnv IO ()
 buildDebugPanel = do
   env <- ask
-  let CloudPanel{..} = dpeCloud env
-      WeatherPanel{..} = dpeWeather env
+  let CloudPanel {..} = dpeCloud env
+      WeatherPanel {..} = dpeWeather env
       tvDebugMode = dpeDebugMode env
       tvWireframe = dpeWireframe env
       tvTimeOfDay = dpeTimeOfDay env
@@ -310,9 +311,10 @@ buildDebugPanel = do
         stats <- readIORef frameStatsRef
         let frameCount = fsFrameCount stats
             accumTime = fsAccumTime stats
-            fps = if frameCount > 0
-                  then 1_000_000_000.0 / fromIntegral (accumTime `div` fromIntegral frameCount)
-                  else 0.0 :: Float
+            fps =
+              if frameCount > 0
+                then 1_000_000_000.0 / fromIntegral (accumTime `div` fromIntegral frameCount)
+                else 0.0 :: Float
         withCString ("FPS: " ++ show (round fps :: Int)) $ \text -> ImGui.Raw.textUnformatted text Nothing
         -- Camera info
         let V3 cx cy cz = cameraPosition cam

@@ -12,7 +12,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Data.Text qualified as Text
 import Data.Word (Word32)
-import qualified DearImGui.Raw
+import DearImGui.Raw qualified
 import Foreign.Marshal.Array qualified
 import Foreign.Storable (Storable (..))
 import Graphics.Haskan.Camera (AnyCamera, Camera (..))
@@ -223,14 +223,14 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdWindDirX = rcWindDirX,
                 dpdWindDirZ = rcWindDirZ,
                 dpdPrevTime = rcPrevTime,
-                 dpdCloudCoverage = rcCloudCoverage,
-                 dpdCloudDetail = rcCloudDetail,
-                 dpdCloudAbsorption = rcCloudAbsorption,
-                 dpdWeatherCoverageScale = rcWeatherCoverageScale,
-                 dpdWeatherTypeBias = rcWeatherTypeBias,
-                 dpdStormIntensity = rcStormIntensity,
-                 dpdWeatherAnimSpeed = rcWeatherAnimSpeed,
-                 dpdCloudFrameDataMemory = drCloudFrameDataMemory rcDeferred,
+                dpdCloudCoverage = rcCloudCoverage,
+                dpdCloudDetail = rcCloudDetail,
+                dpdCloudAbsorption = rcCloudAbsorption,
+                dpdWeatherCoverageScale = rcWeatherCoverageScale,
+                dpdWeatherTypeBias = rcWeatherTypeBias,
+                dpdStormIntensity = rcStormIntensity,
+                dpdWeatherAnimSpeed = rcWeatherAnimSpeed,
+                dpdCloudFrameDataMemory = drCloudFrameDataMemory rcDeferred,
                 dpdCloudRenderPass = drCloudRenderPass rcDeferred,
                 dpdCloudFramebuffer = cloudFramebuffer,
                 dpdCloudPipeline = drCloudPipeline rcDeferred,

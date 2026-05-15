@@ -21,7 +21,6 @@ import Foreign.Storable (sizeOf)
 import Graphics.Haskan.Render.Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
-import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
@@ -29,9 +28,9 @@ import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Resources (BufferResource (..), MeshResource (..), TextureResource (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Linear.Matrix (M44)
 import Linear.V3 (V3 (..))
 import Linear.V4 (V4 (..))
-import Linear.Matrix (M44)
 
 -- | Data needed to build a deferred rendering graph.
 data DeferredPassData = DeferredPassData
@@ -202,57 +201,61 @@ buildDeferredGraph DeferredPassData {..} = do
                 (V4 m02 m12 m22 m32) = col2
                 (V4 m03 m13 m23 m33) = col3
                 cloudFrameData =
-                  [ realToFrac camX,      -- 0
-                    realToFrac camY,      -- 4
-                    realToFrac camZ,      -- 8
-                    0,                    -- 12 pad
-                    realToFrac r0x,       -- 16
-                    realToFrac r0y,       -- 20
-                    realToFrac r0z,       -- 24
-                    0,                    -- 28 pad
-                    realToFrac r1x,       -- 32
-                    realToFrac r1y,       -- 36
-                    realToFrac r1z,       -- 40
-                    0,                    -- 44 pad
-                    realToFrac r2x,       -- 48
-                    realToFrac r2y,       -- 52
-                    realToFrac r2z,       -- 56
-                    0,                    -- 60 pad
-                    realToFrac sunDirX,   -- 64
-                    realToFrac sunDirY,   -- 68
-                    realToFrac sunDirZ,   -- 72
+                  [ realToFrac camX, -- 0
+                    realToFrac camY, -- 4
+                    realToFrac camZ, -- 8
+                    0, -- 12 pad
+                    realToFrac r0x, -- 16
+                    realToFrac r0y, -- 20
+                    realToFrac r0z, -- 24
+                    0, -- 28 pad
+                    realToFrac r1x, -- 32
+                    realToFrac r1y, -- 36
+                    realToFrac r1z, -- 40
+                    0, -- 44 pad
+                    realToFrac r2x, -- 48
+                    realToFrac r2y, -- 52
+                    realToFrac r2z, -- 56
+                    0, -- 60 pad
+                    realToFrac sunDirX, -- 64
+                    realToFrac sunDirY, -- 68
+                    realToFrac sunDirZ, -- 72
                     realToFrac dpdCloudHeight, -- 76
-                    realToFrac dpdTime,   -- 80
+                    realToFrac dpdTime, -- 80
                     realToFrac dpdBlendFactor, -- 84
-                    0, 0,                  -- 88-95: TWO pads for 16-align to 96
-                    realToFrac m00,       -- 96
-                    realToFrac m10,       -- 100
-                    realToFrac m20,       -- 104
-                    realToFrac m30,       -- 108
-                    realToFrac m01,       -- 112
-                    realToFrac m11,       -- 116
-                    realToFrac m21,       -- 120
-                    realToFrac m31,       -- 124
-                    realToFrac m02,       -- 128
-                    realToFrac m12,       -- 132
-                    realToFrac m22,       -- 136
-                    realToFrac m32,       -- 140
-                    realToFrac m03,       -- 144
-                    realToFrac m13,       -- 148
-                    realToFrac m23,       -- 152
-                    realToFrac m33,       -- 156
+                    0,
+                    0, -- 88-95: TWO pads for 16-align to 96
+                    realToFrac m00, -- 96
+                    realToFrac m10, -- 100
+                    realToFrac m20, -- 104
+                    realToFrac m30, -- 108
+                    realToFrac m01, -- 112
+                    realToFrac m11, -- 116
+                    realToFrac m21, -- 120
+                    realToFrac m31, -- 124
+                    realToFrac m02, -- 128
+                    realToFrac m12, -- 132
+                    realToFrac m22, -- 136
+                    realToFrac m32, -- 140
+                    realToFrac m03, -- 144
+                    realToFrac m13, -- 148
+                    realToFrac m23, -- 152
+                    realToFrac m33, -- 156
                     realToFrac dpdWindDirX, -- 160
                     realToFrac dpdWindDirZ, -- 164
                     realToFrac dpdPrevTime, -- 168
                     realToFrac dpdCloudCoverage, -- 172
-                    realToFrac dpdCloudDetail,   -- 176
+                    realToFrac dpdCloudDetail, -- 176
                     realToFrac dpdCloudAbsorption, -- 180
                     realToFrac dpdWeatherCoverageScale, -- 184
-                    realToFrac dpdWeatherTypeBias,      -- 188
-                    realToFrac dpdStormIntensity,       -- 192
-                    realToFrac dpdWeatherAnimSpeed,     -- 196
-                    0, 0, 0                             -- 200-208 pad to 208
-                  ] :: [CFloat]
+                    realToFrac dpdWeatherTypeBias, -- 188
+                    realToFrac dpdStormIntensity, -- 192
+                    realToFrac dpdWeatherAnimSpeed, -- 196
+                    0,
+                    0,
+                    0 -- 200-208 pad to 208
+                  ] ::
+                    [CFloat]
              in liftIO $ Buffer.copyDataToDeviceMemory dpdDevice dpdCloudFrameDataMemory cloudFrameData
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
             -- Copy current cloud result to history buffer for next frame
