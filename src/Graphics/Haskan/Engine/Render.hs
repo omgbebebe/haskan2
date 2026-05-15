@@ -380,6 +380,10 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
                       Backend.wpStormIntensity = reTvStormIntensity,
                       Backend.wpAnimSpeed = reTvWeatherAnimSpeed
                     },
+                Backend.dpeTimeOfDay = reTvTimeOfDay,
+                Backend.dpeTimeSpeed = reTvTimeSpeed,
+                Backend.dpeFrameStatsRef = reFrameStatsRef,
+                Backend.dpeCamera = camera,
                 Backend.dpeDebugMode = reTvDebugMode,
                 Backend.dpeWireframe = reTvWireframe
               }

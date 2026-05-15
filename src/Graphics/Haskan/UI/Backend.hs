@@ -22,8 +22,11 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Reader (ReaderT, ask, runReaderT)
 import Data.Bits (zeroBits)
 import Data.Coerce (coerce)
+import Data.IORef (IORef, readIORef)
 import Data.Word (Word32)
 import Foreign.C (CFloat (..), CBool)
+import Linear (V3 (..))
+import Numeric (showFFloat)
 import Foreign.C.String (CString, withCString)
 import Foreign.Marshal.Alloc qualified
 import Foreign.Marshal.Utils (fromBool, toBool)
@@ -41,6 +44,8 @@ import qualified Vulkan.Core10.Handles as Vk
 import qualified Vulkan.Zero as Vk
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Graphics.Haskan.Camera (AnyCamera, cameraDistance, cameraPosition)
+import Graphics.Haskan.Engine.Types (FrameStats (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Unsafe.Coerce (unsafeCoerce)
@@ -270,10 +275,14 @@ data WeatherPanel = WeatherPanel
   }
 
 -- | Environment for building the entire debug panel.
--- Composes Cloud, Weather, and global debug controls.
+-- Composes Cloud, Weather, Time, Status, and global debug controls.
 data DebugPanelEnv = DebugPanelEnv
   { dpeCloud :: !CloudPanel,
     dpeWeather :: !WeatherPanel,
+    dpeTimeOfDay :: !(STM.TVar Float),
+    dpeTimeSpeed :: !(STM.TVar Float),
+    dpeFrameStatsRef :: !(IORef FrameStats),
+    dpeCamera :: !AnyCamera,
     dpeDebugMode :: !(STM.TVar Word32),
     dpeWireframe :: !(STM.TVar Bool)
   }
@@ -286,8 +295,38 @@ buildDebugPanel = do
       WeatherPanel{..} = dpeWeather env
       tvDebugMode = dpeDebugMode env
       tvWireframe = dpeWireframe env
+      tvTimeOfDay = dpeTimeOfDay env
+      tvTimeSpeed = dpeTimeSpeed env
+      frameStatsRef = dpeFrameStatsRef env
+      cam = dpeCamera env
   liftIO $ withCString "Debug Panels" $ \windowTitle -> do
     _open <- ImGui.Raw.begin windowTitle Nothing Nothing
+
+    -- Status section
+    withCString "Status" $ \statusLabel -> do
+      statusOpen <- ImGui.Raw.collapsingHeader statusLabel Foreign.Ptr.nullPtr zeroBits
+      when statusOpen $ do
+        -- FPS from frame stats
+        stats <- readIORef frameStatsRef
+        let frameCount = fsFrameCount stats
+            accumTime = fsAccumTime stats
+            fps = if frameCount > 0
+                  then 1_000_000_000.0 / fromIntegral (accumTime `div` fromIntegral frameCount)
+                  else 0.0 :: Float
+        withCString ("FPS: " ++ show (round fps :: Int)) $ \text -> ImGui.Raw.textUnformatted text Nothing
+        -- Camera info
+        let V3 cx cy cz = cameraPosition cam
+            dist = cameraDistance cam
+        withCString ("Camera: dist=" ++ showFFloat (Just 1) dist "" ++ " pos=(" ++ showFFloat (Just 1) cx "" ++ "," ++ showFFloat (Just 1) cy "" ++ "," ++ showFFloat (Just 1) cz "" ++ ")") $ \text ->
+          ImGui.Raw.textUnformatted text Nothing
+
+    -- Time section
+    withCString "Time" $ \timeLabel -> do
+      timeOpen <- ImGui.Raw.collapsingHeader timeLabel Foreign.Ptr.nullPtr zeroBits
+      when timeOpen $ do
+        withCString "Time of Day" $ \label -> sliderFloatTVar label 0.0 24.0 tvTimeOfDay
+        withCString "Time Speed" $ \label -> sliderFloatTVar label 0.0 3600.0 tvTimeSpeed
+
     -- Cloud section
     withCString "Cloud" $ \cloudLabel -> do
       cloudOpen <- ImGui.Raw.collapsingHeader cloudLabel Foreign.Ptr.nullPtr zeroBits
@@ -297,6 +336,7 @@ buildDebugPanel = do
         withCString "Wind Speed" $ \label -> sliderFloatTVar label 0.0 100.0 cpWindSpeed
         withCString "Detail" $ \label -> sliderFloatTVar label 0.0 1.0 cpDetail
         withCString "Absorption" $ \label -> sliderFloatTVar label 0.0 10.0 cpAbsorption
+
     -- Weather section
     withCString "Weather" $ \weatherLabel -> do
       weatherOpen <- ImGui.Raw.collapsingHeader weatherLabel Foreign.Ptr.nullPtr zeroBits
@@ -308,6 +348,7 @@ buildDebugPanel = do
         withCString "Type Bias" $ \label -> sliderFloatTVar label (-1.0) 1.0 wpTypeBias
         withCString "Storm Intensity" $ \label -> sliderFloatTVar label 0.0 2.0 wpStormIntensity
         withCString "Anim Speed" $ \label -> sliderFloatTVar label 0.0 2.0 wpAnimSpeed
+
     -- Render Debug section
     withCString "Render Debug" $ \renderLabel -> do
       renderOpen <- ImGui.Raw.collapsingHeader renderLabel Foreign.Ptr.nullPtr zeroBits

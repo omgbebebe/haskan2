@@ -8,8 +8,8 @@
 | 2 | Vulkan Backend Initialization | ✅ Complete |
 | 3 | Frame Integration + Input Forwarding | ✅ Complete |
 | 4 | Input Focus Management | ✅ Merged into Phase 3 |
-| 5 | Engine Status Panel | ❌ Not started |
-| 6 | Rendering Controls Panel | ❌ Not started |
+| 5 | Engine Status Panel | ✅ Complete (FPS, camera, time in Debug Panels) |
+| 6 | Rendering Controls Panel | ✅ Complete (cloud, weather, debug modes) |
 | 7 | Physics Controls Panel | ❌ Blocked (needs Jolt) |
 
 **Commits**: `2cfa84d` (Phase 3 — input), `8ea368d` (Phase 4 — cloud panel)
