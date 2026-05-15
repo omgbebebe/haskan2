@@ -301,6 +301,10 @@ cloudFragment = shader do
 
     rp <- get @"rayPos"
     let ~(Vec3 px py pz) = rp
+        -- Spherical Earth curvature: cloud layer follows Earth surface
+        earthRadius = 6371000.0
+        distHorizSq = (px - camX) * (px - camX) + (pz - camZ) * (pz - camZ)
+        curvedY = py - (distHorizSq / (2.0 * earthRadius))
         -- Multi-octave domain warping to break up noise tiling
         wx1 = sin (py * warpFreq1 + pz * warpFreq1 * 0.7) * warpAmp1
         wy1 = cos (px * warpFreq1 + pz * warpFreq1 * 0.5) * warpAmp1
@@ -317,7 +321,7 @@ cloudFragment = shader do
 
     ~(Vec4 nr ng nb na) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 sx sy sz)
 
-    let h = (py - cloudBottom) / cloudThickness
+    let h = (curvedY - cloudBottom) / cloudThickness
         heightMask = smoothstep 0.0 0.15 h * (1.0 - smoothstep 0.85 1.0 h)
         density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - cloudCoverage)) * heightMask
 
@@ -335,6 +339,9 @@ cloudFragment = shader do
 
       lp <- get @"lightPos"
       let ~(Vec3 lpx lpy lpz) = lp
+          -- Spherical Earth curvature for light march
+          ldistHorizSq = (lpx - camX) * (lpx - camX) + (lpz - camZ) * (lpz - camZ)
+          lcurvedY = lpy - (ldistHorizSq / (2.0 * 6371000.0))
           lwx1 = sin (lpy * warpFreq1 + lpz * warpFreq1 * 0.7) * warpAmp1
           lwy1 = cos (lpx * warpFreq1 + lpz * warpFreq1 * 0.5) * warpAmp1
           lwz1 = sin (lpz * warpFreq1 * 0.7 + lpx * warpFreq1 * 0.6) * warpAmp1
@@ -350,7 +357,7 @@ cloudFragment = shader do
 
       ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 lsx lsy lsz)
 
-      let lh = (lpy - cloudBottom) / cloudThickness
+      let lh = (lcurvedY - cloudBottom) / cloudThickness
           lheightMask = smoothstep 0.0 0.15 lh * (1.0 - smoothstep 0.85 1.0 lh)
           ld = max 0 (lnr * (1.0 - cloudDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - (1.0 - cloudCoverage)) * lheightMask
 
