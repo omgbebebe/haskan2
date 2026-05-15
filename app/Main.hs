@@ -30,6 +30,7 @@ data CliOpts = CliOpts
   , optDayNight :: !Bool
   , optCloudTest :: !Bool
   , optCompileShaders :: !Bool
+  , optWeatherMap :: !(Maybe FilePath)
   }
 
 cliParser :: Parser CliOpts
@@ -115,7 +116,12 @@ cliParser =
     <*> switch
       ( long "compile-shaders"
      <> help "Compile FIR shaders to SPIR-V and exit"
-         )
+          )
+    <*> optional (strOption
+      ( long "weather-map"
+     <> metavar "PATH"
+     <> help "Path to weather map texture (default: data/textures/weather/weather_map.raw)"
+      ))
 
 opts :: ParserInfo CliOpts
 opts = info (cliParser <**> helper)
