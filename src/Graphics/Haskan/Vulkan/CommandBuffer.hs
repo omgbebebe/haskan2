@@ -405,6 +405,12 @@ layerTransition commandBuffer image oldLayout newLayout = do
               Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
               Vulkan.VK_ACCESS_SHADER_READ_BIT
             )
+          (Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) ->
+            ( Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+              Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+              Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT,
+              Vulkan.VK_ACCESS_TRANSFER_READ_BIT
+            )
           _ ->
             ( Vulkan.VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
               Vulkan.VK_ACCESS_MEMORY_READ_BIT .|. Vulkan.VK_ACCESS_MEMORY_WRITE_BIT,
