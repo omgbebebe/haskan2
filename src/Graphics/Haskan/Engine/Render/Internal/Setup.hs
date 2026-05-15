@@ -13,6 +13,7 @@ where
 import Control.Monad (forM, forM_, replicateM, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
+import Data.Bits (shiftR)
 import Data.ByteString qualified as BS
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
@@ -21,7 +22,7 @@ import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import Data.Text qualified as Text
 import Data.Vector.Storable (Vector, fromList)
 import Data.Vector.Storable qualified as VS
-import Data.Word (Word32, Word8)
+import Data.Word (Word16, Word32, Word8)
 import FIR qualified
 import Foreign.C qualified
 import Graphics.Haskan.Assets.Cache (AssetCache)
@@ -71,11 +72,13 @@ import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..))
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
+import Graphics.Haskan.Vulkan.Shaders.Sky.Procedural (generateSkyLUT, defaultSkyParams)
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds qualified as CloudShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
+import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProceduralShaders
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
@@ -110,6 +113,8 @@ compileAllShaders = do
   logInfo LogGeneral "  light_vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/light_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] LightingShaders.fragment
   logInfo LogGeneral "  light_frag.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/light_procedural_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] LightingProceduralShaders.fragment
+  logInfo LogGeneral "  light_procedural_frag.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/wire_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WireframeShaders.vertex
   logInfo LogGeneral "  wire_vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/wire_geom.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WireframeShaders.geometry
@@ -139,6 +144,7 @@ createShaderModules ::
       Vulkan.VkShaderModule,
       Vulkan.VkShaderModule,
       Vulkan.VkShaderModule,
+      Vulkan.VkShaderModule,
       Vulkan.VkShaderModule
     )
 createShaderModules device = do
@@ -148,13 +154,14 @@ createShaderModules device = do
   gbufFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_frag.spv"
   lightVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/light_vert.spv"
   lightFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/light_frag.spv"
+  lightProceduralFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/light_procedural_frag.spv"
   wireVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_vert.spv"
   wireGeomShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_geom.spv"
   wireFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_frag.spv"
   cullShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cull_comp.spv"
   cloudVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_vert.spv"
   cloudFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_frag.spv"
-  pure (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader)
+  pure (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, lightProceduralFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader)
 
 data IBLTextures = IBLTextures
   { iblRadianceCubemap :: !TextureHandle,
@@ -166,7 +173,8 @@ data IBLTextures = IBLTextures
     iblCloudNoiseView :: !(Maybe Vulkan.VkImageView),
     iblBlueNoiseView :: !(Maybe Vulkan.VkImageView),
     iblBlueNoiseSampler :: !Vulkan.VkSampler,
-    iblWeatherMapView :: !(Maybe Vulkan.VkImageView)
+    iblWeatherMapView :: !(Maybe Vulkan.VkImageView),
+    iblSkyLutView :: !(Maybe Vulkan.VkImageView)
   }
 
 -- | Load IBL cubemaps, BRDF LUT, and cloud noise texture
@@ -178,8 +186,9 @@ loadIBLTextures ::
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   String ->
+  Bool ->
   m IBLTextures
-loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuffer envMapDir = do
+loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuffer envMapDir proceduralSkyEnabled = do
   let envDir = "data/textures/cubemaps/" ++ envMapDir ++ "/"
       radianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
       irradianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
@@ -224,6 +233,18 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
   mWeatherMapView <- Texture.textureImageView rm weatherMapHandle
   logInfo LogGeneral "weather map texture loaded"
 
+  mSkyLutView <-
+    if proceduralSkyEnabled
+      then do
+        logInfo LogGeneral "generating procedural sky LUT..."
+        let skyLutPixels16 = generateSkyLUT defaultSkyParams
+            skyLutPixels8 = Data.Vector.Storable.fromList (concatMap (\w -> [fromIntegral (w `shiftR` 8), fromIntegral w]) skyLutPixels16) :: Data.Vector.Storable.Vector Word8
+        skyLutHandle <- Texture.createTextureFromHalfFloatData rm physicalDevice device 200 200 skyLutPixels8 graphicsQueueHandler textureCommandBuffer
+        mView <- Texture.textureImageView rm skyLutHandle
+        logInfo LogGeneral "procedural sky LUT generated and uploaded"
+        pure mView
+      else pure Nothing
+
   pure
     IBLTextures
       { iblRadianceCubemap = radianceCubemap,
@@ -235,7 +256,8 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
         iblCloudNoiseView = Just cloudNoiseView,
         iblBlueNoiseView = mBlueNoiseView,
         iblBlueNoiseSampler = blueNoiseSampler,
-        iblWeatherMapView = mWeatherMapView
+        iblWeatherMapView = mWeatherMapView,
+        iblSkyLutView = mSkyLutView
       }
 
 data SceneLoadResult = SceneLoadResult

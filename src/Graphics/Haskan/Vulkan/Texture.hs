@@ -13,6 +13,7 @@ module Graphics.Haskan.Vulkan.Texture
     generateGridTexture,
     generateCheckerboardTexture,
     createTextureFromData,
+    createTextureFromHalfFloatData,
     createTextureFromBytesCached,
     decodeTextureCached,
     uploadTexture,
@@ -385,7 +386,7 @@ createSamplerNearest dev =
    in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateSampler dev ciPtr Vulkan.vkNullPtr))
 
 -- | Shared texture upload logic: staging buffer -> image -> imageView -> register.
-uploadTexture ::
+uploadTextureWithFormat ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
@@ -393,10 +394,11 @@ uploadTexture ::
   Int ->
   Int ->
   Data.Vector.Storable.Vector Word8 ->
+  Vulkan.VkFormat ->
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   m TextureHandle
-uploadTexture rm pdev dev width height imgData queue commandBuffer = do
+uploadTextureWithFormat rm pdev dev width height imgData format queue commandBuffer = do
   let dataList = Vector.toList imgData
 
   (stagingBuffer, stagingMemoryRequirement) <-
@@ -409,8 +411,7 @@ uploadTexture rm pdev dev width height imgData queue commandBuffer = do
     Haskan.bindBufferMemory dev stagingBuffer stagingMemory dataList
     Haskan.copyDataToDeviceMemory dev stagingMemory dataList
 
-  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
-      imageExtent =
+  let imageExtent =
         Vulkan.createVk
           ( set @"width" (fromIntegral width)
               &* set @"height" (fromIntegral height)
@@ -491,6 +492,34 @@ uploadTexture rm pdev dev width height imgData queue commandBuffer = do
 
   registerTexture rm resource
   pure texH
+
+uploadTexture ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Int ->
+  Int ->
+  Data.Vector.Storable.Vector Word8 ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+uploadTexture rm pdev dev width height imgData queue commandBuffer =
+  uploadTextureWithFormat rm pdev dev width height imgData Vulkan.VK_FORMAT_R8G8B8A8_UNORM queue commandBuffer
+
+createTextureFromHalfFloatData ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Int ->
+  Int ->
+  Data.Vector.Storable.Vector Word8 ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+createTextureFromHalfFloatData rm pdev dev width height imgData queue commandBuffer =
+  uploadTextureWithFormat rm pdev dev width height imgData Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT queue commandBuffer
 
 -- | Create and register a texture resource from file, using asset cache.
 createTextureResource ::

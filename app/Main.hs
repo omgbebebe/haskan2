@@ -31,6 +31,7 @@ data CliOpts = CliOpts
   , optCloudTest :: !Bool
   , optCompileShaders :: !Bool
   , optWeatherMap :: !(Maybe FilePath)
+  , optProceduralSky :: !Bool
   }
 
 cliParser :: Parser CliOpts
@@ -122,6 +123,10 @@ cliParser =
      <> metavar "PATH"
      <> help "Path to weather map texture (default: data/textures/weather/weather_map.raw)"
       ))
+    <*> switch
+      ( long "procedural-sky"
+     <> help "Use procedural sky instead of cubemap for background"
+      )
 
 opts :: ParserInfo CliOpts
 opts = info (cliParser <**> helper)
@@ -160,3 +165,4 @@ main = do
         (optTimeSpeed cli)
         (optDayNight cli)
         (optCloudTest cli)
+        (optProceduralSky cli)

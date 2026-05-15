@@ -518,8 +518,9 @@ renderLoop ::
   Maybe String ->
   String ->
   Bool ->
+  Bool ->
   m ()
-renderLoop window physicalDevice surface inst layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir cloudTestMode = do
+renderLoop window physicalDevice surface inst layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir cloudTestMode proceduralSkyEnabled = do
   control <- liftIO $ STM.atomically $ TChan.dupTChan controlChannel
 
   rm <- newResourceManager
@@ -531,7 +532,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
 
   compileAllShaders
 
-  (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader) <-
+  (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, lightProceduralFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader) <-
     createShaderModules device
 
   descriptorSetLayout <- DescriptorSetLayout.managedDescriptorSetLayout device
@@ -563,7 +564,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
   logDebug LogTexture "textureCommandBuffer created"
 
-  iblTextures <- loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuffer envMapDir
+  iblTextures <- loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuffer envMapDir proceduralSkyEnabled
   let IBLTextures {..} = iblTextures
 
   assetCache <- initCache ".haskan2-cache"
@@ -822,7 +823,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
       outerLoop exit = do
         unless exit $ do
           renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-            with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView iblWeatherMapView iblBlueNoiseSampler imGuiRenderPass) $ \dr -> do
+            with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView iblWeatherMapView iblBlueNoiseSampler imGuiRenderPass proceduralSkyEnabled iblSkyLutView) $ \dr -> do
               -- Update lighting descriptor sets with light SSBO
               for_ (drLightingDescriptorSets dr) $ \ds ->
                 DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer

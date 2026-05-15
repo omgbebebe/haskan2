@@ -83,6 +83,7 @@ createDeferredResources ::
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
+  Vulkan.VkShaderModule ->
   Maybe Vulkan.VkImageView ->
   Maybe Vulkan.VkImageView ->
   Maybe Vulkan.VkImageView ->
@@ -92,8 +93,10 @@ createDeferredResources ::
   Maybe Vulkan.VkImageView ->
   Vulkan.VkSampler ->
   Vulkan.VkRenderPass ->
+  Bool ->
+  Maybe Vulkan.VkImageView ->
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView mWeatherMapView blueNoiseSampler imGuiRenderPass = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView mWeatherMapView blueNoiseSampler imGuiRenderPass proceduralSkyEnabled mSkyLutView = do
   let extent = rcSurfaceExtent ctx
       cloudExtent =
         Vulkan.createVk
@@ -207,7 +210,10 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender "g-buffer pipeline created"
 
   -- Lighting pipeline layout
-  lightingDescriptorSetLayout <- DescriptorSetLayout.managedLightingDescriptorSetLayout device
+  lightingDescriptorSetLayout <-
+    if proceduralSkyEnabled
+      then DescriptorSetLayout.managedLightingProceduralDescriptorSetLayout device
+      else DescriptorSetLayout.managedLightingDescriptorSetLayout device
   let cameraPushConstantRange =
         Vulkan.createVk
           ( set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
@@ -218,6 +224,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender "lighting pipeline layout created"
 
   -- Lighting pipeline
+  let selectedLitFragShader = if proceduralSkyEnabled then lightProceduralFragShader else litFragShader
   lightingPipeline <-
     GraphicsPipeline.managedFullscreenPipeline
       device
@@ -228,7 +235,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
           spTessControl = Nothing,
           spTessEvaluation = Nothing,
           spGeometry = Nothing,
-          spFragment = litFragShader
+          spFragment = selectedLitFragShader
         }
       extent
   logDebugIO LogRender "lighting pipeline created"
@@ -284,17 +291,23 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender $ "ImGui framebuffers created: " <> showT (length imGuiFramebuffers)
 
   -- Lighting descriptor pool and sets
-  lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages 7
+  let lightingTexturesPerSet = if proceduralSkyEnabled then 8 else 7
+  lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages lightingTexturesPerSet
   lightingDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
     DescriptorSet.allocateDescriptorSet device lightingDescriptorPool [lightingDescriptorSetLayout]
   logDebugIO LogRender $ "lighting descriptor sets allocated: " <> showT (length lightingDescriptorSets)
 
   -- Update lighting descriptor sets
   liftIO $ for_ (zip3 lightingDescriptorSets gBufferImageViews cloudImageViews) $ \(ds, views, cloudView) -> do
-    let allViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
+    let baseViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
           (Just env, Just irr, Just brdf) -> views ++ [env, irr, brdf]
           _ -> views ++ replicate 3 Vulkan.VK_NULL_HANDLE
-    DescriptorSet.updateLightingDescriptorSets device ds sampler allViews Nothing (Just cloudView)
+    if proceduralSkyEnabled
+      then do
+        let allViews = baseViews ++ maybe [Vulkan.VK_NULL_HANDLE] pure mSkyLutView
+        DescriptorSet.updateLightingProceduralDescriptorSets device ds sampler allViews Nothing (Just cloudView)
+      else do
+        DescriptorSet.updateLightingDescriptorSets device ds sampler baseViews Nothing (Just cloudView)
   logDebugIO LogRender "lighting descriptor sets updated"
 
   -- Create cloud frame data UBO (256 bytes, minimum UBO alignment)

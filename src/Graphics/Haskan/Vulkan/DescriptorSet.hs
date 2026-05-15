@@ -202,6 +202,78 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer m
     Foreign.Marshal.Array.withArray allWrites $ \writeUpdatePtr ->
       Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writeUpdatePtr 0 Vulkan.vkNullPtr
 
+-- | Update lighting descriptor sets for procedural sky variant.
+-- Expects 8 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive,
+-- env_map, irradiance_map, brdf_lut, sky_lut (bindings 0-6 and 9).
+updateLightingProceduralDescriptorSets ::
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkSampler ->
+  -- | 8 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive, env_map, irradiance_map, brdf_lut, sky_lut
+  [Vulkan.VkImageView] ->
+  -- | light SSBO (optional)
+  Maybe Vulkan.VkBuffer ->
+  -- | cloud result texture (optional)
+  Maybe Vulkan.VkImageView ->
+  m ()
+updateLightingProceduralDescriptorSets dev descriptorSet sampler imageViews mLightBuffer mCloudResultView = do
+  let mkTextureInfo imageView =
+        Vulkan.createVk
+          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+              &* set @"imageView" imageView
+              &* set @"sampler" sampler
+          )
+      mkWrite bindingIdx imageView =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" bindingIdx
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* setListRef @"pImageInfo" [mkTextureInfo imageView]
+              &* set @"pBufferInfo" Vulkan.VK_NULL
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+      -- Bindings 0-6 are the standard textures
+      standardWrites = zipWith mkWrite [0 .. 6] (take 7 imageViews)
+      -- sky_lut is at binding 9
+      skyLutWrite = case drop 7 imageViews of
+        (skyLutView : _) -> [mkWrite 9 skyLutView]
+        _ -> []
+      lightWrite = case mLightBuffer of
+        Nothing -> []
+        Just lightBuffer ->
+          let bufferInfo =
+                Vulkan.createVk
+                  ( set @"buffer" lightBuffer
+                      &* set @"offset" 0
+                      &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+                  )
+           in [ Vulkan.createVk
+                  ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+                      &* set @"pNext" Vulkan.VK_NULL
+                      &* set @"dstSet" descriptorSet
+                      &* set @"dstBinding" 7
+                      &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+                      &* set @"pTexelBufferView" Vulkan.VK_NULL
+                      &* set @"pImageInfo" Vulkan.VK_NULL
+                      &* setVkRef @"pBufferInfo" bufferInfo
+                      &* set @"descriptorCount" 1
+                      &* set @"dstArrayElement" 0
+                  )
+              ]
+      cloudResultWrite = case mCloudResultView of
+        Nothing -> []
+        Just cloudResultView ->
+          [mkWrite 8 cloudResultView]
+      allWrites = standardWrites ++ skyLutWrite ++ lightWrite ++ cloudResultWrite
+  liftIO $
+    Foreign.Marshal.Array.withArray allWrites $ \writeUpdatePtr ->
+      Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writeUpdatePtr 0 Vulkan.vkNullPtr
+
 -- | Update only the light SSBO binding (binding 7) in a lighting descriptor set.
 updateLightingLightBuffer ::
   (MonadIO m) =>

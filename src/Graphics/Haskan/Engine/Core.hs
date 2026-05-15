@@ -25,7 +25,8 @@ data EngineConfig = EngineConfig
   { targetRenderFPS :: !Integer,
     targetPhysicsFPS :: !Integer,
     targetNetworkFPS :: !Integer,
-    targetInputFPS :: !Integer
+    targetInputFPS :: !Integer,
+    proceduralSkyEnabled :: !Bool
   }
   deriving (Show)
 

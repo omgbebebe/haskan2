@@ -325,7 +325,8 @@ data EngineConfig = EngineConfig
     initialTimeOfDay :: !Float,
     timeSpeed :: !Float,
     dayNightEnabled :: !Bool,
-    cloudTestMode :: !Bool
+    cloudTestMode :: !Bool,
+    proceduralSkyEnabled :: !Bool
   }
   deriving (Show)
 
