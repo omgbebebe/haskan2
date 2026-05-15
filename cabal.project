@@ -5,8 +5,12 @@ packages:
 
 write-ghc-environment-files: always
 
+package dear-imgui
+  flags: +sdl +vulkan -opengl3 -glfw +use-wchar32 +use-imdrawidx32
+
 allow-newer:
-  boring:base
+  dear-imgui:megaparsec
+  , boring:base
   , constraints-extras:base
   , *:base
   , *:template-haskell

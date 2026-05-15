@@ -121,8 +121,9 @@ library
                      , fast-logger >=3.0 && <3.4
                      , vulkan-api >=1.4.0 && <1.4.1
                      , managed >=1.0 && <1.1
-                     , sdl2 >=2.5 && <2.6
-                     , lens >=5.0 && <5.5
+                      , sdl2 >=2.5 && <2.6
+                      , dear-imgui >=2.4 && <2.5
+                      , lens >=5.0 && <5.5
                      , linear >=1.23 && <1.24
                      , JuicyPixels >=3.3 && <3.4
                      , unordered-containers >=0.2 && <0.3

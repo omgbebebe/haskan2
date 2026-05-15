@@ -1,0 +1,139 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[english]{babel}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{geometry}
+
+\geometry{margin=1in}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstset{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{purple},
+    basicstyle=\ttfamily\small,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single
+}
+
+\title{Advanced Macro Structure Report: Weather Maps \\ \large Dynamic Coverage Control and Shape Variation for \texttt{Clouds.hs}}
+\author{Advanced Graphics Engine Group}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{The Core Problem: Uniform Noise Distribution}
+Even with dynamic looping and multiple scattering, sampling a 3D noise texture directly using world coordinates results in an evenly distributed, repetitive grid of clouds. 3D noise functions are structurally homogeneous; they have the same average density everywhere.
+
+To break this pattern, you must decouple the \textbf{structural detail} (the 3D noise) from the \textbf{macro distribution} (where clouds are allowed to form). This is achieved using a low-frequency \textbf{2D Weather Map}.
+
+---
+
+\section{Architectural Solution: The 2D Weather Map Texture}
+Introduce a 2D texture wrapped over a massive scale (e.g., $20,000 \times 20,000$ meters) sampled via world horizontal positions $(x, z)$. This texture contains macroeconomic parameters packed into its color channels:
+
+\begin{itemize}
+    \item \textbf{R (Red Channel) --- Cloud Coverage:} Controls local cloud density ($0.0 = $ clear sky, $1.0 = $ heavy overcast).
+    \item \textbf{G (Green Channel) --- Cloud Type / Height Mask:} Controls whether clouds are low, flat Stratus ($0.0$) or towering Cumulonimbus ($1.0$).
+    \item \textbf{B (Blue Channel) --- Wetness / Storm Potential:} Used to darken cloud bellies locally during heavy rain or storms.
+\end{itemize}
+
+---
+
+\section{Mathematical Density Modulation Shifting}
+Instead of evaluating raw noise directly against a fixed threshold, pass a global uniform variable, \texttt{globalCoverage} ($0.0 \to 1.0$), from your CPU app code into the shader. Combine it with the local weather data:
+
+\begin{equation}
+    \text{CombinedCoverage} = \text{clamp}(\text{WeatherMap.R} \cdot \text{globalCoverage}, 0.0, 1.0)
+\end{equation}
+
+Modify your base density accumulation logic inside the loop using a non-linear remap operation:
+
+\begin{equation}
+    \text{FinalDensity} = \text{max}\left(0.0, \frac{\text{BaseNoise} - (1.0 - \text{CombinedCoverage})}{\text{CombinedCoverage}}\right)
+\end{equation}
+
+When \texttt{globalCoverage} is set to $0.0$, \text{CombinedCoverage} collapses to $0.0$, making the subtraction term $(1.0 - 0.0) = 1.0$, completely clipping away all noise to create a perfectly clear sky. When shifted to $1.0$, the entire noise spectrum is pushed above the threshold, forcing thick, stormy overcast clouds.
+
+---
+
+\section{Haskell FIR Integration Script}
+Below is the updated sample block written for Haskell \texttt{FIR} syntax, illustrating how to integrate the 2D weather sampler into your structural raymarch loop.
+
+\begin{lstlisting}[language=Haskell, caption={Haskell FIR Weather Map Masking Architecture}]
+-- Update your pipeline configuration descriptors to take a 2D weather texture map
+type AdvancedCloudPipeline = '[
+    "weather_map"    ':-> Texture2D (Vec 4 Float),
+    "cloud_noise"    ':-> Texture3D (Vec 4 Float),
+    "globalCoverage" ':-> Uniform Float
+  ]
+
+evaluateWeatherDensity :: Vec3 Float -> Float -> Program AdvancedCloudPipeline Float
+evaluateWeatherDensity currPos heightNorm = do
+    globalCov <- use @"globalCoverage"
+    
+    -- 1. Sample Weather Map using massive macro landscape coordinates
+    let weatherScale = 0.00005 -- Covers a large 20km area before looping
+    let weatherUV = Vec2 (currPos.&X * weatherScale) (currPos.&Z * weatherScale)
+    weatherSample <- sample @"weather_map" weatherUV
+    
+    let localCoverage = weatherSample.&R
+    let cloudType     = weatherSample.&G
+    
+    -- 2. Dynamically modify allowed cloud thickness profile based on type
+    let allowedHeightMin = lerp 0.1 0.0 cloudType -- Stratus sits lower
+    let allowedHeightMax = lerp 0.4 1.0 cloudType -- Cumulus towers higher
+    let heightMask = smoothstep allowedHeightMin (allowedHeightMin + 0.05) heightNorm 
+                   * (1.0 - smoothstep (allowedHeightMax - 0.1) allowedHeightMax heightNorm)
+    
+    -- 3. Combine with base 3D noise field
+    baseNoise <- sample @"cloud_noise" (currPos * 0.0002)
+    
+    let targetCoverage = localCoverage * globalCov
+    let activeDensity  = (baseNoise.&R) - (1.0 - targetCoverage)
+    
+    return (max 0.0 (activeDensity * heightMask))
+\end{lstlisting}
+
+---
+
+\section{Configuration Tuning Matrix: Clear Sky to Storms}
+By updating the uniform values on the CPU frame by frame, you can easily control weather states dynamically:
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{llll}
+\toprule
+\textbf{Target Weather State} & \textbf{\texttt{globalCoverage} Value} & \textbf{Visual Effect Outcome} & \textbf{Ambient Lighting Adjust} \\ \midrule
+\textbf{Clear Blue Sky} & $0.00 \to 0.15$ & No cloud density survives threshold clipping. & Bright blue skylight tint. \\
+\textbf{Fair Weather Cumulus} & $0.25 \to 0.45$ & Scattered, localized fluffy cloud clusters. & Normal ambient coefficients. \\
+\textbf{Overcast Day} & $0.60 \to 0.80$ & Continuous cloud sheets covering the dome. & Muted grey ambient tone. \\
+\textbf{Heavy Thunderstorm} & $0.85 \to 1.00$ & Tall, dark, sunlight-blocking cloud layers. & Dark blue-grey undertones. \\ \bottomrule
+\end{tabular}
+\caption{Global state values configuration parameter matrix.}
+\end{table}
+
+\end{document}
+
