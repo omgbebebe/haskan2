@@ -299,6 +299,10 @@ cloudFragment = shader do
     when (t < 0.01) do
       break @1
 
+    -- Per-step irrational jitter to break deterministic phase alignment
+    let stepNoise = fract (blueR + fromIntegral s * 0.618034)
+        jitteredStep = adaptiveStepSize * (1.0 + 0.15 * (stepNoise - 0.5))
+
     rp <- get @"rayPos"
     let ~(Vec3 px py pz) = rp
         -- Spherical Earth curvature: cloud layer follows Earth surface
@@ -370,15 +374,15 @@ cloudFragment = shader do
                        p = 0.7 * exp (-finalLightDensity * cloudAbsorption * 0.167)
                    in max b p
 
-    let s_scatter = cloudBase ^* (lightT_d * phase * density * adaptiveStepSize)
-        t_new = exp (-density * adaptiveStepSize)
+    let s_scatter = cloudBase ^* (lightT_d * phase * density * jitteredStep)
+        t_new = exp (-density * jitteredStep)
         ~(Vec3 srx sry srz) = s_scatter
 
     modify @"accR" (+ (srx * t))
     modify @"accG" (+ (sry * t))
     modify @"accB" (+ (srz * t))
     put @"transmittance" (t * t_new)
-    put @"rayPos" (rp ^+^ dir ^* adaptiveStepSize)
+    put @"rayPos" (rp ^+^ dir ^* jitteredStep)
     modify @"step" (+1)
 
   finalTransmittance <- get @"transmittance"
