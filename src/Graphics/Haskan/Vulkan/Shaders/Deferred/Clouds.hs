@@ -267,12 +267,14 @@ cloudFragment = shader do
       tEntry = tNear + ditherOffset
       entryPos = Vec3 (camX + dirX * tEntry) (camY + dirY * tEntry) (camZ + dirZ * tEntry)
 
-      noiseScale = 0.003
+      noiseScale = 0.0008
       windSpeed = 0.05
       windOffsetX = time * windSpeed * windDirX
       windOffsetZ = time * windSpeed * windDirZ
-      warpFreq = 0.002
-      warpAmp = 170.0
+      warpFreqX = 0.0013
+      warpFreqY = 0.0017
+      warpFreqZ = 0.0023
+      warpAmp = 60.0
 
   -- Dynamic ray march: mutable accumulators
   _ <- def @"step" @RW @Int32 0
@@ -301,9 +303,9 @@ cloudFragment = shader do
 
     rp <- get @"rayPos"
     let ~(Vec3 px py pz) = rp
-        wx = sin (py * warpFreq + pz * warpFreq * 0.7) * warpAmp
-        wy = cos (px * warpFreq + pz * warpFreq * 0.5) * warpAmp
-        wz = sin (pz * warpFreq * 0.7 + px * warpFreq * 0.6) * warpAmp
+        wx = sin (py * warpFreqX + pz * warpFreqX * 0.7) * warpAmp
+        wy = cos (px * warpFreqY + pz * warpFreqY * 0.5) * warpAmp
+        wz = sin (pz * warpFreqZ * 0.7 + px * warpFreqZ * 0.6) * warpAmp
         sx = fract ((px + wx) * noiseScale - windOffsetX)
         sy = fract ((py + wy) * noiseScale)
         sz = fract ((pz + wz) * noiseScale - windOffsetZ)
@@ -312,7 +314,7 @@ cloudFragment = shader do
 
     let h = (py - cloudBottom) / cloudThickness
         heightMask = smoothstep 0.0 0.15 h * (1.0 - smoothstep 0.85 1.0 h)
-        density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - cloudCoverage)) * heightMask * 4.0
+        density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - cloudCoverage)) * heightMask
 
     -- Nested light march: 4 steps toward sun for self-shadowing
     _ <- def @"lightStep" @RW @Int32 0
@@ -328,9 +330,9 @@ cloudFragment = shader do
 
       lp <- get @"lightPos"
       let ~(Vec3 lpx lpy lpz) = lp
-          lwx = sin (lpy * warpFreq + lpz * warpFreq * 0.7) * warpAmp
-          lwy = cos (lpx * warpFreq + lpz * warpFreq * 0.5) * warpAmp
-          lwz = sin (lpz * warpFreq * 0.7 + lpx * warpFreq * 0.6) * warpAmp
+          lwx = sin (lpy * warpFreqX + lpz * warpFreqX * 0.7) * warpAmp
+          lwy = cos (lpx * warpFreqY + lpz * warpFreqY * 0.5) * warpAmp
+          lwz = sin (lpz * warpFreqZ * 0.7 + lpx * warpFreqZ * 0.6) * warpAmp
           lsx = fract ((lpx + lwx) * noiseScale - windOffsetX)
           lsy = fract ((lpy + lwy) * noiseScale)
           lsz = fract ((lpz + lwz) * noiseScale - windOffsetZ)
@@ -339,7 +341,7 @@ cloudFragment = shader do
 
       let lh = (lpy - cloudBottom) / cloudThickness
           lheightMask = smoothstep 0.0 0.15 lh * (1.0 - smoothstep 0.85 1.0 lh)
-          ld = max 0 (lnr * (1.0 - cloudDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - (1.0 - cloudCoverage)) * lheightMask * 4.0
+          ld = max 0 (lnr * (1.0 - cloudDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - (1.0 - cloudCoverage)) * lheightMask
 
       modify @"lightDensity" (+ (ld * lightStepSize))
       put @"lightPos" (lp ^+^ sunDir ^* lightStepSize)
@@ -369,14 +371,6 @@ cloudFragment = shader do
   let cloudSkyR = skyR * finalTransmittance + finalAccR
       cloudSkyG = skyG * finalTransmittance + finalAccG
       cloudSkyB = skyB * finalTransmittance + finalAccB
-
-      -- Apply sky tint
-      skyTintR = view @(Name "skyTintR") cameraPos
-      skyTintG = view @(Name "skyTintG") cameraPos
-      skyTintB = view @(Name "skyTintB") cameraPos
-      tintedSkyR = cloudSkyR * skyTintR
-      tintedSkyG = cloudSkyG * skyTintG
-      tintedSkyB = cloudSkyB * skyTintB
 
       -- Temporal accumulation with reprojection
       blendFactor = view @(Name "blendFactor") cameraPos
@@ -431,8 +425,8 @@ cloudFragment = shader do
       -- Reduced blend factor (0.85 vs 0.92) to reduce ghosting from
       -- residual motion not captured by wind displacement
       reprojBlend = 0.85 * blendFactor * validReproj
-      accR = reprojBlend * histR + (1.0 - reprojBlend) * tintedSkyR
-      accG = reprojBlend * histG + (1.0 - reprojBlend) * tintedSkyG
-      accB = reprojBlend * histB + (1.0 - reprojBlend) * tintedSkyB
+      accR = reprojBlend * histR + (1.0 - reprojBlend) * cloudSkyR
+      accG = reprojBlend * histG + (1.0 - reprojBlend) * cloudSkyG
+      accB = reprojBlend * histB + (1.0 - reprojBlend) * cloudSkyB
 
   put @"out_colour" (Vec4 accR accG accB 1.0)

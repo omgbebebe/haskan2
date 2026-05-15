@@ -637,10 +637,16 @@ fragment = shader do
       gamz = sqrt mapz
 
       -- Tinted skybox for background pixels (no geometry)
-      -- Use cloud-blended sky instead of raw skybox
-      tintedSkyR = cloudSkyR * skyTintR
-      tintedSkyG = cloudSkyG * skyTintG
-      tintedSkyB = cloudSkyB * skyTintB
+      -- Apply same tone map + gamma as geometry pixels
+      cloudMapR = cloudSkyR / (cloudSkyR + 1.0)
+      cloudMapG = cloudSkyG / (cloudSkyG + 1.0)
+      cloudMapB = cloudSkyB / (cloudSkyB + 1.0)
+      cloudGamR = sqrt cloudMapR
+      cloudGamG = sqrt cloudMapG
+      cloudGamB = sqrt cloudMapB
+      tintedSkyR = cloudGamR * skyTintR
+      tintedSkyG = cloudGamG * skyTintG
+      tintedSkyB = cloudGamB * skyTintB
       finalx = if hasGeometry then gamx else tintedSkyR
       finaly = if hasGeometry then gamy else tintedSkyG
       finalz = if hasGeometry then gamz else tintedSkyB
