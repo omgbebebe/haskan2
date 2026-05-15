@@ -209,7 +209,7 @@ buildCloudDebugPanel tvHeight tvCoverage tvDetail tvAbsorption =
       withCString "Coverage" $ \label -> sliderFloatTVar label 0.0 1.0 tvCoverage
       withCString "Detail" $ \label -> sliderFloatTVar label 0.0 1.0 tvDetail
       withCString "Absorption" $ \label -> sliderFloatTVar label 0.0 10.0 tvAbsorption
-      ImGui.Raw.end
+    ImGui.Raw.end
 
 -- ---------------------------------------------------------------------------
 -- Command buffer recording
