@@ -61,7 +61,9 @@ data DeferredResources = DeferredResources
     drGBufferImageViews :: ![[Vulkan.VkImageView]],
     drSampler :: !Vulkan.VkSampler,
     drWireframePipeline :: !Vulkan.VkPipeline,
-    drWireframePipelineLayout :: !Vulkan.VkPipelineLayout
+    drWireframePipelineLayout :: !Vulkan.VkPipelineLayout,
+    drImGuiFramebuffers :: ![Vulkan.VkFramebuffer],
+    drImGuiRenderPass :: !Vulkan.VkRenderPass
   }
 
 createDeferredResources ::
@@ -87,8 +89,9 @@ createDeferredResources ::
   Maybe Vulkan.VkImageView ->
   Maybe Vulkan.VkImageView ->
   Vulkan.VkSampler ->
+  Vulkan.VkRenderPass ->
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView blueNoiseSampler = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView blueNoiseSampler imGuiRenderPass = do
   let extent = rcSurfaceExtent ctx
       cloudExtent =
         Vulkan.createVk
@@ -274,6 +277,10 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   lightingFramebuffers <- for swapchainImageViews $ Framebuffer.managedLightingFramebuffer device lightingRenderPass extent
   logDebugIO LogRender $ "lighting framebuffers created: " <> showT (length lightingFramebuffers)
 
+  -- ImGui framebuffers (swapchain images, no depth)
+  imGuiFramebuffers <- for swapchainImageViews $ Framebuffer.managedLightingFramebuffer device imGuiRenderPass extent
+  logDebugIO LogRender $ "ImGui framebuffers created: " <> showT (length imGuiFramebuffers)
+
   -- Lighting descriptor pool and sets
   lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages 7
   lightingDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
@@ -335,5 +342,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         drGBufferImageViews = gBufferImageViews,
         drSampler = sampler,
         drWireframePipeline = wireframePipeline,
-        drWireframePipelineLayout = gBufferPipelineLayout
+        drWireframePipelineLayout = gBufferPipelineLayout,
+        drImGuiFramebuffers = imGuiFramebuffers,
+        drImGuiRenderPass = imGuiRenderPass
       }

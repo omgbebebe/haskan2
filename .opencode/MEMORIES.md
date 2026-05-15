@@ -548,9 +548,80 @@ camPosData = [ camX, camY, camZ, realToFrac dpdDebugMode
 - FIR submodule: `c2cf37a` (.gitignore for local env files)
 - Main repo: `a19d0c3` (submodule bump + regenerated shaders + engine cleanup)
 
-**Pre-existing issue discovered**:
-- Cloud shader has SSA dominance violation: `%386` defined in inner loop merge block `%193`, used in outer merge block `%120` without phi
-- This exists in BOTH original and fixed FIR code — not caused by my changes
-- Needs separate investigation in cloud shader code or nested loop phi generation
+---
+
+### 2026-05-15: Dear ImGui Vulkan Integration — Phase 1 & 2 DONE
+
+**Dear ImGui Dependency Setup**:
+- Added `dear-imgui >= 2.4` to `haskan2.cabal` with flags `+sdl +vulkan -opengl3 -glfw`
+- Added `vulkan >= 3.0` package dependency (needed for dear-imgui's Vulkan backend)
+- Added `./3rdparty/dear-imgui/` to `cabal.project`
+- `allow-newer: dear-imgui:megaparsec` in cabal.project
+
+**Phase 1 — Render Pass + Descriptor Pool**:
+- `managedImGuiRenderPass` / `createImGuiRenderPass` in `RenderPass.hs`
+  - Single color attachment (swapchain format), `LOAD_OP_LOAD`, `initialLayout=PRESENT_SRC_KHR`, `finalLayout=PRESENT_SRC_KHR`
+- `managedImGuiDescriptorPool` / `createImGuiDescriptorPool` in `DescriptorPool.hs`
+  - 11 pool sizes × 1000 each (all descriptor types), `maxSets=1000`, `FREE_DESCRIPTOR_SET_BIT`
+- Fixed existing `createComputeDescriptorPool` to use `@` type-applied style (was using string literals that broke with newer vulkan-api)
+
+**Phase 2 — Vulkan Backend Module**:
+- Created `src/Graphics/Haskan/UI/Backend.hs`:
+  - `ImGuiBackend` data type: context, init result, check result fun ptr
+  - `initImGuiBackend`: creates context, SDL backend init, Vulkan backend init, font atlas creation
+  - `shutdownImGuiBackend`: proper cleanup order (Vulkan → SDL → context)
+  - `buildImGuiFrame`: vulkanNewFrame + sdl2NewFrame + newFrame + user UI + render + getDrawData
+  - `recordImGuiDrawData`: wraps `vulkanRenderDrawData` inside `withImGuiRenderPass`
+
+**Vulkan Interop (vulkan-api ↔ vulkan package)**:
+- Haskan2 uses `vulkan-api` (`VkDevice = Ptr VkDevice_T`)
+- dear-imgui uses `vulkan` package (`Device = Device (Ptr Device_T) DeviceCmds`)
+- **Critical fix**: Use proper constructor + `castPtr` + `Vulkan.zero`:
+  ```haskell
+  toVulkanDevice ptr = Vk.Device (castPtr ptr) Vk.zero
+  ```
+- **WRONG approach** (causes segfault): `unsafeCoerce` — produces wrong heap layout for UNPACK fields
+- **WRONG approach**: `Vk.Device (castPtr ptr) undefined` — `undefined` for strict `DeviceCmds` field is evaluated during C FFI marshaling, causing crash in `vkCreateSampler`
+- `toVulkanRenderPass` / `toVulkanDescriptorPool` use `coerce` (both are `newtype Word64`)
+
+**DeferredResources Extended**:
+- Added `drImGuiFramebuffers` (per-swapchain-image, no depth) and `drImGuiRenderPass`
+- Created in `createDeferredResources` using `managedLightingFramebuffer` (single attachment)
+
+**RenderEnv Extended**:
+- Added `reImGuiBackend :: !(Maybe Backend.ImGuiBackend)`
+- Initialized in `renderLoop` after device creation, cleaned up via `managed`/`alloc`
+- `renderLoop` signature extended with `VkInstance` parameter
+
+**Frame Recording Integration**:
+- `PassRecording` extended with `rcImGuiDrawData`, `rcImGuiRenderPass`, `rcImGuiFramebuffers`
+- After all deferred graph passes, conditionally records ImGui overlay:
+  ```haskell
+  for_ rcImGuiDrawData $ \drawData -> liftIO $ do
+    let imGuiFramebuffer = rcImGuiFramebuffers !! fromIntegral imageIdx
+    Backend.recordImGuiDrawData commandBuffer rcImGuiRenderPass imGuiFramebuffer rcPassSurfaceExtent drawData
+  ```
+- `buildRecordContext` signature extended with `Maybe DearImGui.Raw.DrawData` parameter
+
+**Runtime Verification**:
+- Demo widget renders correctly on top of scene
+- Mouse hover highlights UI elements
+- Input events routed to both ImGui and engine simultaneously
+- Camera controls (WASD, mouse orbit) work alongside ImGui
+- No performance degradation observed
+
+**Files Changed**:
+- `src/Graphics/Haskan/UI/Backend.hs` — new ImGui backend module
+- `src/Graphics/Haskan/Vulkan/RenderPass.hs` — ImGui render pass
+- `src/Graphics/Haskan/Vulkan/DescriptorPool.hs` — ImGui descriptor pool + compute pool fix
+- `src/Graphics/Haskan/Vulkan/DeferredResources.hs` — ImGui framebuffers/render pass field
+- `src/Graphics/Haskan/Engine/Render.hs` — init/shutdown, frame building, pass to recording
+- `src/Graphics/Haskan/Engine/Render/Internal/PassRecording.hs` — record ImGui draw data
+- `src/Graphics/Haskan/Engine.hs` — pass VkInstance to renderLoop
+- `haskan2.cabal` — dear-imgui, vulkan deps; UI.Backend module
+
+**Open Issues**:
+- Phase 3: Replace `SDL.pollEvents` with `DearImGui.SDL.pollEventWithImGui` for proper input forwarding
+- Phase 4: Build first debug panel (cloud parameter UI)
 
 ---

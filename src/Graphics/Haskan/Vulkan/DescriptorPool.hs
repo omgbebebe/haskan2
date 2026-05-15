@@ -9,6 +9,8 @@ module Graphics.Haskan.Vulkan.DescriptorPool
     createBindlessDescriptorPool,
     managedComputeDescriptorPool,
     createComputeDescriptorPool,
+    managedImGuiDescriptorPool,
+    createImGuiDescriptorPool,
   )
 where
 
@@ -198,3 +200,48 @@ createComputeDescriptorPool dev = do
           ( \ciPtr ->
               allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
           )
+
+managedImGuiDescriptorPool :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorPool
+managedImGuiDescriptorPool dev =
+  alloc
+    "ImGuiDescriptorPool"
+    (createImGuiDescriptorPool dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
+
+createImGuiDescriptorPool :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorPool
+createImGuiDescriptorPool dev = do
+  let poolSize t c =
+        Vulkan.createVk
+          ( set @"type" t
+              &* set @"descriptorCount" c
+          )
+      poolSizes =
+        [ poolSize Vulkan.VK_DESCRIPTOR_TYPE_SAMPLER 1000
+        , poolSize Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER 1000
+        , poolSize Vulkan.VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE 1000
+        , poolSize Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE 1000
+        , poolSize Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER 1000
+        , poolSize Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER 1000
+        , poolSize Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER 1000
+        , poolSize Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER 1000
+        , poolSize Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC 1000
+        , poolSize Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC 1000
+        , poolSize Vulkan.VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT 1000
+        ]
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT
+              &* set @"poolSizeCount" (fromIntegral (length poolSizes))
+              &* setListRef @"pPoolSizes" poolSizes
+              &* set @"maxSets" 1000
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
+          )
+
+

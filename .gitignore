@@ -15,7 +15,9 @@ gltf-codec-*/
 # Root-level gltf-loader copies (we track patches in 3rdparty/gltf-loader)
 /gltf-loader-*/
 
-# Local tooling/vendor code (not part of this repo)
+# Dear ImGui settings
+imgui.ini
+
 vulkan-3.26.6/
 effectful-2.6.1.0/
 

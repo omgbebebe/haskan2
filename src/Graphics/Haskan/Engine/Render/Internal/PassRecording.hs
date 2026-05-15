@@ -12,6 +12,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Data.Text qualified as Text
 import Data.Word (Word32)
+import qualified DearImGui.Raw
 import Foreign.Marshal.Array qualified
 import Foreign.Storable (Storable (..))
 import Graphics.Haskan.Camera (AnyCamera, Camera (..))
@@ -23,6 +24,7 @@ import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGrap
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
+import Graphics.Haskan.UI.Backend qualified as Backend
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
@@ -60,7 +62,10 @@ data RecordContext = RecordContext
     rcDeferred :: !DeferredResources,
     rcCullResources :: !ComputeCullResources,
     rcDevice :: !Vulkan.VkDevice,
-    rcPassSurfaceExtent :: !Vulkan.VkExtent2D
+    rcPassSurfaceExtent :: !Vulkan.VkExtent2D,
+    rcImGuiRenderPass :: !Vulkan.VkRenderPass,
+    rcImGuiFramebuffers :: ![Vulkan.VkFramebuffer],
+    rcImGuiDrawData :: !(Maybe DearImGui.Raw.DrawData)
   }
 
 buildRecordContext ::
@@ -87,8 +92,9 @@ buildRecordContext ::
   Float ->
   Float ->
   Float ->
+  Maybe DearImGui.Raw.DrawData ->
   RecordContext
-buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProj windDirX windDirZ prevTime cloudCoverage cloudDetail cloudAbsorption =
+buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProj windDirX windDirZ prevTime cloudCoverage cloudDetail cloudAbsorption mDrawData =
   RecordContext
     { rcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
       rcFrameDescriptorSets = frameDescriptorSets,
@@ -118,7 +124,10 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
       rcDeferred = dr,
       rcCullResources = ccr,
       rcDevice = device ctx,
-      rcPassSurfaceExtent = rcSurfaceExtent ctx
+      rcPassSurfaceExtent = rcSurfaceExtent ctx,
+      rcImGuiRenderPass = drImGuiRenderPass dr,
+      rcImGuiFramebuffers = drImGuiFramebuffers dr,
+      rcImGuiDrawData = mDrawData
     }
 
 buildRecordAction :: RecordContext -> Vulkan.Word32 -> Int -> IO ()
@@ -256,3 +265,8 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 "clouds" -> cloudPassCtx
                 _ -> lightingPassCtx
           liftIO $ recordFn passCtx
+
+        -- Dear ImGui overlay pass
+        for_ rcImGuiDrawData $ \drawData -> liftIO $ do
+          let imGuiFramebuffer = rcImGuiFramebuffers !! fromIntegral imageIdx
+          Backend.recordImGuiDrawData commandBuffer rcImGuiRenderPass imGuiFramebuffer rcPassSurfaceExtent drawData

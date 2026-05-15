@@ -20,6 +20,7 @@ import Control.Monad (forM, forM_, replicateM, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged, runManaged, with)
 import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, runReaderT)
+import qualified DearImGui.Raw as ImGui.Raw
 import Data.Foldable (for_, toList)
 import Data.HashMap.Strict (HashMap)
 import Data.HashMap.Strict qualified as HashMap
@@ -94,7 +95,8 @@ import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), RenderPassNode (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
-import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
+import Graphics.Haskan.Resources (alloc, allocaAndPeekVkResult, throwVkResult)
+import Graphics.Haskan.UI.Backend qualified as Backend
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
@@ -120,6 +122,7 @@ import Graphics.Haskan.Vulkan.PipelineLayout qualified as PipelineLayout
 import Graphics.Haskan.Vulkan.Render (drawFrame, presentFrame, runRenderM)
 import Graphics.Haskan.Vulkan.Render qualified as Render
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
+import Graphics.Haskan.Vulkan.Swapchain qualified as Swapchain
 import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
@@ -189,9 +192,10 @@ data RenderEnv = RenderEnv
     reTvCloudCoverage :: !(STM.TVar Float),
     reTvCloudDetail :: !(STM.TVar Float),
     reTvCloudAbsorption :: !(STM.TVar Float),
-    rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat)),
-    rePrevTime :: !(TVar Float)
-  }
+   rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat)),
+   rePrevTime :: !(TVar Float),
+   reImGuiBackend :: !(Maybe Backend.ImGuiBackend)
+ }
 
 instance (MonadIO m) => MonadTelemetry (ReaderT RenderEnv m) where
   recordFrameTime rt = do
@@ -344,7 +348,12 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   prevTimeVal <- liftIO $ STM.readTVarIO rePrevTime
   liftIO $ STM.atomically $ STM.writeTVar rePrevTime elapsedSeconds
 
-  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal prevTimeVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal
+  -- Build Dear ImGui frame
+  mDrawData <- liftIO $ case reImGuiBackend of
+    Just _ -> Backend.buildImGuiFrame ImGui.Raw.showDemoWindow
+    Nothing -> pure Nothing
+
+  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal prevTimeVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal mDrawData
       recordAction = buildRecordAction recordCtx
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
@@ -461,6 +470,7 @@ renderLoop ::
   SDL.Window ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkSurfaceKHR ->
+  Vulkan.VkInstance ->
   [String] ->
   Integer ->
   GameState AnyCamera ->
@@ -472,7 +482,7 @@ renderLoop ::
   String ->
   Bool ->
   m ()
-renderLoop window physicalDevice surface layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir cloudTestMode = do
+renderLoop window physicalDevice surface inst layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir cloudTestMode = do
   control <- liftIO $ STM.atomically $ TChan.dupTChan controlChannel
 
   rm <- newResourceManager
@@ -500,6 +510,16 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
   imageAvailableSemaphores <- replicateM Render.maxFramesInFlight (Semaphore.managedSemaphore device)
   renderFinishedSemaphores <- replicateM 4 (Semaphore.managedSemaphore device)
   renderFinishedFences <- replicateM Render.maxFramesInFlight (Fence.managedFence device)
+
+  -- Dear ImGui initialization
+  let imGuiSurfaceFormat = Swapchain.surfaceFormat
+  imGuiRenderPass <- RenderPass.managedImGuiRenderPass device imGuiSurfaceFormat
+  imGuiDescriptorPool <- DescriptorPool.managedImGuiDescriptorPool device
+  mImGuiBackend <-
+    Just <$> alloc "ImGuiBackend"
+      (Backend.initImGuiBackend window inst physicalDevice device (fromIntegral graphicsQueueFamilyIndex) graphicsQueueHandler imGuiDescriptorPool imGuiRenderPass 2 3)
+      Backend.shutdownImGuiBackend
+  logInfo LogGeneral "Dear ImGui initialized"
 
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
   logDebug LogTexture "textureCommandBuffer created"
@@ -759,7 +779,7 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
       outerLoop exit = do
         unless exit $ do
           renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-            with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView iblBlueNoiseSampler) $ \dr -> do
+            with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView iblBlueNoiseSampler imGuiRenderPass) $ \dr -> do
                -- Update lighting descriptor sets with light SSBO
                for_ (drLightingDescriptorSets dr) $ \ds ->
                  DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
@@ -805,9 +825,10 @@ renderLoop window physicalDevice surface layers targetFPS gameState finishedSema
                            reTvCloudCoverage = tvCloudCoverage,
                            reTvCloudDetail = tvCloudDetail,
                            reTvCloudAbsorption = tvCloudAbsorption,
-                          rePrevViewProj = prevViewProjTVar,
-                          rePrevTime = prevTimeTVar
-                        }
+                           rePrevViewProj = prevViewProjTVar,
+                           rePrevTime = prevTimeTVar,
+                           reImGuiBackend = mImGuiBackend
+                         }
                renderFrameLoop renderEnv 0
           outerLoop renderFrameLoopFinished
 

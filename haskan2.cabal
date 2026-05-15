@@ -61,6 +61,7 @@ library
                        Graphics.Haskan.Utils.ObjLoader
                        Graphics.Haskan.Utils.PieLoader
                        Graphics.Haskan.Utils.TangentSpace
+                        Graphics.Haskan.UI.Backend
                         Graphics.Haskan.Vulkan.BRDF
                         Graphics.Haskan.Vulkan.Buffer
                        Graphics.Haskan.Vulkan.CommandBuffer
@@ -120,7 +121,8 @@ library
                      , text >=2.0 && <2.2
                      , fast-logger >=3.0 && <3.4
                      , vulkan-api >=1.4.0 && <1.4.1
-                     , managed >=1.0 && <1.1
+                     , vulkan >=3.0 && <4.0
+                      , managed >=1.0 && <1.1
                       , sdl2 >=2.5 && <2.6
                       , dear-imgui >=2.4 && <2.5
                       , lens >=5.0 && <5.5
