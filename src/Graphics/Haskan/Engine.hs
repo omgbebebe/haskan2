@@ -35,6 +35,7 @@ import Control.Monad.Managed (runManaged, with)
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import DearImGui.SDL qualified as ImGuiSDL
 import Graphics.Haskan.Camera (Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.Camera.Fly (defaultFlyCamera)
@@ -212,9 +213,16 @@ mainLoop meshName EngineConfig {..} = do
   liftIO $ forkIOWithHandler "stateUpdateLoop" stateUpdateLoopFinished $ stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished inputBuffer debugCmdQueue controlChannel
 
   when renderLoopOk $ do
-    let inputLoop :: (MonadIO m) => m ()
+    let pollEventsWithImGui :: MonadIO m => m [SDL.Event]
+        pollEventsWithImGui = go []
+          where
+            go acc = ImGuiSDL.pollEventWithImGui >>= \case
+              Nothing -> pure (reverse acc)
+              Just e -> go (e : acc)
+
+        inputLoop :: (MonadIO m) => m ()
         inputLoop = do
-          events <- SDL.pollEvents
+          events <- pollEventsWithImGui
           let actionEvents = mapMaybe (payloadToActionEvent . SDL.eventPayload) events
               quitting = any (\(a, p, _) -> a == Escape && p) actionEvents
           liftIO $ STM.atomically $ forM_ actionEvents $ writeInputBuffer inputBuffer
