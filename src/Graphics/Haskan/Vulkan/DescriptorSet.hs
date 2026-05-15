@@ -527,3 +527,33 @@ updateCloudDescriptorSets dev descriptorSet sampler mEnvMapView mCloudNoiseView 
   liftIO $
     Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
       Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr
+
+updateCloudFrameDataBuffer ::
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkBuffer ->
+  m ()
+updateCloudFrameDataBuffer dev descriptorSet buffer = do
+  let bufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" buffer
+              &* set @"offset" 0
+              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+          )
+      write =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 4
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pImageInfo" Vulkan.VK_NULL
+              &* setVkRef @"pBufferInfo" bufferInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+  liftIO $
+    Foreign.Marshal.Array.withArray [write] $ \writeUpdatePtr ->
+      Vulkan.vkUpdateDescriptorSets dev 1 writeUpdatePtr 0 Vulkan.vkNullPtr

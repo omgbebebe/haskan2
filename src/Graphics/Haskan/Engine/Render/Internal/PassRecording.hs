@@ -205,6 +205,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdCloudCoverage = rcCloudCoverage,
                 dpdCloudDetail = rcCloudDetail,
                 dpdCloudAbsorption = rcCloudAbsorption,
+                dpdCloudFrameDataMemory = drCloudFrameDataMemory rcDeferred,
                 dpdCloudRenderPass = drCloudRenderPass rcDeferred,
                 dpdCloudFramebuffer = cloudFramebuffer,
                 dpdCloudPipeline = drCloudPipeline rcDeferred,

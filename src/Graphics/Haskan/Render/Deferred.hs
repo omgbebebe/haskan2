@@ -20,6 +20,7 @@ import Foreign.Marshal.Array qualified
 import Foreign.Storable (sizeOf)
 import Graphics.Haskan.Render.Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
+import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
@@ -77,6 +78,7 @@ data DeferredPassData = DeferredPassData
     dpdCloudCoverage :: !Float,
     dpdCloudDetail :: !Float,
     dpdCloudAbsorption :: !Float,
+    dpdCloudFrameDataMemory :: !Vulkan.VkDeviceMemory,
     -- Cloud pass
     dpdCloudRenderPass :: !Vulkan.VkRenderPass,
     dpdCloudFramebuffer :: !Vulkan.VkFramebuffer,
@@ -179,74 +181,64 @@ buildDeferredGraph DeferredPassData {..} = do
                 dsPtr
                 0
                 Vulkan.vkNullPtr
-            -- Same push constants as lighting (shared layout size)
+            -- Write cloud frame data to UBO (std430 layout)
             let (V3 camX camY camZ) = dpdCameraPos
                 (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = dpdSkyboxRays
-                (V3 tintR tintG tintB) = dpdSkyTint
                 (V3 sunDirX sunDirY sunDirZ) = dpdSunDir
                 (V4 col0 col1 col2 col3) = dpdPrevViewProj
                 (V4 m00 m10 m20 m30) = col0
                 (V4 m01 m11 m21 m31) = col1
                 (V4 m02 m12 m22 m32) = col2
                 (V4 m03 m13 m23 m33) = col3
-                camPosData =
-                  [ realToFrac camX,
-                    realToFrac camY,
-                    realToFrac camZ,
-                    realToFrac dpdDebugMode,
-                    realToFrac dpdAxisOverlay,
-                    realToFrac dpdGroundPlane,
-                    realToFrac dpdSunAzimuth,
-                    realToFrac dpdLightCount,
-                    realToFrac r0x,
-                    realToFrac r0y,
-                    realToFrac r0z,
-                    0,
-                    realToFrac r1x,
-                    realToFrac r1y,
-                    realToFrac r1z,
-                    0,
-                    realToFrac r2x,
-                    realToFrac r2y,
-                    realToFrac r2z,
-                    realToFrac tintR,
-                    realToFrac tintG,
-                    realToFrac tintB,
-                    realToFrac dpdIBLIntensity,
-                    0,
-                    realToFrac sunDirX,
-                    realToFrac sunDirY,
-                    realToFrac sunDirZ,
-                    realToFrac dpdCloudHeight,
-                    realToFrac dpdTime,
-                    realToFrac dpdBlendFactor,
-                    0,
-                    0,
-                    realToFrac m00,
-                    realToFrac m10,
-                    realToFrac m20,
-                    realToFrac m30,
-                    realToFrac m01,
-                    realToFrac m11,
-                    realToFrac m21,
-                    realToFrac m31,
-                    realToFrac m02,
-                    realToFrac m12,
-                    realToFrac m22,
-                    realToFrac m32,
-                    realToFrac m03,
-                    realToFrac m13,
-                    realToFrac m23,
-                    realToFrac m33,
-                    realToFrac dpdWindDirX,
-                    realToFrac dpdWindDirZ,
-                    realToFrac dpdPrevTime,
-                    realToFrac dpdCloudCoverage,
-                    realToFrac dpdCloudDetail,
-                    realToFrac dpdCloudAbsorption
-                  ] ::
-                    [CFloat]
-             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdCloudLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 216 . Foreign.castPtr
+                cloudFrameData =
+                  [ realToFrac camX,      -- 0
+                    realToFrac camY,      -- 4
+                    realToFrac camZ,      -- 8
+                    0,                    -- 12 pad
+                    realToFrac r0x,       -- 16
+                    realToFrac r0y,       -- 20
+                    realToFrac r0z,       -- 24
+                    0,                    -- 28 pad
+                    realToFrac r1x,       -- 32
+                    realToFrac r1y,       -- 36
+                    realToFrac r1z,       -- 40
+                    0,                    -- 44 pad
+                    realToFrac r2x,       -- 48
+                    realToFrac r2y,       -- 52
+                    realToFrac r2z,       -- 56
+                    0,                    -- 60 pad
+                    realToFrac sunDirX,   -- 64
+                    realToFrac sunDirY,   -- 68
+                    realToFrac sunDirZ,   -- 72
+                    realToFrac dpdCloudHeight, -- 76
+                    realToFrac dpdTime,   -- 80
+                    realToFrac dpdBlendFactor, -- 84
+                    0,                    -- 88 pad
+                    realToFrac m00,       -- 96
+                    realToFrac m10,       -- 100
+                    realToFrac m20,       -- 104
+                    realToFrac m30,       -- 108
+                    realToFrac m01,       -- 112
+                    realToFrac m11,       -- 116
+                    realToFrac m21,       -- 120
+                    realToFrac m31,       -- 124
+                    realToFrac m02,       -- 128
+                    realToFrac m12,       -- 132
+                    realToFrac m22,       -- 136
+                    realToFrac m32,       -- 140
+                    realToFrac m03,       -- 144
+                    realToFrac m13,       -- 148
+                    realToFrac m23,       -- 152
+                    realToFrac m33,       -- 156
+                    realToFrac dpdWindDirX, -- 160
+                    realToFrac dpdWindDirZ, -- 164
+                    realToFrac dpdPrevTime, -- 168
+                    realToFrac dpdCloudCoverage, -- 172
+                    realToFrac dpdCloudDetail,   -- 176
+                    realToFrac dpdCloudAbsorption, -- 180
+                    0, 0, 0                      -- 184-192 pad to 256
+                  ] :: [CFloat]
+             in liftIO $ Buffer.copyDataToDeviceMemory dpdDevice dpdCloudFrameDataMemory cloudFrameData
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
             -- Copy current cloud result to history buffer for next frame
             CommandBuffer.layerTransition commandBuffer dpdCloudImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL

@@ -13,15 +13,21 @@ Output is blended with history for temporal anti-aliasing.
   * gl_VertexIndex: implicit vertex index (0, 1, 2)
 
 **Push Constants:**
-  * cameraPos: CloudPushConstant struct containing:
+  * cameraPos: V3 Float — world-space camera position (minimal, 12 bytes)
+
+**Uniform Buffer (Binding 4, DS0):**
+  * cloud_frame_data: CloudFrameData struct containing:
     - cameraX/Y/Z      : Float — world-space camera position
     - ray0/ray1/ray2   : V3 Float — per-corner frustum rays
     - sunDir           : V3 Float — normalized sun direction
     - cloudHeight      : Float — cloud layer bottom Y coordinate
     - time             : Float — animation time
-    - blendFactor      : Float — temporal blend weight (0.92 = history)
+    - blendFactor      : Float — temporal blend weight
     - windDirX/Z       : Float — wind direction for noise animation
     - prevViewProj0-3  : V4 Float — previous frame view-projection matrix rows
+    - cloudCoverage    : Float — coverage threshold
+    - cloudDetail      : Float — detail strength
+    - cloudAbsorption  : Float — light absorption coefficient
 
 **Algorithm:** Same fullscreen triangle as Lighting pass.
 
@@ -131,33 +137,14 @@ import Math.Linear
 -- Shared vertex shader with Lighting pass
 -- Fullscreen triangle, outputs UV and ray direction
 
-type CloudVertexDefs =
-  '[ "out_uv" ':-> Output '[Location 0] (V 2 Float),
-     "out_ray" ':-> Output '[Location 1] (V 3 Float),
-     "cameraPos"
-       ':-> PushConstant
-              '[]
-              CloudPushConstant,
-     "main" ':-> EntryPoint '[] Vertex
-   ]
-
-type CloudPushConstant =
+type CloudFrameData =
   Struct
     '[ "cameraX" ':-> Float,
        "cameraY" ':-> Float,
        "cameraZ" ':-> Float,
-       "debugMode" ':-> Float,
-       "axisOverlay" ':-> Float,
-       "groundPlane" ':-> Float,
-       "sunAzimuth" ':-> Float,
-       "lightCount" ':-> Float,
        "ray0" ':-> V 3 Float,
        "ray1" ':-> V 3 Float,
        "ray2" ':-> V 3 Float,
-       "skyTintR" ':-> Float,
-       "skyTintG" ':-> Float,
-       "skyTintB" ':-> Float,
-       "iblIntensity" ':-> Float,
        "sunDir" ':-> V 3 Float,
        "cloudHeight" ':-> Float,
        "time" ':-> Float,
@@ -174,6 +161,16 @@ type CloudPushConstant =
        "cloudAbsorption" ':-> Float
      ]
 
+type CloudVertexDefs =
+  '[ "out_uv" ':-> Output '[Location 0] (V 2 Float),
+     "out_ray" ':-> Output '[Location 1] (V 3 Float),
+     "cloud_frame_data"
+       ':-> Uniform
+              '[Binding 4, DescriptorSet 0]
+              CloudFrameData,
+     "main" ':-> EntryPoint '[] Vertex
+   ]
+
 cloudVertex :: ShaderModule "main" VertexShader CloudVertexDefs _
 cloudVertex = shader do
   vertIdx <- get @"gl_VertexIndex"
@@ -183,10 +180,10 @@ cloudVertex = shader do
       u = if fi == 0 then 0 else if fi == 1 then 2 else 0
       v = if fi == 0 then 1 else if fi == 1 then 1 else (-1)
 
-  cameraPush <- get @"cameraPos"
-  let ray0 = view @(Name "ray0") cameraPush
-      ray1 = view @(Name "ray1") cameraPush
-      ray2 = view @(Name "ray2") cameraPush
+  frameData <- get @"cloud_frame_data"
+  let ray0 = view @(Name "ray0") frameData
+      ray1 = view @(Name "ray1") frameData
+      ray2 = view @(Name "ray2") frameData
       rayDir = if fi == 0 then ray0 else if fi == 1 then ray1 else ray2
 
   put @"out_uv" (Vec2 u v)
@@ -212,11 +209,11 @@ type CloudFragmentDefs =
         ':-> Texture2D
                '[Binding 3, DescriptorSet 0]
                (RGBA8 UNorm),
-     "cameraPos"
-       ':-> PushConstant
-              '[]
-              CloudPushConstant,
-     "out_colour" ':-> Output '[Location 0] (V 4 Float),
+      "cloud_frame_data"
+        ':-> Uniform
+               '[Binding 4, DescriptorSet 0]
+               CloudFrameData,
+      "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
 
@@ -228,19 +225,19 @@ cloudFragment = shader do
   let dir = rayDir ^/ (norm rayDir + 0.0001)
       ~(Vec3 dirX dirY dirZ) = dir
 
-  cameraPos <- get @"cameraPos"
-  let camX = view @(Name "cameraX") cameraPos
-      camY = view @(Name "cameraY") cameraPos
-      camZ = view @(Name "cameraZ") cameraPos
-      sunDir = view @(Name "sunDir") cameraPos
+  frameData <- get @"cloud_frame_data"
+  let camX = view @(Name "cameraX") frameData
+      camY = view @(Name "cameraY") frameData
+      camZ = view @(Name "cameraZ") frameData
+      sunDir = view @(Name "sunDir") frameData
       ~(Vec3 sunDirX sunDirY sunDirZ) = sunDir
-      cloudBottom = view @(Name "cloudHeight") cameraPos
-      time = view @(Name "time") cameraPos
-      windDirX = view @(Name "windDirX") cameraPos
-      windDirZ = view @(Name "windDirZ") cameraPos
-      cloudCoverage = view @(Name "cloudCoverage") cameraPos
-      cloudDetail = view @(Name "cloudDetail") cameraPos
-      cloudAbsorption = view @(Name "cloudAbsorption") cameraPos
+      cloudBottom = view @(Name "cloudHeight") frameData
+      time = view @(Name "time") frameData
+      windDirX = view @(Name "windDirX") frameData
+      windDirZ = view @(Name "windDirZ") frameData
+      cloudCoverage = view @(Name "cloudCoverage") frameData
+      cloudDetail = view @(Name "cloudDetail") frameData
+      cloudAbsorption = view @(Name "cloudAbsorption") frameData
 
   ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps (Vec3 dirX dirY dirZ)
 
@@ -373,8 +370,8 @@ cloudFragment = shader do
       cloudSkyB = skyB * finalTransmittance + finalAccB
 
       -- Temporal accumulation with reprojection
-      blendFactor = view @(Name "blendFactor") cameraPos
-      prevTime = view @(Name "prevTime") cameraPos
+      blendFactor = view @(Name "blendFactor") frameData
+      prevTime = view @(Name "prevTime") frameData
 
       -- World-space cloud entry point (undithered for reprojection)
       worldX = camX + dirX * tNear
@@ -392,10 +389,10 @@ cloudFragment = shader do
       windWorldZ = worldZ - windDeltaZ
 
       -- Previous frame view-projection matrix columns
-      prevVP0 = view @(Name "prevViewProj0") cameraPos
-      prevVP1 = view @(Name "prevViewProj1") cameraPos
-      prevVP2 = view @(Name "prevViewProj2") cameraPos
-      prevVP3 = view @(Name "prevViewProj3") cameraPos
+      prevVP0 = view @(Name "prevViewProj0") frameData
+      prevVP1 = view @(Name "prevViewProj1") frameData
+      prevVP2 = view @(Name "prevViewProj2") frameData
+      prevVP3 = view @(Name "prevViewProj3") frameData
 
       -- Manual mat4 * vec4 multiplication (column-vector convention)
       ~(Vec4 m00 m10 m20 m30) = prevVP0

@@ -9,12 +9,14 @@ import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
 import Data.Foldable (for_)
 import Data.Traversable (for)
+import Data.Word (Word8)
 import Foreign.Marshal.Array qualified
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
 import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
 import Graphics.Haskan.Vertex (Vertex)
 import Graphics.Haskan.Vertex qualified as Vertex
+import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DescriptorPool qualified as DescriptorPool
 import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
@@ -48,6 +50,8 @@ data DeferredResources = DeferredResources
     drCloudPipelineLayout :: !Vulkan.VkPipelineLayout,
     drCloudFramebuffers :: ![Vulkan.VkFramebuffer],
     drCloudDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    drCloudFrameDataBuffer :: !Vulkan.VkBuffer,
+    drCloudFrameDataMemory :: !Vulkan.VkDeviceMemory,
     drCloudImages :: ![Vulkan.VkImage],
     drCloudImageViews :: ![Vulkan.VkImageView],
     drCloudHistoryImages :: ![Vulkan.VkImage],
@@ -223,15 +227,9 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       extent
   logDebugIO LogRender "lighting pipeline created"
 
-  -- Cloud pipeline layout
+  -- Cloud pipeline layout (no push constant — all data in UBO)
   cloudDescriptorSetLayout <- DescriptorSetLayout.managedCloudDescriptorSetLayout device
-  let cloudPushConstantRange =
-        Vulkan.createVk
-          ( set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
-              &* set @"offset" 0
-              &* set @"size" 216
-          )
-  cloudPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [cloudDescriptorSetLayout] [cloudPushConstantRange]
+  cloudPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [cloudDescriptorSetLayout] []
   logDebugIO LogRender "cloud pipeline layout created"
 
   -- Cloud pipeline
@@ -289,6 +287,14 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
     DescriptorSet.updateLightingDescriptorSets device ds sampler allViews Nothing (Just cloudView)
   logDebugIO LogRender "lighting descriptor sets updated"
 
+  -- Create cloud frame data UBO (256 bytes, minimum UBO alignment)
+  let cloudFrameDataSize = 256
+  (cloudFrameDataBuffer, cloudFrameDataMemoryRequirement) <-
+    Buffer.managedBuffer device (replicate cloudFrameDataSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+  cloudFrameDataMemory <- Buffer.managedBufferMemory pdev device cloudFrameDataMemoryRequirement
+  liftIO $ Buffer.bindBufferMemory device cloudFrameDataBuffer cloudFrameDataMemory (replicate cloudFrameDataSize (0 :: Word8))
+  logDebugIO LogRender "cloud frame data UBO created"
+
   -- Cloud descriptor pool and sets
   cloudDescriptorPool <- DescriptorPool.managedCloudDescriptorPool device numSwapchainImages
   cloudDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
@@ -296,8 +302,9 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender $ "cloud descriptor sets allocated: " <> showT (length cloudDescriptorSets)
 
   -- Update cloud descriptor sets
-  liftIO $ for_ (zip cloudDescriptorSets cloudHistoryImageViews) $ \(ds, histView) ->
+  liftIO $ for_ (zip cloudDescriptorSets cloudHistoryImageViews) $ \(ds, histView) -> do
     DescriptorSet.updateCloudDescriptorSets device ds sampler mEnvMapView mCloudNoiseView (Just histView) mBlueNoiseView
+    DescriptorSet.updateCloudFrameDataBuffer device ds cloudFrameDataBuffer
   logDebugIO LogRender "cloud descriptor sets updated"
 
   pure
@@ -316,6 +323,8 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         drCloudPipelineLayout = cloudPipelineLayout,
         drCloudFramebuffers = cloudFramebuffers,
         drCloudDescriptorSets = cloudDescriptorSets,
+        drCloudFrameDataBuffer = cloudFrameDataBuffer,
+        drCloudFrameDataMemory = cloudFrameDataMemory,
         drCloudImages = cloudImages,
         drCloudImageViews = cloudImageViews,
         drCloudHistoryImages = cloudHistoryImages,

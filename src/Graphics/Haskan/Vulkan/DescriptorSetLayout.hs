@@ -175,7 +175,15 @@ createCloudDescriptorSetLayout dev = do
               &* set @"pImmutableSamplers" Vulkan.VK_NULL
               &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
           )
-      bindings = [envBinding, noiseBinding, historyBinding, blueNoiseBinding]
+      frameDataBinding =
+        Vulkan.createVk
+          ( set @"binding" 4
+              &* set @"descriptorCount" 1
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+              &* set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
+          )
+      bindings = [envBinding, noiseBinding, historyBinding, blueNoiseBinding, frameDataBinding]
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
