@@ -263,7 +263,7 @@ cloudFragment = shader do
       tEntry = tNear + ditherOffset
       entryPos = Vec3 (camX + dirX * tEntry) (camY + dirY * tEntry) (camZ + dirZ * tEntry)
 
-      noiseScale = 0.0008
+      noiseScale = 0.0003
       windSpeed = 0.05
       windOffsetX = time * windSpeed * windDirX
       windOffsetZ = time * windSpeed * windDirZ
