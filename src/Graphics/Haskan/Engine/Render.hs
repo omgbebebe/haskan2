@@ -320,9 +320,11 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
       viewProj = projection !*! view
       skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
-      -- prevViewProj for cloud reprojection: must be actual proj*view (not transposed)
-      -- because the cloud shader reads it as a raw mat4 and does manual multiplication
-      cloudPrevViewProj = makeProjectionMatrix w h !*! Camera.unViewMatrix (Camera.toMatrix camera)
+      -- prevViewProj for cloud reprojection: stored in UBO, GLSL reads as column-major.
+      -- The cloud shader does manual element extraction that effectively computes
+      -- transpose(CPU_M) * world. To get the shader to apply P*V (world-to-clip),
+      -- we must store transpose(P*V) = transpose(V) !*! transpose(P) = view !*! projection.
+      cloudPrevViewProj = view !*! projection
   prevViewProj <- liftIO $ STM.readTVarIO rePrevViewProj
   liftIO $ STM.atomically $ STM.writeTVar rePrevViewProj cloudPrevViewProj
   uploadUniformBuffer mvpMemory 0 [view, projection]
