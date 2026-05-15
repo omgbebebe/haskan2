@@ -253,8 +253,8 @@ cloudFragment = shader do
       tNear = max 0.0 (min tToBottom tToTop)
       tFar = max 0.0 (max tToBottom tToTop)
       totalRayLength = min 10000.0 (tFar - tNear)
-      absDirY = if dirY > 0.0 then dirY else 0.0 - dirY
-      stepCountF = 32.0 - 8.0 * step 0.3 absDirY - 8.0 * step 0.7 absDirY
+      absDirY = step 0.0 dirY * dirY + step dirY 0.0 * (0.0 - dirY)
+      stepCountF = max 32.0 (min 64.0 (totalRayLength / 120.0))
       adaptiveStepSize = totalRayLength / stepCountF
 
   -- Sample blue noise for dithered ray entry
@@ -267,10 +267,12 @@ cloudFragment = shader do
       windSpeed = 0.05
       windOffsetX = time * windSpeed * windDirX
       windOffsetZ = time * windSpeed * windDirZ
-      warpFreqX = 0.0013
-      warpFreqY = 0.0017
-      warpFreqZ = 0.0023
-      warpAmp = 60.0
+      -- Primary domain warp: large amplitude to break up noise tiling
+      warpAmp1 = 300.0
+      warpFreq1 = 0.0015
+      -- Secondary warp: higher frequency, smaller amplitude for detail
+      warpAmp2 = 80.0
+      warpFreq2 = 0.0042
 
   -- Dynamic ray march: mutable accumulators
   _ <- def @"step" @RW @Int32 0
@@ -299,9 +301,16 @@ cloudFragment = shader do
 
     rp <- get @"rayPos"
     let ~(Vec3 px py pz) = rp
-        wx = sin (py * warpFreqX + pz * warpFreqX * 0.7) * warpAmp
-        wy = cos (px * warpFreqY + pz * warpFreqY * 0.5) * warpAmp
-        wz = sin (pz * warpFreqZ * 0.7 + px * warpFreqZ * 0.6) * warpAmp
+        -- Multi-octave domain warping to break up noise tiling
+        wx1 = sin (py * warpFreq1 + pz * warpFreq1 * 0.7) * warpAmp1
+        wy1 = cos (px * warpFreq1 + pz * warpFreq1 * 0.5) * warpAmp1
+        wz1 = sin (pz * warpFreq1 * 0.7 + px * warpFreq1 * 0.6) * warpAmp1
+        wx2 = sin (py * warpFreq2 * 1.3 + px * warpFreq2 * 0.9) * warpAmp2
+        wy2 = cos (pz * warpFreq2 * 1.1 + py * warpFreq2 * 0.8) * warpAmp2
+        wz2 = sin (px * warpFreq2 * 1.5 + py * warpFreq2 * 1.2) * warpAmp2
+        wx = wx1 + wx2
+        wy = wy1 + wy2
+        wz = wz1 + wz2
         sx = fract ((px + wx) * noiseScale - windOffsetX)
         sy = fract ((py + wy) * noiseScale)
         sz = fract ((pz + wz) * noiseScale - windOffsetZ)
@@ -326,9 +335,15 @@ cloudFragment = shader do
 
       lp <- get @"lightPos"
       let ~(Vec3 lpx lpy lpz) = lp
-          lwx = sin (lpy * warpFreqX + lpz * warpFreqX * 0.7) * warpAmp
-          lwy = cos (lpx * warpFreqY + lpz * warpFreqY * 0.5) * warpAmp
-          lwz = sin (lpz * warpFreqZ * 0.7 + lpx * warpFreqZ * 0.6) * warpAmp
+          lwx1 = sin (lpy * warpFreq1 + lpz * warpFreq1 * 0.7) * warpAmp1
+          lwy1 = cos (lpx * warpFreq1 + lpz * warpFreq1 * 0.5) * warpAmp1
+          lwz1 = sin (lpz * warpFreq1 * 0.7 + lpx * warpFreq1 * 0.6) * warpAmp1
+          lwx2 = sin (lpy * warpFreq2 * 1.3 + lpx * warpFreq2 * 0.9) * warpAmp2
+          lwy2 = cos (lpz * warpFreq2 * 1.1 + lpy * warpFreq2 * 0.8) * warpAmp2
+          lwz2 = sin (lpx * warpFreq2 * 1.5 + lpy * warpFreq2 * 1.2) * warpAmp2
+          lwx = lwx1 + lwx2
+          lwy = lwy1 + lwy2
+          lwz = lwz1 + lwz2
           lsx = fract ((lpx + lwx) * noiseScale - windOffsetX)
           lsy = fract ((lpy + lwy) * noiseScale)
           lsz = fract ((lpz + lwz) * noiseScale - windOffsetZ)
