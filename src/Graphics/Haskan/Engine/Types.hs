@@ -466,7 +466,9 @@ data GameState cam = GameState
     weatherAnimSpeed :: TVar Float,
     cameraMode :: TVar CameraMode,
     orbitalCamera :: TVar cam,
-    flyCamera :: TVar cam
+    flyCamera :: TVar cam,
+    skyNeedsRegeneration :: TVar Bool,
+    lastSunDirection :: TVar (Maybe (V3 Float))
   }
 
 data RenderDebugInfo = RenderDebugInfo

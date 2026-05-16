@@ -196,6 +196,7 @@ data RenderEnv = RenderEnv
     reTvWeatherTypeBias :: !(STM.TVar Float),
     reTvStormIntensity :: !(STM.TVar Float),
     reTvWeatherAnimSpeed :: !(STM.TVar Float),
+    reTvSkyNeedsRegeneration :: !(STM.TVar Bool),
     rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat)),
     rePrevTime :: !(TVar Float),
     reImGuiBackend :: !(Maybe Backend.ImGuiBackend)
@@ -298,6 +299,14 @@ runFrame frameNumber = do
   uploadStorageBuffer (ccrEntityMemory reCullResources) 0 entityData
   uploadUniformBuffer (ccrCullDataMemory reCullResources) 0 [cullData]
   logDebug LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
+
+  -- Check if procedural sky needs regeneration (day-night cycle)
+  needsSkyRegen <- liftIO $ STM.readTVarIO reTvSkyNeedsRegeneration
+  when needsSkyRegen $ do
+    logInfo LogRender "sky regeneration requested (sun angle > 2°)"
+    -- TODO: dynamic compute dispatch would go here
+    -- For now, just clear the flag
+    liftIO $ STM.atomically $ STM.writeTVar reTvSkyNeedsRegeneration False
 
   lights' <- readLights
   let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
@@ -871,8 +880,9 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                         reTvCloudAbsorption = tvCloudAbsorption,
                         reTvWeatherCoverageScale = tvWeatherCoverageScale,
                         reTvWeatherTypeBias = tvWeatherTypeBias,
-                        reTvStormIntensity = tvStormIntensity,
-                        reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
+                         reTvStormIntensity = tvStormIntensity,
+                         reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
+                         reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
                         rePrevViewProj = prevViewProjTVar,
                         rePrevTime = prevTimeTVar,
                         reImGuiBackend = mImGuiBackend

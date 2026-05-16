@@ -26,7 +26,7 @@ import Graphics.Haskan.Debug.Server (CommandQueue)
 import Graphics.Haskan.Engine.Types (CameraMode (..), ControlMessage (..), GameState (..), InputBuffer (..), LightData (..), WorldState (..), flushInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
-import Linear (V2 (..), V3 (..))
+import Linear (V2 (..), V3 (..), dot)
 import SDL qualified
 import SDL.Input.Mouse qualified as SDL.Mouse
 import System.Clock (Clock (..), getTime, toNanoSecs)
@@ -252,6 +252,16 @@ stateUpdateLoop targetFPS gameState finishedSemaphore inputBuffer debugCmdQueue 
               let sunState = computeSunState defaultDayNightConfig newTime
               when (floor newTime /= floor currentTime) $ do
                 logInfoIO LogGeneral $ "time=" <> showT newTime <> " sunDir=" <> showT (ssDirection sunState) <> " intensity=" <> showT (ssIntensity sunState)
+              -- Check if sun direction changed significantly (> 2 degrees)
+              lastSunDir <- STM.readTVarIO (lastSunDirection gameState)
+              let currentSunDir = ssDirection sunState
+                  angleDiff = case lastSunDir of
+                    Just prevDir -> acos (max (-1.0) (min 1.0 (prevDir `dot` currentSunDir)))
+                    Nothing -> pi -- Force regeneration on first check
+                  thresholdRadians = 2.0 * pi / 180.0
+              when (angleDiff > thresholdRadians) $ do
+                STM.atomically $ STM.writeTVar (skyNeedsRegeneration gameState) True
+                STM.atomically $ STM.writeTVar (lastSunDirection gameState) (Just currentSunDir)
               -- Update first light (the sun)
               lightsList <- STM.readTVarIO (lights gameState)
               let updatedLights = case lightsList of
