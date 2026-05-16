@@ -11,6 +11,7 @@ module Graphics.Haskan.Engine.Types
     ComputeCullData (..),
     DrawIndexedIndirectCommand (..),
     ComputeCullResources (..),
+    SkyGenUniforms (..),
     transformAABB,
     extractFrustumPlanes,
     filterVisible,
@@ -274,6 +275,48 @@ data ComputeCullResources = ComputeCullResources
     ccrCullDataMemory :: Vulkan.VkDeviceMemory,
     ccrMaxEntities :: Int
   }
+
+-- | Uniform buffer data for procedural sky generation compute shaders.
+data SkyGenUniforms = SkyGenUniforms
+  { sgSunDirX :: !Float,
+    sgSunDirY :: !Float,
+    sgSunDirZ :: !Float,
+    sgSunIntensity :: !Float,
+    sgRayleighR :: !Float,
+    sgRayleighG :: !Float,
+    sgRayleighB :: !Float,
+    sgMieCoeff :: !Float,
+    sgMieG :: !Float,
+    sgTurbidity :: !Float
+  }
+  deriving (Show, Generic)
+
+instance Storable SkyGenUniforms where
+  sizeOf _ = 40  -- 10 floats * 4 bytes
+  alignment _ = 16
+  peek ptr =
+    SkyGenUniforms
+      <$> peekByteOff ptr 0
+      <*> peekByteOff ptr 4
+      <*> peekByteOff ptr 8
+      <*> peekByteOff ptr 12
+      <*> peekByteOff ptr 16
+      <*> peekByteOff ptr 20
+      <*> peekByteOff ptr 24
+      <*> peekByteOff ptr 28
+      <*> peekByteOff ptr 32
+      <*> peekByteOff ptr 36
+  poke ptr (SkyGenUniforms x y z i rr rg rb mc mg t) = do
+    pokeByteOff ptr 0 x
+    pokeByteOff ptr 4 y
+    pokeByteOff ptr 8 z
+    pokeByteOff ptr 12 i
+    pokeByteOff ptr 16 rr
+    pokeByteOff ptr 20 rg
+    pokeByteOff ptr 24 rb
+    pokeByteOff ptr 28 mc
+    pokeByteOff ptr 32 mg
+    pokeByteOff ptr 36 t
 
 transformAABB :: M44 Float -> BBox -> (V3 Float, V3 Float)
 transformAABB worldMat (BBox (V3 minX minY minZ) (V3 maxX maxY maxZ)) =

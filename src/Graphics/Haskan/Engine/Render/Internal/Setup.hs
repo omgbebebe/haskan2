@@ -23,6 +23,7 @@ import Data.Text qualified as Text
 import Data.Vector.Storable (Vector, fromList)
 import Data.Vector.Storable qualified as VS
 import Data.Word (Word16, Word32, Word8)
+import Foreign.Marshal.Array qualified
 import FIR qualified
 import Foreign.C qualified
 import Graphics.Haskan.Assets.Cache (AssetCache)
@@ -33,7 +34,7 @@ import Graphics.Haskan.DayNight (computeSunState, defaultDayNightConfig)
 import Graphics.Haskan.DayNight qualified as DayNight
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo)
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
-import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
+import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), SkyGenUniforms (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Mesh qualified as Mesh
@@ -70,7 +71,7 @@ import Graphics.Haskan.Vulkan.Render (drawFrame, presentFrame, runRenderM)
 import Graphics.Haskan.Vulkan.Render qualified as Render
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Resources
-import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..))
+import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..), TextureResource (..), lookupTexture)
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.Shaders.Sky.Procedural (generateSkyLUT, defaultSkyParams)
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
@@ -238,6 +239,9 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       weatherMapHandle <- Texture.createTextureFromData rm physicalDevice device 512 512 weatherMapPixels graphicsQueueHandler textureCommandBuffer
       mWeatherMapView <- Texture.textureImageView rm weatherMapHandle
       logInfo LogGeneral "weather map texture loaded"
+
+      -- Dispatch compute shaders to fill storage images
+      dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm skyLutHandle radianceHandle irradianceHandle
 
       pure
         IBLTextures
@@ -442,3 +446,140 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
               logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
 
               pure $ SceneLoadResult world 1 sceneBbox IntMap.empty
+
+-- | Dispatch compute shaders to generate procedural sky content.
+-- Creates temporary pipelines, dispatches, transitions images, and cleans up.
+dispatchProceduralSkyGeneration ::
+  (MonadManaged m, MonadIO m, MonadLog m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  ResourceManager ->
+  TextureHandle -> -- skyLut
+  TextureHandle -> -- radiance
+  TextureHandle -> -- irradiance
+  m ()
+dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm skyLutHandle radianceHandle irradianceHandle = do
+  logInfo LogGeneral "dispatching procedural sky compute shaders..."
+
+  -- Load compute shader modules
+  skyLUTShader <- ShaderModule.managedShaderModule device "data/shaders/fir/sky_lut_comp.spv"
+  radianceShader <- ShaderModule.managedShaderModule device "data/shaders/fir/radiance_comp.spv"
+  irradianceShader <- ShaderModule.managedShaderModule device "data/shaders/fir/irradiance_comp.spv"
+
+  -- Create descriptor set layouts
+  skyLUTLayout <- DescriptorSetLayout.managedSkyLUTComputeDescriptorSetLayout device
+  cubemapLayout <- DescriptorSetLayout.managedCubemapComputeDescriptorSetLayout device
+
+  -- Create pipeline layouts
+  skyLUTPipelineLayout <- PipelineLayout.managedPipelineLayout device [skyLUTLayout]
+  cubemapPipelineLayout <- PipelineLayout.managedPipelineLayout device [cubemapLayout]
+
+  -- Create pipelines
+  skyLUTPipeline <- ComputePipeline.managedComputePipeline device skyLUTPipelineLayout skyLUTShader
+  radiancePipeline <- ComputePipeline.managedComputePipeline device cubemapPipelineLayout radianceShader
+  irradiancePipeline <- ComputePipeline.managedComputePipeline device cubemapPipelineLayout irradianceShader
+
+  -- Create descriptor pools
+  skyLUTPool <- DescriptorPool.managedSkyLUTComputeDescriptorPool device
+  cubemapPool <- DescriptorPool.managedCubemapComputeDescriptorPool device
+
+  -- Allocate descriptor sets
+  skyLUTDescriptorSet <- DescriptorSet.allocateDescriptorSet device skyLUTPool [skyLUTLayout]
+  radianceDescriptorSet <- DescriptorSet.allocateDescriptorSet device cubemapPool [cubemapLayout]
+  irradianceDescriptorSet <- DescriptorSet.allocateDescriptorSet device cubemapPool [cubemapLayout]
+
+  -- Create UBO with default sky params
+  let skyParams =
+        SkyGenUniforms
+          { sgSunDirX = 0.0,
+            sgSunDirY = 0.3,
+            sgSunDirZ = (-1.0),
+            sgSunIntensity = 50.0,
+            sgRayleighR = 0.0058,
+            sgRayleighG = 0.0135,
+            sgRayleighB = 0.0331,
+            sgMieCoeff = 0.021,
+            sgMieG = 0.76,
+            sgTurbidity = 2.0
+          }
+  (skyGenDataBuffer, skyGenDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [skyParams]
+
+  -- Get image views
+  mSkyLutView <- Texture.textureImageView rm skyLutHandle
+  mRadianceView <- Texture.textureImageView rm radianceHandle
+  mIrradianceView <- Texture.textureImageView rm irradianceHandle
+
+  -- Update descriptor sets
+  case mSkyLutView of
+    Just skyLutView -> DescriptorSet.updateSkyLUTComputeDescriptorSets device skyLUTDescriptorSet skyLutView skyGenDataBuffer
+    Nothing -> logInfo LogGeneral "warning: sky LUT view not found"
+  case mRadianceView of
+    Just radianceView -> DescriptorSet.updateCubemapComputeDescriptorSets device radianceDescriptorSet radianceView skyGenDataBuffer
+    Nothing -> logInfo LogGeneral "warning: radiance view not found"
+  case mIrradianceView of
+    Just irradianceView -> DescriptorSet.updateCubemapComputeDescriptorSets device irradianceDescriptorSet irradianceView skyGenDataBuffer
+    Nothing -> logInfo LogGeneral "warning: irradiance view not found"
+
+  -- Get VkImage handles for transition
+  mSkyLutTex <- liftIO $ lookupTexture rm skyLutHandle
+  mRadianceTex <- liftIO $ lookupTexture rm radianceHandle
+  mIrradianceTex <- liftIO $ lookupTexture rm irradianceHandle
+
+  -- Dispatch compute shaders
+  CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
+    -- Sky LUT: 200x200 / 8x8 = 25x25 workgroups
+    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE skyLUTPipeline
+    liftIO $ Foreign.Marshal.Array.withArray [skyLUTDescriptorSet] $ \dsPtr ->
+      Vulkan.vkCmdBindDescriptorSets
+        textureCommandBuffer
+        Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
+        skyLUTPipelineLayout
+        0
+        1
+        dsPtr
+        0
+        Vulkan.vkNullPtr
+    CommandBuffer.cmdDispatch textureCommandBuffer 25 25 1
+
+    -- Radiance: 512x512x6 / 8x8 = 64x64x6 workgroups
+    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE radiancePipeline
+    liftIO $ Foreign.Marshal.Array.withArray [radianceDescriptorSet] $ \dsPtr ->
+      Vulkan.vkCmdBindDescriptorSets
+        textureCommandBuffer
+        Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
+        cubemapPipelineLayout
+        0
+        1
+        dsPtr
+        0
+        Vulkan.vkNullPtr
+    CommandBuffer.cmdDispatch textureCommandBuffer 64 64 6
+
+    -- Irradiance: 64x64x6 / 8x8 = 8x8x6 workgroups
+    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE irradiancePipeline
+    liftIO $ Foreign.Marshal.Array.withArray [irradianceDescriptorSet] $ \dsPtr ->
+      Vulkan.vkCmdBindDescriptorSets
+        textureCommandBuffer
+        Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
+        cubemapPipelineLayout
+        0
+        1
+        dsPtr
+        0
+        Vulkan.vkNullPtr
+    CommandBuffer.cmdDispatch textureCommandBuffer 8 8 6
+
+    -- Transition storage images to SHADER_READ_ONLY_OPTIMAL
+    case mSkyLutTex of
+      Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 1
+      Nothing -> pure ()
+    case mRadianceTex of
+      Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 6
+      Nothing -> pure ()
+    case mIrradianceTex of
+      Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 6
+      Nothing -> pure ()
+
+  logInfo LogGeneral "procedural sky compute dispatch complete"

@@ -637,3 +637,106 @@ updateCloudFrameDataBuffer dev descriptorSet buffer = do
   liftIO $
     Foreign.Marshal.Array.withArray [write] $ \writeUpdatePtr ->
       Vulkan.vkUpdateDescriptorSets dev 1 writeUpdatePtr 0 Vulkan.vkNullPtr
+
+
+-- | Update sky LUT compute descriptor set with storage image and UBO.
+updateSkyLUTComputeDescriptorSets ::
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkImageView -> -- skyLut storage image
+  Vulkan.VkBuffer -> -- skyGenData UBO
+  m ()
+updateSkyLUTComputeDescriptorSets dev descriptorSet skyLutView skyGenDataBuffer = do
+  let imageInfo =
+        Vulkan.createVk
+          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_GENERAL
+              &* set @"imageView" skyLutView
+              &* set @"sampler" Vulkan.VK_NULL_HANDLE
+          )
+      bufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" skyGenDataBuffer
+              &* set @"offset" 0
+              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+          )
+      writeImage =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 0
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pBufferInfo" Vulkan.VK_NULL
+              &* setVkRef @"pImageInfo" imageInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+      writeBuffer =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 1
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pImageInfo" Vulkan.VK_NULL
+              &* setVkRef @"pBufferInfo" bufferInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+  liftIO $
+    Foreign.Marshal.Array.withArray [writeImage, writeBuffer] $ \writePtr ->
+      Vulkan.vkUpdateDescriptorSets dev 2 writePtr 0 Vulkan.vkNullPtr
+
+-- | Update cubemap compute descriptor set with storage image and UBO.
+updateCubemapComputeDescriptorSets ::
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkImageView -> -- cubemap storage image
+  Vulkan.VkBuffer -> -- genData UBO
+  m ()
+updateCubemapComputeDescriptorSets dev descriptorSet cubemapView genDataBuffer = do
+  let imageInfo =
+        Vulkan.createVk
+          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_GENERAL
+              &* set @"imageView" cubemapView
+              &* set @"sampler" Vulkan.VK_NULL_HANDLE
+          )
+      bufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" genDataBuffer
+              &* set @"offset" 0
+              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+          )
+      writeImage =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 0
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pBufferInfo" Vulkan.VK_NULL
+              &* setVkRef @"pImageInfo" imageInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+      writeBuffer =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 1
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pImageInfo" Vulkan.VK_NULL
+              &* setVkRef @"pBufferInfo" bufferInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+  liftIO $
+    Foreign.Marshal.Array.withArray [writeImage, writeBuffer] $ \writePtr ->
+      Vulkan.vkUpdateDescriptorSets dev 2 writePtr 0 Vulkan.vkNullPtr
