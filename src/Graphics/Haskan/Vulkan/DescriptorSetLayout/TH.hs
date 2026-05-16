@@ -60,7 +60,8 @@ processDefType stageFlagsFn mBindlessCount ty =
                 if isBindlessSyn conName
                   then maybe 1 id mBindlessCount
                   else 1
-          pure [mkLayoutBindingExp binding count combinedImageSampler stageFlags]
+              descType = if nameBase conName == "StorageImage" then storageImage else combinedImageSampler
+          pure [mkLayoutBindingExp binding count descType stageFlags]
       | nameBase conName == "Uniform" -> do
           (binding, _ds) <- extractDecorations decs
           stageFlags <- stageFlagsFn binding
@@ -102,7 +103,8 @@ isTextureSyn n =
              "Texture1DArray",
              "Texture2DArray",
              "Texture3DArray",
-             "Texture"
+             "Texture",
+             "StorageImage"
            ]
 
 isBindlessSyn :: Name -> Bool
@@ -149,3 +151,6 @@ uniformBuffer = VarE (mkName "vkUniformBuffer")
 
 storageBuffer :: Exp
 storageBuffer = VarE (mkName "vkStorageBuffer")
+
+storageImage :: Exp
+storageImage = VarE (mkName "vkStorageImage")

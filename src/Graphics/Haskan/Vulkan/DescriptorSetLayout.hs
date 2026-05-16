@@ -13,6 +13,10 @@ module Graphics.Haskan.Vulkan.DescriptorSetLayout
     createBindlessDescriptorSetLayout,
     managedComputeDescriptorSetLayout,
     createComputeDescriptorSetLayout,
+    managedSkyLUTComputeDescriptorSetLayout,
+    createSkyLUTComputeDescriptorSetLayout,
+    managedCubemapComputeDescriptorSetLayout,
+    createCubemapComputeDescriptorSetLayout,
     maxBindlessTextures,
     layoutBinding,
   )
@@ -25,6 +29,9 @@ import Foreign (castPtr)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
 import Graphics.Haskan.Vulkan.DescriptorSetLayout.TH (descriptorSetLayoutBindings)
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as Cull
+import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGen
+import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGen
+import Graphics.Haskan.Vulkan.Shaders.Compute.SkyLUTGen qualified as SkyLUTGen
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds (CloudFragmentDefs)
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as Lighting
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProcedural
@@ -59,6 +66,9 @@ vkUniformBuffer = Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
 
 vkStorageBuffer :: Vulkan.VkDescriptorType
 vkStorageBuffer = Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+
+vkStorageImage :: Vulkan.VkDescriptorType
+vkStorageImage = Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
 
 -- Stage flag helpers (avoid pattern synonym issues in TH splices).
 vkFragmentBit :: Vulkan.VkShaderStageFlags
@@ -265,6 +275,61 @@ createComputeDescriptorSetLayout dev = do
               &* set @"bindingCount" (fromIntegral (length bindings))
               &* setListRef @"pBindings" bindings
           )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+          )
+
+-- | Sky LUT compute descriptor set layout: StorageImage (sky_lut) + Uniform (skyGenData).
+-- Also usable for cubemap compute (radiance/irradiance) since binding structure is identical.
+managedSkyLUTComputeDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedSkyLUTComputeDescriptorSetLayout dev =
+  alloc
+    "SkyLUTComputeDescriptorSetLayout"
+    (createSkyLUTComputeDescriptorSetLayout dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+
+createSkyLUTComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createSkyLUTComputeDescriptorSetLayout dev = do
+  let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''SkyLUTGen.Defs)
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"bindingCount" (fromIntegral (length bindings))
+              &* setListRef @"pBindings" bindings
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+          )
+
+-- | Cubemap compute descriptor set layout: StorageImage (cubemap) + Uniform (genData).
+-- Shared between radiance and irradiance compute shaders.
+managedCubemapComputeDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedCubemapComputeDescriptorSetLayout dev =
+  alloc
+    "CubemapComputeDescriptorSetLayout"
+    (createCubemapComputeDescriptorSetLayout dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+
+createCubemapComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createCubemapComputeDescriptorSetLayout dev = do
+  let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''RadianceGen.Defs)
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"bindingCount" (fromIntegral (length bindings))
+              &* setListRef @"pBindings" bindings
+          )
+
    in liftIO $
         withPtr
           createInfo
