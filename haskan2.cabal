@@ -33,7 +33,8 @@ library
                          Graphics.Haskan.Camera.Types
                          Graphics.Haskan.Camera.Orbital
                          Graphics.Haskan.Camera.Fly
-                        Graphics.Haskan.DayNight
+                         Graphics.Haskan.DayNight
+                        Graphics.Haskan.HosekWilkie
                         Graphics.Haskan.Debug.Server
                        Graphics.Haskan.Events
                         Graphics.Haskan.Engine
@@ -111,11 +112,14 @@ library
                        Graphics.Haskan.Scene.ECS
                        Graphics.Haskan.Scene.Transform
                        Graphics.Haskan.Scene.GLTF
-                       Graphics.Haskan.Render.RenderSystem
-                       Graphics.Haskan.Render.Graph
-                       Graphics.Haskan.Render.Deferred
-                       Graphics.Haskan.Render.Forward
-                       Graphics.Haskan.Render.ShaderProgram
+                        Graphics.Haskan.Render.RenderSystem
+                        Graphics.Haskan.Render.Graph
+                        Graphics.Haskan.Render.Deferred
+                        Graphics.Haskan.Render.Forward
+                        Graphics.Haskan.Render.ShaderProgram
+                        Graphics.Haskan.Physics.Jolt.FFI
+                        Graphics.Haskan.Physics.Jolt.Types
+                        Graphics.Haskan.Physics.Jolt.World
  
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:

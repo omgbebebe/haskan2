@@ -33,3 +33,7 @@ data/textures/
 # Test assets (glTF sample models)
 glTF-Sample-Assets/
 .ghc.environment.*
+# Jolt wrapper build artifacts
+3rdparty/jolt-wrapper/*.a
+3rdparty/jolt-wrapper/*.so
+3rdparty/jolt-wrapper/test_wrapper
