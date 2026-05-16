@@ -198,76 +198,118 @@ loadIBLTextures ::
   Bool ->
   m IBLTextures
 loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuffer envMapDir proceduralSkyEnabled = do
-  let envDir = "data/textures/cubemaps/" ++ envMapDir ++ "/"
-      radianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
-      irradianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
-  logInfo LogGeneral "loading IBL cubemaps..."
-  radianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile radianceFacePaths
-  irradianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile irradianceFacePaths
-  let (radDatas, radWidths, _) = unzip3 radianceFaceDatas
-      (irrDatas, irrWidths, _) = unzip3 irradianceFaceDatas
-      radSize = fromMaybe 0 (listToMaybe radWidths)
-      irrSize = fromMaybe 0 (listToMaybe irrWidths)
-      radMipLevels = floor (logBase 2 (fromIntegral radSize :: Double)) + 1
-  radianceCubemap <- Texture.createCubemapMips rm physicalDevice device radSize radDatas graphicsQueueHandler textureCommandBuffer
-  irradianceCubemap <- Texture.createCubemap rm physicalDevice device irrSize irrDatas graphicsQueueHandler textureCommandBuffer
-  mRadianceView <- Texture.textureImageView rm radianceCubemap
-  mIrradianceView <- Texture.textureImageView rm irradianceCubemap
-  logInfo LogGeneral $ "IBL cubemaps loaded: radiance=" <> showT radSize <> "px irradiance=" <> showT irrSize <> "px mipLevels=" <> showT radMipLevels
+  lightingSampler <- Texture.createSamplerWithLod device 0
+  logInfo LogGeneral "lighting sampler created"
 
-  lightingSampler <- Texture.createSamplerWithLod device (fromIntegral radMipLevels - 1)
-  logInfo LogGeneral "lighting sampler created with mip support"
+  if proceduralSkyEnabled
+    then do
+      logInfo LogGeneral "procedural sky enabled: creating storage images..."
+      -- Create storage images for compute shader output
+      skyLutHandle <- Texture.createStorageImage2D rm physicalDevice device 200 200 Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT graphicsQueueHandler textureCommandBuffer
+      radianceHandle <- Texture.createStorageImageCube rm physicalDevice device 512 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
+      irradianceHandle <- Texture.createStorageImageCube rm physicalDevice device 64 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
+      mSkyLutView <- Texture.textureImageView rm skyLutHandle
+      mRadianceView <- Texture.textureImageView rm radianceHandle
+      mIrradianceView <- Texture.textureImageView rm irradianceHandle
+      logInfo LogGeneral "procedural sky storage images created"
 
-  let brdfPixels = BRDF.generateBRDFLUT 256 256
-  brdfTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 brdfPixels graphicsQueueHandler textureCommandBuffer
-  mBrdfView <- Texture.textureImageView rm brdfTexHandle
-  logInfo LogGeneral "BRDF LUT generated"
+      -- BRDF LUT (shared)
+      let brdfPixels = BRDF.generateBRDFLUT 256 256
+      brdfTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 brdfPixels graphicsQueueHandler textureCommandBuffer
+      mBrdfView <- Texture.textureImageView rm brdfTexHandle
+      logInfo LogGeneral "BRDF LUT generated"
 
-  logInfo LogGeneral "loading 3D cloud noise texture..."
-  cloudNoiseView <- Texture.managedTexture3D physicalDevice device "data/textures/cloud_noise/cloud_noise_256.raw" 256 256 256 graphicsQueueHandler textureCommandBuffer
-  logInfo LogGeneral "3D cloud noise texture loaded"
+      -- Cloud textures (shared)
+      logInfo LogGeneral "loading 3D cloud noise texture..."
+      cloudNoiseView <- Texture.managedTexture3D physicalDevice device "data/textures/cloud_noise/cloud_noise_256.raw" 256 256 256 graphicsQueueHandler textureCommandBuffer
+      logInfo LogGeneral "3D cloud noise texture loaded"
 
-  logInfo LogGeneral "loading blue noise texture..."
-  blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
-  let blueNoisePixels = Data.Vector.Storable.fromList (BS.unpack blueNoiseRaw)
-  blueNoiseHandle <- Texture.createTextureFromData rm physicalDevice device 64 64 blueNoisePixels graphicsQueueHandler textureCommandBuffer
-  mBlueNoiseView <- Texture.textureImageView rm blueNoiseHandle
-  blueNoiseSampler <- Texture.managedSamplerNearest device
-  logInfo LogGeneral "blue noise texture loaded"
+      logInfo LogGeneral "loading blue noise texture..."
+      blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
+      let blueNoisePixels = Data.Vector.Storable.fromList (BS.unpack blueNoiseRaw)
+      blueNoiseHandle <- Texture.createTextureFromData rm physicalDevice device 64 64 blueNoisePixels graphicsQueueHandler textureCommandBuffer
+      mBlueNoiseView <- Texture.textureImageView rm blueNoiseHandle
+      blueNoiseSampler <- Texture.managedSamplerNearest device
+      logInfo LogGeneral "blue noise texture loaded"
 
-  logInfo LogGeneral "loading weather map texture..."
-  weatherMapRaw <- liftIO $ BS.readFile "data/textures/weather/weather_map.raw"
-  let weatherMapPixels = Data.Vector.Storable.fromList (BS.unpack weatherMapRaw)
-  weatherMapHandle <- Texture.createTextureFromData rm physicalDevice device 512 512 weatherMapPixels graphicsQueueHandler textureCommandBuffer
-  mWeatherMapView <- Texture.textureImageView rm weatherMapHandle
-  logInfo LogGeneral "weather map texture loaded"
+      logInfo LogGeneral "loading weather map texture..."
+      weatherMapRaw <- liftIO $ BS.readFile "data/textures/weather/weather_map.raw"
+      let weatherMapPixels = Data.Vector.Storable.fromList (BS.unpack weatherMapRaw)
+      weatherMapHandle <- Texture.createTextureFromData rm physicalDevice device 512 512 weatherMapPixels graphicsQueueHandler textureCommandBuffer
+      mWeatherMapView <- Texture.textureImageView rm weatherMapHandle
+      logInfo LogGeneral "weather map texture loaded"
 
-  mSkyLutView <-
-    if proceduralSkyEnabled
-      then do
-        logInfo LogGeneral "generating procedural sky LUT..."
-        let skyLutPixels16 = generateSkyLUT defaultSkyParams
-            skyLutPixels8 = Data.Vector.Storable.fromList (concatMap (\w -> [fromIntegral (w `shiftR` 8), fromIntegral w]) skyLutPixels16) :: Data.Vector.Storable.Vector Word8
-        skyLutHandle <- Texture.createTextureFromHalfFloatData rm physicalDevice device 200 200 skyLutPixels8 graphicsQueueHandler textureCommandBuffer
-        mView <- Texture.textureImageView rm skyLutHandle
-        logInfo LogGeneral "procedural sky LUT generated and uploaded"
-        pure mView
-      else pure Nothing
+      pure
+        IBLTextures
+          { iblRadianceCubemap = radianceHandle,
+            iblIrradianceCubemap = irradianceHandle,
+            iblRadianceView = mRadianceView,
+            iblIrradianceView = mIrradianceView,
+            iblSampler = lightingSampler,
+            iblBrdfView = mBrdfView,
+            iblCloudNoiseView = Just cloudNoiseView,
+            iblBlueNoiseView = mBlueNoiseView,
+            iblBlueNoiseSampler = blueNoiseSampler,
+            iblWeatherMapView = mWeatherMapView,
+            iblSkyLutView = mSkyLutView
+          }
+    else do
+      -- Photo-based cubemap loading
+      let envDir = "data/textures/cubemaps/" ++ envMapDir ++ "/"
+          radianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
+          irradianceFacePaths = map (envDir ++) ["posx.png", "negx.png", "posy.png", "negy.png", "posz.png", "negz.png"]
+      logInfo LogGeneral "loading IBL cubemaps..."
+      radianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile radianceFacePaths
+      irradianceFaceDatas <- liftIO $ mapM Texture.readImageFromFile irradianceFacePaths
+      let (radDatas, radWidths, _) = unzip3 radianceFaceDatas
+          (irrDatas, irrWidths, _) = unzip3 irradianceFaceDatas
+          radSize = fromMaybe 0 (listToMaybe radWidths)
+          irrSize = fromMaybe 0 (listToMaybe irrWidths)
+          radMipLevels = floor (logBase 2 (fromIntegral radSize :: Double)) + 1
+      radianceCubemap <- Texture.createCubemapMips rm physicalDevice device radSize radDatas graphicsQueueHandler textureCommandBuffer
+      irradianceCubemap <- Texture.createCubemap rm physicalDevice device irrSize irrDatas graphicsQueueHandler textureCommandBuffer
+      mRadianceView <- Texture.textureImageView rm radianceCubemap
+      mIrradianceView <- Texture.textureImageView rm irradianceCubemap
+      logInfo LogGeneral $ "IBL cubemaps loaded: radiance=" <> showT radSize <> "px irradiance=" <> showT irrSize <> "px mipLevels=" <> showT radMipLevels
 
-  pure
-    IBLTextures
-      { iblRadianceCubemap = radianceCubemap,
-        iblIrradianceCubemap = irradianceCubemap,
-        iblRadianceView = mRadianceView,
-        iblIrradianceView = mIrradianceView,
-        iblSampler = lightingSampler,
-        iblBrdfView = mBrdfView,
-        iblCloudNoiseView = Just cloudNoiseView,
-        iblBlueNoiseView = mBlueNoiseView,
-        iblBlueNoiseSampler = blueNoiseSampler,
-        iblWeatherMapView = mWeatherMapView,
-        iblSkyLutView = mSkyLutView
-      }
+      let brdfPixels = BRDF.generateBRDFLUT 256 256
+      brdfTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 brdfPixels graphicsQueueHandler textureCommandBuffer
+      mBrdfView <- Texture.textureImageView rm brdfTexHandle
+      logInfo LogGeneral "BRDF LUT generated"
+
+      logInfo LogGeneral "loading 3D cloud noise texture..."
+      cloudNoiseView <- Texture.managedTexture3D physicalDevice device "data/textures/cloud_noise/cloud_noise_256.raw" 256 256 256 graphicsQueueHandler textureCommandBuffer
+      logInfo LogGeneral "3D cloud noise texture loaded"
+
+      logInfo LogGeneral "loading blue noise texture..."
+      blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
+      let blueNoisePixels = Data.Vector.Storable.fromList (BS.unpack blueNoiseRaw)
+      blueNoiseHandle <- Texture.createTextureFromData rm physicalDevice device 64 64 blueNoisePixels graphicsQueueHandler textureCommandBuffer
+      mBlueNoiseView <- Texture.textureImageView rm blueNoiseHandle
+      blueNoiseSampler <- Texture.managedSamplerNearest device
+      logInfo LogGeneral "blue noise texture loaded"
+
+      logInfo LogGeneral "loading weather map texture..."
+      weatherMapRaw <- liftIO $ BS.readFile "data/textures/weather/weather_map.raw"
+      let weatherMapPixels = Data.Vector.Storable.fromList (BS.unpack weatherMapRaw)
+      weatherMapHandle <- Texture.createTextureFromData rm physicalDevice device 512 512 weatherMapPixels graphicsQueueHandler textureCommandBuffer
+      mWeatherMapView <- Texture.textureImageView rm weatherMapHandle
+      logInfo LogGeneral "weather map texture loaded"
+
+      pure
+        IBLTextures
+          { iblRadianceCubemap = radianceCubemap,
+            iblIrradianceCubemap = irradianceCubemap,
+            iblRadianceView = mRadianceView,
+            iblIrradianceView = mIrradianceView,
+            iblSampler = lightingSampler,
+            iblBrdfView = mBrdfView,
+            iblCloudNoiseView = Just cloudNoiseView,
+            iblBlueNoiseView = mBlueNoiseView,
+            iblBlueNoiseSampler = blueNoiseSampler,
+            iblWeatherMapView = mWeatherMapView,
+            iblSkyLutView = Nothing
+          }
 
 data SceneLoadResult = SceneLoadResult
   { slrECSWorld :: !ECS.World,
