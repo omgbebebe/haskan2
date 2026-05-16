@@ -14,6 +14,9 @@ module Graphics.Haskan.Vulkan.Texture
     generateCheckerboardTexture,
     createTextureFromData,
     createTextureFromHalfFloatData,
+    createStorageImage2D,
+    createStorageImageCube,
+    transitionStorageImageToShaderRead,
     createTextureFromBytesCached,
     decodeTextureCached,
     uploadTexture,
@@ -1054,3 +1057,220 @@ createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
 
   registerTexture rm resource
   pure texH
+
+
+-- | Create a 2D storage image for compute shader writes and later sampling.
+-- Image is transitioned to GENERAL layout for compute writes.
+createStorageImage2D ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Int ->
+  Int ->
+  Vulkan.VkFormat ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+createStorageImage2D rm pdev dev width height format queue commandBuffer = do
+  let imageExtent =
+        Vulkan.createVk
+          ( set @"width" (fromIntegral width)
+              &* set @"height" (fromIntegral height)
+              &* set @"depth" 1
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
+              &* set @"extent" imageExtent
+              &* set @"mipLevels" 1
+              &* set @"arrayLayers" 1
+              &* set @"format" format
+              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_STORAGE_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
+              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
+              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"queueFamilyIndexCount" 0
+              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
+          )
+
+  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+
+  imageMemoryRequirements <-
+    allocaAndPeek_
+      (Vulkan.vkGetImageMemoryRequirements dev image)
+  logDebugIO LogTexture $ "storage image 2D memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " width=" <> showT width <> " height=" <> showT height
+
+  imageMemory <-
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+
+  liftIO $ bindImageMemory dev image imageMemory 0
+
+  -- Transition to GENERAL for compute writes
+  Haskan.withCommandBufferOneTime queue commandBuffer $ do
+    Haskan.layerTransition
+      commandBuffer
+      image
+      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+      Vulkan.VK_IMAGE_LAYOUT_GENERAL
+
+  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+
+  imageView <- Haskan.createImageView dev format image
+
+  texH <- TextureHandle <$> allocHandle (rmNextId rm)
+
+  let destroy = do
+        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
+        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
+        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+
+      resource =
+        TextureResource
+          { trHandle = texH,
+            trImage = image,
+            trImageView = imageView,
+            trMemory = imageMemory,
+            trWidth = width,
+            trHeight = height,
+            trPixelData = Nothing,
+            trDestroy = destroy
+          }
+
+  registerTexture rm resource
+  pure texH
+
+-- | Create a cube storage image for compute shader writes and later sampling.
+-- Image is transitioned to GENERAL layout for compute writes.
+createStorageImageCube ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Int ->
+  Vulkan.VkFormat ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+createStorageImageCube rm pdev dev faceSize format queue commandBuffer = do
+  let imageExtent =
+        Vulkan.createVk
+          ( set @"width" (fromIntegral faceSize)
+              &* set @"height" (fromIntegral faceSize)
+              &* set @"depth" 1
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
+              &* set @"extent" imageExtent
+              &* set @"mipLevels" 1
+              &* set @"arrayLayers" 6
+              &* set @"format" format
+              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_STORAGE_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
+              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
+              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+              &* set @"flags" Vulkan.VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
+              &* set @"queueFamilyIndexCount" 0
+              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
+          )
+
+  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+
+  imageMemoryRequirements <-
+    allocaAndPeek_
+      (Vulkan.vkGetImageMemoryRequirements dev image)
+  logDebugIO LogTexture $ "storage image cube memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " faceSize=" <> showT faceSize
+
+  imageMemory <-
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+
+  liftIO $ bindImageMemory dev image imageMemory 0
+
+  -- Transition to GENERAL for compute writes
+  Haskan.withCommandBufferOneTime queue commandBuffer $ do
+    Haskan.layerTransitionAll
+      commandBuffer
+      image
+      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+      Vulkan.VK_IMAGE_LAYOUT_GENERAL
+      6
+
+  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+
+  imageView <- Haskan.createImageViewCube dev format image
+
+  texH <- TextureHandle <$> allocHandle (rmNextId rm)
+
+  let destroy = do
+        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
+        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
+        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+
+      resource =
+        TextureResource
+          { trHandle = texH,
+            trImage = image,
+            trImageView = imageView,
+            trMemory = imageMemory,
+            trWidth = faceSize,
+            trHeight = faceSize,
+            trPixelData = Nothing,
+            trDestroy = destroy
+          }
+
+  registerTexture rm resource
+  pure texH
+
+-- | Transition a storage image from GENERAL to SHADER_READ_ONLY_OPTIMAL
+-- after compute shader writes are complete.
+transitionStorageImageToShaderRead ::
+  (MonadIO m) =>
+  Vulkan.VkCommandBuffer ->
+  Vulkan.VkImage ->
+  -- | layer count (1 for 2D, 6 for cube)
+  Vulkan.Word32 ->
+  m ()
+transitionStorageImageToShaderRead commandBuffer image layerCount = do
+  let subresourceRange =
+        Vulkan.createVk
+          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+              &* set @"baseMipLevel" 0
+              &* set @"levelCount" 1
+              &* set @"baseArrayLayer" 0
+              &* set @"layerCount" layerCount
+          )
+      barrier =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"oldLayout" Vulkan.VK_IMAGE_LAYOUT_GENERAL
+              &* set @"newLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+              &* set @"srcQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+              &* set @"dstQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+              &* set @"image" image
+              &* set @"subresourceRange" subresourceRange
+              &* set @"srcAccessMask" Vulkan.VK_ACCESS_SHADER_WRITE_BIT
+              &* set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
+          )
+  liftIO $
+    withPtr
+      barrier
+      ( Vulkan.vkCmdPipelineBarrier
+          commandBuffer
+          Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+          Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+          Vulkan.VK_ZERO_FLAGS
+          0
+          Vulkan.vkNullPtr
+          0
+          Vulkan.vkNullPtr
+          1
+      )
