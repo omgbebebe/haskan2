@@ -9,6 +9,9 @@ write-ghc-environment-files: always
 package dear-imgui
   flags: +sdl +vulkan -opengl3 -glfw +use-wchar32 +use-imdrawidx32
 
+package fir
+  flags: +internals
+
 allow-newer:
   dear-imgui:megaparsec
   , boring:base

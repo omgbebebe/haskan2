@@ -75,6 +75,9 @@ import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.Shaders.Sky.Procedural (generateSkyLUT, defaultSkyParams)
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
+import Graphics.Haskan.Vulkan.Shaders.Compute.SkyLUTGen qualified as SkyLUTGenShaders
+import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGenShaders
+import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds qualified as CloudShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
@@ -123,6 +126,12 @@ compileAllShaders = do
   logInfo LogGeneral "  wire_frag.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/cull_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CullShaders.program
   logInfo LogGeneral "  cull_comp.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/sky_lut_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] SkyLUTGenShaders.program
+  logInfo LogGeneral "  sky_lut_comp.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/radiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] RadianceGenShaders.program
+  logInfo LogGeneral "  radiance_comp.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/irradiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] IrradianceGenShaders.program
+  logInfo LogGeneral "  irradiance_comp.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/cloud_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudShaders.cloudVertex
   logInfo LogGeneral "  cloud_vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/cloud_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudShaders.cloudFragment
