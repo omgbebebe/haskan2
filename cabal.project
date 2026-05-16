@@ -9,7 +9,6 @@ write-ghc-environment-files: always
 package haskan2
   extra-include-dirs: /home/pion/work/dev/haskan2/3rdparty/jolt-wrapper
   extra-lib-dirs: /home/pion/work/dev/haskan2/3rdparty/jolt-wrapper
-  extra-libraries: jolt_wrapper
 
 package dear-imgui
   flags: +sdl +vulkan -opengl3 -glfw +use-wchar32 +use-imdrawidx32

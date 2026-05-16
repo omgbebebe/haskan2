@@ -17,7 +17,12 @@ import Graphics.Haskan.Engine.Capabilities.Test
 import Graphics.Haskan.Engine.Types (FrameStats (..))
 import Graphics.Haskan.Logger (LogCategory (..), LogLevel (..))
 import Graphics.Haskan.Model qualified as Model
+import Graphics.Haskan.Physics.Jolt.World qualified as Physics
+import Graphics.Haskan.Physics.Jolt.Types (BodyType (..), bsPosition, bsVelocity, bsActive)
 import Graphics.Haskan.Vulkan.Types (RenderResult (..))
+import Linear (V3 (..))
+import Linear.V3 (_y)
+import Control.Lens ((^.), Lens')
 
 main :: IO ()
 main = do
@@ -83,6 +88,16 @@ main = do
         vkRes <- presentFrameGraphics 0 undefined
         pure (res, vkRes)
   assertEq "draw result" (FrameOk 0) (fst drawRes)
+
+  putStrLn "Testing Jolt Physics..."
+  world <- Physics.createWorld 1024 1024 1024
+  ground <- Physics.createBody world (StaticPlane (V3 0 1 0) 0) (V3 0 0 0)
+  box <- Physics.createBody world (BoxBody (V3 0.5 0.5 0.5) 10) (V3 0 5 0)
+  Physics.stepWorld world 1.0 60
+  st <- Physics.getBodyState world box
+  let py = bsPosition st ^. _y
+  assertEq "box fell onto plane" True (py < 1.5)
+  Physics.destroyWorld world
 
   putStrLn "All tests passed"
 

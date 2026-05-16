@@ -157,8 +157,9 @@ library
                        , optparse-applicative >=0.18 && <0.20
                         , mtl >=2.3 && <2.4
                         , random >=1.2 && <1.4
-                        , gltf-loader >=0.3 && <0.4
+                         , gltf-loader >=0.3 && <0.4
     hs-source-dirs:   src
+    extra-libraries:  jolt_wrapper
     default-language: GHC2021
     default-extensions:
                       OverloadedStrings
@@ -201,6 +202,7 @@ test-suite haskan2-test
                      , text >=2.0 && <2.2
                      , vulkan-api >=1.4.0 && <1.4.1
                      , linear >=1.23 && <1.24
+                     , lens >=5.0 && <5.5
                      , clock >=0.7 && <0.9
     default-language:  GHC2021
     default-extensions:
