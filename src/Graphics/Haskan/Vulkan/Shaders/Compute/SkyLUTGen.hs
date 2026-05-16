@@ -65,7 +65,7 @@ program = Module $ entryPoint @"main" @Compute do
       -- Dot product between view and sun
       cosGammaDot = dot viewDir sunDir
       cosGammaClamped = clamp cosGammaDot (-1.0) 1.0
-      cosThetaView = max 0.0 (view @(Index 1) viewDir)
+      cosThetaView = abs (view @(Index 1) viewDir)
       
       -- Rayleigh phase function: 3/(16*pi) * (1 + mu^2)
       rayleighPhase = (3.0 / (16.0 * pi)) * (1.0 + cosGammaClamped * cosGammaClamped)
@@ -95,9 +95,11 @@ program = Module $ entryPoint @"main" @Compute do
       
       -- Color temperature based on sun elevation
       sunElev = view @(Index 1) sunDir
-      colorTempR = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 1.0 else (if sunElev > (-0.1) then 1.0 else 0.05))
-      colorTempG = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 0.75 else (if sunElev > (-0.1) then 0.4 else 0.05))
-      colorTempB = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 0.45 else (if sunElev > (-0.1) then 0.2 else 0.15))
+      sunElevClamped = clamp sunElev (-0.1) 1.0
+      warmth = clamp (sunElevClamped / 0.3) 0.0 1.0
+      colorTempR = 1.0
+      colorTempG = 0.45 + 0.55 * warmth
+      colorTempB = 0.2 + 0.8 * warmth
       
       -- Apply color temperature
       tintedR = totalR * colorTempR

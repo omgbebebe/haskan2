@@ -207,8 +207,8 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       logInfo LogGeneral "procedural sky enabled: creating storage images..."
       -- Create storage images for compute shader output
       skyLutHandle <- Texture.createStorageImage2D rm physicalDevice device 200 200 Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT graphicsQueueHandler textureCommandBuffer
-      radianceHandle <- Texture.createStorageImageCube rm physicalDevice device 512 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
-      irradianceHandle <- Texture.createStorageImageCube rm physicalDevice device 64 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
+      radianceHandle <- Texture.createStorageImageCube rm physicalDevice device 512 Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT graphicsQueueHandler textureCommandBuffer
+      irradianceHandle <- Texture.createStorageImageCube rm physicalDevice device 64 Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT graphicsQueueHandler textureCommandBuffer
       mSkyLutView <- Texture.textureImageView rm skyLutHandle
       mRadianceView <- Texture.textureImageView rm radianceHandle
       mIrradianceView <- Texture.textureImageView rm irradianceHandle

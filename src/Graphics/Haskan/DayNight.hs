@@ -70,8 +70,8 @@ computeSunState config time =
       sunset = dncSunsetTime config
       dayLength = sunset - sunrise
 
-      -- Normalized day progress (0 at sunrise, 1 at sunset)
-      dayProgress = clamp 0.0 1.0 ((t - sunrise) / dayLength)
+      -- Normalized progress (0 at sunrise, 1 at sunset, continues below 0/1 at night)
+      dayProgress = (t - sunrise) / dayLength
 
       -- Sun angle through the day (0 at sunrise, π/2 at noon, π at sunset)
       sunAngle = dayProgress * pi
@@ -79,8 +79,9 @@ computeSunState config time =
       -- Elevation: sine of sun angle, peaking at noon
       elevation = sin sunAngle * dncMaxElevation config
 
-      -- Azimuth for sun direction: rotates 180° from sunrise to sunset
-      azimuth = sunAngle
+      -- Azimuth: continuous rotation, 0 at sunrise, π at sunset
+      -- Extends naturally beyond [0,π] during night for smooth below-horizon arc
+      azimuth = dayProgress * pi
 
       -- Azimuth for cubemap rotation: continuous 360° over 24 hours
       -- Sun makes a full apparent revolution every 24 hours

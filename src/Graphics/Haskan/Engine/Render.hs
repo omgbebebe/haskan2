@@ -832,10 +832,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
       outerLoop exit = do
         unless exit $ do
           renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-            with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView iblWeatherMapView iblBlueNoiseSampler imGuiRenderPass proceduralSkyEnabled iblSkyLutView) $ \dr -> do
-              -- Update lighting descriptor sets with light SSBO
-              for_ (drLightingDescriptorSets dr) $ \ds ->
-                DescriptorSet.updateLightingLightBuffer device ds lightSsboBuffer
+            with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView iblWeatherMapView iblBlueNoiseSampler (Just lightSsboBuffer) imGuiRenderPass proceduralSkyEnabled iblSkyLutView) $ \dr -> do
               prevViewProjTVar <- STM.newTVarIO (identity :: M44 Foreign.C.CFloat)
               prevTimeTVar <- STM.newTVarIO 0.0
               let renderEnv =

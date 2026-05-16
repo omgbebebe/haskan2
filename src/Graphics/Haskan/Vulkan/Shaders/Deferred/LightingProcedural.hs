@@ -338,13 +338,6 @@ fragment = shader do
   -- Check if background (no geometry written to g-buffer)
   let hasGeometry = abs posX + abs posY + abs posZ > 0.001
 
-  -- Sample procedural sky LUT for background
-  -- UV mapping: U = (dot(viewDir, sunDir) + 1) / 2, V = sqrt(max(0, viewDir.y))
-  let skyCosGamma = dirX * sunDirX + dirY * sunDirY + dirZ * sunDirZ
-      skyU = (skyCosGamma + 1.0) * 0.5
-      skyV = sqrt (max 0.0 dirY)
-  ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "sky_lut") NilOps (Vec2 skyU skyV)
-
   -- Sample cloud result texture (rendered in separate pass)
   ~(Vec4 cloudSkyR_h cloudSkyG_h cloudSkyB_h _) <- use @(ImageTexel "cloud_result") NilOps uv
 

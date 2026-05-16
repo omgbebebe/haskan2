@@ -30,10 +30,10 @@ type SkyGenData =
      ]
 
 type Defs =
-  '[ "irradianceImage" ':-> StorageImage '[DescriptorSet 0, Binding 0] (Properties IntegralCoordinates Float Cube (Just NotDepthImage) NonArrayed SingleSampled Storage (Just (RGBA8 UNorm))),
-     "skyGenData" ':-> Uniform '[DescriptorSet 0, Binding 1] SkyGenData,
-     "main" ':-> EntryPoint '[LocalSize 8 8 1] Compute
-   ]
+  '[ "irradianceImage" ':-> StorageImage '[DescriptorSet 0, Binding 0] (Properties IntegralCoordinates Float Cube (Just NotDepthImage) NonArrayed SingleSampled Storage (Just (RGBA16 F))),
+      "skyGenData" ':-> Uniform '[DescriptorSet 0, Binding 1] SkyGenData,
+      "main" ':-> EntryPoint '[LocalSize 8 8 1] Compute
+    ]
 
 -- | Number of samples for hemisphere integration.
 numSamples :: Code Word32
@@ -59,10 +59,10 @@ program = Module $ entryPoint @"main" @Compute do
       u = (fromIntegral gidX :: Code Float) / size * 2.0 - 1.0
       v = (fromIntegral gidY :: Code Float) / size * 2.0 - 1.0
       
-      -- Compute normal direction based on face index
-      nX = if faceIdx == 0 then 1.0 else (if faceIdx == 1 then (-1.0) else (if faceIdx == 4 then u else (if faceIdx == 5 then (-u) else u)))
+      -- Compute normal direction based on face index (Vulkan cubemap layer mapping)
+      nX = if faceIdx == 0 then 1.0 else (if faceIdx == 1 then (-1.0) else (if faceIdx == 4 then (-u) else u))
       nY = if faceIdx == 2 then 1.0 else (if faceIdx == 3 then (-1.0) else (-v))
-      nZ = if faceIdx == 4 then 1.0 else (if faceIdx == 5 then (-1.0) else (if faceIdx == 0 then (-u) else (if faceIdx == 1 then u else v)))
+      nZ = if faceIdx == 4 then 1.0 else (if faceIdx == 5 then (-1.0) else (if faceIdx == 0 then u else (if faceIdx == 1 then (-u) else (if faceIdx == 2 then (-v) else v))))
       
       normal = normalise (Vec3 nX nY nZ)
       sunDir = normalise (Vec3 sunDirX sunDirY sunDirZ)
@@ -115,25 +115,33 @@ program = Module $ entryPoint @"main" @Compute do
         -- Transform to world space
         sampleDir = normalise ((tangent ^* localX) ^+^ (normal ^* localY) ^+^ (bitangent ^* localZ))
         
-        -- Evaluate sky in sample direction
+        -- Evaluate sky in sample direction with fixed scattering model (HDR)
         cosGammaDot = dot sampleDir sunDir
         cosGammaClamped = clamp cosGammaDot (-1.0) 1.0
-        cosThetaView = max 0.0 (view @(Index 1) sampleDir)
+        cosThetaView = abs (view @(Index 1) sampleDir)
         
+        -- Rayleigh phase function
         rayleighPhase = (3.0 / (16.0 * pi)) * (1.0 + cosGammaClamped * cosGammaClamped)
-        rayleighExp = exp (-0.05 / (cosThetaView + 0.001))
-        rayleighScatterR = rayleighR * rayleighPhase * rayleighExp
-        rayleighScatterG = rayleighG * rayleighPhase * rayleighExp
-        rayleighScatterB = rayleighB * rayleighPhase * rayleighExp
         
+        -- Optical depth model with larger epsilon for smooth horizon
+        rayleighOD = 0.3
+        mieOD = 0.1
+        rayleighTrans = exp (-rayleighOD / (cosThetaView + 0.05))
+        mieTrans = exp (-mieOD / (cosThetaView + 0.05))
+        
+        -- In-scattering (scale ~100x to bring into visible HDR range)
+        rayleighScatterR = rayleighR * rayleighPhase * (1.0 - rayleighTrans) * 100.0
+        rayleighScatterG = rayleighG * rayleighPhase * (1.0 - rayleighTrans) * 100.0
+        rayleighScatterB = rayleighB * rayleighPhase * (1.0 - rayleighTrans) * 100.0
+        
+        -- Mie phase (Henyey-Greenstein)
         g2 = mieG * mieG
         mieDenom = (1.0 + g2 - 2.0 * mieG * cosGammaClamped) ** 1.5
         miePhase = (1.0 - g2) / (4.0 * pi * mieDenom)
+        mieScatter = mieCoeff * miePhase * (1.0 - mieTrans) * 100.0
         
-        mieExp = exp (-0.1 / (cosThetaView + 0.001))
-        mieScatter = mieCoeff * miePhase * mieExp
-        
-        sunDisc = if cosGammaClamped > 0.9995 then sunIntensity else 0.0
+        -- Soft sun disc with smoothstep to avoid banding
+        sunDisc = sunIntensity * smoothstep 0.999 1.0 cosGammaClamped
         
         radianceR = rayleighScatterR + mieScatter + sunDisc
         radianceG = rayleighScatterG + mieScatter + sunDisc
@@ -141,9 +149,11 @@ program = Module $ entryPoint @"main" @Compute do
         
         -- Color temperature
         sunElev = view @(Index 1) sunDir
-        colorTempR = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 1.0 else (if sunElev > (-0.1) then 1.0 else 0.05))
-        colorTempG = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 0.75 else (if sunElev > (-0.1) then 0.4 else 0.05))
-        colorTempB = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 0.45 else (if sunElev > (-0.1) then 0.2 else 0.15))
+        sunElevClamped = clamp sunElev (-0.1) 1.0
+        warmth = clamp (sunElevClamped / 0.3) 0.0 1.0
+        colorTempR = 1.0
+        colorTempG = 0.45 + 0.55 * warmth
+        colorTempB = 0.2 + 0.8 * warmth
         
         tintedR = radianceR * colorTempR
         tintedG = radianceG * colorTempG
@@ -154,23 +164,12 @@ program = Module $ entryPoint @"main" @Compute do
         scaledG = tintedG * turbidityScale
         scaledB = tintedB * turbidityScale
         
-        -- ACES tonemapping
-        acesR = (scaledR * (2.51 * scaledR + 0.03)) / (scaledR * (2.43 * scaledR + 0.59) + 0.14)
-        acesG = (scaledG * (2.51 * scaledG + 0.03)) / (scaledG * (2.43 * scaledG + 0.59) + 0.14)
-        acesB = (scaledB * (2.51 * scaledB + 0.03)) / (scaledB * (2.43 * scaledB + 0.59) + 0.14)
-        
-        clampedR = clamp acesR 0.0 1.0
-        clampedG = clamp acesG 0.0 1.0
-        clampedB = clamp acesB 0.0 1.0
-        
         -- Weight by cosine and solid angle
-        -- dOmega = sin(theta) * dtheta * dphi = sin(theta) * (pi/2)/8 * 2*pi/8 = sin(theta) * pi^2 / 32
-        -- Weight = cos(theta) * dOmega = cos(theta) * sin(theta) * pi^2 / 32
         solidAngleWeight = cosTheta * sinTheta * pi * pi / 32.0
         
-        weightedR = clampedR * solidAngleWeight
-        weightedG = clampedG * solidAngleWeight
-        weightedB = clampedB * solidAngleWeight
+        weightedR = scaledR * solidAngleWeight
+        weightedG = scaledG * solidAngleWeight
+        weightedB = scaledB * solidAngleWeight
     
     put @"accR" (accR + weightedR)
     put @"accG" (accG + weightedG)

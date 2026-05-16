@@ -92,11 +92,12 @@ createDeferredResources ::
   Maybe Vulkan.VkImageView ->
   Maybe Vulkan.VkImageView ->
   Vulkan.VkSampler ->
+  Maybe Vulkan.VkBuffer ->
   Vulkan.VkRenderPass ->
   Bool ->
   Maybe Vulkan.VkImageView ->
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView mWeatherMapView blueNoiseSampler imGuiRenderPass proceduralSkyEnabled mSkyLutView = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView mWeatherMapView blueNoiseSampler mLightBuffer imGuiRenderPass proceduralSkyEnabled mSkyLutView = do
   let extent = rcSurfaceExtent ctx
       cloudExtent =
         Vulkan.createVk
@@ -305,9 +306,9 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
     if proceduralSkyEnabled
       then do
         let allViews = baseViews ++ maybe [Vulkan.VK_NULL_HANDLE] pure mSkyLutView
-        DescriptorSet.updateLightingProceduralDescriptorSets device ds sampler allViews Nothing (Just cloudView)
+        DescriptorSet.updateLightingProceduralDescriptorSets device ds sampler allViews mLightBuffer (Just cloudView)
       else do
-        DescriptorSet.updateLightingDescriptorSets device ds sampler baseViews Nothing (Just cloudView)
+        DescriptorSet.updateLightingDescriptorSets device ds sampler baseViews mLightBuffer (Just cloudView)
   logDebugIO LogRender "lighting descriptor sets updated"
 
   -- Create cloud frame data UBO (256 bytes, minimum UBO alignment)

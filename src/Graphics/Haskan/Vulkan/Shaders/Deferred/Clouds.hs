@@ -249,7 +249,50 @@ cloudFragment = shader do
       stormIntensity = view @(Name "stormIntensity") frameData
       weatherAnimSpeed = view @(Name "weatherAnimSpeed") frameData
 
-  ~(Vec4 skyR skyG skyB _) <- use @(ImageTexel "env_map") NilOps (Vec3 dirX dirY dirZ)
+  -- Analytic sky evaluation (dynamic, replaces static env_map cubemap)
+  let cosThetaView = abs dirY
+      cosGamma = dir ^.^ sunDir
+      cosGammaClamped = clamp cosGamma (-1.0) 1.0
+
+      -- Rayleigh phase function
+      rayleighPhase = (3.0 / (16.0 * 3.14159265)) * (1.0 + cosGammaClamped * cosGammaClamped)
+
+      -- Optical depth model with larger epsilon for smooth horizon
+      rayleighOD = 0.3
+      mieOD = 0.1
+      rayleighTrans = exp (-rayleighOD / (cosThetaView + 0.05))
+      mieTrans = exp (-mieOD / (cosThetaView + 0.05))
+
+      -- In-scattering (scale ~100x to bring into visible HDR range)
+      rayleighScatterR = 0.0058 * rayleighPhase * (1.0 - rayleighTrans) * 100.0
+      rayleighScatterG = 0.0135 * rayleighPhase * (1.0 - rayleighTrans) * 100.0
+      rayleighScatterB = 0.0331 * rayleighPhase * (1.0 - rayleighTrans) * 100.0
+
+      -- Mie phase (Henyey-Greenstein)
+      g = 0.76
+      g2 = g * g
+      mieDenom = (1.0 + g2 - 2.0 * g * cosGammaClamped) ** 1.5
+      miePhase = (1.0 - g2) / (4.0 * 3.14159265 * mieDenom)
+      mieScatter = 0.021 * miePhase * (1.0 - mieTrans) * 100.0
+
+      -- Soft sun disc with smoothstep to avoid banding
+      sunDisc = 50.0 * smoothstep 0.999 1.0 cosGammaClamped
+
+      -- Color temperature based on sun elevation
+      sunElev = sunDirY
+      colorTempR = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 1.0 else (if sunElev > (-0.1) then 1.0 else 0.05))
+      colorTempG = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 0.75 else (if sunElev > (-0.1) then 0.4 else 0.05))
+      colorTempB = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 0.45 else (if sunElev > (-0.1) then 0.2 else 0.15))
+
+      totalR = (rayleighScatterR + mieScatter + sunDisc) * colorTempR
+      totalG = (rayleighScatterG + mieScatter + sunDisc) * colorTempG
+      totalB = (rayleighScatterB + mieScatter + sunDisc) * colorTempB
+
+      turbidityScale = 1.2
+
+      skyR = totalR * turbidityScale
+      skyG = totalG * turbidityScale
+      skyB = totalB * turbidityScale
 
   let cloudThickness = 800.0
       cloudTop = cloudBottom + cloudThickness
