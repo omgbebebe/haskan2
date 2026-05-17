@@ -278,11 +278,12 @@ cloudFragment = shader do
       -- Soft sun disc with smoothstep to avoid banding
       sunDisc = 50.0 * smoothstep 0.999 1.0 cosGammaClamped
 
-      -- Color temperature based on sun elevation
+      -- Warm tint: smooth gradient matching Hosek-Wilkie color model
       sunElev = sunDirY
-      colorTempR = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 1.0 else (if sunElev > (-0.1) then 1.0 else 0.05))
-      colorTempG = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 0.75 else (if sunElev > (-0.1) then 0.4 else 0.05))
-      colorTempB = if sunElev > 0.3 then 1.0 else (if sunElev > 0.0 then 0.45 else (if sunElev > (-0.1) then 0.2 else 0.15))
+      warmth = clamp ((clamp sunElev (-0.1) 1.0) / 0.3) 0.0 1.0
+      colorTempR = 1.0
+      colorTempG = 0.45 + 0.55 * warmth
+      colorTempB = 0.2 + 0.8 * warmth
 
       totalR = (rayleighScatterR + mieScatter + sunDisc) * colorTempR
       totalG = (rayleighScatterG + mieScatter + sunDisc) * colorTempG
@@ -306,7 +307,7 @@ cloudFragment = shader do
       tFar = max 0.0 (max tToBottom tToTop)
       totalRayLength = min 5000.0 (tFar - tNear)
       absDirY = step 0.0 dirY * dirY + step dirY 0.0 * (0.0 - dirY)
-      stepCountF = max 32.0 (min 128.0 (totalRayLength / 80.0))
+      stepCountF = max 32.0 (min 256.0 (totalRayLength / 20.0))
       adaptiveStepSize = totalRayLength / stepCountF
 
   -- Sample blue noise for dithered ray entry
