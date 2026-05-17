@@ -10,15 +10,17 @@ module Graphics.Haskan.Render.ShaderProgram
 where
 
 import Data.Maybe (catMaybes)
+import Foreign (Ptr, nullPtr)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal.Create (set, setStrRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
--- | A single shader stage configuration.
+-- | A single shader stage configuration, with optional specialization constants.
 data ShaderStage = ShaderStage
   { ssStage :: !Vulkan.VkShaderStageFlagBits,
-    ssModule :: !Vulkan.VkShaderModule
+    ssModule :: !Vulkan.VkShaderModule,
+    ssSpecializationInfo :: !(Maybe (Ptr Vulkan.VkSpecializationInfo))
   }
 
 -- | Traditional graphics pipeline shader program.
@@ -40,6 +42,7 @@ data MeshShaderProgram = MeshShaderProgram
   }
 
 -- | Convert a ShaderProgram to a list of Vulkan pipeline stage create infos.
+-- No specialization constants by default.
 toPipelineStages :: ShaderProgram -> [Vulkan.VkPipelineShaderStageCreateInfo]
 toPipelineStages ShaderProgram {..} =
   let mkStage stageFlag mod_ =
@@ -49,6 +52,7 @@ toPipelineStages ShaderProgram {..} =
               &* set @"stage" stageFlag
               &* set @"module" mod_
               &* setStrRef @"pName" "main"
+              &* set @"pSpecializationInfo" nullPtr
           )
    in catMaybes
         [ Just (mkStage Vulkan.VK_SHADER_STAGE_VERTEX_BIT spVertex),
@@ -57,6 +61,18 @@ toPipelineStages ShaderProgram {..} =
           mkStage Vulkan.VK_SHADER_STAGE_GEOMETRY_BIT <$> spGeometry,
           Just (mkStage Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT spFragment)
         ]
+
+-- | Convert shader stages with specialization info.
+toPipelineStagesWithSpec :: [ShaderStage] -> [Vulkan.VkPipelineShaderStageCreateInfo]
+toPipelineStagesWithSpec = map $ \ShaderStage{..} ->
+  Vulkan.createVk
+    ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+        &* set @"pNext" Vulkan.VK_NULL
+        &* set @"stage" ssStage
+        &* set @"module" ssModule
+        &* setStrRef @"pName" "main"
+        &* set @"pSpecializationInfo" (maybe nullPtr id ssSpecializationInfo)
+    )
 
 -- | Number of active stages in a ShaderProgram.
 stageCount :: ShaderProgram -> Int

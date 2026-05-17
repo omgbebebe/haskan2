@@ -1,11 +1,13 @@
 module Graphics.Haskan.Vulkan.ComputePipeline
   ( managedComputePipeline,
     createComputePipeline,
+    createComputePipelineWithSpec,
   )
 where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
+import Foreign (Ptr, nullPtr)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -31,7 +33,17 @@ createComputePipeline ::
   Vulkan.VkPipelineLayout ->
   Vulkan.VkShaderModule ->
   m Vulkan.VkPipeline
-createComputePipeline dev layout shaderModule = do
+createComputePipeline dev layout shaderModule =
+  createComputePipelineWithSpec dev layout shaderModule nullPtr
+
+createComputePipelineWithSpec ::
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkPipelineLayout ->
+  Vulkan.VkShaderModule ->
+  Ptr Vulkan.VkSpecializationInfo ->
+  m Vulkan.VkPipeline
+createComputePipelineWithSpec dev layout shaderModule specInfoPtr = do
   let stageCreateInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
@@ -40,7 +52,7 @@ createComputePipeline dev layout shaderModule = do
               &* set @"stage" Vulkan.VK_SHADER_STAGE_COMPUTE_BIT
               &* set @"module" shaderModule
               &* setStrRef @"pName" "main"
-              &* set @"pSpecializationInfo" Vulkan.VK_NULL
+              &* set @"pSpecializationInfo" specInfoPtr
           )
       createInfo =
         Vulkan.createVk
