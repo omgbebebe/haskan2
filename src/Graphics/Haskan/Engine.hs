@@ -143,6 +143,7 @@ mainLoop meshName EngineConfig {..} = do
   tvPhysicsBodies <- liftIO $ STM.newTVarIO IntMap.empty
   tvPhysicsTimeScale <- liftIO $ STM.newTVarIO 1.0
   tvPhysicsAutoStep <- liftIO $ STM.newTVarIO True
+  tvPhysicsBodyToEntity <- liftIO $ STM.newTVarIO IntMap.empty
 
   let gameState =
         GameState
@@ -185,6 +186,7 @@ mainLoop meshName EngineConfig {..} = do
           tvPhysicsBodies
           tvPhysicsTimeScale
           tvPhysicsAutoStep
+          tvPhysicsBodyToEntity
 
   mDebugServer <- case debugSocketPath of
     Just path -> do

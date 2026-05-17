@@ -17,6 +17,7 @@ import Graphics.Haskan.Engine.Types (GameState (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Physics.Jolt.Types (BodyId (..), BodyState (..), BodyType (..))
 import Graphics.Haskan.Physics.Jolt.World qualified as Physics
+import Graphics.Haskan.Scene.ECS (EntityId (..))
 import System.Clock (Clock (..), getTime, toNanoSecs)
 
 physicsLoop :: MonadIO m => Integer -> GameState cam -> MVar () -> m ()
@@ -30,6 +31,7 @@ physicsLoop targetFPS gameState finishedSemaphore = liftIO $ do
 
   -- Test box (will be replaced by scene description in Phase 6)
   boxId <- Physics.createBody world (BoxBody (V3 0.5 0.5 0.5) 10) (V3 0 5 0)
+  STM.atomically $ STM.writeTVar (physicsBodyToEntity gameState) (IntMap.singleton (unBodyId boxId) (EntityId 0))
 
   let bodyIds = [boxId]
 

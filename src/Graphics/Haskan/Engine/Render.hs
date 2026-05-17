@@ -86,6 +86,8 @@ import Graphics.Haskan.Engine.Render.Internal.Setup
   )
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
+import Graphics.Haskan.Physics.Jolt.Types (BodyState (..))
+import Graphics.Haskan.Scene.ECS (EntityId (..))
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Mesh qualified as Mesh
@@ -197,6 +199,8 @@ data RenderEnv = RenderEnv
     reTvStormIntensity :: !(STM.TVar Float),
     reTvWeatherAnimSpeed :: !(STM.TVar Float),
     reTvSkyNeedsRegeneration :: !(STM.TVar Bool),
+    reTvPhysicsBodies :: !(STM.TVar (IntMap BodyState)),
+    reTvPhysicsBodyToEntity :: !(STM.TVar (IntMap EntityId)),
     rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat)),
     rePrevTime :: !(TVar Float),
     reImGuiBackend :: !(Maybe Backend.ImGuiBackend)
@@ -284,6 +288,17 @@ runFrame frameNumber = do
   let imageAvailableSemaphore = reImageAvailableSemaphores !! frameNumber
       mvpMemory = reFrameMvpMemories !! frameNumber
   camera <- readCamera
+
+  -- Sync physics bodies to ECS transforms
+  physicsBodies' <- liftIO $ STM.readTVarIO reTvPhysicsBodies
+  physicsBodyToEntity' <- liftIO $ STM.readTVarIO reTvPhysicsBodyToEntity
+  liftIO $ forM_ (IntMap.toList physicsBodies') $ \(bid, bstate) ->
+    case IntMap.lookup bid physicsBodyToEntity' of
+      Just (EntityId eid) -> do
+        let t = Transform (bsPosition bstate) (bsRotation bstate) (V3 1 1 1)
+        ECS.setTransform reECSWorld (EntityId eid) t
+      Nothing -> pure ()
+
   drawList <- extractDrawList reECSWorld reResourceManager reTextureIndexMap
   logDebug LogRender $ "draw list: " <> showT (length drawList) <> " entities"
   let camPos = realToFrac <$> Camera.cameraPosition camera
@@ -880,7 +895,9 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                          reTvStormIntensity = tvStormIntensity,
                          reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
                          reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
-                        rePrevViewProj = prevViewProjTVar,
+                         reTvPhysicsBodies = physicsBodies gameState,
+                         reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,
+                         rePrevViewProj = prevViewProjTVar,
                         rePrevTime = prevTimeTVar,
                         reImGuiBackend = mImGuiBackend
                       }

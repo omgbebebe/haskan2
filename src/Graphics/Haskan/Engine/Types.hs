@@ -66,6 +66,7 @@ import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Physics.Jolt.Types (BodyId, BodyState)
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
+import Graphics.Haskan.Scene.ECS (EntityId (..))
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Vulkan qualified as Vulkan
 import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
@@ -479,7 +480,8 @@ data GameState cam = GameState
     lastSunDirection :: TVar (Maybe (V3 Float)),
     physicsBodies :: TVar (IntMap BodyState),
     physicsTimeScale :: TVar Float,
-    physicsAutoStep :: TVar Bool
+    physicsAutoStep :: TVar Bool,
+    physicsBodyToEntity :: TVar (IntMap EntityId)
   }
 
 data RenderDebugInfo = RenderDebugInfo
