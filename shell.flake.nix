@@ -96,7 +96,7 @@ mkShell {
     haskell.packages.ghc98.apply-refact
   ] ++ nativeLibs;
   shellHook = ''
-    export LD_LIBRARY_PATH="${lib.makeLibraryPath nativeLibs}:$LD_LIBRARY_PATH"
+    export LD_LIBRARY_PATH="${lib.makeLibraryPath nativeLibs}:${toString ./3rdparty/jolt-wrapper}:$LD_LIBRARY_PATH"
     export VK_LAYER_PATH="${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d"
     export JOLT_INCLUDE_DIR="${jolt-physics}/include"
     export JOLT_LIB_DIR="${jolt-physics}/lib"
