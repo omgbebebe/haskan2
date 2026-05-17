@@ -2,60 +2,43 @@
 
 **Priority**: P1 — needed for shader permutations
 **Estimate**: 1.5 weeks
-**Status**: Not started
+**Status**: Codegen complete, runtime + tests pending
 
 ---
 
-## Phase 3A: Type-Level API (2-3 days)
+## Implementation Summary
 
-- [ ] Create `3rdparty/fir/src/FIR/Prim/SpecConstant.hs`
-- [ ] Define `SpecConstant (name :: Symbol) (ty :: Type) (defaultVal :: k)`
-- [ ] Support `KnownNat` / `KnownSymbol` for default values
-- [ ] Add `specConstant` function yielding `Code a`
+Simplified approach: scalar + bool only, `Word32` specId parameter.
 
----
+### Done
 
-## Phase 3B: Decoration and Layout (2 days)
+- `SpecConstantF` GADT in `FIR/AST/Prim.hs` with pattern `SpecConstant`
+- `SpecConstantF` added to `AllOpsF` in `FIR/AST.hs` + boot files
+- `specConstantID` in `CodeGen/IDs.hs`: emits `OpSpecConstant`/`True`/`False` + `SpecId` decoration
+- `CodeGen (SpecConstantF AST)` instance in `CodeGen/CodeGen.hs`
+- `specConstant` user-facing helper in `FIR/Syntax/Program.hs`
 
-- [ ] Add `SpecId` decoration tracking to FIR compilation state
-- [ ] Assign sequential `SpecId` during shader compilation
-- [ ] Support `OpSpecConstantOp` for computed constants
-- [ ] Track spec constants in `ProgramState`
+### Pending
 
----
-
-## Phase 3C: Code Generation (2-3 days)
-
-- [ ] Emit `OpDecorate %const SpecId <n>`
-- [ ] Emit `OpSpecConstant` / `OpSpecConstantTrue` / `OpSpecConstantFalse`
-- [ ] Emit `OpSpecConstantComposite` for vectors
-- [ ] Emit `OpSpecConstantOp` for computed values
-- [ ] Verify `spirv-val`
+- [ ] Vulkan runtime API (`VkSpecializationInfo` integration)
+- [ ] Test suite (`test/Tests/SpecConstants/WorkgroupSize.hs`)
+- [ ] Verify with `spirv-val`
 
 ---
 
-## Phase 3D: Vulkan Runtime API (2 days)
+## Files Changed
 
-- [ ] Create `src/Graphics/Haskan/Vulkan/ShaderSpecialization.hs`
-- [ ] Define `SpecInfo` with `VkSpecializationMapEntry` + `ByteString` data
-- [ ] Implement `buildSpecInfo` from FIR shader metadata
-- [ ] Integrate into pipeline creation (`VkGraphicsPipelineCreateInfo.pSpecializationInfo`)
-- [ ] Integrate into compute pipeline creation
-
----
-
-## Phase 3E: Tests (1 day)
-
-- [ ] `test/Tests/SpecConstant/WorkgroupSize.hs` — specialize compute local size
-- [ ] `test/Tests/SpecConstant/BoolFlag.hs` — feature toggle
-- [ ] `test/Tests/SpecConstant/MultiSpec.hs` — multiple constants
-- [ ] All tests pass `spirv-val`
+- `src/FIR/AST/Prim.hs` — `SpecConstantF` GADT, pattern, Display
+- `src/FIR/AST/Prim.hs-boot` — role annotation
+- `src/FIR/AST.hs` + boot — `AllOpsF` extension
+- `src/CodeGen/IDs.hs` — `specConstantID` + export
+- `src/CodeGen/CodeGen.hs` — `CodeGen (SpecConstantF AST)` instance
+- `src/FIR/Syntax/Program.hs` — `specConstant` helper
 
 ---
 
-## Definition of Done
+## Next Steps
 
-- [ ] `specConstant @"foo" @Word32` produces valid SPIR-V with `SpecId`
-- [ ] Vulkan runtime can specialize and create pipeline
-- [ ] Compute workgroup size specialization works
-- [ ] 3 test suites pass
+1. Write `test/Tests/SpecConstants/WorkgroupSize.hs`
+2. Run `spirv-val` on generated SPIR-V
+3. Implement Vulkan runtime specialization (deferred)
