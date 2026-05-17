@@ -23,29 +23,29 @@ import Data.Text qualified as Text
 import Data.Vector.Storable (Vector, fromList)
 import Data.Vector.Storable qualified as VS
 import Data.Word (Word16, Word32, Word8)
-import Foreign.Marshal.Array qualified
 import FIR qualified
 import Foreign.C qualified
+import Foreign.Marshal.Array qualified
 import Graphics.Haskan.Assets.Cache (AssetCache)
 import Graphics.Haskan.BoundingBox (BBox (..), emptyBBox, fromPoints)
 import Graphics.Haskan.Camera (AnyCamera, Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.DayNight (computeSunState, defaultDayNightConfig)
 import Graphics.Haskan.DayNight qualified as DayNight
-import Graphics.Haskan.HosekWilkie (computeHWCoeffs, hwCoeffsToList, HWCoeffs(..))
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo)
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), PhysicsBodySpec (..), RenderDebugInfo (..), SkyGenUniforms (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
+import Graphics.Haskan.HosekWilkie (HWCoeffs (..), computeHWCoeffs, hwCoeffsToList)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
+import Graphics.Haskan.Physics.Jolt.Types (BodyType (..))
 import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
 import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), RenderPassNode (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
-import Graphics.Haskan.Physics.Jolt.Types (BodyType (..))
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
@@ -75,16 +75,16 @@ import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..), TextureResource (..), lookupTexture)
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
-import Graphics.Haskan.Vulkan.Shaders.Sky.Procedural (generateSkyLUT, defaultSkyParams)
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
-import Graphics.Haskan.Vulkan.Shaders.Compute.SkyLUTGen qualified as SkyLUTGenShaders
-import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGenShaders
+import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGenShaders
+import Graphics.Haskan.Vulkan.Shaders.Compute.SkyLUTGen qualified as SkyLUTGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds qualified as CloudShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProceduralShaders
+import Graphics.Haskan.Vulkan.Shaders.Sky.Procedural (defaultSkyParams, generateSkyLUT)
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
@@ -496,24 +496,67 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
 
   -- Create UBO with default sky params (HW coefficients for turbidity=2, albedo=0.3, solar elevation=π/6)
   let hwCoeffs = computeHWCoeffs 2.0 0.3 (pi / 6.0)
-      [hwAR, hwAG, hwAB, hwBR, hwBG, hwBB, hwCR, hwCG, hwCB,
-       hwDR, hwDG, hwDB, hwER, hwEG, hwEB, hwFR, hwFG, hwFB,
-       hwGR, hwGG, hwGB, hwHR, hwHG, hwHB, hwIR, hwIG, hwIB] = hwCoeffsToList hwCoeffs
+      [ hwAR,
+        hwAG,
+        hwAB,
+        hwBR,
+        hwBG,
+        hwBB,
+        hwCR,
+        hwCG,
+        hwCB,
+        hwDR,
+        hwDG,
+        hwDB,
+        hwER,
+        hwEG,
+        hwEB,
+        hwFR,
+        hwFG,
+        hwFB,
+        hwGR,
+        hwGG,
+        hwGB,
+        hwHR,
+        hwHG,
+        hwHB,
+        hwIR,
+        hwIG,
+        hwIB
+        ] = hwCoeffsToList hwCoeffs
       skyParams =
         SkyGenUniforms
           { sgSunDirX = 0.0,
             sgSunDirY = 0.3,
             sgSunDirZ = (-1.0),
             sgSunIntensity = 50.0,
-            sgHwAR = hwAR, sgHwAG = hwAG, sgHwAB = hwAB,
-            sgHwBR = hwBR, sgHwBG = hwBG, sgHwBB = hwBB,
-            sgHwCR = hwCR, sgHwCG = hwCG, sgHwCB = hwCB,
-            sgHwDR = hwDR, sgHwDG = hwDG, sgHwDB = hwDB,
-            sgHwER = hwER, sgHwEG = hwEG, sgHwEB = hwEB,
-            sgHwFR = hwFR, sgHwFG = hwFG, sgHwFB = hwFB,
-            sgHwGR = hwGR, sgHwGG = hwGG, sgHwGB = hwGB,
-            sgHwHR = hwHR, sgHwHG = hwHG, sgHwHB = hwHB,
-            sgHwIR = hwIR, sgHwIG = hwIG, sgHwIB = hwIB
+            sgHwAR = hwAR,
+            sgHwAG = hwAG,
+            sgHwAB = hwAB,
+            sgHwBR = hwBR,
+            sgHwBG = hwBG,
+            sgHwBB = hwBB,
+            sgHwCR = hwCR,
+            sgHwCG = hwCG,
+            sgHwCB = hwCB,
+            sgHwDR = hwDR,
+            sgHwDG = hwDG,
+            sgHwDB = hwDB,
+            sgHwER = hwER,
+            sgHwEG = hwEG,
+            sgHwEB = hwEB,
+            sgHwFR = hwFR,
+            sgHwFG = hwFG,
+            sgHwFB = hwFB,
+            sgHwGR = hwGR,
+            sgHwGG = hwGG,
+            sgHwGB = hwGB,
+            sgHwHR = hwHR,
+            sgHwHG = hwHG,
+            sgHwHB = hwHB,
+            sgHwIR = hwIR,
+            sgHwIG = hwIG,
+            sgHwIB = hwIB
           }
   (skyGenDataBuffer, skyGenDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [skyParams]
 

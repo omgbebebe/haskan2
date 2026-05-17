@@ -14,8 +14,8 @@ import Control.Lens ((^.))
 import Data.Bits (shiftL, (.&.), (.|.))
 import Data.Word (Word16)
 import GHC.Float (isInfinite, isNaN)
-import Linear (V3 (..), normalize, (^*), (^+^), (^-^), (*^), _x, _y, _z, dot)
-import Prelude hiding ((*^), (^.), (^+^), (^-^))
+import Linear (V3 (..), dot, normalize, (*^), (^*), (^+^), (^-^), _x, _y, _z)
+import Prelude hiding ((*^), (^+^), (^-^), (^.))
 
 -- | Parameters for procedural sky generation.
 data SkyParams = SkyParams
@@ -54,7 +54,7 @@ hgPhase g mu =
 -- | Evaluate procedural sky color for a view direction.
 evaluateSky ::
   SkyParams ->
-  V3 Float ->  -- viewDir (normalized)
+  V3 Float -> -- viewDir (normalized)
   V3 Float
 evaluateSky params viewDir =
   let sunDir = spSunDir params

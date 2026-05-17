@@ -638,7 +638,6 @@ updateCloudFrameDataBuffer dev descriptorSet buffer = do
     Foreign.Marshal.Array.withArray [write] $ \writeUpdatePtr ->
       Vulkan.vkUpdateDescriptorSets dev 1 writeUpdatePtr 0 Vulkan.vkNullPtr
 
-
 -- | Update sky LUT compute descriptor set with storage image and UBO.
 updateSkyLUTComputeDescriptorSets ::
   (MonadIO m) =>

@@ -1058,7 +1058,6 @@ createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
   registerTexture rm resource
   pure texH
 
-
 -- | Create a 2D storage image for compute shader writes and later sampling.
 -- Image is transitioned to GENERAL layout for compute writes.
 createStorageImage2D ::

@@ -266,14 +266,14 @@ type FragmentDefs =
        ':-> StorageBuffer
               '[Binding 7, DescriptorSet 0]
               LightsData,
-      "cloud_result"
-        ':-> Texture2D
-               '[Binding 8, DescriptorSet 0]
-               (RGBA16 F),
-      "sky_lut"
-        ':-> Texture2D
-               '[Binding 9, DescriptorSet 0]
-               (RGBA16 F),
+     "cloud_result"
+       ':-> Texture2D
+              '[Binding 8, DescriptorSet 0]
+              (RGBA16 F),
+     "sky_lut"
+       ':-> Texture2D
+              '[Binding 9, DescriptorSet 0]
+              (RGBA16 F),
      "cameraPos"
        ':-> PushConstant
               '[]

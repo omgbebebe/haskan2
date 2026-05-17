@@ -28,8 +28,8 @@ import Graphics.Haskan.Assets.Cache (AssetCache)
 import Graphics.Haskan.Assets.TexturePreprocessor (TextureConfig, defaultTextureConfig)
 import Graphics.Haskan.Engine.Types (PhysicsBodySpec (..))
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
-import Graphics.Haskan.Physics.Jolt.Types (BodyType (..))
 import Graphics.Haskan.Mesh (Mesh (..))
+import Graphics.Haskan.Physics.Jolt.Types (BodyType (..))
 import Graphics.Haskan.Scene.ECS (EntityId, World)
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform)
@@ -575,11 +575,12 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
 
   -- Check for physics body naming convention
   let maybeSpec = case nodeName node of
-        Just name | "_physics_box" `Text.isSuffixOf` name ->
-          let pos = tPosition transform
-              scale = tScale transform
-              halfExtents = scale * 0.5
-          in Just $ PhysicsBodySpec (BoxBody halfExtents 10.0) pos entity
+        Just name
+          | "_physics_box" `Text.isSuffixOf` name ->
+              let pos = tPosition transform
+                  scale = tScale transform
+                  halfExtents = scale * 0.5
+               in Just $ PhysicsBodySpec (BoxBody halfExtents 10.0) pos entity
         _ -> Nothing
 
   -- Process children

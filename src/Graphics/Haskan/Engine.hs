@@ -45,6 +45,7 @@ import Graphics.Haskan.DayNight (computeSunState, defaultDayNightConfig)
 import Graphics.Haskan.Debug.FrameInspector (defaultInspector)
 import Graphics.Haskan.Debug.Interface (DebugMessage (..), debugMessageToActionEvent)
 import Graphics.Haskan.Debug.Server (startDebugServer, stopDebugServer)
+import Graphics.Haskan.Engine.Physics (physicsLoop)
 import Graphics.Haskan.Engine.Render (renderLoop)
 import Graphics.Haskan.Engine.Scene (computeSkyboxRays, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types
@@ -64,7 +65,6 @@ import Graphics.Haskan.Engine.Types
     updateFrameStats,
     writeInputBuffer,
   )
-import Graphics.Haskan.Engine.Physics (physicsLoop)
 import Graphics.Haskan.Engine.Update (stateUpdateLoop)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)

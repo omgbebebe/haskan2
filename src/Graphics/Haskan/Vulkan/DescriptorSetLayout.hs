@@ -329,7 +329,6 @@ createCubemapComputeDescriptorSetLayout dev = do
               &* set @"bindingCount" (fromIntegral (length bindings))
               &* setListRef @"pBindings" bindings
           )
-
    in liftIO $
         withPtr
           createInfo

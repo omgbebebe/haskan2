@@ -86,18 +86,18 @@ import Graphics.Haskan.Engine.Render.Internal.Setup
   )
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
-import Graphics.Haskan.Physics.Jolt.Types (BodyState (..))
-import Graphics.Haskan.Scene.ECS (EntityId (..))
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
+import Graphics.Haskan.Physics.Jolt.Types (BodyState (..))
 import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
 import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), RenderPassNode (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
 import Graphics.Haskan.Resources (alloc, allocaAndPeekVkResult, throwVkResult)
+import Graphics.Haskan.Scene.ECS (EntityId (..))
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
@@ -899,14 +899,14 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                         reTvCloudAbsorption = tvCloudAbsorption,
                         reTvWeatherCoverageScale = tvWeatherCoverageScale,
                         reTvWeatherTypeBias = tvWeatherTypeBias,
-                         reTvStormIntensity = tvStormIntensity,
-                         reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
-                         reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
-                         reTvPhysicsBodies = physicsBodies gameState,
-                         reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,
-                         reTvPhysicsAutoStep = physicsAutoStep gameState,
-                         reTvPhysicsTimeScale = physicsTimeScale gameState,
-                         rePrevViewProj = prevViewProjTVar,
+                        reTvStormIntensity = tvStormIntensity,
+                        reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
+                        reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
+                        reTvPhysicsBodies = physicsBodies gameState,
+                        reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,
+                        reTvPhysicsAutoStep = physicsAutoStep gameState,
+                        reTvPhysicsTimeScale = physicsTimeScale gameState,
+                        rePrevViewProj = prevViewProjTVar,
                         rePrevTime = prevTimeTVar,
                         reImGuiBackend = mImGuiBackend
                       }

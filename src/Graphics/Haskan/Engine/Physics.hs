@@ -1,6 +1,7 @@
 module Graphics.Haskan.Engine.Physics
-  ( physicsLoop
-  ) where
+  ( physicsLoop,
+  )
+where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.MVar (MVar, putMVar)
@@ -11,16 +12,15 @@ import Control.Monad (unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
-import Linear (V3 (..))
-
 import Graphics.Haskan.Engine.Types (GameState (..), PhysicsBodySpec (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Physics.Jolt.Types (BodyId (..), BodyState (..), BodyType (..))
 import Graphics.Haskan.Physics.Jolt.World qualified as Physics
 import Graphics.Haskan.Scene.ECS (EntityId (..))
+import Linear (V3 (..))
 import System.Clock (Clock (..), getTime, toNanoSecs)
 
-physicsLoop :: MonadIO m => Integer -> GameState cam -> MVar () -> m ()
+physicsLoop :: (MonadIO m) => Integer -> GameState cam -> MVar () -> m ()
 physicsLoop targetFPS gameState finishedSemaphore = liftIO $ do
   logInfoIO LogGeneral "physicsLoop starting"
 
@@ -35,10 +35,13 @@ physicsLoop targetFPS gameState finishedSemaphore = liftIO $ do
     STM.writeTVar (physicsPendingSpecs gameState) []
     pure s
 
-  bodies <- mapM (\spec -> do
-    bid <- Physics.createBody world (pbsBodyType spec) (pbsPosition spec)
-    pure (unBodyId bid, pbsEntityId spec)
-    ) specs
+  bodies <-
+    mapM
+      ( \spec -> do
+          bid <- Physics.createBody world (pbsBodyType spec) (pbsPosition spec)
+          pure (unBodyId bid, pbsEntityId spec)
+      )
+      specs
 
   let bodyIds = map (BodyId . fst) bodies
   STM.atomically $ STM.writeTVar (physicsBodyToEntity gameState) (IntMap.fromList bodies)
@@ -66,10 +69,13 @@ physicsLoop targetFPS gameState finishedSemaphore = liftIO $ do
             let stepDt = dtSeconds * timeScale
             Physics.stepWorld world stepDt 1
 
-            states <- mapM (\bid -> do
-              st <- Physics.getBodyState world bid
-              pure (unBodyId bid, st)
-              ) bids
+            states <-
+              mapM
+                ( \bid -> do
+                    st <- Physics.getBodyState world bid
+                    pure (unBodyId bid, st)
+                )
+                bids
             STM.atomically $ STM.writeTVar (physicsBodies gameState) (IntMap.fromList states)
 
           let targetDelayMicros = 1000000 `div` fromIntegral tFPS

@@ -67,8 +67,8 @@ import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Physics.Jolt.Types (BodyId, BodyState, BodyType)
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
-import Graphics.Haskan.Scene.ECS (EntityId (..))
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
+import Graphics.Haskan.Scene.ECS (EntityId (..))
 import Graphics.Vulkan qualified as Vulkan
 import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
 import Linear.Matrix (identity, inv33, inv44, transpose, (!*), (!*!))
@@ -286,47 +286,104 @@ data SkyGenUniforms = SkyGenUniforms
     sgSunDirY :: !Float,
     sgSunDirZ :: !Float,
     sgSunIntensity :: !Float,
-    sgHwAR :: !Float, sgHwAG :: !Float, sgHwAB :: !Float,
-    sgHwBR :: !Float, sgHwBG :: !Float, sgHwBB :: !Float,
-    sgHwCR :: !Float, sgHwCG :: !Float, sgHwCB :: !Float,
-    sgHwDR :: !Float, sgHwDG :: !Float, sgHwDB :: !Float,
-    sgHwER :: !Float, sgHwEG :: !Float, sgHwEB :: !Float,
-    sgHwFR :: !Float, sgHwFG :: !Float, sgHwFB :: !Float,
-    sgHwGR :: !Float, sgHwGG :: !Float, sgHwGB :: !Float,
-    sgHwHR :: !Float, sgHwHG :: !Float, sgHwHB :: !Float,
-    sgHwIR :: !Float, sgHwIG :: !Float, sgHwIB :: !Float
+    sgHwAR :: !Float,
+    sgHwAG :: !Float,
+    sgHwAB :: !Float,
+    sgHwBR :: !Float,
+    sgHwBG :: !Float,
+    sgHwBB :: !Float,
+    sgHwCR :: !Float,
+    sgHwCG :: !Float,
+    sgHwCB :: !Float,
+    sgHwDR :: !Float,
+    sgHwDG :: !Float,
+    sgHwDB :: !Float,
+    sgHwER :: !Float,
+    sgHwEG :: !Float,
+    sgHwEB :: !Float,
+    sgHwFR :: !Float,
+    sgHwFG :: !Float,
+    sgHwFB :: !Float,
+    sgHwGR :: !Float,
+    sgHwGG :: !Float,
+    sgHwGB :: !Float,
+    sgHwHR :: !Float,
+    sgHwHG :: !Float,
+    sgHwHB :: !Float,
+    sgHwIR :: !Float,
+    sgHwIG :: !Float,
+    sgHwIB :: !Float
   }
   deriving (Show, Generic)
 
 instance Storable SkyGenUniforms where
-  sizeOf _ = 124  -- 31 floats * 4 bytes
+  sizeOf _ = 124 -- 31 floats * 4 bytes
   alignment _ = 16
   peek ptr =
     SkyGenUniforms
-      <$> peekByteOff ptr 0 <*> peekByteOff ptr 4 <*> peekByteOff ptr 8 <*> peekByteOff ptr 12
-      <*> peekByteOff ptr 16 <*> peekByteOff ptr 20 <*> peekByteOff ptr 24
-      <*> peekByteOff ptr 28 <*> peekByteOff ptr 32 <*> peekByteOff ptr 36
-      <*> peekByteOff ptr 40 <*> peekByteOff ptr 44 <*> peekByteOff ptr 48
-      <*> peekByteOff ptr 52 <*> peekByteOff ptr 56 <*> peekByteOff ptr 60
-      <*> peekByteOff ptr 64 <*> peekByteOff ptr 68 <*> peekByteOff ptr 72
-      <*> peekByteOff ptr 76 <*> peekByteOff ptr 80 <*> peekByteOff ptr 84
-      <*> peekByteOff ptr 88 <*> peekByteOff ptr 92 <*> peekByteOff ptr 96
-      <*> peekByteOff ptr 100 <*> peekByteOff ptr 104 <*> peekByteOff ptr 108
-      <*> peekByteOff ptr 112 <*> peekByteOff ptr 116 <*> peekByteOff ptr 120
+      <$> peekByteOff ptr 0
+      <*> peekByteOff ptr 4
+      <*> peekByteOff ptr 8
+      <*> peekByteOff ptr 12
+      <*> peekByteOff ptr 16
+      <*> peekByteOff ptr 20
+      <*> peekByteOff ptr 24
+      <*> peekByteOff ptr 28
+      <*> peekByteOff ptr 32
+      <*> peekByteOff ptr 36
+      <*> peekByteOff ptr 40
+      <*> peekByteOff ptr 44
+      <*> peekByteOff ptr 48
+      <*> peekByteOff ptr 52
+      <*> peekByteOff ptr 56
+      <*> peekByteOff ptr 60
+      <*> peekByteOff ptr 64
+      <*> peekByteOff ptr 68
+      <*> peekByteOff ptr 72
+      <*> peekByteOff ptr 76
+      <*> peekByteOff ptr 80
+      <*> peekByteOff ptr 84
+      <*> peekByteOff ptr 88
+      <*> peekByteOff ptr 92
+      <*> peekByteOff ptr 96
+      <*> peekByteOff ptr 100
+      <*> peekByteOff ptr 104
+      <*> peekByteOff ptr 108
+      <*> peekByteOff ptr 112
+      <*> peekByteOff ptr 116
+      <*> peekByteOff ptr 120
   poke ptr u = do
     pokeByteOff ptr 0 (sgSunDirX u)
     pokeByteOff ptr 4 (sgSunDirY u)
     pokeByteOff ptr 8 (sgSunDirZ u)
     pokeByteOff ptr 12 (sgSunIntensity u)
-    pokeByteOff ptr 16 (sgHwAR u); pokeByteOff ptr 20 (sgHwAG u); pokeByteOff ptr 24 (sgHwAB u)
-    pokeByteOff ptr 28 (sgHwBR u); pokeByteOff ptr 32 (sgHwBG u); pokeByteOff ptr 36 (sgHwBB u)
-    pokeByteOff ptr 40 (sgHwCR u); pokeByteOff ptr 44 (sgHwCG u); pokeByteOff ptr 48 (sgHwCB u)
-    pokeByteOff ptr 52 (sgHwDR u); pokeByteOff ptr 56 (sgHwDG u); pokeByteOff ptr 60 (sgHwDB u)
-    pokeByteOff ptr 64 (sgHwER u); pokeByteOff ptr 68 (sgHwEG u); pokeByteOff ptr 72 (sgHwEB u)
-    pokeByteOff ptr 76 (sgHwFR u); pokeByteOff ptr 80 (sgHwFG u); pokeByteOff ptr 84 (sgHwFB u)
-    pokeByteOff ptr 88 (sgHwGR u); pokeByteOff ptr 92 (sgHwGG u); pokeByteOff ptr 96 (sgHwGB u)
-    pokeByteOff ptr 100 (sgHwHR u); pokeByteOff ptr 104 (sgHwHG u); pokeByteOff ptr 108 (sgHwHB u)
-    pokeByteOff ptr 112 (sgHwIR u); pokeByteOff ptr 116 (sgHwIG u); pokeByteOff ptr 120 (sgHwIB u)
+    pokeByteOff ptr 16 (sgHwAR u)
+    pokeByteOff ptr 20 (sgHwAG u)
+    pokeByteOff ptr 24 (sgHwAB u)
+    pokeByteOff ptr 28 (sgHwBR u)
+    pokeByteOff ptr 32 (sgHwBG u)
+    pokeByteOff ptr 36 (sgHwBB u)
+    pokeByteOff ptr 40 (sgHwCR u)
+    pokeByteOff ptr 44 (sgHwCG u)
+    pokeByteOff ptr 48 (sgHwCB u)
+    pokeByteOff ptr 52 (sgHwDR u)
+    pokeByteOff ptr 56 (sgHwDG u)
+    pokeByteOff ptr 60 (sgHwDB u)
+    pokeByteOff ptr 64 (sgHwER u)
+    pokeByteOff ptr 68 (sgHwEG u)
+    pokeByteOff ptr 72 (sgHwEB u)
+    pokeByteOff ptr 76 (sgHwFR u)
+    pokeByteOff ptr 80 (sgHwFG u)
+    pokeByteOff ptr 84 (sgHwFB u)
+    pokeByteOff ptr 88 (sgHwGR u)
+    pokeByteOff ptr 92 (sgHwGG u)
+    pokeByteOff ptr 96 (sgHwGB u)
+    pokeByteOff ptr 100 (sgHwHR u)
+    pokeByteOff ptr 104 (sgHwHG u)
+    pokeByteOff ptr 108 (sgHwHB u)
+    pokeByteOff ptr 112 (sgHwIR u)
+    pokeByteOff ptr 116 (sgHwIG u)
+    pokeByteOff ptr 120 (sgHwIB u)
 
 transformAABB :: M44 Float -> BBox -> (V3 Float, V3 Float)
 transformAABB worldMat (BBox (V3 minX minY minZ) (V3 maxX maxY maxZ)) =
