@@ -101,8 +101,8 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   let extent = rcSurfaceExtent ctx
       cloudExtent =
         Vulkan.createVk
-          ( set @"width" (Vulkan.getField @"width" extent `div` 2)
-              &* set @"height" (Vulkan.getField @"height" extent `div` 2)
+          ( set @"width" (Vulkan.getField @"width" extent)
+              &* set @"height" (Vulkan.getField @"height" extent)
           )
       gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
       gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
