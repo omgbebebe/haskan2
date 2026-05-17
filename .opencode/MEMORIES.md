@@ -55,6 +55,20 @@
 - **Elevation bounds**: `(-pi/2 + 0.01, pi/2 - 0.01)`
 - **Pitch axis**: Local right axis from current forward (not world-X)
 
+## Active Milestones & Plans
+| File | Status | Description |
+|------|--------|-------------|
+| `MILESTONE_FIR_PIPELINE_FIXES.md` | In progress | Fix 1 (atomics) complete, Fix 2+4A (Choose/abs) already done, Fix 3 (spec constants codegen) complete, Fix 4B-4D pending |
+| `MILESTONE_EEVEE_PARITY.md` | Not started | 5-phase EEVEE parity plan (~50-80 weeks, FIR fixes first) |
+| `MILESTONE_CLOUD_SHADER_PRODUCTION.md` | Phase 7 pending | Cloud production quality, automated tests |
+| `MILESTONE_CLOUD_LIGHTING_AMBIENT.md` | Not started | Height-graded ambient + multi-scattering |
+| `MILESTONE_CLOUD_WEATHER_MAP.md` | Not started | 2D weather map texture for spatial cloud variation |
+| `MILESTONE_DEAR_IMGUI.md` | Phases 5-7 pending | Status panel, rendering controls, physics panel |
+| `MILESTONE_JOLT_PHYSICS.md` | Complete | Physics integration |
+| `MILESTONE_FIR_IMPROVEMENTS.md` | Complete | Texture checking, layout gen, vector unpack QoL |
+| `MILESTONE_FIR_GAPS.md` | Open issues | Choose overlap, abs, type inference cascades |
+| `MILESTONE_FIR_MATH.md` | Complete | All 20 vector/matrix ops implemented |
+
 ## Active Issues (See `.opencode/PROJECT_STATE.md` for full audit)
 
 ### P0 — Critical
