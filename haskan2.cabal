@@ -45,7 +45,8 @@ library
                          Graphics.Haskan.Engine.Capabilities.Telemetry
                         Graphics.Haskan.Engine.Types
                        Graphics.Haskan.Engine.Scene
-                       Graphics.Haskan.Engine.Update
+                        Graphics.Haskan.Engine.Update
+                        Graphics.Haskan.Engine.Physics
                         Graphics.Haskan.Engine.Render
                         Graphics.Haskan.Engine.Render.Internal.FramePrepare
                         Graphics.Haskan.Engine.Render.Internal.FrameState

@@ -32,6 +32,7 @@ import Control.Concurrent.STM.TVar (TVar)
 import Control.Monad (forM_, unless, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (runManaged, with)
+import Data.IntMap.Strict qualified as IntMap
 import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import Data.Text (Text)
 import Data.Text qualified as Text
@@ -63,6 +64,7 @@ import Graphics.Haskan.Engine.Types
     updateFrameStats,
     writeInputBuffer,
   )
+import Graphics.Haskan.Engine.Physics (physicsLoop)
 import Graphics.Haskan.Engine.Update (stateUpdateLoop)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
@@ -138,6 +140,9 @@ mainLoop meshName EngineConfig {..} = do
   tvFlyCamera <- liftIO $ STM.newTVarIO (Camera.Fly defaultFlyCamera)
   tvSkyNeedsRegeneration <- liftIO $ STM.newTVarIO False
   tvLastSunDirection <- liftIO $ STM.newTVarIO Nothing
+  tvPhysicsBodies <- liftIO $ STM.newTVarIO IntMap.empty
+  tvPhysicsTimeScale <- liftIO $ STM.newTVarIO 1.0
+  tvPhysicsAutoStep <- liftIO $ STM.newTVarIO True
 
   let gameState =
         GameState
@@ -177,6 +182,9 @@ mainLoop meshName EngineConfig {..} = do
           tvFlyCamera
           tvSkyNeedsRegeneration
           tvLastSunDirection
+          tvPhysicsBodies
+          tvPhysicsTimeScale
+          tvPhysicsAutoStep
 
   mDebugServer <- case debugSocketPath of
     Just path -> do
@@ -225,6 +233,9 @@ mainLoop meshName EngineConfig {..} = do
   stateUpdateLoopFinished <- liftIO newEmptyMVar
   liftIO $ forkIOWithHandler "stateUpdateLoop" stateUpdateLoopFinished $ stateUpdateLoop targetPhysicsFPS gameState stateUpdateLoopFinished inputBuffer debugCmdQueue controlChannel
 
+  physicsLoopFinished <- liftIO newEmptyMVar
+  liftIO $ forkIOWithHandler "physicsLoop" physicsLoopFinished $ physicsLoop targetPhysicsFPS gameState physicsLoopFinished
+
   when renderLoopOk $ do
     let pollEventsWithImGui :: (MonadIO m) => m [SDL.Event]
         pollEventsWithImGui = go []
@@ -264,6 +275,11 @@ mainLoop meshName EngineConfig {..} = do
   case mbStateDone of
     Nothing -> logInfoIO LogGeneral "WARNING: state update loop shutdown timed out after 10s"
     Just _ -> logInfoIO LogGeneral "state update loop shut down cleanly"
+
+  mbPhysicsDone <- liftIO $ timeout shutdownTimeoutMicros $ takeMVar physicsLoopFinished
+  case mbPhysicsDone of
+    Nothing -> logInfoIO LogGeneral "WARNING: physics loop shutdown timed out after 10s"
+    Just _ -> logInfoIO LogGeneral "physics loop shut down cleanly"
 
   liftIO $ forM_ mDebugServer stopDebugServer
 
