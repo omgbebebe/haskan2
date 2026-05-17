@@ -14,19 +14,22 @@ import FIR
 import FIR.Prim.Image (ImageCoordinateKind(..))
 import Math.Linear
 
--- | Sky generation uniform data (same as SkyLUTGen).
+-- | Sky generation uniform data (Hosek-Wilkie model).
 type SkyGenData =
   Struct
     '[ "sunDirX" ':-> Float,
        "sunDirY" ':-> Float,
        "sunDirZ" ':-> Float,
        "sunIntensity" ':-> Float,
-       "rayleighR" ':-> Float,
-       "rayleighG" ':-> Float,
-       "rayleighB" ':-> Float,
-       "mieCoeff" ':-> Float,
-       "mieG" ':-> Float,
-       "turbidity" ':-> Float
+       "hwAR" ':-> Float, "hwAG" ':-> Float, "hwAB" ':-> Float,
+       "hwBR" ':-> Float, "hwBG" ':-> Float, "hwBB" ':-> Float,
+       "hwCR" ':-> Float, "hwCG" ':-> Float, "hwCB" ':-> Float,
+       "hwDR" ':-> Float, "hwDG" ':-> Float, "hwDB" ':-> Float,
+       "hwER" ':-> Float, "hwEG" ':-> Float, "hwEB" ':-> Float,
+       "hwFR" ':-> Float, "hwFG" ':-> Float, "hwFB" ':-> Float,
+       "hwGR" ':-> Float, "hwGG" ':-> Float, "hwGB" ':-> Float,
+       "hwHR" ':-> Float, "hwHG" ':-> Float, "hwHB" ':-> Float,
+       "hwIR" ':-> Float, "hwIG" ':-> Float, "hwIB" ':-> Float
      ]
 
 type Defs =
@@ -39,17 +42,39 @@ program :: Module Defs
 program = Module $ entryPoint @"main" @Compute do
   ~(Vec3 gidX gidY faceIdx) <- get @"gl_GlobalInvocationID"
   
-  -- Read sky parameters from uniform buffer
+  -- Read sun direction and HW coefficients from uniform buffer
   sunDirX <- use @(Name "skyGenData" :.: Name "sunDirX")
   sunDirY <- use @(Name "skyGenData" :.: Name "sunDirY")
   sunDirZ <- use @(Name "skyGenData" :.: Name "sunDirZ")
   sunIntensity <- use @(Name "skyGenData" :.: Name "sunIntensity")
-  rayleighR <- use @(Name "skyGenData" :.: Name "rayleighR")
-  rayleighG <- use @(Name "skyGenData" :.: Name "rayleighG")
-  rayleighB <- use @(Name "skyGenData" :.: Name "rayleighB")
-  mieCoeff <- use @(Name "skyGenData" :.: Name "mieCoeff")
-  mieG <- use @(Name "skyGenData" :.: Name "mieG")
-  turbidity <- use @(Name "skyGenData" :.: Name "turbidity")
+  
+  ar <- use @(Name "skyGenData" :.: Name "hwAR")
+  ag <- use @(Name "skyGenData" :.: Name "hwAG")
+  ab <- use @(Name "skyGenData" :.: Name "hwAB")
+  br <- use @(Name "skyGenData" :.: Name "hwBR")
+  bg <- use @(Name "skyGenData" :.: Name "hwBG")
+  bb <- use @(Name "skyGenData" :.: Name "hwBB")
+  cr <- use @(Name "skyGenData" :.: Name "hwCR")
+  cg <- use @(Name "skyGenData" :.: Name "hwCG")
+  cb <- use @(Name "skyGenData" :.: Name "hwCB")
+  dr <- use @(Name "skyGenData" :.: Name "hwDR")
+  dg <- use @(Name "skyGenData" :.: Name "hwDG")
+  db <- use @(Name "skyGenData" :.: Name "hwDB")
+  er <- use @(Name "skyGenData" :.: Name "hwER")
+  eg <- use @(Name "skyGenData" :.: Name "hwEG")
+  eb <- use @(Name "skyGenData" :.: Name "hwEB")
+  fr <- use @(Name "skyGenData" :.: Name "hwFR")
+  fg <- use @(Name "skyGenData" :.: Name "hwFG")
+  fb <- use @(Name "skyGenData" :.: Name "hwFB")
+  gr <- use @(Name "skyGenData" :.: Name "hwGR")
+  gg <- use @(Name "skyGenData" :.: Name "hwGG")
+  gb <- use @(Name "skyGenData" :.: Name "hwGB")
+  hr <- use @(Name "skyGenData" :.: Name "hwHR")
+  hg <- use @(Name "skyGenData" :.: Name "hwHG")
+  hb <- use @(Name "skyGenData" :.: Name "hwHB")
+  ir <- use @(Name "skyGenData" :.: Name "hwIR")
+  ig <- use @(Name "skyGenData" :.: Name "hwIG")
+  ib <- use @(Name "skyGenData" :.: Name "hwIB")
   
   let size = 511.0  -- 512 - 1
       u = (fromIntegral gidX :: Code Float) / size
@@ -65,55 +90,43 @@ program = Module $ entryPoint @"main" @Compute do
       viewDir = normalise (Vec3 dirX dirY dirZ)
       sunDir = normalise (Vec3 sunDirX sunDirY sunDirZ)
       
-      -- Evaluate sky with fixed scattering model (HDR, no tonemapping)
-      cosGammaDot = dot viewDir sunDir
-      cosGammaClamped = clamp cosGammaDot (-1.0) 1.0
-      cosThetaView = abs (view @(Index 1) viewDir)
+      -- Hosek-Wilkie sky radiance evaluation
+      cosTheta = max 0.0001 (abs (view @(Index 1) viewDir))
+      cosGamma = clamp (dot viewDir sunDir) (-1.0) 1.0
+      gammaSq = cosGamma * cosGamma
+      sqrtCosTheta = sqrt cosTheta
       
-      -- Rayleigh phase function
-      rayleighPhase = (3.0 / (16.0 * pi)) * (1.0 + cosGammaClamped * cosGammaClamped)
+      -- F1 = (1 + A * exp(B / (cosTheta + 0.01)))
+      f1R = 1.0 + ar * exp (br / (cosTheta + 0.01))
+      f1G = 1.0 + ag * exp (bg / (cosTheta + 0.01))
+      f1B = 1.0 + ab * exp (bb / (cosTheta + 0.01))
       
-      -- Optical depth model with larger epsilon for smooth horizon
-      rayleighOD = 0.3
-      mieOD = 0.1
-      rayleighTrans = exp (-rayleighOD / (cosThetaView + 0.05))
-      mieTrans = exp (-mieOD / (cosThetaView + 0.05))
+      -- Mie chi: (1 + cos^2) / (1 + I^2 - 2*I*cos)^1.5
+      iSqR = ir * ir
+      iSqG = ig * ig
+      iSqB = ib * ib
+      chiR = (1.0 + gammaSq) / ((1.0 + iSqR - 2.0 * ir * cosGamma) ** 1.5)
+      chiG = (1.0 + gammaSq) / ((1.0 + iSqG - 2.0 * ig * cosGamma) ** 1.5)
+      chiB = (1.0 + gammaSq) / ((1.0 + iSqB - 2.0 * ib * cosGamma) ** 1.5)
       
-      -- In-scattering (scale ~100x to bring into visible HDR range)
-      rayleighScatterR = rayleighR * rayleighPhase * (1.0 - rayleighTrans) * 100.0
-      rayleighScatterG = rayleighG * rayleighPhase * (1.0 - rayleighTrans) * 100.0
-      rayleighScatterB = rayleighB * rayleighPhase * (1.0 - rayleighTrans) * 100.0
+      -- F2 = C + D*exp(E*gamma) + F*cos^2(gamma) + G*chi + H*sqrt(cosTheta)
+      f2R = cr + dr * exp (er * cosGamma) + fr * gammaSq + gr * chiR + hr * sqrtCosTheta
+      f2G = cg + dg * exp (eg * cosGamma) + fg * gammaSq + gg * chiG + hg * sqrtCosTheta
+      f2B = cb + db * exp (eb * cosGamma) + fb * gammaSq + gb * chiB + hb * sqrtCosTheta
       
-      -- Mie phase (Henyey-Greenstein)
-      g2 = mieG * mieG
-      mieDenom = (1.0 + g2 - 2.0 * mieG * cosGammaClamped) ** 1.5
-      miePhase = (1.0 - g2) / (4.0 * pi * mieDenom)
-      mieScatter = mieCoeff * miePhase * (1.0 - mieTrans) * 100.0
+      -- Total radiance: F1 * F2
+      radR = f1R * f2R
+      radG = f1G * f2G
+      radB = f1B * f2B
       
-      -- Soft sun disc with smoothstep to avoid banding
-      sunDisc = sunIntensity * smoothstep 0.999 1.0 cosGammaClamped
+      -- Soft sun disc
+      sunDisc = sunIntensity * smoothstep 0.999 1.0 cosGamma
       
-      totalR = rayleighScatterR + mieScatter + sunDisc
-      totalG = rayleighScatterG + mieScatter + sunDisc
-      totalB = rayleighScatterB + mieScatter + sunDisc
+      resultR = max 0.0 (radR + sunDisc)
+      resultG = max 0.0 (radG + sunDisc)
+      resultB = max 0.0 (radB + sunDisc)
       
-      sunElev = view @(Index 1) sunDir
-      sunElevClamped = clamp sunElev (-0.1) 1.0
-
-      -- Warm tint: strong at horizon (low sun), fading to neutral at zenith
-      -- R always 1.0, G/B decrease as sun drops — sunset orange/red
-      warmth = clamp (sunElevClamped / 0.3) 0.0 1.0
-      colorTempR = 1.0
-      colorTempG = 0.45 + 0.55 * warmth
-      colorTempB = 0.2 + 0.8 * warmth
-
-      tintedR = totalR * colorTempR
-      tintedG = totalG * colorTempG
-      tintedB = totalB * colorTempB
-
-      turbidityScale = 1.0 + turbidity * 0.1
-      
-      result = Vec4 (tintedR * turbidityScale) (tintedG * turbidityScale) (tintedB * turbidityScale) 1.0
+      result = Vec4 resultR resultG resultB 1.0
   
   -- Write to cube storage image (Vec3 coordinates: x, y, face)
   imageWrite @"radianceImage" (Vec3 gidX gidY faceIdx) result

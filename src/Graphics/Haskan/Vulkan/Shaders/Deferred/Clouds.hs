@@ -306,10 +306,13 @@ cloudFragment = shader do
       tNear = max 0.0 (min tToBottom tToTop)
       tFar = max 0.0 (max tToBottom tToTop)
       totalRayLength = min 5000.0 (tFar - tNear)
-      absDirY = step 0.0 dirY * dirY + step dirY 0.0 * (0.0 - dirY)
-      stepCountF = max 32.0 (min 256.0 (totalRayLength / 20.0))
+      -- LOD: fewer steps for long rays (grazing/horizon), more for short (overhead)
+      -- 48 steps min, 96 max. Step size ~30-50 units regardless of ray length.
+      stepCountF = max 48.0 (min 96.0 (totalRayLength / 40.0))
       adaptiveStepSize = totalRayLength / stepCountF
-
+      -- Light march LOD: fewer samples for distant rays
+      lightStepCount = if totalRayLength > 2500.0 then 2.0 else if totalRayLength > 1200.0 then 3.0 else 4.0
+      lightStepSize = min 120.0 (cloudThickness / lightStepCount)
   -- Sample blue noise for dithered ray entry
   ~(Vec4 blueR _ _ _) <- use @(ImageTexel "blue_noise") NilOps (Vec2 uvX uvY)
   let ditherOffset = blueR * adaptiveStepSize
@@ -415,49 +418,35 @@ cloudFragment = shader do
         -- Darken ambient in storm regions
         ambientTerm = rawAmbientTerm ^* (1.0 - stormDarkness * 0.6)
 
-    -- Nested light march: 4 steps toward sun for self-shadowing
+    -- Nested light march toward sun for self-shadowing
+    -- Reuse combinedCoverage from primary step (weather varies slowly)
     _ <- def @"lightStep" @RW @Int32 0
     _ <- def @"lightPos" @RW @(V 3 Float) rp
     _ <- def @"lightDensity" @RW @Float 0.0
 
-    let lightStepSize = cloudThickness / 4.0
-
     loop do
       ls <- get @"lightStep"
-      when (ls >= 4) do
+      when (fromIntegral ls >= lightStepCount) do
         break @1
 
       lp <- get @"lightPos"
       let ~(Vec3 lpx lpy lpz) = lp
-          -- Spherical Earth curvature for light march
           ldistHorizSq = (lpx - camX) * (lpx - camX) + (lpz - camZ) * (lpz - camZ)
           lcurvedY = lpy - (ldistHorizSq / (2.0 * 6371000.0))
-          lwx1 = sin (lpy * warpFreq1 + lpz * warpFreq1 * 0.7) * warpAmp1
-          lwy1 = cos (lpx * warpFreq1 + lpz * warpFreq1 * 0.5) * warpAmp1
-          lwz1 = sin (lpz * warpFreq1 * 0.7 + lpx * warpFreq1 * 0.6) * warpAmp1
-          lwx2 = sin (lpy * warpFreq2 * 1.3 + lpx * warpFreq2 * 0.9) * warpAmp2
-          lwy2 = cos (lpz * warpFreq2 * 1.1 + lpy * warpFreq2 * 0.8) * warpAmp2
-          lwz2 = sin (lpx * warpFreq2 * 1.5 + lpy * warpFreq2 * 1.2) * warpAmp2
-          lwx = lwx1 + lwx2
-          lwy = lwy1 + lwy2
-          lwz = lwz1 + lwz2
+          -- Simplified single-octave warp for light march (cheaper)
+          lwx = sin (lpy * warpFreq1 + lpz * warpFreq1 * 0.7) * warpAmp1
+          lwy = cos (lpx * warpFreq1 + lpz * warpFreq1 * 0.5) * warpAmp1
+          lwz = sin (lpz * warpFreq1 * 0.7 + lpx * warpFreq1 * 0.6) * warpAmp1
           lsx = fract ((lpx + lwx) * noiseScale - windOffsetX)
           lsy = fract ((lpy + lwy) * noiseScale)
           lsz = fract ((lpz + lwz) * noiseScale - windOffsetZ)
 
       ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 lsx lsy lsz)
 
-      -- Sample weather map at light march position for consistent shadows
-      let lweatherUV = Vec2 (lpx * weatherScale - weatherWindOffsetX) (lpz * weatherScale - weatherWindOffsetZ)
-      ~(Vec4 lweatherR lweatherG _lweatherB _lweatherA) <- use @(ImageTexel "weather_map") NilOps lweatherUV
-
-      let lcombinedCoverage = clamp (lweatherR * cloudCoverage * weatherCoverageScale) 0.0 1.0
-          lcloudType = clamp (lweatherG + weatherTypeBias) 0.0 1.0
-          lhMin = mix 0.1 0.0 lcloudType
-          lhMax = mix 0.4 1.0 lcloudType
-          lh = (lcurvedY - cloudBottom) / cloudThickness
-          lheightMask = smoothstep lhMin (lhMin + 0.05) lh * (1.0 - smoothstep (lhMax - 0.1) lhMax lh)
-          ld = max 0 (lnr * (1.0 - cloudDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - (1.0 - lcombinedCoverage)) * lheightMask
+      -- Reuse primary step coverage (weather map changes slowly over light march distance)
+      let lh = (lcurvedY - cloudBottom) / cloudThickness
+          lheightMask = smoothstep hMin (hMin + 0.05) lh * (1.0 - smoothstep (hMax - 0.1) hMax lh)
+          ld = max 0 (lnr * (1.0 - cloudDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - (1.0 - combinedCoverage)) * lheightMask
 
       modify @"lightDensity" (+ (ld * lightStepSize))
       put @"lightPos" (lp ^+^ sunDir ^* lightStepSize)
@@ -486,7 +475,6 @@ cloudFragment = shader do
   finalAccR <- get @"accR"
   finalAccG <- get @"accG"
   finalAccB <- get @"accB"
-
   let cloudSkyR = skyR * finalTransmittance + finalAccR
       cloudSkyG = skyG * finalTransmittance + finalAccG
       cloudSkyB = skyB * finalTransmittance + finalAccB
@@ -541,9 +529,10 @@ cloudFragment = shader do
   let histR = convert histR_h
       histG = convert histG_h
       histB = convert histB_h
-      -- Reduced blend factor (0.85 vs 0.92) to reduce ghosting from
-      -- residual motion not captured by wind displacement
-      reprojBlend = 0.5 * blendFactor * validReproj
+      rayHitCloud = step 0.1 totalRayLength
+      maxLum = max cloudSkyR (max cloudSkyG cloudSkyB)
+      brightFade = 1.0 - smoothstep 5.0 30.0 maxLum
+      reprojBlend = rayHitCloud * 0.25 * blendFactor * validReproj * brightFade
       accR = reprojBlend * histR + (1.0 - reprojBlend) * cloudSkyR
       accG = reprojBlend * histG + (1.0 - reprojBlend) * cloudSkyG
       accB = reprojBlend * histB + (1.0 - reprojBlend) * cloudSkyB

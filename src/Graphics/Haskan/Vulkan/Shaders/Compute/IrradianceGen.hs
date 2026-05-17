@@ -14,19 +14,22 @@ import FIR
 import FIR.Prim.Image (ImageCoordinateKind(..))
 import Math.Linear
 
--- | Sky generation uniform data (same as SkyLUTGen).
+-- | Sky generation uniform data (Hosek-Wilkie model).
 type SkyGenData =
   Struct
     '[ "sunDirX" ':-> Float,
        "sunDirY" ':-> Float,
        "sunDirZ" ':-> Float,
        "sunIntensity" ':-> Float,
-       "rayleighR" ':-> Float,
-       "rayleighG" ':-> Float,
-       "rayleighB" ':-> Float,
-       "mieCoeff" ':-> Float,
-       "mieG" ':-> Float,
-       "turbidity" ':-> Float
+       "hwAR" ':-> Float, "hwAG" ':-> Float, "hwAB" ':-> Float,
+       "hwBR" ':-> Float, "hwBG" ':-> Float, "hwBB" ':-> Float,
+       "hwCR" ':-> Float, "hwCG" ':-> Float, "hwCB" ':-> Float,
+       "hwDR" ':-> Float, "hwDG" ':-> Float, "hwDB" ':-> Float,
+       "hwER" ':-> Float, "hwEG" ':-> Float, "hwEB" ':-> Float,
+       "hwFR" ':-> Float, "hwFG" ':-> Float, "hwFB" ':-> Float,
+       "hwGR" ':-> Float, "hwGG" ':-> Float, "hwGB" ':-> Float,
+       "hwHR" ':-> Float, "hwHG" ':-> Float, "hwHB" ':-> Float,
+       "hwIR" ':-> Float, "hwIG" ':-> Float, "hwIB" ':-> Float
      ]
 
 type Defs =
@@ -35,7 +38,6 @@ type Defs =
       "main" ':-> EntryPoint '[LocalSize 8 8 1] Compute
     ]
 
--- | Number of samples for hemisphere integration.
 numSamples :: Code Word32
 numSamples = 64
 
@@ -43,23 +45,43 @@ program :: Module Defs
 program = Module $ entryPoint @"main" @Compute do
   ~(Vec3 gidX gidY faceIdx) <- get @"gl_GlobalInvocationID"
   
-  -- Read sky parameters from uniform buffer
   sunDirX <- use @(Name "skyGenData" :.: Name "sunDirX")
   sunDirY <- use @(Name "skyGenData" :.: Name "sunDirY")
   sunDirZ <- use @(Name "skyGenData" :.: Name "sunDirZ")
   sunIntensity <- use @(Name "skyGenData" :.: Name "sunIntensity")
-  rayleighR <- use @(Name "skyGenData" :.: Name "rayleighR")
-  rayleighG <- use @(Name "skyGenData" :.: Name "rayleighG")
-  rayleighB <- use @(Name "skyGenData" :.: Name "rayleighB")
-  mieCoeff <- use @(Name "skyGenData" :.: Name "mieCoeff")
-  mieG <- use @(Name "skyGenData" :.: Name "mieG")
-  turbidity <- use @(Name "skyGenData" :.: Name "turbidity")
+  
+  ar <- use @(Name "skyGenData" :.: Name "hwAR")
+  ag <- use @(Name "skyGenData" :.: Name "hwAG")
+  ab <- use @(Name "skyGenData" :.: Name "hwAB")
+  br <- use @(Name "skyGenData" :.: Name "hwBR")
+  bg <- use @(Name "skyGenData" :.: Name "hwBG")
+  bb <- use @(Name "skyGenData" :.: Name "hwBB")
+  cr <- use @(Name "skyGenData" :.: Name "hwCR")
+  cg <- use @(Name "skyGenData" :.: Name "hwCG")
+  cb <- use @(Name "skyGenData" :.: Name "hwCB")
+  dr <- use @(Name "skyGenData" :.: Name "hwDR")
+  dg <- use @(Name "skyGenData" :.: Name "hwDG")
+  db <- use @(Name "skyGenData" :.: Name "hwDB")
+  er <- use @(Name "skyGenData" :.: Name "hwER")
+  eg <- use @(Name "skyGenData" :.: Name "hwEG")
+  eb <- use @(Name "skyGenData" :.: Name "hwEB")
+  fr <- use @(Name "skyGenData" :.: Name "hwFR")
+  fg <- use @(Name "skyGenData" :.: Name "hwFG")
+  fb <- use @(Name "skyGenData" :.: Name "hwFB")
+  gr <- use @(Name "skyGenData" :.: Name "hwGR")
+  gg <- use @(Name "skyGenData" :.: Name "hwGG")
+  gb <- use @(Name "skyGenData" :.: Name "hwGB")
+  hr <- use @(Name "skyGenData" :.: Name "hwHR")
+  hg <- use @(Name "skyGenData" :.: Name "hwHG")
+  hb <- use @(Name "skyGenData" :.: Name "hwHB")
+  ir <- use @(Name "skyGenData" :.: Name "hwIR")
+  ig <- use @(Name "skyGenData" :.: Name "hwIG")
+  ib <- use @(Name "skyGenData" :.: Name "hwIB")
   
   let size = 63.0  -- 64 - 1
       u = (fromIntegral gidX :: Code Float) / size * 2.0 - 1.0
       v = (fromIntegral gidY :: Code Float) / size * 2.0 - 1.0
       
-      -- Compute normal direction based on face index (Vulkan cubemap layer mapping)
       nX = if faceIdx == 0 then 1.0 else (if faceIdx == 1 then (-1.0) else (if faceIdx == 4 then (-u) else u))
       nY = if faceIdx == 2 then 1.0 else (if faceIdx == 3 then (-1.0) else (-v))
       nZ = if faceIdx == 4 then 1.0 else (if faceIdx == 5 then (-1.0) else (if faceIdx == 0 then u else (if faceIdx == 1 then (-u) else (if faceIdx == 2 then (-v) else v))))
@@ -67,21 +89,15 @@ program = Module $ entryPoint @"main" @Compute do
       normal = normalise (Vec3 nX nY nZ)
       sunDir = normalise (Vec3 sunDirX sunDirY sunDirZ)
       
-      -- Build orthonormal basis around normal
-      -- If normal is close to Y axis, use X as reference, otherwise use Y
       nx = view @(Index 0) normal
       ny = view @(Index 1) normal
-      nz = view @(Index 2) normal
       
       refX = if abs ny < 0.999 then 0.0 else 1.0
       refY = if abs ny < 0.999 then 1.0 else 0.0
-      refZ = 0.0
       
-      tangent = normalise (cross (Vec3 refX refY refZ) normal)
+      tangent = normalise (cross (Vec3 refX refY 0.0) normal)
       bitangent = cross normal tangent
   
-  -- Hemisphere integration loop
-  -- Initialize accumulator
   _ <- def @"accR" @RW @Float 0.0
   _ <- def @"accG" @RW @Float 0.0
   _ <- def @"accB" @RW @Float 0.0
@@ -93,95 +109,72 @@ program = Module $ entryPoint @"main" @Compute do
     accG <- get @"accG"
     accB <- get @"accB"
     
-    let -- Grid sampling: 8x8 = 64 samples
-        gridSize = 8
+    let gridSize = 8
         i = sampleIdx `mod` gridSize
         j = sampleIdx `div` gridSize
         
-        -- Uniform grid over hemisphere
         phi = 2.0 * pi * (fromIntegral i + 0.5) / 8.0
         theta = pi / 2.0 * (fromIntegral j + 0.5) / 8.0
         
         sinTheta = sin theta
         cosTheta = cos theta
-        sinPhi = sin phi
-        cosPhi = cos phi
         
-        -- Sample direction in local coordinates (tangent, normal, bitangent)
-        localX = sinTheta * cosPhi
+        localX = sinTheta * cos phi
         localY = cosTheta
-        localZ = sinTheta * sinPhi
-        
-        -- Transform to world space
+        localZ = sinTheta * sin phi
+         
         sampleDir = normalise ((tangent ^* localX) ^+^ (normal ^* localY) ^+^ (bitangent ^* localZ))
-        
-        -- Evaluate sky in sample direction with fixed scattering model (HDR)
-        cosGammaDot = dot sampleDir sunDir
-        cosGammaClamped = clamp cosGammaDot (-1.0) 1.0
-        cosThetaView = abs (view @(Index 1) sampleDir)
-        
-        -- Rayleigh phase function
-        rayleighPhase = (3.0 / (16.0 * pi)) * (1.0 + cosGammaClamped * cosGammaClamped)
-        
-        -- Optical depth model with larger epsilon for smooth horizon
-        rayleighOD = 0.3
-        mieOD = 0.1
-        rayleighTrans = exp (-rayleighOD / (cosThetaView + 0.05))
-        mieTrans = exp (-mieOD / (cosThetaView + 0.05))
-        
-        -- In-scattering (scale ~100x to bring into visible HDR range)
-        rayleighScatterR = rayleighR * rayleighPhase * (1.0 - rayleighTrans) * 100.0
-        rayleighScatterG = rayleighG * rayleighPhase * (1.0 - rayleighTrans) * 100.0
-        rayleighScatterB = rayleighB * rayleighPhase * (1.0 - rayleighTrans) * 100.0
-        
-        -- Mie phase (Henyey-Greenstein)
-        g2 = mieG * mieG
-        mieDenom = (1.0 + g2 - 2.0 * mieG * cosGammaClamped) ** 1.5
-        miePhase = (1.0 - g2) / (4.0 * pi * mieDenom)
-        mieScatter = mieCoeff * miePhase * (1.0 - mieTrans) * 100.0
-        
-        -- Soft sun disc with smoothstep to avoid banding
-        sunDisc = sunIntensity * smoothstep 0.999 1.0 cosGammaClamped
-        
-        radianceR = rayleighScatterR + mieScatter + sunDisc
-        radianceG = rayleighScatterG + mieScatter + sunDisc
-        radianceB = rayleighScatterB + mieScatter + sunDisc
-        
-        -- Color temperature
-        sunElev = view @(Index 1) sunDir
-        sunElevClamped = clamp sunElev (-0.1) 1.0
-        warmth = clamp (sunElevClamped / 0.3) 0.0 1.0
-        colorTempR = 1.0
-        colorTempG = 0.45 + 0.55 * warmth
-        colorTempB = 0.2 + 0.8 * warmth
-        
-        tintedR = radianceR * colorTempR
-        tintedG = radianceG * colorTempG
-        tintedB = radianceB * colorTempB
-        
-        turbidityScale = 1.0 + turbidity * 0.1
-        scaledR = tintedR * turbidityScale
-        scaledG = tintedG * turbidityScale
-        scaledB = tintedB * turbidityScale
-        
-        -- Weight by cosine and solid angle
+         
+        -- HW evaluation in sample direction
+        cosThetaV = max 0.0001 (abs (view @(Index 1) sampleDir))
+        cosGamma = clamp (dot sampleDir sunDir) (-1.0) 1.0
+        gammaSq = cosGamma * cosGamma
+        sqrtCosThetaV = sqrt cosThetaV
+         
+        -- F1 = (1 + A * exp(B / (cosTheta + 0.01)))
+        f1R = 1.0 + ar * exp (br / (cosThetaV + 0.01))
+        f1G = 1.0 + ag * exp (bg / (cosThetaV + 0.01))
+        f1B = 1.0 + ab * exp (bb / (cosThetaV + 0.01))
+         
+        -- Mie chi: (1 + cos^2) / (1 + I^2 - 2*I*cos)^1.5
+        iSqR = ir * ir
+        iSqG = ig * ig
+        iSqB = ib * ib
+        chiR = (1.0 + gammaSq) / ((1.0 + iSqR - 2.0 * ir * cosGamma) ** 1.5)
+        chiG = (1.0 + gammaSq) / ((1.0 + iSqG - 2.0 * ig * cosGamma) ** 1.5)
+        chiB = (1.0 + gammaSq) / ((1.0 + iSqB - 2.0 * ib * cosGamma) ** 1.5)
+         
+        -- F2 = C + D*exp(E*gamma) + F*cos^2(gamma) + G*chi + H*sqrt(cosTheta)
+        f2R = cr + dr * exp (er * cosGamma) + fr * gammaSq + gr * chiR + hr * sqrtCosThetaV
+        f2G = cg + dg * exp (eg * cosGamma) + fg * gammaSq + gg * chiG + hg * sqrtCosThetaV
+        f2B = cb + db * exp (eb * cosGamma) + fb * gammaSq + gb * chiB + hb * sqrtCosThetaV
+         
+        -- Total radiance: F1 * F2
+        radR = f1R * f2R
+        radG = f1G * f2G
+        radB = f1B * f2B
+         
+        sunDisc = sunIntensity * smoothstep 0.999 1.0 cosGamma
+         
+        resultR = max 0.0 (radR + sunDisc)
+        resultG = max 0.0 (radG + sunDisc)
+        resultB = max 0.0 (radB + sunDisc)
+         
         solidAngleWeight = cosTheta * sinTheta * pi * pi / 32.0
-        
-        weightedR = scaledR * solidAngleWeight
-        weightedG = scaledG * solidAngleWeight
-        weightedB = scaledB * solidAngleWeight
+         
+        weightedR = resultR * solidAngleWeight
+        weightedG = resultG * solidAngleWeight
+        weightedB = resultB * solidAngleWeight
     
     put @"accR" (accR + weightedR)
     put @"accG" (accG + weightedG)
     put @"accB" (accB + weightedB)
     put @"sampleIdx" (sampleIdx + 1)
   
-  -- Read final accumulated values
   finalAccR <- get @"accR"
   finalAccG <- get @"accG"
   finalAccB <- get @"accB"
   
   let result = Vec4 finalAccR finalAccG finalAccB 1.0
   
-  -- Write to cube storage image
   imageWrite @"irradianceImage" (Vec3 gidX gidY faceIdx) result
