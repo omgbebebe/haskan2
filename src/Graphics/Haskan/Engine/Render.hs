@@ -201,6 +201,8 @@ data RenderEnv = RenderEnv
     reTvSkyNeedsRegeneration :: !(STM.TVar Bool),
     reTvPhysicsBodies :: !(STM.TVar (IntMap BodyState)),
     reTvPhysicsBodyToEntity :: !(STM.TVar (IntMap EntityId)),
+    reTvPhysicsAutoStep :: !(STM.TVar Bool),
+    reTvPhysicsTimeScale :: !(STM.TVar Float),
     rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat)),
     rePrevTime :: !(TVar Float),
     reImGuiBackend :: !(Maybe Backend.ImGuiBackend)
@@ -409,7 +411,9 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
                 Backend.dpeFrameStatsRef = reFrameStatsRef,
                 Backend.dpeCamera = camera,
                 Backend.dpeDebugMode = reTvDebugMode,
-                Backend.dpeWireframe = reTvWireframe
+                Backend.dpeWireframe = reTvWireframe,
+                Backend.dpePhysicsAutoStep = reTvPhysicsAutoStep,
+                Backend.dpePhysicsTimeScale = reTvPhysicsTimeScale
               }
       Backend.buildImGuiFrame (runReaderT Backend.buildDebugPanel panelEnv)
     Nothing -> pure Nothing
@@ -900,6 +904,8 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                          reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
                          reTvPhysicsBodies = physicsBodies gameState,
                          reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,
+                         reTvPhysicsAutoStep = physicsAutoStep gameState,
+                         reTvPhysicsTimeScale = physicsTimeScale gameState,
                          rePrevViewProj = prevViewProjTVar,
                         rePrevTime = prevTimeTVar,
                         reImGuiBackend = mImGuiBackend

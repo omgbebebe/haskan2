@@ -285,7 +285,9 @@ data DebugPanelEnv = DebugPanelEnv
     dpeFrameStatsRef :: !(IORef FrameStats),
     dpeCamera :: !AnyCamera,
     dpeDebugMode :: !(STM.TVar Word32),
-    dpeWireframe :: !(STM.TVar Bool)
+    dpeWireframe :: !(STM.TVar Bool),
+    dpePhysicsAutoStep :: !(STM.TVar Bool),
+    dpePhysicsTimeScale :: !(STM.TVar Float)
   }
 
 -- | Build the debug panel using ReaderT for clean parameter access.
@@ -298,6 +300,8 @@ buildDebugPanel = do
       tvWireframe = dpeWireframe env
       tvTimeOfDay = dpeTimeOfDay env
       tvTimeSpeed = dpeTimeSpeed env
+      tvPhysicsAutoStep = dpePhysicsAutoStep env
+      tvPhysicsTimeScale = dpePhysicsTimeScale env
       frameStatsRef = dpeFrameStatsRef env
       cam = dpeCamera env
   liftIO $ withCString "Debug Panels" $ \windowTitle -> do
@@ -377,6 +381,14 @@ buildDebugPanel = do
           newMode <- Foreign.Storable.peek modePtr
           STM.atomically $ STM.writeTVar tvDebugMode (fromIntegral newMode)
         withCString "Wireframe" $ \label -> checkboxTVar label tvWireframe
+
+    -- Physics section
+    withCString "Physics" $ \physicsLabel -> do
+      physicsOpen <- ImGui.Raw.collapsingHeader physicsLabel Foreign.Ptr.nullPtr zeroBits
+      when physicsOpen $ do
+        withCString "Auto Step" $ \label -> checkboxTVar label tvPhysicsAutoStep
+        withCString "Time Scale" $ \label -> sliderFloatTVar label 0.0 5.0 tvPhysicsTimeScale
+
     ImGui.Raw.end
 
 -- ---------------------------------------------------------------------------
