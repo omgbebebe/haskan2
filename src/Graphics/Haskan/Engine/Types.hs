@@ -28,6 +28,7 @@ module Graphics.Haskan.Engine.Types
     EntityDebugInfo (..),
     ControlMessage (..),
     CameraMode (..),
+    PhysicsBodySpec (..),
   )
 where
 
@@ -64,7 +65,7 @@ import Graphics.Haskan.Debug.Interface (DebugCameraSnapshot (..), DebugCommand (
 import Graphics.Haskan.Debug.Server (CommandQueue, DebugServerHandle)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
-import Graphics.Haskan.Physics.Jolt.Types (BodyId, BodyState)
+import Graphics.Haskan.Physics.Jolt.Types (BodyId, BodyState, BodyType)
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.Scene.ECS (EntityId (..))
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
@@ -481,8 +482,16 @@ data GameState cam = GameState
     physicsBodies :: TVar (IntMap BodyState),
     physicsTimeScale :: TVar Float,
     physicsAutoStep :: TVar Bool,
-    physicsBodyToEntity :: TVar (IntMap EntityId)
+    physicsBodyToEntity :: TVar (IntMap EntityId),
+    physicsPendingSpecs :: TVar [PhysicsBodySpec]
   }
+
+data PhysicsBodySpec = PhysicsBodySpec
+  { pbsBodyType :: !BodyType,
+    pbsPosition :: !(V3 Float),
+    pbsEntityId :: !EntityId
+  }
+  deriving (Eq, Show)
 
 data RenderDebugInfo = RenderDebugInfo
   { rdiFrameNumber :: Int,

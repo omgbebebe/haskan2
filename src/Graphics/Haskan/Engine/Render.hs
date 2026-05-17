@@ -600,6 +600,9 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
       sceneBounds = slrSceneBounds
       texturePixelMap = slrTexturePixelMap
 
+  -- Write physics body specs from scene description
+  liftIO $ STM.atomically $ STM.writeTVar (physicsPendingSpecs gameState) slrPhysicsSpecs
+
   worldState <- liftIO $ STM.readTVarIO (world gameState)
   let tvCamera = activeCamera worldState
   currentCam <- liftIO $ STM.readTVarIO tvCamera

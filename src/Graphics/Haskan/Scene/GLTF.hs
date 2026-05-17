@@ -26,7 +26,9 @@ import Data.Word (Word32, Word8)
 import Foreign.C qualified
 import Graphics.Haskan.Assets.Cache (AssetCache)
 import Graphics.Haskan.Assets.TexturePreprocessor (TextureConfig, defaultTextureConfig)
+import Graphics.Haskan.Engine.Types (PhysicsBodySpec (..))
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
+import Graphics.Haskan.Physics.Jolt.Types (BodyType (..))
 import Graphics.Haskan.Mesh (Mesh (..))
 import Graphics.Haskan.Scene.ECS (EntityId, World)
 import Graphics.Haskan.Scene.ECS qualified as ECS
@@ -60,6 +62,7 @@ import Text.GLTF.Loader.Gltf
     meshPrimitives,
     nodeChildren,
     nodeMeshId,
+    nodeName,
     nodeRotation,
     nodeScale,
     nodeTranslation,
@@ -115,7 +118,8 @@ data GLTFImportResult = GLTFImportResult
     girTextures :: ![TextureHandle],
     -- | parallel to girTextures: (width, height, pixels)
     girTextureData :: ![(Int, Int, VectorStorable.Vector Word8)],
-    girRootEntity :: !EntityId
+    girRootEntity :: !EntityId,
+    girPhysicsSpecs :: ![PhysicsBodySpec]
   }
 
 -- | Import a glTF file into the engine's ECS + ResourceManager.
@@ -171,7 +175,7 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
   meshes <- loadMeshes rm pdev dev gltf
 
   -- Build scene graph from nodes
-  rootEntity <- buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures
+  (rootEntity, physicsSpecs) <- buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures
 
   pure
     GLTFImportResult
@@ -179,7 +183,8 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
         girMeshes = meshes,
         girTextures = textures,
         girTextureData = textureData,
-        girRootEntity = rootEntity
+        girRootEntity = rootEntity,
+        girPhysicsSpecs = physicsSpecs
       }
 
 -- | Load all images from glTF as placeholder texture handles.
@@ -449,7 +454,7 @@ buildSceneGraph ::
   [Maybe TextureHandle] -> -- material index -> normal texture handle
   [Maybe TextureHandle] -> -- material index -> occlusion texture handle
   [Maybe TextureHandle] -> -- material index -> emissive texture handle
-  m EntityId
+  m (EntityId, [PhysicsBodySpec])
 buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures = do
   let nodes = gltfNodes gltf
       -- Find root nodes (nodes that are not children of any other node)
@@ -461,11 +466,11 @@ buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNo
   ECS.setTransform world sceneRoot defaultTransform
 
   -- Process each root node
-  for_ rootIndices $ \nodeIdx -> do
-    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures nodeIdx sceneRoot
-    pure ()
+  specs <- fmap concat $ forM rootIndices $ \nodeIdx -> do
+    (_, nodeSpecs) <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures nodeIdx sceneRoot
+    pure nodeSpecs
 
-  pure sceneRoot
+  pure (sceneRoot, specs)
 
 -- | Recursively process a glTF node and its children.
 processNode ::
@@ -480,7 +485,7 @@ processNode ::
   [Maybe TextureHandle] -> -- material index -> emissive texture handle
   Int -> -- node index
   EntityId -> -- parent entity
-  m EntityId
+  m (EntityId, [PhysicsBodySpec])
 processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures nodeIdx parentEntity = do
   let nodes = gltfNodes gltf
       node = nodes Vector.! nodeIdx
@@ -568,12 +573,25 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
             [] -> pure ()
     Nothing -> pure ()
 
-  -- Process children
-  for_ (Vector.toList (nodeChildren node)) $ \childIdx -> do
-    _ <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures childIdx entity
-    pure ()
+  -- Check for physics body naming convention
+  let maybeSpec = case nodeName node of
+        Just name | "_physics_box" `Text.isSuffixOf` name ->
+          let pos = tPosition transform
+              scale = tScale transform
+              halfExtents = scale * 0.5
+          in Just $ PhysicsBodySpec (BoxBody halfExtents 10.0) pos entity
+        _ -> Nothing
 
-  pure entity
+  -- Process children
+  childSpecs <- fmap concat $ forM (Vector.toList (nodeChildren node)) $ \childIdx -> do
+    (_, cs) <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures childIdx entity
+    pure cs
+
+  pure (entity, maybeToList maybeSpec ++ childSpecs)
+
+maybeToList :: Maybe a -> [a]
+maybeToList Nothing = []
+maybeToList (Just x) = [x]
 
 -- | Convert glTF node TRS to engine Transform.
 nodeToTransform :: GLTFTypes.Node -> Transform

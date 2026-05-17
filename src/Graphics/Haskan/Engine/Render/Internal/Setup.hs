@@ -32,9 +32,10 @@ import Graphics.Haskan.Camera (AnyCamera, Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.DayNight (computeSunState, defaultDayNightConfig)
 import Graphics.Haskan.DayNight qualified as DayNight
+import Graphics.Haskan.HosekWilkie (computeHWCoeffs, hwCoeffsToList, HWCoeffs(..))
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo)
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
-import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), SkyGenUniforms (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
+import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), PhysicsBodySpec (..), RenderDebugInfo (..), SkyGenUniforms (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Mesh qualified as Mesh
@@ -44,6 +45,7 @@ import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), RenderPassNode (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
+import Graphics.Haskan.Physics.Jolt.Types (BodyType (..))
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
@@ -319,7 +321,8 @@ data SceneLoadResult = SceneLoadResult
   { slrECSWorld :: !ECS.World,
     slrNumEntities :: !Int,
     slrSceneBounds :: !BBox,
-    slrTexturePixelMap :: !(IntMap (Int, Int, Vector Word8))
+    slrTexturePixelMap :: !(IntMap (Int, Int, Vector Word8)),
+    slrPhysicsSpecs :: ![PhysicsBodySpec]
   }
 
 -- | Load scene based on mode (UV check, stress test, GLTF, or OBJ)
@@ -364,7 +367,8 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
       ECS.setRoughnessFactor world testEntity 0.5
 
       let sceneBbox = BBox (V3 (-1) (-1) (-1)) (V3 1 1 1)
-      pure $ SceneLoadResult world 1 sceneBbox IntMap.empty
+          uvCheckSpecs = [PhysicsBodySpec (BoxBody (V3 0.5 0.5 0.5) 10.0) (V3 0 0 0) testEntity]
+      pure $ SceneLoadResult world 1 sceneBbox IntMap.empty uvCheckSpecs
     Nothing ->
       if isStressTest
         then do
@@ -389,7 +393,7 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
 
           let sceneBbox = BBox (V3 (-50) (-2) (-50)) (V3 50 2 50)
           logInfo LogGeneral $ "stress test scene bounds: " <> showT sceneBbox
-          pure $ SceneLoadResult world 10000 sceneBbox IntMap.empty
+          pure $ SceneLoadResult world 10000 sceneBbox IntMap.empty []
         else
           if isGLTF
             then do
@@ -404,7 +408,7 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
               sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
               logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
 
-              pure $ SceneLoadResult world (length (girMeshes result)) sceneBbox pixelMap
+              pure $ SceneLoadResult world (length (girMeshes result)) sceneBbox pixelMap (girPhysicsSpecs result)
             else do
               world <- ECS.createWorld
               (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj meshName
@@ -445,7 +449,7 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
               sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
               logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
 
-              pure $ SceneLoadResult world 1 sceneBbox IntMap.empty
+              pure $ SceneLoadResult world 1 sceneBbox IntMap.empty []
 
 -- | Dispatch compute shaders to generate procedural sky content.
 -- Creates temporary pipelines, dispatches, transitions images, and cleans up.
@@ -490,19 +494,26 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
   radianceDescriptorSet <- DescriptorSet.allocateDescriptorSet device cubemapPool [cubemapLayout]
   irradianceDescriptorSet <- DescriptorSet.allocateDescriptorSet device cubemapPool [cubemapLayout]
 
-  -- Create UBO with default sky params
-  let skyParams =
+  -- Create UBO with default sky params (HW coefficients for turbidity=2, albedo=0.3, solar elevation=π/6)
+  let hwCoeffs = computeHWCoeffs 2.0 0.3 (pi / 6.0)
+      [hwAR, hwAG, hwAB, hwBR, hwBG, hwBB, hwCR, hwCG, hwCB,
+       hwDR, hwDG, hwDB, hwER, hwEG, hwEB, hwFR, hwFG, hwFB,
+       hwGR, hwGG, hwGB, hwHR, hwHG, hwHB, hwIR, hwIG, hwIB] = hwCoeffsToList hwCoeffs
+      skyParams =
         SkyGenUniforms
           { sgSunDirX = 0.0,
             sgSunDirY = 0.3,
             sgSunDirZ = (-1.0),
             sgSunIntensity = 50.0,
-            sgRayleighR = 0.0058,
-            sgRayleighG = 0.0135,
-            sgRayleighB = 0.0331,
-            sgMieCoeff = 0.021,
-            sgMieG = 0.76,
-            sgTurbidity = 2.0
+            sgHwAR = hwAR, sgHwAG = hwAG, sgHwAB = hwAB,
+            sgHwBR = hwBR, sgHwBG = hwBG, sgHwBB = hwBB,
+            sgHwCR = hwCR, sgHwCG = hwCG, sgHwCB = hwCB,
+            sgHwDR = hwDR, sgHwDG = hwDG, sgHwDB = hwDB,
+            sgHwER = hwER, sgHwEG = hwEG, sgHwEB = hwEB,
+            sgHwFR = hwFR, sgHwFG = hwFG, sgHwFB = hwFB,
+            sgHwGR = hwGR, sgHwGG = hwGG, sgHwGB = hwGB,
+            sgHwHR = hwHR, sgHwHG = hwHG, sgHwHB = hwHB,
+            sgHwIR = hwIR, sgHwIG = hwIG, sgHwIB = hwIB
           }
   (skyGenDataBuffer, skyGenDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [skyParams]
 

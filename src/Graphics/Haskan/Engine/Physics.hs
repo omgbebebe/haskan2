@@ -13,7 +13,7 @@ import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
 import Linear (V3 (..))
 
-import Graphics.Haskan.Engine.Types (GameState (..))
+import Graphics.Haskan.Engine.Types (GameState (..), PhysicsBodySpec (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Physics.Jolt.Types (BodyId (..), BodyState (..), BodyType (..))
 import Graphics.Haskan.Physics.Jolt.World qualified as Physics
@@ -29,14 +29,31 @@ physicsLoop targetFPS gameState finishedSemaphore = liftIO $ do
   -- Ground plane
   _ground <- Physics.createBody world (StaticPlane (V3 0 1 0) 0) (V3 0 0 0)
 
-  -- Test box (will be replaced by scene description in Phase 6)
-  boxId <- Physics.createBody world (BoxBody (V3 0.5 0.5 0.5) 10) (V3 0 5 0)
-  STM.atomically $ STM.writeTVar (physicsBodyToEntity gameState) (IntMap.singleton (unBodyId boxId) (EntityId 0))
+  -- Read pending body specs from scene loader
+  specs <- STM.atomically $ do
+    s <- STM.readTVar (physicsPendingSpecs gameState)
+    STM.writeTVar (physicsPendingSpecs gameState) []
+    pure s
 
-  let bodyIds = [boxId]
+  bodies <- mapM (\spec -> do
+    bid <- Physics.createBody world (pbsBodyType spec) (pbsPosition spec)
+    pure (unBodyId bid, pbsEntityId spec)
+    ) specs
 
-  let loop :: Integer -> Integer -> IO ()
-      loop tFPS prevTime = do
+  let bodyIds = map (BodyId . fst) bodies
+  STM.atomically $ STM.writeTVar (physicsBodyToEntity gameState) (IntMap.fromList bodies)
+
+  when (null specs) $ do
+    -- Fallback test box if no scene specs provided
+    boxId <- Physics.createBody world (BoxBody (V3 0.5 0.5 0.5) 10) (V3 0 5 0)
+    STM.atomically $ STM.writeTVar (physicsBodyToEntity gameState) (IntMap.singleton (unBodyId boxId) (EntityId 0))
+    let _ = bodyIds ++ [boxId]
+    pure ()
+
+  let allBodyIds = if null specs then [BodyId 0] else bodyIds
+
+  let loop :: [BodyId] -> Integer -> Integer -> IO ()
+      loop bids tFPS prevTime = do
         running <- STM.readTVarIO (isRunning gameState)
         when running $ do
           autoStep <- STM.readTVarIO (physicsAutoStep gameState)
@@ -52,15 +69,15 @@ physicsLoop targetFPS gameState finishedSemaphore = liftIO $ do
             states <- mapM (\bid -> do
               st <- Physics.getBodyState world bid
               pure (unBodyId bid, st)
-              ) bodyIds
+              ) bids
             STM.atomically $ STM.writeTVar (physicsBodies gameState) (IntMap.fromList states)
 
           let targetDelayMicros = 1000000 `div` fromIntegral tFPS
           threadDelay (fromIntegral targetDelayMicros)
-          loop tFPS newTime
+          loop bids tFPS newTime
 
   currentTime <- toNanoSecs <$> getTime Monotonic
-  loop targetFPS currentTime
+  loop allBodyIds targetFPS currentTime
 
   Physics.destroyWorld world
   logInfoIO LogGeneral "physicsLoop finished"
