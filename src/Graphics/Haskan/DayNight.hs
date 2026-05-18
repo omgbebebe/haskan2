@@ -102,18 +102,17 @@ computeSunState config time =
       sunsetCol = dncSunsetColor config
       color = lerpV3 colorLerp sunsetCol noonCol
 
-      -- Sky tint: lerp between night, sunset, and day
-      skyLerp = clamp 0.0 1.0 (sin sunAngle)
+      -- Sky tint: proper 3-phase blend (night → sunset → day)
+      -- Bug in old code: skyLerp = sin(sunAngle) ≈ 0 at sunrise/sunset,
+      -- which forced result to nightTint (dark blue) instead of sunsetTint (warm)
       dayTint = dncDaySkyTint config
       sunsetTint = dncSunsetSkyTint config
       nightTint = dncNightSkyTint config
+      horizonPhase = clamp 0.0 1.0 ((sin sunAngle + 0.15) / 0.3)
+      dayPhase = clamp 0.0 1.0 ((sin sunAngle - 0.15) / 0.5)
 
-      -- First lerp between night and sunset, then to day
-      -- At sunrise/set (skyLerp ≈ 0): closer to sunset
-      -- At noon (skyLerp ≈ 1): day
-      sunsetLerp = 1.0 - abs (dayProgress - 0.5) * 2.0 -- 1 at sunrise/set, 0 at noon
-      tempTint = lerpV3 sunsetLerp dayTint sunsetTint
-      skyTint = lerpV3 skyLerp nightTint tempTint
+      baseTint = lerpV3 horizonPhase nightTint sunsetTint
+      skyTint = lerpV3 dayPhase baseTint dayTint
 
       -- IBL intensity: dim at night, bright at day
       iblLerp = clamp 0.0 1.0 (sin sunAngle)

@@ -1,224 +1,207 @@
-# Deep Analysis: Cloud Ghosting, Horizon Banding & Zenith Noise
+# Deep Analysis: Cloud Rendering — Ghosting Fix, God Rays, Dawn/Dusk Color
 
-> Date: 2026-05-18 (updated after first fix round failed)
-> Status: **True root cause found** — swapchain history/VP frame mismatch
-> Reference: [leoawen/volumetric_cloud_atmosphere_scattering](https://github.com/leoawen/volumetric_cloud_atmosphere_scattering)
-
----
-
-## Executive Summary
-
-**Previous analysis was wrong.** Applied fixes (god ray mask, `fract()` removal, horizon epsilon increase) had no visible effect. Deep re-investigation reveals the actual root cause.
-
-The ghosting is caused by a **temporal reprojection frame mismatch**: the `prevViewProj` matrix is always 1 frame old, but the cloud history texture is `maxFramesInFlight` (= 2) frames old. The shader reprojects current-frame positions into a screen space that doesn't match the history buffer's actual viewport, producing a displaced ghost of the previous clouds.
-
-| # | Bug | True Root Cause | Location |
-|---|-----|-----------------|----------|
-| 1 | Cloud ghosting on rotation | **prevViewProj is 1-frame-old, history is N-frames-old** | `Render.hs:410-411` |
-| 2 | Vertical bands at horizon | Same — wrong reprojection creates systematic column errors | Same |
-| 3 | Zenith pixelated noise | Wrong reprojection → `validReproj` fails → no temporal blend → raw dither visible | Same + `Clouds.hs:578` |
-
-All three symptoms stem from a single bug.
+> Date: 2026-05-19 (updated after fixes verified working)
+> Status: **Ghosting fixed.** Two open issues: god ray quality, dawn/dusk blue tint.
 
 ---
 
-## Root Cause: Swapchain History/VP Frame Mismatch
+## Fix History
 
-### The Timeline
+### Fix 1: God Ray Ghost (Applied, Verified)
+**Problem**: 3-sample radial probe in lighting pass added warm-tinted cloud opacity copy centered on sun screen position. Created ghost that moved with sun.
 
-`maxFramesInFlight = 2` (`Vulkan/Render.hs:46`). Cloud resources are per-swapchain-image:
+**Fix**: Replaced with dedicated god ray render pass (`GodRays.hs`, 32-sample radial blur).
 
-```
-PassRecording.hs:174-175:
-  cloudImage = drCloudImages !! fromIntegral imageIdx
-  cloudHistoryImage = drCloudHistoryImages !! fromIntegral imageIdx
-```
+**Current state**: `GodRays.hs` has a working 32-sample radial blur pass. Architecture is:
+1. Cloud pass → `cloud_result` (RGBA16F: RGB=color, A=opacity)
+2. God ray pass → reads `cloud_result`, radial blur → `god_ray` texture
+3. Lighting pass → adds `god_ray` to sky pixels
 
-Timeline with 2 frames in flight:
+### Fix 2: Temporal VP Mismatch (Applied, Verified)
+**Problem**: `prevViewProj`/`prevTime` TVars indexed by `frameIdx = frameNumber mod maxFramesInFlight` (cycles 0,1), but cloud history images indexed by `imageIdx` (swapchain index, cycles 0..N-1). With 3 swapchain images, indices diverged.
 
-```
-Frame A (swapchain 0, T=0):
-  - reads historyImage[0] (contains cloud from T=-2)
-  - renders cloud to cloudImage[0]
-  - copies cloudImage[0] → historyImage[0]
-  - prevViewProj written = VP(T=0)
+**Fix**: 
+- `rePrevViewProj`/`rePrevTime` now allocated with `numSwapchainImages` entries
+- Read/write moved into `buildRecordAction` which receives `imageIdx`
+- `RecordContext` carries `rcPrevViewProjTVars`/`rcPrevTimeTVars`/`rcCurrentCloudViewProj`
 
-Frame B (swapchain 1, T=1):
-  - reads historyImage[1] (contains cloud from T=-1)
-  - renders cloud to cloudImage[1]
-  - copies cloudImage[1] → historyImage[1]
-  - prevViewProj written = VP(T=1)
+**Files changed**: `Render.hs`, `PassRecording.hs`
 
-Frame A (swapchain 0, T=2):
-  - reads historyImage[0] (contains cloud from T=0, rendered with VP(T=0))
-  - prevViewProj read = VP(T=1)   ← WRONG! Should be VP(T=0)
-  - Error = 1 frame of camera movement
-```
+### Fix 3: Blend Factor (Applied, Verified)
+`dpdBlendFactor` reduced from 0.92 → 0.3 (`PassRecording.hs:253`)
 
-### The Code
+### Fix 4: Noise UV `fract()` removal (Applied, Verified)
+Correct — sampler REPEAT handles tiling.
 
-**Render.hs:409-411** — single TVar, overwritten every frame:
-```haskell
-cloudPrevViewProj = view !*! projection          -- current frame's VP
-prevViewProj <- STM.readTVarIO rePrevViewProj    -- reads LAST FRAME's VP
-liftIO $ STM.atomically $ STM.writeTVar rePrevViewProj cloudPrevViewProj
-```
-
-Same issue with `prevTime` (Render.hs:433-434):
-```haskell
-prevTimeVal <- liftIO $ STM.readTVarIO rePrevTime       -- 1 frame old
-liftIO $ STM.atomically $ STM.writeTVar rePrevTime elapsedSeconds
-```
-
-The wind delta `dt = max 0.0 (time - prevTime)` (Clouds.hs:548) is also wrong — it represents 1 frame of wind but should represent N frames.
-
-### Why This Causes Ghosting
-
-The temporal blend (Clouds.hs:592-599):
-```haskell
-baseBlend = 0.3 * 0.92 * distFade + 0.2 * 0.92 * (1.0 - distFade)
--- effective blend ≈ 0.18–0.28
-reprojBlend = rayHitCloud * baseBlend * validReproj * brightFade * ghostSuppress
-accR = reprojBlend * histR + (1.0 - reprojBlend) * cloudSkyR
-```
-
-With `dpdBlendFactor = 0.92` (PassRecording.hs:243), the effective blend is 18–28%. This means **28% of the wrongly-reprojected history** is mixed into the current frame. When the camera moves, the 1-frame VP error causes the history sample to be displaced from where the clouds actually were, creating a visible ghost.
-
-### Why It Causes Zenith Noise
-
-At zenith, the camera looks straight up. The 1-frame VP error produces reprojected UVs that are systematically wrong for this viewing angle. The `validReproj` check (Clouds.hs:578):
-```haskell
-validReproj = step 0.0 prevU * step prevU 1.0 * step 0.0 prevV * step prevV 1.0 * step 0.0 prevClipW
-```
-
-With wrong UVs, `validReproj` often fails → `reprojBlend = 0` → no temporal blending. Without temporal smoothing, the blue noise dither (Clouds.hs:335-337) is the only per-pixel variation, producing visible pixelated noise that shifts with time-of-day.
-
-### Why It Causes Horizon Bands
-
-At the horizon, camera rotation creates systematic vertical displacement in the wrongly-reprojected UVs. The `validReproj` check passes for some screen columns but fails for others, creating vertical bands where temporal blend switches on/off. The half-resolution history texture (960×540) amplifies this by making the transition between valid/invalid more abrupt.
+### Fix 5: Horizon epsilon (Applied, Verified)
+`dirY_safe = max 0.05 dirY` — reduces tangent-ray singularity.
 
 ---
 
-## Matrix Arithmetic Verification (Correct)
+## Open Issue 1: God Ray Quality
 
-The matrix computation itself is correct. Tracing through:
+### Current Implementation (`GodRays.hs`)
 
-1. `view = transpose(V_cam)`, `projection = transpose(P_cam)` — transposed from `lookAt`/`perspective` row-major convention
-2. `cloudPrevViewProj = view !*! projection = transpose(P_cam * V_cam)` — via identity `A^T * B^T = (B*A)^T`
-3. UBO packing decomposes into columns of `(P*V)`, stored as sequential V4s
-4. Shader manual multiply reconstructs `(P*V) * worldPos` correctly
+The 32-sample radial blur works but has a conceptual flaw in how it accumulates light:
 
-The matrix is correct. The **age** of the matrix is wrong — it's from frame T-1 but should be from frame T-N.
+```haskell
+-- Lines 109-119: per sample
+~(Vec4 cloudR cloudG cloudB cloudA) <- use @(ImageTexel "cloud_result") NilOps (Vec2 su sv)
+let occ = cloudA
+    contribR = cloudR * occ * sd * weight
+```
+
+This **accumulates cloud color × opacity** along the radial. It produces a smeared copy of cloud color centered on the sun, not proper crepuscular rays.
+
+### What Proper God Rays Need
+
+Crepuscular rays are bright streaks of light visible through cloud gaps, with dark shadows behind clouds. The math:
+
+1. Start with sun brightness at the sun's screen position
+2. March from each pixel toward the sun
+3. At each step, measure **occlusion** (cloud opacity)
+4. Light transmission: `T = exp(-Σ opacity_i)` along the path
+5. Bright ray where `T` is high (gap), dark shadow where `T` is low (behind cloud)
+6. Apply Mie forward scattering (phase function peaked toward sun)
+
+### Fix for GodRays.hs
+
+```haskell
+-- Correct accumulation: measure occlusion, not cloud color
+-- Start from pixel, march toward sun
+-- Each sample reduces light by cloud opacity
+
+_ <- def @"transmittance" @RW @Float 1.0
+_ <- def @"accLight" @RW @Float 0.0
+
+loop do
+  -- ...sample cloud opacity at su,sv...
+  let stepOcclusion = cloudA * density  -- how much light is blocked
+  t <- get @"transmittance"
+  let newT = t * exp(-stepOcclusion)
+      -- In-scatter: light that reaches this point and scatters toward camera
+      scatter = t * (1.0 - exp(-stepOcclusion)) * sd * weight
+  put @"transmittance" newT
+  modify @"accLight" (+ scatter)
+  -- ...advance sampleU/V...
+```
+
+This gives Beer-Lambert attenuation with in-scattering — proper volumetric light.
+
+### Answer: Can we do good god rays with current architecture?
+
+**Yes.** The current architecture is correct:
+- `cloud_result` texture already has cloud opacity in alpha
+- Separate god ray pass at half resolution is the right approach
+- Only the accumulation math needs correction
+- Push constants for sun screen position already available
+
+The fix is ~15 lines in `GodRays.hs`. The pipeline architecture doesn't need to change.
 
 ---
 
-## Fix
+## Open Issue 2: Dawn/Dusk Only Blue, No Red/Orange Tint
 
-### Primary Fix: Per-Swapchain-Image VP Storage
+### Root Cause: `skyTint` Calculation in `DayNight.hs`
 
-**File**: `Engine/Render.hs`
-
-Replace the single TVar with a per-frame-index buffer:
+The `skyTint` computed on CPU is applied as a **multiplicative tint** in the lighting pass:
 
 ```haskell
--- Initialization (where rePrevViewProj is created):
--- BEFORE:
-prevViewProjTVar <- STM.newTVarIO (identity :: M44 Foreign.C.CFloat)
-
--- AFTER:
-prevViewProjTVars <- replicateM Render.maxFramesInFlight
-                      (STM.newTVarIO (identity :: M44 Foreign.C.CFloat))
+-- LightingProcedural.hs:658-660
+tintedSkyR = cloudGamR * skyTintR
+tintedSkyG = cloudGamG * skyTintG
+tintedSkyB = cloudGamB * skyTintB
 ```
+
+The problem is in `DayNight.hs:106-116`:
 
 ```haskell
--- Render loop (where prevViewProj is read/written):
--- BEFORE:
-prevViewProj <- liftIO $ STM.readTVarIO rePrevViewProj
-liftIO $ STM.atomically $ STM.writeTVar rePrevViewProj cloudPrevViewProj
-
--- AFTER:
-let frameIdx = fromIntegral frameNumber `mod` Render.maxFramesInFlight
-prevViewProj <- liftIO $ STM.readTVarIO (rePrevViewProjRing !! frameIdx)
-liftIO $ STM.atomically $ STM.writeTVar (rePrevViewProjRing !! frameIdx) cloudPrevViewProj
+skyLerp = clamp 0.0 1.0 (sin sunAngle)        -- 0 at horizon, 1 at noon
+sunsetLerp = 1.0 - abs (dayProgress - 0.5) * 2.0  -- 1 at sunrise/set, 0 at noon
+tempTint = lerpV3 sunsetLerp dayTint sunsetTint    -- warm at sunrise/set
+skyTint = lerpV3 skyLerp nightTint tempTint         -- ← BUG HERE
 ```
 
-Same fix for `prevTime`:
+**The bug**: `skyLerp = sin(sunAngle) ≈ 0` at sunrise/sunset. The final blend:
+```
+skyTint = lerpV3 0 nightTint tempTint = nightTint = V3 0.1 0.1 0.2  (dark blue!)
+```
+
+The warm `sunsetTint` is computed correctly in `tempTint`, but `skyLerp` forces the result to `nightTint` at the exact moments when sunset tint should appear.
+
+### Numerical Trace
+
+| Time | sunAngle | skyLerp | sunsetLerp | tempTint | **skyTint** | Expected |
+|------|----------|---------|------------|----------|-------------|----------|
+| 6:00 (sunrise) | 0 | 0.00 | 1.0 | (1, 0.7, 0.4) | **(0.1, 0.1, 0.2)** blue | warm orange |
+| 6:30 | 0.13 | 0.13 | 0.08 | (1, 0.98, 0.95) | **(0.22, 0.22, 0.30)** blue | warm |
+| 8:00 | 0.52 | 0.50 | 0.33 | (1, 0.90, 0.80) | **(0.55, 0.50, 0.50)** neutral | warm fading |
+| 12:00 | 1.57 | 1.00 | 0.0 | (1, 1, 1) | **(1, 1, 1)** white | white ✓ |
+
+The sky is **blue at dawn/dusk** because the night→day transition skips the sunset phase entirely.
+
+### Fix: 3-Phase Sky Tint Blend
+
+Replace the 2-step blend with a proper 3-phase transition:
 
 ```haskell
--- BEFORE:
-prevTimeVal <- liftIO $ STM.readTVarIO rePrevTime
-liftIO $ STM.atomically $ STM.writeTVar rePrevTime elapsedSeconds
+-- Phase 1: night → sunset (sun near/below horizon)
+horizonPhase = clamp 0.0 1.0 ((sin sunAngle + 0.15) / 0.3)
+-- Phase 2: sunset → day (sun well above horizon)  
+dayPhase = clamp 0.0 1.0 ((sin sunAngle - 0.15) / 0.5)
 
--- AFTER:
-let frameIdx = fromIntegral frameNumber `mod` Render.maxFramesInFlight
-prevTimeVal <- liftIO $ STM.readTVarIO (rePrevTimeRing !! frameIdx)
-liftIO $ STM.atomically $ STM.writeTVar (rePrevTimeRing !! frameIdx) elapsedSeconds
+baseTint = lerpV3 horizonPhase nightTint sunsetTint
+skyTint = lerpV3 dayPhase baseTint dayTint
 ```
 
-**Why this works**: Frame index N reads VP from when swapchain image N was last used (N frames ago), matching the actual age of historyImage[N].
+This gives:
 
-### Secondary Fix: Reduce Blend Factor
+| Time | horizonPhase | dayPhase | baseTint | **skyTint** |
+|------|-------------|----------|----------|-------------|
+| Night | 0.0 | 0.0 | nightTint | **nightTint** (dark blue) |
+| Sunrise | 0.5 | 0.0 | 50/50 night/sunset | **sunsetTint-ish** (warm) |
+| +30min | 1.0 | 0.0 | sunsetTint | **sunsetTint** (warm orange) |
+| +2h | 1.0 | 0.5 | sunsetTint | **blend toward white** |
+| Noon | 1.0 | 1.0 | sunsetTint | **dayTint** (white) |
 
-The current `dpdBlendFactor = 0.92` gives effective blend ≈ 28%. After fixing the VP mismatch, reduce to 0.3 (matching the reference):
+### GPU Side: Cloud Shader Already Has Warm Tones
+
+The cloud shader (`Clouds.hs:261-313`) computes its own analytic sky with directional color temperature:
 
 ```haskell
--- PassRecording.hs:243:
-dpdBlendFactor = 0.3,  -- was 0.92
+horizonFactor = 1.0 - clamp ((sunElev + 0.1) / 0.4) 0.0 1.0
+sunProximity = max 0.0 (dir ^.^ sunDir)
+warmth = sunProximity * horizonFactor
+colorTempG = mix 1.0 0.55 warmth    -- reduce green
+colorTempB = mix 1.0 0.25 warmth    -- reduce blue more
 ```
+
+This correctly produces warm tones near the sun at low elevation. But these warm tones are then **killed** by the blue `skyTint` multiplier in the lighting pass.
+
+Fixing `DayNight.hs` will let the cloud shader's warm tones through to the screen.
+
+### The cloud shader's analytic sky also has a minor issue
+
+The Rayleigh scattering coefficients (lines 277-279):
+```haskell
+rayleighScatterR = 0.0058 * rayleighPhase * (1.0 - rayleighTrans) * 100.0
+rayleighScatterG = 0.0135 * rayleighPhase * (1.0 - rayleighTrans) * 100.0
+rayleighScatterB = 0.0331 * rayleighPhase * (1.0 - rayleighTrans) * 100.0
+```
+
+These are Rayleigh scattering coefficients (λ⁻⁴ dependence). Blue (0.0331) >> Red (0.0058). This makes the base sky very blue. The `colorTemp` correction at lines 303-305 helps at sunset, but the blue base is overwhelming. The coefficients could be rebalanced for more visible warm tones at low sun angles, but this is a tuning issue, not a bug. The `DayNight.hs` fix is the primary solution.
 
 ---
 
-## Previous Fixes (Applied But Insufficient)
+## File Reference
 
-These were applied but did not resolve the ghosting because they addressed secondary issues:
-
-1. **God ray mask** (`LightingProcedural.hs:675`): `godRayMask = if hasGeometry then 0.0 else 1.0` — correctly masks god rays from geometry, but the cloud sky itself still ghosts from temporal blend error.
-
-2. **`fract()` removal** (`Clouds.hs:432-434`): Correct change — sampler REPEAT handles tiling. But doesn't fix the temporal blend ghosting.
-
-3. **Horizon epsilon increase** (`Clouds.hs:312`): `dirY_safe = max 0.05` — reduces tangent-ray singularity but doesn't fix temporal reprojection error.
-
-These fixes should remain — they're individually correct — but they don't address the primary ghosting cause.
-
----
-
-## FIR Investigation Results
-
-### ImageTexel Sampling: Confirmed Working
-
-`ImageTexel` with `Texture2D` + `NilOps` → `OpImageSampleImplicitLod` with LINEAR filtering:
-
-- `Texture2D` = `Properties FloatingPointCoordinates ... Sampled ...` (`FIR/Syntax/Synonyms.hs:263-267`)
-- `FloatingPointCoordinates` → sampling branch (`CodeGen/Images.hs:154`)
-- `NilOps` → `ImplicitLOD` → `OpImageSampleImplicitLod` (`CodeGen/Images.hs:329`)
-- Combined image sampler with `VK_FILTER_LINEAR` (`DescriptorSet.hs:221-226`)
-
-**Not a sampling mode issue.** The earlier MEMORIES.md hypothesis about `OpImageFetch`/nearest-neighbor was wrong.
-
-### `if-then-else` on Code Types: Working for Scalars
-
-The god ray mask uses `if hasGeometry then 0.0 else 1.0` which resolves to:
-
-- `Choose (Code Bool) '(Code Float, Code Float, Code Float)` — OVERLAPPABLE instance
-- `Chooser Code Float Code Float PureChoice` — scalar select
-- Generates `OpSelect` in SPIR-V — branchless, correct
-
-The MEMORIES.md note about "broken if-then-else" applies to **vector types** (V3, V4) where `canUseSelection` may fail. Scalar `if` works correctly.
-
-### FIR `LOD` Operand: Working
-
-`use @(ImageTexel "cloud_noise") (LOD noiseLod NilOps)` generates `OpImageSampleExplicitLod` with the LOD as an image operand. This is correct SPIR-V.
-
----
-
-## Validation Criteria
-
-After the per-frame-index VP fix:
-
-- [ ] No gray ghost overlay during camera rotation (sky or geometry)
-- [ ] No vertical banding at the horizon
-- [ ] Cloud structures visible at zenith with temporal smoothing
-- [ ] No pixelated noise at zenith
-- [ ] Smooth temporal convergence (no flickering)
-- [ ] Ghost suppression (alpha-diff) triggers less frequently
-- [ ] God rays masked to sky-only (keep existing fix)
+| File | Lines | What |
+|------|-------|------|
+| `DayNight.hs:106-116` | skyTint calculation (BUG: 2-phase blend skips sunset) |
+| `DayNight.hs:38-52` | defaultDayNightConfig (colors are correct, math is wrong) |
+| `LightingProcedural.hs:658-660` | tintedSkyR = cloudGamR * skyTintR (multiplies blue tint over warm sky) |
+| `GodRays.hs:109-119` | god ray accumulation (accumulates cloud color, should use Beer-Lambert) |
+| `GodRays.hs:82-84` | direction is pixel→sun (correct for radial blur) |
+| `Clouds.hs:261-313` | analytic sky with directional color temperature (correct) |
+| `Render.hs:912-913` | prevViewProj/prevTime allocation (now per-swapchain-image) |
+| `PassRecording.hs:170-174` | prevViewProj/prevTime read/write by imageIdx (fixed) |

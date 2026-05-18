@@ -88,11 +88,9 @@ fragment = shader do
                     step 0.0 sunScreenY * step sunScreenY 1.0
 
   -- Radial blur: sample along line from pixel toward sun
-  -- Using a fixed 32-sample loop with manual unroll via accumulators
-  -- (FIR doesn't support dynamic loop counts well)
-  _ <- def @"accR" @RW @Float 0.0
-  _ <- def @"accG" @RW @Float 0.0
-  _ <- def @"accB" @RW @Float 0.0
+  -- Beer-Lambert attenuation with in-scattering for proper crepuscular rays
+  _ <- def @"transmittance" @RW @Float 1.0
+  _ <- def @"accLight" @RW @Float 0.0
   _ <- def @"sampleDecay" @RW @Float 1.0
   _ <- def @"sampleU" @RW @Float uvX
   _ <- def @"sampleV" @RW @Float uvY
@@ -106,29 +104,27 @@ fragment = shader do
 
     su <- get @"sampleU"
     sv <- get @"sampleV"
-    ~(Vec4 cloudR cloudG cloudB cloudA) <- use @(ImageTexel "cloud_result") NilOps (Vec2 su sv)
+    ~(Vec4 _cloudR _cloudG _cloudB cloudA) <- use @(ImageTexel "cloud_result") NilOps (Vec2 su sv)
 
+    t <- get @"transmittance"
     sd <- get @"sampleDecay"
-    let occ = cloudA  -- Use cloud opacity as occlusion mask
-        contribR = cloudR * occ * sd * weight
-        contribG = cloudG * occ * sd * weight
-        contribB = cloudB * occ * sd * weight
+    let stepOcclusion = cloudA * density
+        newT = t * exp (-stepOcclusion)
+        -- In-scatter: light that reaches this point and scatters toward camera
+        scatter = t * (1.0 - exp (-stepOcclusion)) * sd * weight
 
-    modify @"accR" (+ contribR)
-    modify @"accG" (+ contribG)
-    modify @"accB" (+ contribB)
+    put @"transmittance" newT
+    modify @"accLight" (+ scatter)
     put @"sampleDecay" (sd * decay)
     put @"sampleU" (su - deltaX * density)
     put @"sampleV" (sv - deltaY * density)
     modify @"i" (+ 1)
 
-  finalR <- get @"accR"
-  finalG <- get @"accG"
-  finalB <- get @"accB"
+  finalLight <- get @"accLight"
 
   -- Apply exposure and intensity, mask by sun visibility
-  let godRayR = finalR * exposure * intensity * sunOnScreen
-      godRayG = finalG * exposure * intensity * sunOnScreen
-      godRayB = finalB * exposure * intensity * sunOnScreen
+  let godRayR = finalLight * exposure * intensity * sunOnScreen
+      godRayG = finalLight * exposure * intensity * sunOnScreen
+      godRayB = finalLight * exposure * intensity * sunOnScreen
 
   put @"out_colour" (Vec4 godRayR godRayG godRayB 1.0)
