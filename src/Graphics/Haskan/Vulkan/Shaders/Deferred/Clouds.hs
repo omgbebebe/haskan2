@@ -540,6 +540,7 @@ cloudFragment = shader do
   let cloudSkyR = skyR * finalTransmittance + finalAccR
       cloudSkyG = skyG * finalTransmittance + finalAccG
       cloudSkyB = skyB * finalTransmittance + finalAccB
+      cloudOpacity = 1.0 - finalTransmittance
 
       -- Temporal accumulation with reprojection
       blendFactor = view @(Name "blendFactor") frameData
@@ -592,7 +593,7 @@ cloudFragment = shader do
       histG = convert histG_h
       histB = convert histB_h
       histA = convert histA_h
-      rayHitCloud = step 0.1 totalRayLength
+      rayHitCloud = step 0.01 cloudOpacity
       maxLum = max cloudSkyR (max cloudSkyG cloudSkyB)
       brightFade = 1.0 - smoothstep 5.0 30.0 maxLum
       -- Distance-dependent blend: less temporal blend near camera (reduces swimming)
@@ -605,6 +606,5 @@ cloudFragment = shader do
       accR = reprojBlend * histR + (1.0 - reprojBlend) * cloudSkyR
       accG = reprojBlend * histG + (1.0 - reprojBlend) * cloudSkyG
       accB = reprojBlend * histB + (1.0 - reprojBlend) * cloudSkyB
-      cloudOpacity = 1.0 - finalTransmittance
 
   put @"out_colour" (Vec4 accR accG accB cloudOpacity)
