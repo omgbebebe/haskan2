@@ -367,7 +367,7 @@ runFrame frameNumber = do
       (graphicsQueueHandler ctx)
       regenCmdBuf
       reResourceManager
-      iblRadianceCubemap
+      iblCloudNoiseHandle
       noiseSeedVal
       noiseFreqVal
       noisePersistVal
