@@ -347,30 +347,11 @@ fragment = shader do
       dbgHeight = cloudSkyG * 0.5
       dbgNoise = cloudSkyB * 0.5
 
-  -- God rays: sample cloud opacity at points toward screen-space sun
-  let sunScreenX = view @(Name "sunScreenX") cameraPos
-      sunScreenY = view @(Name "sunScreenY") cameraPos
-      toSunX = sunScreenX - uvX
-      toSunY = sunScreenY - uvY
-      sampleX1 = clamp (uvX + toSunX * 0.25) 0.0 1.0
-      sampleY1 = clamp (uvY + toSunY * 0.25) 0.0 1.0
-      sampleX2 = clamp (uvX + toSunX * 0.5) 0.0 1.0
-      sampleY2 = clamp (uvY + toSunY * 0.5) 0.0 1.0
-      sampleX3 = clamp (uvX + toSunX * 0.75) 0.0 1.0
-      sampleY3 = clamp (uvY + toSunY * 0.75) 0.0 1.0
-
-  ~(Vec4 _ _ _ occ1) <- use @(ImageTexel "cloud_result") NilOps (Vec2 sampleX1 sampleY1)
-  ~(Vec4 _ _ _ occ2) <- use @(ImageTexel "cloud_result") NilOps (Vec2 sampleX2 sampleY2)
-  ~(Vec4 _ _ _ occ3) <- use @(ImageTexel "cloud_result") NilOps (Vec2 sampleX3 sampleY3)
-
-  let occ1f = occ1
-      occ2f = occ2
-      occ3f = occ3
-      godRayAccum = occ1f * 0.5 + occ2f * 0.3 + occ3f * 0.2
-      godRayStrength = godRayAccum * 0.15
-      godRayR = 1.0 * godRayStrength
-      godRayG = 0.95 * godRayStrength
-      godRayB = 0.85 * godRayStrength
+  -- God rays disabled: 3-sample radial probe creates ghost copy of cloud alpha
+  -- centered on sun screen position. Needs proper radial blur pass (Phase 4).
+  let godRayR = 0.0
+      godRayG = 0.0
+      godRayB = 0.0
 
   let normX = normX_raw * 2 - 1
       normY = normY_raw * 2 - 1
@@ -672,9 +653,9 @@ fragment = shader do
       tintedSkyR = cloudGamR * skyTintR
       tintedSkyG = cloudGamG * skyTintG
       tintedSkyB = cloudGamB * skyTintB
-      finalx = (if hasGeometry then gamx else tintedSkyR) + godRayR
-      finaly = (if hasGeometry then gamy else tintedSkyG) + godRayG
-      finalz = (if hasGeometry then gamz else tintedSkyB) + godRayB
+      finalx = if hasGeometry then gamx else tintedSkyR + godRayR
+      finaly = if hasGeometry then gamy else tintedSkyG + godRayG
+      finalz = if hasGeometry then gamz else tintedSkyB + godRayB
 
       -- Debug mode 12.0: raw skybox for ALL pixels
       dbgSkyR = if debugMode == 12.0 then tintedSkyR else finalx

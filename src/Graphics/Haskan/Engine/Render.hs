@@ -210,8 +210,8 @@ data RenderEnv = RenderEnv
     reTvPhysicsBodyToEntity :: !(STM.TVar (IntMap EntityId)),
     reTvPhysicsAutoStep :: !(STM.TVar Bool),
     reTvPhysicsTimeScale :: !(STM.TVar Float),
-    rePrevViewProj :: !(TVar (Linear.Matrix.M44 Foreign.C.CFloat)),
-    rePrevTime :: !(TVar Float),
+    rePrevViewProj :: ![TVar (Linear.Matrix.M44 Foreign.C.CFloat)],
+    rePrevTime :: ![TVar Float],
     reImGuiBackend :: !(Maybe Backend.ImGuiBackend)
   }
 
@@ -402,13 +402,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
       viewProj = projection !*! view
       skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
-      -- prevViewProj for cloud reprojection: stored in UBO, GLSL reads as column-major.
-      -- The cloud shader does manual element extraction that effectively computes
-      -- transpose(CPU_M) * world. To get the shader to apply P*V (world-to-clip),
-      -- we must store transpose(P*V) = transpose(V) !*! transpose(P) = view !*! projection.
       cloudPrevViewProj = view !*! projection
-  prevViewProj <- liftIO $ STM.readTVarIO rePrevViewProj
-  liftIO $ STM.atomically $ STM.writeTVar rePrevViewProj cloudPrevViewProj
   uploadUniformBuffer mvpMemory 0 [view, projection]
 
   frameState <- readFrameState
@@ -429,9 +423,6 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
 
   currentTime <- getMonotonicTime
   let elapsedSeconds = fromIntegral (toNanoSecs currentTime) / 1e9
-
-  prevTimeVal <- liftIO $ STM.readTVarIO rePrevTime
-  liftIO $ STM.atomically $ STM.writeTVar rePrevTime elapsedSeconds
 
   -- Build Dear ImGui frame
   mDrawData <- liftIO $ case reImGuiBackend of
@@ -470,7 +461,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       Backend.buildImGuiFrame (runReaderT Backend.buildDebugPanel panelEnv)
     Nothing -> pure Nothing
 
-  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds ((realToFrac <$>) <$> prevViewProj) windDirXVal windDirZVal prevTimeVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal weatherCoverageScaleVal weatherTypeBiasVal stormIntensityVal weatherAnimSpeedVal mDrawData
+  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds rePrevViewProj rePrevTime cloudPrevViewProj windDirXVal windDirZVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal weatherCoverageScaleVal weatherTypeBiasVal stormIntensityVal weatherAnimSpeedVal mDrawData
       recordAction = buildRecordAction recordCtx
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
@@ -907,8 +898,9 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
         unless exit $ do
           renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
             with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView iblWeatherMapView iblBlueNoiseSampler (Just lightSsboBuffer) imGuiRenderPass proceduralSkyEnabled) $ \dr -> do
-              prevViewProjTVar <- STM.newTVarIO (identity :: M44 Foreign.C.CFloat)
-              prevTimeTVar <- STM.newTVarIO 0.0
+              let numSwapchainImages = length (drCloudImages dr)
+              prevViewProjTVars <- replicateM numSwapchainImages (STM.newTVarIO (identity :: M44 Foreign.C.CFloat))
+              prevTimeTVars <- replicateM numSwapchainImages (STM.newTVarIO 0.0)
               let renderEnv =
                     RenderEnv
                       { reWindow = window,
@@ -963,8 +955,8 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                         reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,
                         reTvPhysicsAutoStep = physicsAutoStep gameState,
                         reTvPhysicsTimeScale = physicsTimeScale gameState,
-                        rePrevViewProj = prevViewProjTVar,
-                        rePrevTime = prevTimeTVar,
+                         rePrevViewProj = prevViewProjTVars,
+                         rePrevTime = prevTimeTVars,
                         reImGuiBackend = mImGuiBackend
                       }
               renderFrameLoop renderEnv 0

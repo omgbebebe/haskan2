@@ -7,12 +7,14 @@ module Graphics.Haskan.Engine.Render.Internal.PassRecording
   )
 where
 
+import Control.Concurrent.STM qualified as STM
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Data.Text qualified as Text
 import Data.Word (Word32)
 import DearImGui.Raw qualified
+import Foreign.C (CFloat)
 import Foreign.Marshal.Array qualified
 import Foreign.Storable (Storable (..))
 import Control.Lens ((^.))
@@ -58,10 +60,11 @@ data RecordContext = RecordContext
     rcSunDir :: !(V3 Float),
     rcCloudHeight :: !Float,
     rcTime :: !Float,
-    rcPrevViewProj :: !(M44 Float),
+    rcPrevViewProjTVars :: ![STM.TVar (M44 CFloat)],
+    rcPrevTimeTVars :: ![STM.TVar Float],
+    rcCurrentCloudViewProj :: !(M44 CFloat),
     rcWindDirX :: !Float,
     rcWindDirZ :: !Float,
-    rcPrevTime :: !Float,
     rcCloudCoverage :: !Float,
     rcCloudDetail :: !Float,
     rcCloudAbsorption :: !Float,
@@ -96,8 +99,9 @@ buildRecordContext ::
   Float ->
   V3 Float ->
   Float ->
-  M44 Float ->
-  Float ->
+  [STM.TVar (M44 CFloat)] ->
+  [STM.TVar Float] ->
+  M44 CFloat ->
   Float ->
   Float ->
   Float ->
@@ -109,7 +113,7 @@ buildRecordContext ::
   Float ->
   Maybe DearImGui.Raw.DrawData ->
   RecordContext
-buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProj windDirX windDirZ prevTime cloudCoverage cloudDetail cloudAbsorption weatherCoverageScale weatherTypeBias stormIntensity weatherAnimSpeed mDrawData =
+buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProjTVars prevTimeTVars currentCloudViewProj windDirX windDirZ cloudCoverage cloudDetail cloudAbsorption weatherCoverageScale weatherTypeBias stormIntensity weatherAnimSpeed mDrawData =
   let viewMat = fmap (fmap realToFrac) (unViewMatrix (Camera.toMatrix camera)) :: M44 Float
       extent = rcSurfaceExtent ctx
       width = realToFrac (Vulkan.getField @"width" extent) :: Float
@@ -140,10 +144,11 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
       rcSunDir = sunDir,
       rcCloudHeight = fsCloudHeight frameState,
       rcTime = time,
-      rcPrevViewProj = prevViewProj,
+      rcPrevViewProjTVars = prevViewProjTVars,
+      rcPrevTimeTVars = prevTimeTVars,
+      rcCurrentCloudViewProj = currentCloudViewProj,
       rcWindDirX = windDirX,
       rcWindDirZ = windDirZ,
-      rcPrevTime = prevTime,
       rcCloudCoverage = cloudCoverage,
       rcCloudDetail = cloudDetail,
       rcCloudAbsorption = cloudAbsorption,
@@ -163,7 +168,13 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
 
 buildRecordAction :: RecordContext -> Vulkan.Word32 -> Int -> IO ()
 buildRecordAction RecordContext {..} imageIdx frameIdx = do
-  let commandBuffer = rcGraphicsCommandBuffers !! fromIntegral imageIdx
+  prevViewProj <- STM.readTVarIO (rcPrevViewProjTVars !! fromIntegral imageIdx)
+  prevTimeVal <- STM.readTVarIO (rcPrevTimeTVars !! fromIntegral imageIdx)
+  STM.atomically $ do
+    STM.writeTVar (rcPrevViewProjTVars !! fromIntegral imageIdx) rcCurrentCloudViewProj
+    STM.writeTVar (rcPrevTimeTVars !! fromIntegral imageIdx) rcTime
+  let prevViewProjF = (realToFrac <$>) <$> prevViewProj
+      commandBuffer = rcGraphicsCommandBuffers !! fromIntegral imageIdx
       gBufferFramebuffer = drGBufferFramebuffers rcDeferred !! fromIntegral imageIdx
       lightingFramebuffer = drLightingFramebuffers rcDeferred !! fromIntegral imageIdx
       frameDescriptorSet = rcFrameDescriptorSets !! frameIdx
@@ -239,11 +250,11 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                  dpdSunDir = rcSunDir,
                 dpdCloudHeight = rcCloudHeight,
                 dpdTime = rcTime,
-                dpdPrevViewProj = rcPrevViewProj,
-                dpdBlendFactor = 0.92,
+                dpdPrevViewProj = prevViewProjF,
+                dpdBlendFactor = 0.3,
                 dpdWindDirX = rcWindDirX,
                 dpdWindDirZ = rcWindDirZ,
-                dpdPrevTime = rcPrevTime,
+                dpdPrevTime = prevTimeVal,
                 dpdCloudCoverage = rcCloudCoverage,
                 dpdCloudDetail = rcCloudDetail,
                 dpdCloudAbsorption = rcCloudAbsorption,

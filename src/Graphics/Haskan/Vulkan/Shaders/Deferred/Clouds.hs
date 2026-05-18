@@ -309,7 +309,7 @@ cloudFragment = shader do
 
       -- Slab intersector: handles camera below, inside, or above cloud layer
       -- Smooth clamp to epsilon: no dead zone discontinuity
-      dirY_safe = if dirY > 0.0 then max 0.001 dirY else min (-0.001) dirY
+      dirY_safe = if dirY > 0.0 then max 0.05 dirY else min (-0.05) dirY
       tToBottom = (cloudBottom - camY) / dirY_safe
       tToTop = (cloudTop - camY) / dirY_safe
       tNear = max 0.0 (min tToBottom tToTop)
@@ -333,7 +333,8 @@ cloudFragment = shader do
       lightStepSize = min 120.0 (cloudThickness / lightStepCount)
   -- Sample blue noise for dithered ray entry
   ~(Vec4 blueR _ _ _) <- use @(ImageTexel "blue_noise") NilOps (Vec2 uvX uvY)
-  let ditherOffset = blueR * baseStepSize * 0.5
+  let ditherScale = min 1.0 (totalRayLength / 2000.0)
+      ditherOffset = blueR * baseStepSize * 0.5 * ditherScale
       tEntry = tNear + ditherOffset
       entryPos = Vec3 (camX + dirX * tEntry) (camY + dirY * tEntry) (camZ + dirZ * tEntry)
 
@@ -428,9 +429,9 @@ cloudFragment = shader do
         wx = wx1 + wx2
         wy = wy1 + wy2
         wz = wz1 + wz2
-        sx = fract ((px + wx) * noiseScale - windOffsetX)
-        sy = fract ((py + wy) * noiseScale)
-        sz = fract ((pz + wz) * noiseScale - windOffsetZ)
+        sx = (px + wx) * noiseScale - windOffsetX
+        sy = (py + wy) * noiseScale
+        sz = (pz + wz) * noiseScale - windOffsetZ
 
     ~(Vec4 nr ng nb na) <- use @(ImageTexel "cloud_noise") (LOD noiseLod NilOps) (Vec3 sx sy sz)
 
@@ -471,9 +472,9 @@ cloudFragment = shader do
         lwx = sin (lpy * warpFreq1 + lpz * warpFreq1 * 0.7) * warpAmp1
         lwy = cos (lpx * warpFreq1 + lpz * warpFreq1 * 0.5) * warpAmp1
         lwz = sin (lpz * warpFreq1 * 0.7 + lpx * warpFreq1 * 0.6) * warpAmp1
-        lsx = fract ((lpx + lwx) * noiseScale - windOffsetX)
-        lsy = fract ((lpy + lwy) * noiseScale)
-        lsz = fract ((lpz + lwz) * noiseScale - windOffsetZ)
+        lsx = (lpx + lwx) * noiseScale - windOffsetX
+        lsy = (lpy + lwy) * noiseScale
+        lsz = (lpz + lwz) * noiseScale - windOffsetZ
         -- Light position distance from camera for LOD
         ldistFromCam = sqrt ((lpx - camX) * (lpx - camX) + (lpy - camY) * (lpy - camY) + (lpz - camZ) * (lpz - camZ))
         lnoiseLod = clamp (ldistFromCam / lodScale) 0.0 maxNoiseLod
