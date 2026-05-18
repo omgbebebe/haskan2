@@ -20,9 +20,9 @@
 - **Threading**: 4 threads (input, state update, physics, render) via STM TVars
 - **Prefix**: `~/bin/env-wrap` for commands needing project nix environment
 
-## Current Status (2026-05-17)
+## Current Status (2026-05-19)
 - **M9 COMPLETE**: PBR deferred rendering, normal mapping, AO, emissive, IBL split-sum with BRDF LUT
-- **M10 COMPLETE**: Multi-light, skybox, day/night cycle, volumetric clouds (250-step adaptive raymarch)
+- **M10 COMPLETE**: Multi-light, skybox, day/night cycle, volumetric clouds (96-step adaptive raymarch)
 - **FIR Math Ops COMPLETE**: 20+ vector/matrix operations
 - **FIR Optimization COMPLETE**: spirv-opt Phase 0 (596× size reduction), Phase 1.3 (vectorized IfF)
 - **FIR Loop Codegen FIXED**: Three critical bugs in while loop CFG
@@ -30,6 +30,7 @@
 - **Dear ImGui COMPLETE**: Vulkan backend, input forwarding, cloud debug panel, physics debug panel
 - **Procedural Sky COMPLETE**: Compute-shader generated cubemap with Hosek-Wilkie scattering
 - **Jolt Physics COMPLETE**: All 7 phases — Nix build, C wrapper, Haskell FFI, async thread, render sync, scene loading, ImGui panel
+- **Cloud Ghosting FIXED**: Per-swapchain-image VP ring buffer eliminates temporal reprojection mismatch
 
 ## Key Design Decisions
 1. **glTF UV**: Matches Vulkan (0,0 = top-left). No `flipV`.
@@ -44,7 +45,7 @@
 10. **Texture format**: `Rgba8 UNorm`; view `VK_FORMAT_R8G8B8A8_UNORM`
 11. **JuicyPixels**: Row 0 at top; Vulkan stores row 0 at top. No V-flip.
 12. **FIR optimization**: Always use `[SPIRV (Version 1 5), Optimize]` flags for shader compilation
-13. **FIR if-then-else on Code types**: Broken (overlapping instances). Use branchless `step()` instead.
+13. **FIR if-then-else on `Code` types**: Scalar `if` works via `OpSelect`. **BUT** intermediate `Code Float` bindings (e.g. `let mask = if x then 0.0 else 1.0`) can trigger GHC solver limit (`solveWanteds: too many iterations`) in complex shaders. **Workaround**: inline the conditional into each branch rather than binding an intermediate.
 14. **Cloud pass**: Half-resolution, 250-step adaptive raymarch, temporal history
 15. **ImGui backend**: `DearImGui.SDL.Vulkan`, sync in render loop, separate descriptor pool
 16. **Physics**: Jolt v5.5.0 via C wrapper, async thread, TVar state sync, `_physics_box` naming convention
@@ -76,10 +77,10 @@
 2. **Dynamic sky regeneration no-op**: `needsSkyRegen` flag checked but handler is TODO. Day/night cycle doesn't update procedural sky.
 
 ### P1 — High
-3. **Cloud ghosting in lighting pass**: God ray opacity sampling (`ImageTexel "cloud_result" NilOps`) in LightingProcedural.hs produces light-gray copy of clouds that glitches on camera rotation. Disabling god rays fixes it; UV clamping alone doesn't. Likely nearest-neighbor aliasing on half-res texture. Needs bilinear sampling or blurred opacity texture.
+3. ~~**Cloud ghosting in lighting pass**~~ **FIXED 2026-05-19**: See session entry below. Root cause was per-swapchain-image VP mismatch, not god ray sampling.
 4. **Cloud push constant 216 bytes**: Exceeds Vulkan 128-byte minimum. Won't run on mobile/integrated.
 5. **No `abs` for `Code` types**: `step()` workaround in 4+ places
-6. **Zenith solid color**: Looking straight up, cloud layer fills entire view with solid color + pixelated noise. Related to `maxNoiseLod` and small `totalRayLength` at zenith.
+6. ~~**Zenith solid color**~~ **FIXED 2026-05-19**: Removed `fract()` from noise UVs; sampler REPEAT handles tiling seamlessly. Horizon epsilon increased to 0.05.
 
 ### P2 — Medium
 6. Blue noise tileability unverified
@@ -117,6 +118,17 @@
 
 ## Session History (condensed)
 
+### 2026-05-19: Cloud Ghosting — ROOT CAUSE FOUND AND FIXED
+- **True root cause**: `prevViewProj` and `prevTime` were single TVars overwritten every frame, but cloud history textures are per-swapchain-image. With `numSwapchainImages=3` and `maxFramesInFlight=2`, history could be 2+ frames old while VP was only 1 frame old. Temporal reprojection used wrong matrix → displaced ghost.
+- **Fix**: Changed `rePrevViewProj`/`rePrevTime` from `TVar` to `[TVar]` arrays sized to `numSwapchainImages`. Read/write moved into `buildRecordAction` and indexed by `imageIdx` (actual swapchain image), matching history texture age exactly.
+- **Secondary fixes** (individually correct but insufficient alone):
+  - `Clouds.hs`: Removed `fract()` from noise UVs — sampler `REPEAT` handles tiling without hard-edge discontinuities
+  - `Clouds.hs`: Horizon epsilon `0.001 → 0.05` — smooths tangent-ray singularity
+  - `Clouds.hs`: Dither scaled by `min 1.0 (totalRayLength / 2000.0)` — reduces pixelation at zenith
+  - `LightingProcedural.hs`: God rays masked to sky-only (geometry gets no god ray contribution)
+- **FIR type inference workaround**: Intermediate `Code Float` binding `let mask = if hasGeometry then 0.0 else 1.0` triggered `solveWanteds: too many iterations` in LightingProcedural.hs. Fixed by inlining: `final = if hasGeometry then gamx else skyR + godRayR`.
+- **Blend factor reduced**: `dpdBlendFactor 0.92 → 0.3` (effective blend ~9% vs ~28%). With correct VP match, less blend needed.
+
 ### 2026-05-18: Cloud Black Screen Root Cause + Validation Fixes
 - **Root cause of black screen**: `FormatDefault` type family in FIR mapped `Floating (16 ': _)` → `Half`. Vulkan requires `Float` (32-bit) sampled type for ALL SFLOAT image formats (VUID-SampledType-04471). Shader reads returned undefined → black.
   - **Fix**: `3rdparty/fir/src/FIR/Syntax/Synonyms.hs:339` — removed `Half` case, all `Floating` formats now map to `Float`
@@ -130,15 +142,11 @@
 - **maxNoiseLod 4→2**: prevents sampling 16³ blocky mip at zenith
 - **Empty-space skip disabled**: causes vertical banding artifacts (step-size jumps)
 
-### 2026-05-18 (later): Ghosting Investigation — NOT FIXED
-- **Ghosting identified**: light-gray copy of clouds that "glitches" when rotating camera
-- **Cause isolated**: God ray opacity sampling in `LightingProcedural.hs` lines 362-364. Disabling god rays (`godRayStrength = 0`) eliminates ghosting completely.
-- **UV clamping alone insufficient**: Even with clamped UVs, ghosting persists
-- **Not temporal blend**: Setting `blendFactor = 0.0` didn't fix it
-- **Not history copy**: Disabling history copy didn't fix it  
-- **Not empty-space skip**: Disabling skip didn't fix it
-- **Hypothesis**: `ImageTexel` with `NilOps` uses `OpImageFetch` (nearest-neighbor). Cloud texture is half-res. Sampling at sub-texel offsets with nearest-neighbor produces aliasing/Moiré that looks like ghosting. Needs bilinear sampling or blurred opacity texture for god rays.
-- **Status**: Clouds render correctly (density, color, sun response). Ghosting is cosmetic issue in lighting compositing. Deferred to deep analysis.
+### 2026-05-18 (later): Ghosting Investigation — SUPERCEDED
+- **Previous analysis was wrong.** See 2026-05-19 entry for true root cause (per-swapchain-image VP mismatch).
+- **What we got right**: God ray mask to sky-only, `fract()` removal, horizon epsilon — all individually correct secondary fixes.
+- **What was wrong**: Ghosting was NOT caused by god ray sampling, nearest-neighbor aliasing, or UV clamping. It was temporal reprojection using a 1-frame-old VP matrix against a 2+-frame-old history texture.
+- **Reference**: `.opencode/CLOUD_GHOSTING_ANALYSIS.md` contains full diagnostic trail.
 
 ### 2026-05-12: FIR Math + IBL Rotation + Clouds
 - Added GLSL math to FIR: clamp, mix, step, smoothstep, fract + 20 vector ops
