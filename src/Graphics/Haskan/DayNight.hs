@@ -76,28 +76,31 @@ computeSunState config time =
       -- Sun angle through the day (0 at sunrise, π/2 at noon, π at sunset)
       sunAngle = dayProgress * pi
 
-      -- Elevation: sine of sun angle, peaking at noon
-      elevation = sin sunAngle * dncMaxElevation config
+      -- Altitude factor: 0→1→0 (horizon→peak→horizon)
+      altFactor = sin sunAngle
 
-      -- Azimuth: continuous rotation, 0 at sunrise, π at sunset
-      -- Extends naturally beyond [0,π] during night for smooth below-horizon arc
-      azimuth = dayProgress * pi
+      -- Horizontal scale: 1→0→-1 (east→overhead→west)
+      horizScale = cos sunAngle
+
+      -- Max elevation as a constant sine factor (avoids double-trig kink)
+      sinMaxElev = sin (dncMaxElevation config)
+      cosMaxElev = cos (dncMaxElevation config)
 
       -- Azimuth for cubemap rotation: continuous 360° over 24 hours
-      -- Sun makes a full apparent revolution every 24 hours
       azimuth24h = (t / 24.0) * 2 * pi
 
       -- Direction (light comes FROM this direction)
-      dirX = cos elevation * sin azimuth
-      dirY = sin elevation
-      dirZ = cos elevation * cos azimuth
+      -- Parameterized directly: monotonic east→west sweep, smooth altitude arc
+      dirX = horizScale * sinMaxElev
+      dirY = altFactor * sinMaxElev
+      dirZ = cosMaxElev
 
       -- Intensity: peaks at noon, zero at night
       intensity = max 0.0 (sin sunAngle) * dncMaxIntensity config
 
       -- Color: lerp between sunset (morning/evening) and noon colors
-      -- Use elevation as lerp factor
-      colorLerp = clamp 0.0 1.0 (elevation / dncMaxElevation config)
+      -- Use altitude factor as lerp factor (0 at horizon, 1 at peak)
+      colorLerp = clamp 0.0 1.0 altFactor
       noonCol = dncNoonColor config
       sunsetCol = dncSunsetColor config
       color = lerpV3 colorLerp sunsetCol noonCol
