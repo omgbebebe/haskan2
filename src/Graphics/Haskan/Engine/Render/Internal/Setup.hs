@@ -9,6 +9,8 @@ module Graphics.Haskan.Engine.Render.Internal.Setup
     loadScene,
     dispatchProceduralSkyGeneration,
     dispatchCloudNoiseGeneration,
+    dispatchCloudDetailNoiseGeneration,
+    dispatchWeatherMapGeneration,
   )
 where
 
@@ -36,7 +38,7 @@ import Graphics.Haskan.DayNight (computeSunState, defaultDayNightConfig)
 import Graphics.Haskan.DayNight qualified as DayNight
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo)
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
-import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), NoiseGenUniforms (..), PhysicsBodySpec (..), RenderDebugInfo (..), SkyGenUniforms (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
+import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), NoiseGenUniforms (..), PhysicsBodySpec (..), RenderDebugInfo (..), SkyGenUniforms (..), WeatherMapUniforms (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.HosekWilkie (HWCoeffs (..), computeHWCoeffs, hwCoeffsToList)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
@@ -78,10 +80,12 @@ import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..), TextureResource (..), lookupTexture)
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
+import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen qualified as CloudNoiseGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGenShaders
+import Graphics.Haskan.Vulkan.Shaders.Compute.WeatherMapGen qualified as WeatherMapGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds qualified as CloudShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
@@ -132,6 +136,10 @@ compileAllShaders = do
   logInfo LogGeneral "  cull_comp.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/cloud_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudNoiseGenShaders.program
   logInfo LogGeneral "  cloud_noise_comp.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/cloud_detail_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudDetailNoiseGenShaders.program
+  logInfo LogGeneral "  cloud_detail_noise_comp.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/weather_map_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WeatherMapGenShaders.program
+  logInfo LogGeneral "  weather_map_comp.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/radiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] RadianceGenShaders.program
   logInfo LogGeneral "  radiance_comp.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/irradiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] IrradianceGenShaders.program
@@ -184,6 +192,7 @@ data IBLTextures = IBLTextures
     iblSampler :: !Vulkan.VkSampler,
     iblBrdfView :: !(Maybe Vulkan.VkImageView),
     iblCloudNoiseView :: !(Maybe Vulkan.VkImageView),
+    iblCloudDetailNoiseView :: !(Maybe Vulkan.VkImageView),
     iblBlueNoiseView :: !(Maybe Vulkan.VkImageView),
     iblBlueNoiseSampler :: !Vulkan.VkSampler,
     iblWeatherMapView :: !(Maybe Vulkan.VkImageView)
@@ -227,6 +236,12 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       cloudNoiseView <- Texture.textureImageView rm cloudNoiseHandle
       logInfo LogGeneral "3D cloud noise texture generated"
 
+      logInfo LogGeneral "creating 3D cloud detail noise storage image..."
+      cloudDetailNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 64 64 64 1 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
+      dispatchCloudDetailNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudDetailNoiseHandle
+      cloudDetailNoiseView <- Texture.textureImageView rm cloudDetailNoiseHandle
+      logInfo LogGeneral "3D cloud detail noise texture generated"
+
       logInfo LogGeneral "loading blue noise texture..."
       blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
       let blueNoisePixels = Data.Vector.Storable.fromList (BS.unpack blueNoiseRaw)
@@ -235,12 +250,11 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       blueNoiseSampler <- Texture.managedSamplerNearest device
       logInfo LogGeneral "blue noise texture loaded"
 
-      logInfo LogGeneral "loading weather map texture..."
-      weatherMapRaw <- liftIO $ BS.readFile "data/textures/weather/weather_map.raw"
-      let weatherMapPixels = Data.Vector.Storable.fromList (BS.unpack weatherMapRaw)
-      weatherMapHandle <- Texture.createTextureFromData rm physicalDevice device 512 512 weatherMapPixels graphicsQueueHandler textureCommandBuffer
-      mWeatherMapView <- Texture.textureImageView rm weatherMapHandle
-      logInfo LogGeneral "weather map texture loaded"
+      logInfo LogGeneral "creating weather map storage image..."
+      weatherMapHandle <- Texture.createStorageImage2D rm physicalDevice device 512 512 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
+      dispatchWeatherMapGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm weatherMapHandle
+      weatherMapView <- Texture.textureImageView rm weatherMapHandle
+      logInfo LogGeneral "weather map texture generated"
 
       -- Dispatch compute shaders to fill storage images
       let V3 dirX dirY dirZ = V3 0.0 0.3 (-1.0)
@@ -257,9 +271,10 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
             iblSampler = lightingSampler,
             iblBrdfView = mBrdfView,
             iblCloudNoiseView = cloudNoiseView,
+            iblCloudDetailNoiseView = cloudDetailNoiseView,
             iblBlueNoiseView = mBlueNoiseView,
             iblBlueNoiseSampler = blueNoiseSampler,
-            iblWeatherMapView = mWeatherMapView
+            iblWeatherMapView = weatherMapView
           }
     else do
       -- Photo-based cubemap loading
@@ -291,6 +306,12 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       cloudNoiseView <- Texture.textureImageView rm cloudNoiseHandle
       logInfo LogGeneral "3D cloud noise texture generated"
 
+      logInfo LogGeneral "creating 3D cloud detail noise storage image..."
+      cloudDetailNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 64 64 64 1 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
+      dispatchCloudDetailNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudDetailNoiseHandle
+      cloudDetailNoiseView <- Texture.textureImageView rm cloudDetailNoiseHandle
+      logInfo LogGeneral "3D cloud detail noise texture generated"
+
       logInfo LogGeneral "loading blue noise texture..."
       blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
       let blueNoisePixels = Data.Vector.Storable.fromList (BS.unpack blueNoiseRaw)
@@ -299,12 +320,11 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       blueNoiseSampler <- Texture.managedSamplerNearest device
       logInfo LogGeneral "blue noise texture loaded"
 
-      logInfo LogGeneral "loading weather map texture..."
-      weatherMapRaw <- liftIO $ BS.readFile "data/textures/weather/weather_map.raw"
-      let weatherMapPixels = Data.Vector.Storable.fromList (BS.unpack weatherMapRaw)
-      weatherMapHandle <- Texture.createTextureFromData rm physicalDevice device 512 512 weatherMapPixels graphicsQueueHandler textureCommandBuffer
-      mWeatherMapView <- Texture.textureImageView rm weatherMapHandle
-      logInfo LogGeneral "weather map texture loaded"
+      logInfo LogGeneral "creating weather map storage image..."
+      weatherMapHandle <- Texture.createStorageImage2D rm physicalDevice device 512 512 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
+      dispatchWeatherMapGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm weatherMapHandle
+      weatherMapView <- Texture.textureImageView rm weatherMapHandle
+      logInfo LogGeneral "weather map texture generated"
 
       pure
         IBLTextures
@@ -315,9 +335,10 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
             iblSampler = lightingSampler,
             iblBrdfView = mBrdfView,
             iblCloudNoiseView = cloudNoiseView,
+            iblCloudDetailNoiseView = cloudDetailNoiseView,
             iblBlueNoiseView = mBlueNoiseView,
             iblBlueNoiseSampler = blueNoiseSampler,
-            iblWeatherMapView = mWeatherMapView
+            iblWeatherMapView = weatherMapView
           }
 
 data SceneLoadResult = SceneLoadResult
@@ -752,3 +773,137 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
         1
 
   logInfo LogGeneral "cloud noise compute dispatch + mipgen complete"
+
+-- | Dispatch cloud detail noise generation compute shader to fill a 64^3 3D storage image.
+dispatchCloudDetailNoiseGeneration ::
+  (MonadManaged m, MonadIO m, MonadLog m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  ResourceManager ->
+  TextureHandle -> -- 3D detail noise storage image
+  m ()
+dispatchCloudDetailNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm noiseHandle = do
+  logInfo LogGeneral "dispatching cloud detail noise compute shader..."
+
+  noiseShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_detail_noise_comp.spv"
+  noiseLayout <- DescriptorSetLayout.managedCloudDetailNoiseComputeDescriptorSetLayout device
+  noisePipelineLayout <- PipelineLayout.managedPipelineLayout device [noiseLayout]
+  noisePipeline <- ComputePipeline.managedComputePipeline device noisePipelineLayout noiseShader
+  noisePool <- DescriptorPool.managedCloudDetailNoiseComputeDescriptorPool device
+  noiseDescriptorSet <- DescriptorSet.allocateDescriptorSet device noisePool [noiseLayout]
+
+  let noiseParams =
+        NoiseGenUniforms
+          { ngSeed = 123.0,
+            ngFrequency = 4.0,
+            ngPersistence = 0.5,
+            ngZSlice = 0.0
+          }
+  (noiseParamsBuffer, _noiseParamsMemory) <- Buffer.managedUniformBuffer physicalDevice device [noiseParams]
+
+  mNoiseView <- Texture.textureImageView rm noiseHandle
+  case mNoiseView of
+    Just noiseView -> DescriptorSet.updateCloudDetailNoiseComputeDescriptorSets device noiseDescriptorSet noiseView noiseParamsBuffer
+    Nothing -> logInfo LogGeneral "warning: cloud detail noise view not found"
+
+  mNoiseTex <- liftIO $ lookupTexture rm noiseHandle
+  let (noiseImage, _) = case mNoiseTex of
+        Just tex -> (trImage tex, trWidth tex)
+        Nothing -> (Vulkan.vkNullPtr, 0)
+
+  CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
+    -- 64x64x64 / 8x8x8 = 8x8x8 workgroups
+    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE noisePipeline
+    liftIO $ Foreign.Marshal.Array.withArray [noiseDescriptorSet] $ \dsPtr ->
+      Vulkan.vkCmdBindDescriptorSets
+        textureCommandBuffer
+        Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
+        noisePipelineLayout
+        0
+        1
+        dsPtr
+        0
+        Vulkan.vkNullPtr
+    CommandBuffer.cmdDispatch textureCommandBuffer 8 8 8
+
+    -- Transition to SHADER_READ_ONLY_OPTIMAL
+    when (noiseImage /= Vulkan.vkNullPtr) $ do
+      CommandBuffer.mipLayerTransition
+        textureCommandBuffer
+        noiseImage
+        Vulkan.VK_IMAGE_LAYOUT_GENERAL
+        Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        0
+        1
+        1
+
+  logInfo LogGeneral "cloud detail noise compute dispatch complete"
+
+-- | Dispatch weather map generation compute shader to fill a 512^2 2D storage image.
+dispatchWeatherMapGeneration ::
+  (MonadManaged m, MonadIO m, MonadLog m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  ResourceManager ->
+  TextureHandle -> -- 2D weather map storage image
+  m ()
+dispatchWeatherMapGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm weatherHandle = do
+  logInfo LogGeneral "dispatching weather map compute shader..."
+
+  weatherShader <- ShaderModule.managedShaderModule device "data/shaders/fir/weather_map_comp.spv"
+  weatherLayout <- DescriptorSetLayout.managedWeatherMapComputeDescriptorSetLayout device
+  weatherPipelineLayout <- PipelineLayout.managedPipelineLayout device [weatherLayout]
+  weatherPipeline <- ComputePipeline.managedComputePipeline device weatherPipelineLayout weatherShader
+  weatherPool <- DescriptorPool.managedWeatherMapComputeDescriptorPool device
+  weatherDescriptorSet <- DescriptorSet.allocateDescriptorSet device weatherPool [weatherLayout]
+
+  let weatherParams =
+        WeatherMapUniforms
+          { wmSeed = 42.0,
+            wmCoverageScale = 3.0,
+            wmTypeScale = 5.0,
+            wmHeightScale = 2.0
+          }
+  (weatherParamsBuffer, _weatherParamsMemory) <- Buffer.managedUniformBuffer physicalDevice device [weatherParams]
+
+  mWeatherView <- Texture.textureImageView rm weatherHandle
+  case mWeatherView of
+    Just weatherView -> DescriptorSet.updateWeatherMapComputeDescriptorSets device weatherDescriptorSet weatherView weatherParamsBuffer
+    Nothing -> logInfo LogGeneral "warning: weather map view not found"
+
+  mWeatherTex <- liftIO $ lookupTexture rm weatherHandle
+  let (weatherImage, _) = case mWeatherTex of
+        Just tex -> (trImage tex, trWidth tex)
+        Nothing -> (Vulkan.vkNullPtr, 0)
+
+  CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
+    -- 512x512 / 8x8 = 64x64x1 workgroups
+    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE weatherPipeline
+    liftIO $ Foreign.Marshal.Array.withArray [weatherDescriptorSet] $ \dsPtr ->
+      Vulkan.vkCmdBindDescriptorSets
+        textureCommandBuffer
+        Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
+        weatherPipelineLayout
+        0
+        1
+        dsPtr
+        0
+        Vulkan.vkNullPtr
+    CommandBuffer.cmdDispatch textureCommandBuffer 64 64 1
+
+    -- Transition to SHADER_READ_ONLY_OPTIMAL
+    when (weatherImage /= Vulkan.vkNullPtr) $ do
+      CommandBuffer.mipLayerTransition
+        textureCommandBuffer
+        weatherImage
+        Vulkan.VK_IMAGE_LAYOUT_GENERAL
+        Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        0
+        1
+        1
+
+  logInfo LogGeneral "weather map compute dispatch complete"

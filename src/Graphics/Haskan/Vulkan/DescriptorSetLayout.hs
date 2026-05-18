@@ -17,6 +17,10 @@ module Graphics.Haskan.Vulkan.DescriptorSetLayout
     createCubemapComputeDescriptorSetLayout,
     managedCloudNoiseComputeDescriptorSetLayout,
     createCloudNoiseComputeDescriptorSetLayout,
+    managedCloudDetailNoiseComputeDescriptorSetLayout,
+    createCloudDetailNoiseComputeDescriptorSetLayout,
+    managedWeatherMapComputeDescriptorSetLayout,
+    createWeatherMapComputeDescriptorSetLayout,
     maxBindlessTextures,
     layoutBinding,
   )
@@ -28,10 +32,12 @@ import Data.Bits ((.|.))
 import Foreign (castPtr)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
 import Graphics.Haskan.Vulkan.DescriptorSetLayout.TH (descriptorSetLayoutBindings)
+import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen qualified as CloudNoiseGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as Cull
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGen
+import Graphics.Haskan.Vulkan.Shaders.Compute.WeatherMapGen qualified as WeatherMapGen
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds (CloudFragmentDefs)
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as Lighting
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProcedural
@@ -327,9 +333,59 @@ createCloudNoiseComputeDescriptorSetLayout dev = do
               &* set @"bindingCount" (fromIntegral (length bindings))
               &* setListRef @"pBindings" bindings
           )
+    in liftIO $
+         withPtr
+           createInfo
+           ( \ciPtr ->
+               allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+           )
+
+managedCloudDetailNoiseComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedCloudDetailNoiseComputeDescriptorSetLayout dev =
+  alloc
+    "CloudDetailNoiseComputeDescriptorSetLayout"
+    (createCloudDetailNoiseComputeDescriptorSetLayout dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+
+createCloudDetailNoiseComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createCloudDetailNoiseComputeDescriptorSetLayout dev = do
+  let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''CloudDetailNoiseGen.Defs)
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"bindingCount" (fromIntegral (length bindings))
+              &* setListRef @"pBindings" bindings
+          )
    in liftIO $
         withPtr
           createInfo
           ( \ciPtr ->
               allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+          )
+  
+managedWeatherMapComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedWeatherMapComputeDescriptorSetLayout dev =
+  alloc
+    "WeatherMapComputeDescriptorSetLayout"
+    (createWeatherMapComputeDescriptorSetLayout dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+  
+createWeatherMapComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createWeatherMapComputeDescriptorSetLayout dev = do
+  let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''WeatherMapGen.Defs)
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"bindingCount" (fromIntegral (length bindings))
+              &* setListRef @"pBindings" bindings
+          )
+    in liftIO $
+         withPtr
+           createInfo
+           ( \ciPtr ->
+               allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
           )

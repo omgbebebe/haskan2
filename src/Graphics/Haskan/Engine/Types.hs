@@ -13,6 +13,7 @@ module Graphics.Haskan.Engine.Types
     ComputeCullResources (..),
     SkyGenUniforms (..),
     NoiseGenUniforms (..),
+    WeatherMapUniforms (..),
     transformAABB,
     extractFrustumPlanes,
     filterVisible,
@@ -410,6 +411,31 @@ instance Storable NoiseGenUniforms where
     pokeByteOff ptr 4 (ngFrequency u)
     pokeByteOff ptr 8 (ngPersistence u)
     pokeByteOff ptr 12 (ngZSlice u)
+
+-- | Uniform buffer data for weather map generation compute shader.
+-- Layout: seed (1f) + coverageScale (1f) + typeScale (1f) + heightScale (1f) = 16 bytes
+data WeatherMapUniforms = WeatherMapUniforms
+  { wmSeed :: !Float,
+    wmCoverageScale :: !Float,
+    wmTypeScale :: !Float,
+    wmHeightScale :: !Float
+  }
+  deriving (Show, Generic)
+
+instance Storable WeatherMapUniforms where
+  sizeOf _ = 16
+  alignment _ = 16
+  peek ptr =
+    WeatherMapUniforms
+      <$> peekByteOff ptr 0
+      <*> peekByteOff ptr 4
+      <*> peekByteOff ptr 8
+      <*> peekByteOff ptr 12
+  poke ptr u = do
+    pokeByteOff ptr 0 (wmSeed u)
+    pokeByteOff ptr 4 (wmCoverageScale u)
+    pokeByteOff ptr 8 (wmTypeScale u)
+    pokeByteOff ptr 12 (wmHeightScale u)
 
 transformAABB :: M44 Float -> BBox -> (V3 Float, V3 Float)
 transformAABB worldMat (BBox (V3 minX minY minZ) (V3 maxX maxY maxZ)) =
