@@ -5,6 +5,8 @@ module Graphics.Haskan.Vulkan.DescriptorPool
     createLightingDescriptorPool,
     managedCloudDescriptorPool,
     createCloudDescriptorPool,
+    managedGodRayDescriptorPool,
+    createGodRayDescriptorPool,
     managedBindlessDescriptorPool,
     createBindlessDescriptorPool,
     managedComputeDescriptorPool,
@@ -135,6 +137,36 @@ createCloudDescriptorPool dev numSets = do
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
               &* set @"poolSizeCount" 2
               &* setListRef @"pPoolSizes" [samplerPoolSize, uboPoolSize]
+              &* set @"maxSets" (fromIntegral numSets)
+          )
+   in liftIO $
+        withPtr
+          createInfo
+           ( \ciPtr ->
+               allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
+           )
+
+managedGodRayDescriptorPool :: (MonadManaged m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+managedGodRayDescriptorPool dev numSets =
+  alloc
+    "GodRayDescriptorPool"
+    (createGodRayDescriptorPool dev numSets)
+    (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
+
+createGodRayDescriptorPool :: (MonadIO m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+createGodRayDescriptorPool dev numSets = do
+  let samplerPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"descriptorCount" (fromIntegral (numSets * 1))
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"poolSizeCount" 1
+              &* setListRef @"pPoolSizes" [samplerPoolSize]
               &* set @"maxSets" (fromIntegral numSets)
           )
    in liftIO $

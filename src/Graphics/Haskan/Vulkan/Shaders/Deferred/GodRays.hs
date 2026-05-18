@@ -8,7 +8,7 @@
 
 module Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays
   ( VertexDefs,
-    FragmentDefs,
+    GodRayFragmentDefs,
     vertex,
     fragment,
   )
@@ -52,7 +52,7 @@ type GodRayPushConstant =
        "padding" ':-> V 3 Float
      ]
 
-type FragmentDefs =
+type GodRayFragmentDefs =
   '[ "in_uv" ':-> Input '[Location 0] (V 2 Float),
      "cloud_result" ':-> Texture2D '[Binding 0, DescriptorSet 0] (RGBA16 F),
      "god_ray_data" ':-> PushConstant
@@ -62,7 +62,7 @@ type FragmentDefs =
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
 
-fragment :: ShaderModule "main" FragmentShader FragmentDefs _
+fragment :: ShaderModule "main" FragmentShader GodRayFragmentDefs _
 fragment = shader do
   uv <- get @"in_uv"
   let (Vec2 uvX uvY) = uv

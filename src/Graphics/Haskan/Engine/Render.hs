@@ -603,7 +603,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
 
   compileAllShaders
 
-  (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, lightProceduralFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader, _godrayVertShader, _godrayFragShader) <-
+  (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, lightProceduralFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader, godrayVertShader, godrayFragShader) <-
     createShaderModules device
 
   descriptorSetLayout <- DescriptorSetLayout.managedDescriptorSetLayout device
@@ -897,7 +897,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
       outerLoop exit = do
         unless exit $ do
           renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context ->
-            with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView iblWeatherMapView iblBlueNoiseSampler (Just lightSsboBuffer) imGuiRenderPass proceduralSkyEnabled) $ \dr -> do
+             with (createDeferredResources physicalDevice device context descriptorSetLayout [] gbufVertShader gbufFragShader lightVertShader lightFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader godrayVertShader godrayFragShader iblRadianceView iblIrradianceView iblBrdfView iblSampler iblCloudNoiseView iblBlueNoiseView iblWeatherMapView iblBlueNoiseSampler (Just lightSsboBuffer) imGuiRenderPass proceduralSkyEnabled) $ \dr -> do
               let numSwapchainImages = length (drCloudImages dr)
               prevViewProjTVars <- replicateM numSwapchainImages (STM.newTVarIO (identity :: M44 Foreign.C.CFloat))
               prevTimeTVars <- replicateM numSwapchainImages (STM.newTVarIO 0.0)

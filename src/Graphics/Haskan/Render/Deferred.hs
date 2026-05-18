@@ -95,6 +95,13 @@ data DeferredPassData = DeferredPassData
     dpdCloudExtent :: !Vulkan.VkExtent2D,
     dpdCloudImage :: !Vulkan.VkImage,
     dpdCloudHistoryImage :: !Vulkan.VkImage,
+    -- God ray pass
+    dpdGodRayRenderPass :: !Vulkan.VkRenderPass,
+    dpdGodRayFramebuffer :: !Vulkan.VkFramebuffer,
+    dpdGodRayPipeline :: !Vulkan.VkPipeline,
+    dpdGodRayLayout :: !Vulkan.VkPipelineLayout,
+    dpdGodRayDescriptor :: !Vulkan.VkDescriptorSet,
+    dpdGodRayExtent :: !Vulkan.VkExtent2D,
     -- G-buffer images for barrier
     dpdGBufferImages :: ![Vulkan.VkImage],
     -- Wireframe overlay
@@ -269,11 +276,49 @@ buildDeferredGraph DeferredPassData {..} = do
           CommandBuffer.layerTransition commandBuffer dpdCloudHistoryImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       }
 
+  -- God ray pass: radial blur on cloud opacity
+  let godRayOut = resourceId "god_ray_result"
+  addPass
+    RenderPassNode
+      { rpName = "godrays",
+        rpInputs = [cloudOut],
+        rpOutputs = [godRayOut],
+        rpRecord = PassRecordFunc $ \ctx -> do
+          let commandBuffer = pcCommandBuffer ctx
+          RenderPass.withCloudRenderPass commandBuffer dpdGodRayRenderPass dpdGodRayFramebuffer dpdGodRayExtent $ do
+            GraphicsPipeline.cmdBindPipeline commandBuffer dpdGodRayPipeline
+            Foreign.Marshal.Array.withArray [dpdGodRayDescriptor] $ \dsPtr ->
+              DescriptorSet.cmdBindDescriptorSets
+                commandBuffer
+                Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+                dpdGodRayLayout
+                0
+                1
+                dsPtr
+                0
+                Vulkan.vkNullPtr
+            -- Push constants for god ray parameters
+            let godRayData =
+                  [ realToFrac dpdSunScreenX,
+                    realToFrac dpdSunScreenY,
+                    1.0,  -- intensity
+                    32.0, -- numSamples
+                    0.95, -- decay
+                    0.02, -- density
+                    0.25, -- weight
+                    0.25, -- exposure
+                    0, 0, 0  -- padding
+                  ] ::
+                    [CFloat]
+             in Foreign.Marshal.Array.withArray godRayData $ Vulkan.vkCmdPushConstants commandBuffer dpdGodRayLayout Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT 0 (fromIntegral (length godRayData * 4)) . Foreign.castPtr
+            Vulkan.vkCmdDraw commandBuffer 3 1 0 0
+      }
+
   -- Lighting pass: fullscreen triangle compositing
   addPass
     RenderPassNode
       { rpName = "lighting",
-        rpInputs = [gbufPosOut, gbufNormOut, gbufAlbedoOut, gbufEmissiveOut, cloudOut],
+        rpInputs = [gbufPosOut, gbufNormOut, gbufAlbedoOut, gbufEmissiveOut, cloudOut, godRayOut],
         rpOutputs = [litOut],
         rpRecord = PassRecordFunc $ \ctx -> do
           let commandBuffer = pcCommandBuffer ctx

@@ -57,6 +57,13 @@ data DeferredResources = DeferredResources
     drCloudHistoryImages :: ![Vulkan.VkImage],
     drCloudHistoryImageViews :: ![Vulkan.VkImageView],
     drCloudExtent :: !Vulkan.VkExtent2D,
+    drGodRayImages :: ![Vulkan.VkImage],
+    drGodRayImageViews :: ![Vulkan.VkImageView],
+    drGodRayRenderPass :: !Vulkan.VkRenderPass,
+    drGodRayPipeline :: !Vulkan.VkPipeline,
+    drGodRayPipelineLayout :: !Vulkan.VkPipelineLayout,
+    drGodRayFramebuffers :: ![Vulkan.VkFramebuffer],
+    drGodRayDescriptorSets :: ![Vulkan.VkDescriptorSet],
     drWeatherMapView :: !(Maybe Vulkan.VkImageView),
     drGBufferImages :: ![[Vulkan.VkImage]],
     drGBufferImageViews :: ![[Vulkan.VkImageView]],
@@ -84,6 +91,8 @@ createDeferredResources ::
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
   Vulkan.VkShaderModule ->
+  Vulkan.VkShaderModule ->
+  Vulkan.VkShaderModule ->
   Maybe Vulkan.VkImageView ->
   Maybe Vulkan.VkImageView ->
   Maybe Vulkan.VkImageView ->
@@ -96,7 +105,7 @@ createDeferredResources ::
   Vulkan.VkRenderPass ->
   Bool ->
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView mWeatherMapView blueNoiseSampler mLightBuffer imGuiRenderPass proceduralSkyEnabled = do
+createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader godrayVertShader godrayFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView mWeatherMapView blueNoiseSampler mLightBuffer imGuiRenderPass proceduralSkyEnabled = do
   let extent = rcSurfaceExtent ctx
       cloudExtent =
         Vulkan.createVk
@@ -158,19 +167,26 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       cloudHistoryImageViews = map snd cloudHistoryImagesAndViews
   logDebugIO LogRender $ "cloud history images created: " <> showT (length cloudHistoryImages) <> " sets"
 
-  -- Initial layout transition for g-buffer images and cloud history images
-  tempCmdBuf <- CommandBuffer.createCommandBuffer device (rcGraphicsCommandPool ctx)
+  -- Create god ray images and views (RGBA16F, half resolution)
+  godRayImagesAndViews <- for [0 .. numSwapchainImages - 1] $ \_ -> do
+    godRayImage <- Swapchain.managedGBufferImage pdev device cloudExtent cloudFormat
+    godRayView <- ImageView.managedImageView device cloudFormat godRayImage
+    pure (godRayImage, godRayView)
+  let godRayImages = map fst godRayImagesAndViews
+      godRayImageViews = map snd godRayImagesAndViews
+  logDebugIO LogRender $ "god ray images created: " <> showT (length godRayImages) <> " sets"
+
+  -- Initial layout transition for god ray images
+  tempCmdBuf2 <- CommandBuffer.createCommandBuffer device (rcGraphicsCommandPool ctx)
   CommandBuffer.withCommandBufferOneTime
     (graphicsQueueHandler ctx)
-    tempCmdBuf
+    tempCmdBuf2
     ( do
-        for_ (concat gBufferImages) $ \img ->
-          CommandBuffer.layerTransition tempCmdBuf img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-        for_ cloudHistoryImages $ \img ->
-          CommandBuffer.layerTransition tempCmdBuf img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        for_ godRayImages $ \img ->
+          CommandBuffer.layerTransition tempCmdBuf2 img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     )
-  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBuf] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
-  logDebugIO LogRender "g-buffer and cloud history images transitioned to SHADER_READ_ONLY_OPTIMAL"
+  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBuf2] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
+  logDebugIO LogRender "god ray images transitioned to SHADER_READ_ONLY_OPTIMAL"
 
   -- Shared depth image for g-buffer
   depthImage <- Swapchain.managedDepthImage pdev device extent depthFormat
@@ -245,6 +261,10 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   cloudPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [cloudDescriptorSetLayout] []
   logDebugIO LogRender "cloud pipeline layout created"
 
+  -- God ray descriptor set layout
+  godRayDescriptorSetLayout <- DescriptorSetLayout.managedGodRayDescriptorSetLayout device
+  logDebugIO LogRender "god ray descriptor set layout created"
+
   -- Cloud pipeline
   cloudPipeline <-
     GraphicsPipeline.managedFullscreenPipeline
@@ -279,6 +299,30 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       4
   logDebugIO LogRender "wireframe pipeline created"
 
+  -- God ray pipeline (reuses cloud render pass since same format)
+  godRayPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [godRayDescriptorSetLayout] []
+  logDebugIO LogRender "god ray pipeline layout created"
+
+  godRayPipeline <-
+    GraphicsPipeline.managedFullscreenPipeline
+      device
+      godRayPipelineLayout
+      cloudRenderPass
+      ShaderProgram
+        { spVertex = godrayVertShader,
+          spTessControl = Nothing,
+          spTessEvaluation = Nothing,
+          spGeometry = Nothing,
+          spFragment = godrayFragShader
+        }
+      cloudExtent
+  logDebugIO LogRender "god ray pipeline created"
+
+  -- God ray framebuffers (one per swapchain image, half resolution)
+  godRayFramebuffers <- for godRayImageViews $ \view ->
+    Framebuffer.managedLightingFramebuffer device cloudRenderPass cloudExtent view
+  logDebugIO LogRender $ "god ray framebuffers created: " <> showT (length godRayFramebuffers) <> " sets"
+
   -- Lighting framebuffers
   swapchainImages <- Swapchain.getSwapchainImages device (swapchain ctx)
   let surfaceFormat' = Vulkan.getField @"format" surfaceFormat
@@ -291,20 +335,20 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender $ "ImGui framebuffers created: " <> showT (length imGuiFramebuffers)
 
   -- Lighting descriptor pool and sets
-  let lightingTexturesPerSet = 8
+  let lightingTexturesPerSet = 9
   lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages lightingTexturesPerSet
   lightingDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
     DescriptorSet.allocateDescriptorSet device lightingDescriptorPool [lightingDescriptorSetLayout]
   logDebugIO LogRender $ "lighting descriptor sets allocated: " <> showT (length lightingDescriptorSets)
 
   -- Update lighting descriptor sets
-  liftIO $ for_ (zip3 lightingDescriptorSets gBufferImageViews cloudImageViews) $ \(ds, views, cloudView) -> do
+  liftIO $ for_ (zip (zip lightingDescriptorSets gBufferImageViews) (zip cloudImageViews godRayImageViews)) $ \((ds, views), (cloudView, godRayView)) -> do
     let baseViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
           (Just env, Just irr, Just brdf) -> views ++ [env, irr, brdf]
           _ -> views ++ replicate 3 Vulkan.VK_NULL_HANDLE
     if proceduralSkyEnabled
       then do
-        DescriptorSet.updateLightingProceduralDescriptorSets device ds sampler baseViews mLightBuffer (Just cloudView)
+        DescriptorSet.updateLightingProceduralDescriptorSets device ds sampler baseViews mLightBuffer (Just cloudView) (Just godRayView)
       else do
         DescriptorSet.updateLightingDescriptorSets device ds sampler baseViews mLightBuffer (Just cloudView)
   logDebugIO LogRender "lighting descriptor sets updated"
@@ -329,6 +373,17 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
     DescriptorSet.updateCloudFrameDataBuffer device ds cloudFrameDataBuffer
   logDebugIO LogRender "cloud descriptor sets updated"
 
+  -- God ray descriptor pool and sets
+  godRayDescriptorPool <- DescriptorPool.managedGodRayDescriptorPool device numSwapchainImages
+  godRayDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
+    DescriptorSet.allocateDescriptorSet device godRayDescriptorPool [godRayDescriptorSetLayout]
+  logDebugIO LogRender $ "god ray descriptor sets allocated: " <> showT (length godRayDescriptorSets)
+
+  -- Update god ray descriptor sets (only need cloud_result)
+  liftIO $ for_ (zip godRayDescriptorSets cloudImageViews) $ \(ds, cloudView) -> do
+    DescriptorSet.updateGodRayDescriptorSets device ds sampler cloudView
+  logDebugIO LogRender "god ray descriptor sets updated"
+
   pure
     DeferredResources
       { drGBufferRenderPass = gBufferRenderPass,
@@ -352,6 +407,13 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
         drCloudHistoryImages = cloudHistoryImages,
         drCloudHistoryImageViews = cloudHistoryImageViews,
         drCloudExtent = cloudExtent,
+        drGodRayImages = godRayImages,
+        drGodRayImageViews = godRayImageViews,
+        drGodRayRenderPass = cloudRenderPass,
+        drGodRayPipeline = godRayPipeline,
+        drGodRayPipelineLayout = godRayPipelineLayout,
+        drGodRayFramebuffers = godRayFramebuffers,
+        drGodRayDescriptorSets = godRayDescriptorSets,
         drWeatherMapView = mWeatherMapView,
         drGBufferImages = gBufferImages,
         drGBufferImageViews = gBufferImageViews,

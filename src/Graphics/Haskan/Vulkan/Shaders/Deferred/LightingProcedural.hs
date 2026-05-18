@@ -268,14 +268,18 @@ type FragmentDefs =
        ':-> StorageBuffer
               '[Binding 7, DescriptorSet 0]
               LightsData,
-      "cloud_result"
-        ':-> Texture2D
-               '[Binding 8, DescriptorSet 0]
-               (RGBA16 F),
-      "cameraPos"
-        ':-> PushConstant
-               '[]
-               CameraPushConstant,
+       "cloud_result"
+         ':-> Texture2D
+                '[Binding 8, DescriptorSet 0]
+                (RGBA16 F),
+       "god_ray"
+         ':-> Texture2D
+                '[Binding 9, DescriptorSet 0]
+                (RGBA16 F),
+       "cameraPos"
+         ':-> PushConstant
+                '[]
+                CameraPushConstant,
      "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
@@ -339,19 +343,20 @@ fragment = shader do
   -- Sample cloud result texture (rendered in separate pass)
   ~(Vec4 cloudSkyR_h cloudSkyG_h cloudSkyB_h _) <- use @(ImageTexel "cloud_result") NilOps uv
 
+  -- Sample god ray texture (radial blur on cloud opacity)
+  ~(Vec4 godRayR_h godRayG_h godRayB_h _) <- use @(ImageTexel "god_ray") NilOps uv
+
   let cloudSkyR = cloudSkyR_h
       cloudSkyG = cloudSkyG_h
       cloudSkyB = cloudSkyB_h
 
+      godRayR = godRayR_h
+      godRayG = godRayG_h
+      godRayB = godRayB_h
+
       dbgCloud = cloudSkyR * 0.5
       dbgHeight = cloudSkyG * 0.5
       dbgNoise = cloudSkyB * 0.5
-
-  -- God rays disabled: 3-sample radial probe creates ghost copy of cloud alpha
-  -- centered on sun screen position. Needs proper radial blur pass (Phase 4).
-  let godRayR = 0.0
-      godRayG = 0.0
-      godRayB = 0.0
 
   let normX = normX_raw * 2 - 1
       normY = normY_raw * 2 - 1
