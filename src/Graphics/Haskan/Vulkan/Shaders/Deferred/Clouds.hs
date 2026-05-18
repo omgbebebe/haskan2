@@ -258,51 +258,12 @@ cloudFragment = shader do
       dir = jitteredRayDir ^/ (norm jitteredRayDir + 0.0001)
       ~(Vec3 dirX dirY dirZ) = dir
 
-      -- Analytic sky evaluation
-      cosThetaView = abs dirY
-      cosGamma = dir ^.^ sunDir
-      cosGammaClamped = clamp cosGamma (-1.0) 1.0
-
-      -- Rayleigh phase function
-      rayleighPhase = (3.0 / (16.0 * 3.14159265)) * (1.0 + cosGammaClamped * cosGammaClamped)
-
-      -- Optical depth model with larger epsilon for smooth horizon
-      rayleighOD = 0.3
-      mieOD = 0.1
-      rayleighTrans = exp (-rayleighOD / (cosThetaView + 0.05))
-      mieTrans = exp (-mieOD / (cosThetaView + 0.05))
-
-      -- In-scattering (scale ~100x to bring into visible HDR range)
-      rayleighScatterR = 0.0058 * rayleighPhase * (1.0 - rayleighTrans) * 100.0
-      rayleighScatterG = 0.0135 * rayleighPhase * (1.0 - rayleighTrans) * 100.0
-      rayleighScatterB = 0.0331 * rayleighPhase * (1.0 - rayleighTrans) * 100.0
-
-      -- Mie phase (Henyey-Greenstein)
-      g = 0.76
-      g2 = g * g
-      mieDenom = (1.0 + g2 - 2.0 * g * cosGammaClamped) ** 1.5
-      miePhase = (1.0 - g2) / (4.0 * 3.14159265 * mieDenom)
-      mieScatter = 0.021 * miePhase * (1.0 - mieTrans) * 100.0
-
-      -- Soft sun disc with smoothstep to avoid banding
-      sunDisc = 50.0 * smoothstep 0.999 1.0 cosGammaClamped
-
-      -- Warm tint: smooth gradient matching Hosek-Wilkie color model
-      sunElev = sunDirY
-      warmth = clamp ((clamp sunElev (-0.1) 1.0) / 0.3) 0.0 1.0
-      colorTempR = 1.0
-      colorTempG = 0.45 + 0.55 * warmth
-      colorTempB = 0.2 + 0.8 * warmth
-
-      totalR = (rayleighScatterR + mieScatter + sunDisc) * colorTempR
-      totalG = (rayleighScatterG + mieScatter + sunDisc) * colorTempG
-      totalB = (rayleighScatterB + mieScatter + sunDisc) * colorTempB
-
-      turbidityScale = 1.2
-
-      skyR = totalR * turbidityScale
-      skyG = totalG * turbidityScale
-      skyB = totalB * turbidityScale
+  -- Sample procedural sky from env_map cubemap (Hosek-Wilkie model)
+  -- This provides correct directional color variation at sunset/sunrise
+  ~(Vec4 envR envG envB _) <- use @(ImageTexel "env_map") NilOps dir
+  let skyR = envR * 0.05
+      skyG = envG * 0.05
+      skyB = envB * 0.05
 
   let cloudThickness = 800.0
       cloudTop = cloudBottom + cloudThickness
