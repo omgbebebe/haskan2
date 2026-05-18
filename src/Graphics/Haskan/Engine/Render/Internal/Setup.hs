@@ -8,6 +8,7 @@ module Graphics.Haskan.Engine.Render.Internal.Setup
     SceneLoadResult (..),
     loadScene,
     dispatchProceduralSkyGeneration,
+    dispatchCloudNoiseGeneration,
   )
 where
 
@@ -35,7 +36,7 @@ import Graphics.Haskan.DayNight (computeSunState, defaultDayNightConfig)
 import Graphics.Haskan.DayNight qualified as DayNight
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo)
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
-import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), PhysicsBodySpec (..), RenderDebugInfo (..), SkyGenUniforms (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
+import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), NoiseGenUniforms (..), PhysicsBodySpec (..), RenderDebugInfo (..), SkyGenUniforms (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.HosekWilkie (HWCoeffs (..), computeHWCoeffs, hwCoeffsToList)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
@@ -77,6 +78,7 @@ import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..), TextureResource (..), lookupTexture)
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
+import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen qualified as CloudNoiseGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGenShaders
@@ -128,6 +130,8 @@ compileAllShaders = do
   logInfo LogGeneral "  wire_frag.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/cull_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CullShaders.program
   logInfo LogGeneral "  cull_comp.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/cloud_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudNoiseGenShaders.program
+  logInfo LogGeneral "  cloud_noise_comp.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/radiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] RadianceGenShaders.program
   logInfo LogGeneral "  radiance_comp.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/irradiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] IrradianceGenShaders.program
@@ -217,9 +221,11 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       logInfo LogGeneral "BRDF LUT generated"
 
       -- Cloud textures (shared)
-      logInfo LogGeneral "loading 3D cloud noise texture..."
-      cloudNoiseView <- Texture.managedTexture3DWithMips physicalDevice device "data/textures/cloud_noise/cloud_noise_256.raw" 256 256 256 5 graphicsQueueHandler textureCommandBuffer
-      logInfo LogGeneral "3D cloud noise texture loaded (5 mip levels)"
+      logInfo LogGeneral "creating 3D cloud noise storage image..."
+      cloudNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 256 256 256 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
+      dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudNoiseHandle
+      cloudNoiseView <- Texture.textureImageView rm cloudNoiseHandle
+      logInfo LogGeneral "3D cloud noise texture generated"
 
       logInfo LogGeneral "loading blue noise texture..."
       blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
@@ -250,7 +256,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
             iblIrradianceView = mIrradianceView,
             iblSampler = lightingSampler,
             iblBrdfView = mBrdfView,
-            iblCloudNoiseView = Just cloudNoiseView,
+            iblCloudNoiseView = cloudNoiseView,
             iblBlueNoiseView = mBlueNoiseView,
             iblBlueNoiseSampler = blueNoiseSampler,
             iblWeatherMapView = mWeatherMapView
@@ -279,9 +285,11 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       mBrdfView <- Texture.textureImageView rm brdfTexHandle
       logInfo LogGeneral "BRDF LUT generated"
 
-      logInfo LogGeneral "loading 3D cloud noise texture..."
-      cloudNoiseView <- Texture.managedTexture3DWithMips physicalDevice device "data/textures/cloud_noise/cloud_noise_256.raw" 256 256 256 5 graphicsQueueHandler textureCommandBuffer
-      logInfo LogGeneral "3D cloud noise texture loaded (5 mip levels)"
+      logInfo LogGeneral "creating 3D cloud noise storage image..."
+      cloudNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 256 256 256 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
+      dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudNoiseHandle
+      cloudNoiseView <- Texture.textureImageView rm cloudNoiseHandle
+      logInfo LogGeneral "3D cloud noise texture generated"
 
       logInfo LogGeneral "loading blue noise texture..."
       blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
@@ -306,7 +314,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
             iblIrradianceView = mIrradianceView,
             iblSampler = lightingSampler,
             iblBrdfView = mBrdfView,
-            iblCloudNoiseView = Just cloudNoiseView,
+            iblCloudNoiseView = cloudNoiseView,
             iblBlueNoiseView = mBlueNoiseView,
             iblBlueNoiseSampler = blueNoiseSampler,
             iblWeatherMapView = mWeatherMapView
@@ -607,3 +615,78 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
       Nothing -> pure ()
 
   logInfo LogGeneral "procedural sky compute dispatch complete"
+
+-- | Dispatch cloud noise generation compute shader to fill a 3D storage image.
+dispatchCloudNoiseGeneration ::
+  (MonadManaged m, MonadIO m, MonadLog m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  ResourceManager ->
+  TextureHandle -> -- 3D noise storage image
+  m ()
+dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm noiseHandle = do
+  logInfo LogGeneral "dispatching cloud noise compute shader..."
+
+  -- Load compute shader module
+  noiseShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_noise_comp.spv"
+
+  -- Create descriptor set layout
+  noiseLayout <- DescriptorSetLayout.managedCloudNoiseComputeDescriptorSetLayout device
+
+  -- Create pipeline layout
+  noisePipelineLayout <- PipelineLayout.managedPipelineLayout device [noiseLayout]
+
+  -- Create pipeline
+  noisePipeline <- ComputePipeline.managedComputePipeline device noisePipelineLayout noiseShader
+
+  -- Create descriptor pool
+  noisePool <- DescriptorPool.managedCloudNoiseComputeDescriptorPool device
+
+  -- Allocate descriptor set
+  noiseDescriptorSet <- DescriptorSet.allocateDescriptorSet device noisePool [noiseLayout]
+
+  -- Create UBO with noise params
+  let noiseParams =
+        NoiseGenUniforms
+          { ngSeed = 42.0,
+            ngFrequency = 2.0,
+            ngPersistence = 0.5,
+            ngZSlice = 0.0
+          }
+  (noiseParamsBuffer, _noiseParamsMemory) <- Buffer.managedUniformBuffer physicalDevice device [noiseParams]
+
+  -- Get image view
+  mNoiseView <- Texture.textureImageView rm noiseHandle
+
+  -- Update descriptor set
+  case mNoiseView of
+    Just noiseView -> DescriptorSet.updateCloudNoiseComputeDescriptorSets device noiseDescriptorSet noiseView noiseParamsBuffer
+    Nothing -> logInfo LogGeneral "warning: cloud noise view not found"
+
+  -- Get VkImage handle for transition
+  mNoiseTex <- liftIO $ lookupTexture rm noiseHandle
+
+  -- Dispatch compute shader
+  CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
+    -- 256x256x256 / 8x8x4 = 32x32x64 workgroups
+    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE noisePipeline
+    liftIO $ Foreign.Marshal.Array.withArray [noiseDescriptorSet] $ \dsPtr ->
+      Vulkan.vkCmdBindDescriptorSets
+        textureCommandBuffer
+        Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
+        noisePipelineLayout
+        0
+        1
+        dsPtr
+        0
+        Vulkan.vkNullPtr
+    CommandBuffer.cmdDispatch textureCommandBuffer 32 32 64
+
+    -- Transition storage image to SHADER_READ_ONLY_OPTIMAL
+    case mNoiseTex of
+      Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 1
+      Nothing -> pure ()
+
+  logInfo LogGeneral "cloud noise compute dispatch complete"

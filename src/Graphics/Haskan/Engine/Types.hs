@@ -12,6 +12,7 @@ module Graphics.Haskan.Engine.Types
     DrawIndexedIndirectCommand (..),
     ComputeCullResources (..),
     SkyGenUniforms (..),
+    NoiseGenUniforms (..),
     transformAABB,
     extractFrustumPlanes,
     filterVisible,
@@ -384,6 +385,31 @@ instance Storable SkyGenUniforms where
     pokeByteOff ptr 112 (sgHwIR u)
     pokeByteOff ptr 116 (sgHwIG u)
     pokeByteOff ptr 120 (sgHwIB u)
+
+-- | Uniform buffer data for cloud noise generation compute shader.
+-- Layout: seed (1f) + frequency (1f) + persistence (1f) + zSlice (1f) = 16 bytes
+data NoiseGenUniforms = NoiseGenUniforms
+  { ngSeed :: !Float,
+    ngFrequency :: !Float,
+    ngPersistence :: !Float,
+    ngZSlice :: !Float
+  }
+  deriving (Show, Generic)
+
+instance Storable NoiseGenUniforms where
+  sizeOf _ = 16
+  alignment _ = 16
+  peek ptr =
+    NoiseGenUniforms
+      <$> peekByteOff ptr 0
+      <*> peekByteOff ptr 4
+      <*> peekByteOff ptr 8
+      <*> peekByteOff ptr 12
+  poke ptr u = do
+    pokeByteOff ptr 0 (ngSeed u)
+    pokeByteOff ptr 4 (ngFrequency u)
+    pokeByteOff ptr 8 (ngPersistence u)
+    pokeByteOff ptr 12 (ngZSlice u)
 
 transformAABB :: M44 Float -> BBox -> (V3 Float, V3 Float)
 transformAABB worldMat (BBox (V3 minX minY minZ) (V3 maxX maxY maxZ)) =

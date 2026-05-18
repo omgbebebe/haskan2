@@ -11,6 +11,8 @@ module Graphics.Haskan.Vulkan.DescriptorPool
     createComputeDescriptorPool,
     managedCubemapComputeDescriptorPool,
     createCubemapComputeDescriptorPool,
+    managedCloudNoiseComputeDescriptorPool,
+    createCloudNoiseComputeDescriptorPool,
     managedImGuiDescriptorPool,
     createImGuiDescriptorPool,
   )
@@ -230,6 +232,41 @@ createCubemapComputeDescriptorPool dev = do
               &* set @"poolSizeCount" 2
               &* setListRef @"pPoolSizes" [storageImagePoolSize, uboPoolSize]
               &* set @"maxSets" 2
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
+          )
+
+managedCloudNoiseComputeDescriptorPool :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorPool
+managedCloudNoiseComputeDescriptorPool dev =
+  alloc
+    "CloudNoiseComputeDescriptorPool"
+    (createCloudNoiseComputeDescriptorPool dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
+
+createCloudNoiseComputeDescriptorPool :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorPool
+createCloudNoiseComputeDescriptorPool dev = do
+  let storageImagePoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+              &* set @"descriptorCount" 1
+          )
+      uboPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"descriptorCount" 1
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"poolSizeCount" 2
+              &* setListRef @"pPoolSizes" [storageImagePoolSize, uboPoolSize]
+              &* set @"maxSets" 1
           )
    in liftIO $
         withPtr

@@ -16,6 +16,7 @@ module Graphics.Haskan.Vulkan.Texture
     createTextureFromData,
     createTextureFromHalfFloatData,
     createStorageImage2D,
+    createStorageImage3D,
     createStorageImageCube,
     transitionStorageImageToShaderRead,
     createTextureFromBytesCached,
@@ -1282,6 +1283,93 @@ createStorageImage2D rm pdev dev width height format queue commandBuffer = do
   liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
 
   imageView <- Haskan.createImageView dev format image
+
+  texH <- TextureHandle <$> allocHandle (rmNextId rm)
+
+  let destroy = do
+        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
+        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
+        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+
+      resource =
+        TextureResource
+          { trHandle = texH,
+            trImage = image,
+            trImageView = imageView,
+            trMemory = imageMemory,
+            trWidth = width,
+            trHeight = height,
+            trPixelData = Nothing,
+            trDestroy = destroy
+          }
+
+  registerTexture rm resource
+  pure texH
+
+-- | Create a 3D storage image for compute shader writes and later sampling.
+-- Image is transitioned to GENERAL layout for compute writes.
+-- Includes TRANSFER_SRC and TRANSFER_DST for mipmap generation.
+createStorageImage3D ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Int ->
+  Int ->
+  Int ->
+  Vulkan.VkFormat ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+createStorageImage3D rm pdev dev width height depth format queue commandBuffer = do
+  let imageExtent =
+        Vulkan.createVk
+          ( set @"width" (fromIntegral width)
+              &* set @"height" (fromIntegral height)
+              &* set @"depth" (fromIntegral depth)
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_3D
+              &* set @"extent" imageExtent
+              &* set @"mipLevels" 1
+              &* set @"arrayLayers" 1
+              &* set @"format" format
+              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_STORAGE_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT .|. Vulkan.VK_IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
+              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"queueFamilyIndexCount" 0
+              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
+          )
+
+  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+
+  imageMemoryRequirements <-
+    allocaAndPeek_
+      (Vulkan.vkGetImageMemoryRequirements dev image)
+  logDebugIO LogTexture $ "storage image 3D memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " width=" <> showT width <> " height=" <> showT height <> " depth=" <> showT depth
+
+  imageMemory <-
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+
+  liftIO $ bindImageMemory dev image imageMemory 0
+
+  -- Transition to GENERAL for compute writes
+  Haskan.withCommandBufferOneTime queue commandBuffer $ do
+    Haskan.layerTransition
+      commandBuffer
+      image
+      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+      Vulkan.VK_IMAGE_LAYOUT_GENERAL
+
+  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+
+  imageView <- Haskan.createImageView3D dev format image
 
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 
