@@ -342,10 +342,10 @@ cloudFragment = shader do
       windOffsetX = time * windSpeed * windDirX
       windOffsetZ = time * windSpeed * windDirZ
       -- Primary domain warp: large amplitude to break up noise tiling
-      warpAmp1 = 150.0
+      warpAmp1 = 500.0
       warpFreq1 = 0.0015
       -- Secondary warp: higher frequency, smaller amplitude for detail
-      warpAmp2 = 80.0
+      warpAmp2 = 250.0
       warpFreq2 = 0.0042
 
   -- Dynamic ray march: mutable accumulators
@@ -413,10 +413,15 @@ cloudFragment = shader do
     ~(Vec4 nr ng nb na) <- use @(ImageTexel "cloud_noise") (LOD noiseLod NilOps) (Vec3 sx sy sz)
 
     -- Sample weather map for spatial cloud variation
+    -- Use spherical-inspired UV to avoid planar banding at grazing angles
     let weatherScale = 0.00005
         weatherWindOffsetX = time * 0.002 * windDirX * weatherAnimSpeed
         weatherWindOffsetZ = time * 0.002 * windDirZ * weatherAnimSpeed
-        weatherUV = Vec2 (px * weatherScale - weatherWindOffsetX) (pz * weatherScale - weatherWindOffsetZ)
+        -- Spherical UV: longitude from XZ angle, latitude from height
+        horizDist = sqrt (px * px + pz * pz)
+        longitude = atan2 pz px / (2.0 * 3.14159265)
+        latitude = curvedY / 2000.0  -- normalize by approximate cloud layer height
+        weatherUV = Vec2 (longitude - weatherWindOffsetX * 0.1) ((latitude + horizDist * weatherScale) - weatherWindOffsetZ * 0.1)
     ~(Vec4 weatherR weatherG weatherB _weatherA) <- use @(ImageTexel "weather_map") NilOps weatherUV
 
     let combinedCoverage = clamp (weatherR * cloudCoverage * weatherCoverageScale) 0.0 1.0
