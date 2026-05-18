@@ -354,15 +354,10 @@ cloudFragment = shader do
 
   -- Hoist weather map sample (varies slowly, sample once at entry point)
   let ~(Vec3 epx epy epz) = entryPos
-      eDistHorizSq = (epx - camX) * (epx - camX) + (epz - camZ) * (epz - camZ)
-      eCurvedY = epy - (eDistHorizSq / (2.0 * 6371000.0))
       eWeatherScale = 0.00005
       eWeatherWindOffsetX = time * 0.002 * windDirX * weatherAnimSpeed
       eWeatherWindOffsetZ = time * 0.002 * windDirZ * weatherAnimSpeed
-      eHorizDist = sqrt (epx * epx + epz * epz)
-      eLongitude = atan2 epz epx / (2.0 * 3.14159265)
-      eLatitude = eCurvedY / 2000.0
-      eWeatherUV = Vec2 (eLongitude - eWeatherWindOffsetX * 0.1) ((eLatitude + eHorizDist * eWeatherScale) - eWeatherWindOffsetZ * 0.1)
+      eWeatherUV = Vec2 ((epx - eWeatherWindOffsetX) * eWeatherScale) ((epz - eWeatherWindOffsetZ) * eWeatherScale)
   ~(Vec4 eWeatherR eWeatherG eWeatherB _eWeatherA) <- use @(ImageTexel "weather_map") NilOps eWeatherUV
   let entryCoverage = clamp (eWeatherR * cloudCoverage * weatherCoverageScale) 0.0 1.0
       entryCloudType = clamp (eWeatherG + weatherTypeBias) 0.0 1.0

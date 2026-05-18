@@ -41,13 +41,17 @@ program = Module $ entryPoint @"main" @Compute do
       x = (fromIntegral gidX :: Code Float) / size
       y = (fromIntegral gidY :: Code Float) / size
 
-      -- 2D hash
-      hash2 px py =
-        let dp = px * 127.1 + py * 311.7 + seed
+      -- Tileable 2D hash: wraps cell coordinates to [0, period)
+      hash2 px py period =
+        let pxWrap = fract (px / period) * period
+            pyWrap = fract (py / period) * period
+            dp = pxWrap * 127.1 + pyWrap * 311.7 + seed
          in fract (sin dp * 43758.5453)
 
-      hash2b px py =
-        let dp = px * 269.5 + py * 183.3 + seed + 1000.0
+      hash2b px py period =
+        let pxWrap = fract (px / period) * period
+            pyWrap = fract (py / period) * period
+            dp = pxWrap * 269.5 + pyWrap * 183.3 + seed + 1000.0
          in fract (sin dp * 43758.5453)
 
       -- Bilinear interpolation
@@ -56,46 +60,46 @@ program = Module $ entryPoint @"main" @Compute do
             cx1 = mix c01 c11 fx
          in mix cx0 cx1 fy
 
-      -- Value noise at a point (2D)
-      vnoise2 px py =
+      -- Tileable value noise at a point (2D)
+      vnoise2 px py period =
         let ix = floor px
             iy = floor py
             fx = fract px
             fy = fract py
             ux = fx * fx * (3.0 - 2.0 * fx)
             uy = fy * fy * (3.0 - 2.0 * fy)
-            n00 = hash2 ix iy
-            n10 = hash2 (ix + 1.0) iy
-            n01 = hash2 ix (iy + 1.0)
-            n11 = hash2 (ix + 1.0) (iy + 1.0)
+            n00 = hash2 ix iy period
+            n10 = hash2 (ix + 1.0) iy period
+            n01 = hash2 ix (iy + 1.0) period
+            n11 = hash2 (ix + 1.0) (iy + 1.0) period
          in biLerp n00 n10 n01 n11 ux uy
 
-      vnoise2b px py =
+      vnoise2b px py period =
         let ix = floor px
             iy = floor py
             fx = fract px
             fy = fract py
             ux = fx * fx * (3.0 - 2.0 * fx)
             uy = fy * fy * (3.0 - 2.0 * fy)
-            n00 = hash2b ix iy
-            n10 = hash2b (ix + 1.0) iy
-            n01 = hash2b ix (iy + 1.0)
-            n11 = hash2b (ix + 1.0) (iy + 1.0)
+            n00 = hash2b ix iy period
+            n10 = hash2b (ix + 1.0) iy period
+            n01 = hash2b ix (iy + 1.0) period
+            n11 = hash2b (ix + 1.0) (iy + 1.0) period
          in biLerp n00 n10 n01 n11 ux uy
 
-      vnoise2_1 px py f = vnoise2 (px * f) (py * f)
+      vnoise2_1 px py f = vnoise2 (px * f) (py * f) f
 
-      -- Domain warp for coverage
+      -- Domain warp for coverage (periodic with same period as coverage)
       warpFreq = covScale * 0.3
       warpAmt = 0.2
 
-      wx = vnoise2b (x * warpFreq + 100.0) (y * warpFreq + 200.0) * warpAmt
-      wy = vnoise2b (x * warpFreq + 300.0) (y * warpFreq + 400.0) * warpAmt
+      wx = vnoise2b (x * warpFreq + 100.0) (y * warpFreq + 200.0) warpFreq * warpAmt
+      wy = vnoise2b (x * warpFreq + 300.0) (y * warpFreq + 400.0) warpFreq * warpAmt
 
       wx1 = x + wx
       wy1 = y + wy
 
-      -- Coverage: large-scale FBM with domain warp
+      -- Coverage: large-scale tileable FBM with domain warp
       c1 = vnoise2_1 wx1 wy1 covScale
       c2 = vnoise2_1 wx1 wy1 (covScale * 2.0) * 0.5
       c3 = vnoise2_1 wx1 wy1 (covScale * 4.0) * 0.25
@@ -106,7 +110,7 @@ program = Module $ entryPoint @"main" @Compute do
       t2 = vnoise2_1 (x + wx * 0.5) (y + wy * 0.5) (typeScale * 2.0) * 0.5
       cloudType = (t1 + t2) / 1.5
 
-      -- Height offset: simple noise
+      -- Height offset: simple tileable noise
       h1 = vnoise2_1 x y hScale
       h2 = vnoise2_1 x y (hScale * 2.0) * 0.5
       heightOffset = (h1 + h2) / 1.5
