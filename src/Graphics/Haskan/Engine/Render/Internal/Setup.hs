@@ -222,7 +222,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
 
       -- Cloud textures (shared)
       logInfo LogGeneral "creating 3D cloud noise storage image..."
-      cloudNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 256 256 256 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
+      cloudNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 256 256 256 5 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
       dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudNoiseHandle
       cloudNoiseView <- Texture.textureImageView rm cloudNoiseHandle
       logInfo LogGeneral "3D cloud noise texture generated"
@@ -286,7 +286,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       logInfo LogGeneral "BRDF LUT generated"
 
       logInfo LogGeneral "creating 3D cloud noise storage image..."
-      cloudNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 256 256 256 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
+      cloudNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 256 256 256 5 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
       dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudNoiseHandle
       cloudNoiseView <- Texture.textureImageView rm cloudNoiseHandle
       logInfo LogGeneral "3D cloud noise texture generated"
@@ -665,10 +665,15 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
     Just noiseView -> DescriptorSet.updateCloudNoiseComputeDescriptorSets device noiseDescriptorSet noiseView noiseParamsBuffer
     Nothing -> logInfo LogGeneral "warning: cloud noise view not found"
 
-  -- Get VkImage handle for transition
+  -- Get VkImage handle and dimensions for transition/mipgen
   mNoiseTex <- liftIO $ lookupTexture rm noiseHandle
+  let (noiseImage, noiseW, noiseH) = case mNoiseTex of
+        Just tex -> (trImage tex, trWidth tex, trHeight tex)
+        Nothing -> (Vulkan.vkNullPtr, 0, 0)
+      noiseD = noiseW -- 3D texture, depth == width (256)
+      mipLevels = 5
 
-  -- Dispatch compute shader
+  -- Dispatch compute shader + generate mipmaps
   CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
     -- 256x256x256 / 8x8x4 = 32x32x64 workgroups
     liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE noisePipeline
@@ -684,9 +689,66 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
         Vulkan.vkNullPtr
     CommandBuffer.cmdDispatch textureCommandBuffer 32 32 64
 
-    -- Transition storage image to SHADER_READ_ONLY_OPTIMAL
-    case mNoiseTex of
-      Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 1
-      Nothing -> pure ()
+    -- Transition mip 0 from GENERAL to TRANSFER_SRC for blitting
+    when (noiseImage /= Vulkan.vkNullPtr) $ do
+      CommandBuffer.mipLayerTransition
+        textureCommandBuffer
+        noiseImage
+        Vulkan.VK_IMAGE_LAYOUT_GENERAL
+        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        0
+        1
+        1
 
-  logInfo LogGeneral "cloud noise compute dispatch complete"
+      -- Generate mipmaps 1..4
+      forM_ [1 .. mipLevels - 1] $ \mip -> do
+        let srcMip = fromIntegral (mip - 1)
+            dstMip = fromIntegral mip
+            srcW = fromIntegral (noiseW `div` (2 ^ (mip - 1)))
+            srcH = fromIntegral (noiseH `div` (2 ^ (mip - 1)))
+            srcD = fromIntegral (noiseD `div` (2 ^ (mip - 1)))
+            dstW = fromIntegral (noiseW `div` (2 ^ mip))
+            dstH = fromIntegral (noiseH `div` (2 ^ mip))
+            dstD = fromIntegral (noiseD `div` (2 ^ mip))
+
+        CommandBuffer.mipLayerTransition
+          textureCommandBuffer
+          noiseImage
+          Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+          Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+          dstMip
+          1
+          1
+
+        CommandBuffer.cmdBlitImage3DMip
+          textureCommandBuffer
+          noiseImage
+          srcMip
+          dstMip
+          srcW
+          srcH
+          srcD
+          dstW
+          dstH
+          dstD
+
+        CommandBuffer.mipLayerTransition
+          textureCommandBuffer
+          noiseImage
+          Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+          Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+          dstMip
+          1
+          1
+
+      -- Transition all mips to SHADER_READ_ONLY_OPTIMAL
+      CommandBuffer.mipLayerTransition
+        textureCommandBuffer
+        noiseImage
+        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        0
+        (fromIntegral mipLevels)
+        1
+
+  logInfo LogGeneral "cloud noise compute dispatch + mipgen complete"
