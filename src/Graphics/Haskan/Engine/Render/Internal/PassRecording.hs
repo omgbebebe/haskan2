@@ -15,7 +15,9 @@ import Data.Word (Word32)
 import DearImGui.Raw qualified
 import Foreign.Marshal.Array qualified
 import Foreign.Storable (Storable (..))
+import Control.Lens ((^.))
 import Graphics.Haskan.Camera (AnyCamera, Camera (..))
+import Graphics.Haskan.Camera.Types (ViewMatrix (..))
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.Engine.Render.Internal.FrameState (FrameState (..))
 import Graphics.Haskan.Engine.Types (ComputeCullResources (..), DrawIndexedIndirectCommand (..))
@@ -30,7 +32,10 @@ import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Linear (M44, V3 (..))
+import Linear (M44, V3 (..), V4 (..), (^*))
+import Linear.Matrix ((!*), (!*!))
+import Linear.Projection (perspective)
+import Linear.V3 (_x, _y, _z)
 
 -- | All values pre-computed before creating the IO callback
 data RecordContext = RecordContext
@@ -48,6 +53,8 @@ data RecordContext = RecordContext
     rcSkyTint :: !(V3 Float),
     rcIBLIntensity :: !Float,
     rcSunAzimuth :: !Float,
+    rcSunScreenX :: !Float,
+    rcSunScreenY :: !Float,
     rcSunDir :: !(V3 Float),
     rcCloudHeight :: !Float,
     rcTime :: !Float,
@@ -103,7 +110,17 @@ buildRecordContext ::
   Maybe DearImGui.Raw.DrawData ->
   RecordContext
 buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProj windDirX windDirZ prevTime cloudCoverage cloudDetail cloudAbsorption weatherCoverageScale weatherTypeBias stormIntensity weatherAnimSpeed mDrawData =
-  RecordContext
+  let viewMat = fmap (fmap realToFrac) (unViewMatrix (Camera.toMatrix camera)) :: M44 Float
+      extent = rcSurfaceExtent ctx
+      width = realToFrac (Vulkan.getField @"width" extent) :: Float
+      height = realToFrac (Vulkan.getField @"height" extent) :: Float
+      projMat = perspective (pi / 3) (width / height) 1.0 50000.0
+      viewProj = projMat !*! viewMat
+      sunWorld = sunDir ^* 10000.0
+      V4 cx cy cz cw = viewProj !* V4 (sunWorld ^. _x) (sunWorld ^. _y) (sunWorld ^. _z) 1.0
+      sunScreenX = if cw > 0 then cx / cw * 0.5 + 0.5 else (-1.0)
+      sunScreenY = if cw > 0 then -cy / cw * 0.5 + 0.5 else (-1.0)
+   in RecordContext
     { rcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
       rcFrameDescriptorSets = frameDescriptorSets,
       rcTextureSampler = textureSampler,
@@ -118,6 +135,8 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
       rcSkyTint = skyTint,
       rcIBLIntensity = iblInt,
       rcSunAzimuth = sunAzimuth,
+      rcSunScreenX = sunScreenX,
+      rcSunScreenY = sunScreenY,
       rcSunDir = sunDir,
       rcCloudHeight = fsCloudHeight frameState,
       rcTime = time,
@@ -214,8 +233,10 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdLightBuffer = rcLightSsboBuffer,
                 dpdSkyTint = rcSkyTint,
                 dpdIBLIntensity = rcIBLIntensity,
-                dpdSunAzimuth = rcSunAzimuth,
-                dpdSunDir = rcSunDir,
+                 dpdSunAzimuth = rcSunAzimuth,
+                 dpdSunScreenX = rcSunScreenX,
+                 dpdSunScreenY = rcSunScreenY,
+                 dpdSunDir = rcSunDir,
                 dpdCloudHeight = rcCloudHeight,
                 dpdTime = rcTime,
                 dpdPrevViewProj = rcPrevViewProj,
@@ -229,7 +250,8 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdWeatherCoverageScale = rcWeatherCoverageScale,
                 dpdWeatherTypeBias = rcWeatherTypeBias,
                 dpdStormIntensity = rcStormIntensity,
-                dpdWeatherAnimSpeed = rcWeatherAnimSpeed,
+                 dpdWeatherAnimSpeed = rcWeatherAnimSpeed,
+                 dpdFrameIndex = frameIdx,
                 dpdCloudFrameDataMemory = drCloudFrameDataMemory rcDeferred,
                 dpdCloudRenderPass = drCloudRenderPass rcDeferred,
                 dpdCloudFramebuffer = cloudFramebuffer,

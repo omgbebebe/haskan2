@@ -67,6 +67,8 @@ data DeferredPassData = DeferredPassData
     dpdSkyTint :: !(V3 Float),
     dpdIBLIntensity :: !Float,
     dpdSunAzimuth :: !Float,
+    dpdSunScreenX :: !Float,
+    dpdSunScreenY :: !Float,
     dpdSunDir :: !(V3 Float),
     dpdCloudHeight :: !Float,
     dpdTime :: !Float,
@@ -82,6 +84,7 @@ data DeferredPassData = DeferredPassData
     dpdWeatherTypeBias :: !Float,
     dpdStormIntensity :: !Float,
     dpdWeatherAnimSpeed :: !Float,
+    dpdFrameIndex :: !Int,
     dpdCloudFrameDataMemory :: !Vulkan.VkDeviceMemory,
     -- Cloud pass
     dpdCloudRenderPass :: !Vulkan.VkRenderPass,
@@ -250,10 +253,10 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac dpdWeatherCoverageScale, -- 184
                     realToFrac dpdWeatherTypeBias, -- 188
                     realToFrac dpdStormIntensity, -- 192
-                    realToFrac dpdWeatherAnimSpeed, -- 196
-                    0,
-                    0,
-                    0 -- 200-208 pad to 208
+                     realToFrac dpdWeatherAnimSpeed, -- 196
+                     realToFrac dpdFrameIndex, -- 200
+                     0,
+                     0 -- 204-208 pad to 208
                   ] ::
                     [CFloat]
              in liftIO $ Buffer.copyDataToDeviceMemory dpdDevice dpdCloudFrameDataMemory cloudFrameData
@@ -296,7 +299,8 @@ buildDeferredGraph DeferredPassData {..} = do
                 -- After iblInt(92) → sunDir needs 16-align → pad 1 float → sunDir at 96
                 -- After sunDir(108) → cloudHeight at 108 (scalar, no pad needed)
                 -- After cloudHeight(112) → time at 112 (scalar, no pad needed)
-                -- Total: 29 floats * 4 = 116 bytes
+                -- After time(116) → sunScreenX at 116, sunScreenY at 120
+                -- Total: 31 floats * 4 = 124 bytes
                 camPosData =
                   [ realToFrac camX,
                     realToFrac camY,
@@ -326,10 +330,12 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac sunDirY,
                     realToFrac sunDirZ,
                     realToFrac dpdCloudHeight,
-                    realToFrac dpdTime
+                    realToFrac dpdTime,
+                    realToFrac dpdSunScreenX,
+                    realToFrac dpdSunScreenY
                   ] ::
                     [CFloat]
-             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 116 . Foreign.castPtr
+             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 124 . Foreign.castPtr
             -- Fullscreen triangle: 3 vertices, no indices
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
       }

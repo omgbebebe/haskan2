@@ -227,7 +227,9 @@ type CameraPushConstant =
        "iblIntensity" ':-> Float,
        "sunDir" ':-> V 3 Float,
        "cloudHeight" ':-> Float,
-       "time" ':-> Float
+       "time" ':-> Float,
+       "sunScreenX" ':-> Float,
+       "sunScreenY" ':-> Float
      ]
 
 type FragmentDefs =
@@ -266,18 +268,14 @@ type FragmentDefs =
        ':-> StorageBuffer
               '[Binding 7, DescriptorSet 0]
               LightsData,
-     "cloud_result"
-       ':-> Texture2D
-              '[Binding 8, DescriptorSet 0]
-              (RGBA16 F),
-     "sky_lut"
-       ':-> Texture2D
-              '[Binding 9, DescriptorSet 0]
-              (RGBA16 F),
-     "cameraPos"
-       ':-> PushConstant
-              '[]
-              CameraPushConstant,
+      "cloud_result"
+        ':-> Texture2D
+               '[Binding 8, DescriptorSet 0]
+               (RGBA16 F),
+      "cameraPos"
+        ':-> PushConstant
+               '[]
+               CameraPushConstant,
      "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
@@ -348,6 +346,31 @@ fragment = shader do
       dbgCloud = cloudSkyR * 0.5
       dbgHeight = cloudSkyG * 0.5
       dbgNoise = cloudSkyB * 0.5
+
+  -- God rays: sample cloud opacity at points toward screen-space sun
+  let sunScreenX = view @(Name "sunScreenX") cameraPos
+      sunScreenY = view @(Name "sunScreenY") cameraPos
+      toSunX = sunScreenX - uvX
+      toSunY = sunScreenY - uvY
+      sampleX1 = uvX + toSunX * 0.25
+      sampleY1 = uvY + toSunY * 0.25
+      sampleX2 = uvX + toSunX * 0.5
+      sampleY2 = uvY + toSunY * 0.5
+      sampleX3 = uvX + toSunX * 0.75
+      sampleY3 = uvY + toSunY * 0.75
+
+  ~(Vec4 _ _ _ occ1) <- use @(ImageTexel "cloud_result") NilOps (Vec2 sampleX1 sampleY1)
+  ~(Vec4 _ _ _ occ2) <- use @(ImageTexel "cloud_result") NilOps (Vec2 sampleX2 sampleY2)
+  ~(Vec4 _ _ _ occ3) <- use @(ImageTexel "cloud_result") NilOps (Vec2 sampleX3 sampleY3)
+
+  let occ1f = convert occ1
+      occ2f = convert occ2
+      occ3f = convert occ3
+      godRayAccum = occ1f * 0.5 + occ2f * 0.3 + occ3f * 0.2
+      godRayStrength = godRayAccum * 0.15
+      godRayR = 1.0 * godRayStrength
+      godRayG = 0.95 * godRayStrength
+      godRayB = 0.85 * godRayStrength
 
   let normX = normX_raw * 2 - 1
       normY = normY_raw * 2 - 1
@@ -649,9 +672,9 @@ fragment = shader do
       tintedSkyR = cloudGamR * skyTintR
       tintedSkyG = cloudGamG * skyTintG
       tintedSkyB = cloudGamB * skyTintB
-      finalx = if hasGeometry then gamx else tintedSkyR
-      finaly = if hasGeometry then gamy else tintedSkyG
-      finalz = if hasGeometry then gamz else tintedSkyB
+      finalx = (if hasGeometry then gamx else tintedSkyR) + godRayR
+      finaly = (if hasGeometry then gamy else tintedSkyG) + godRayG
+      finalz = (if hasGeometry then gamz else tintedSkyB) + godRayB
 
       -- Debug mode 12.0: raw skybox for ALL pixels
       dbgSkyR = if debugMode == 12.0 then tintedSkyR else finalx

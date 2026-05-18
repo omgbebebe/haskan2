@@ -13,8 +13,6 @@ module Graphics.Haskan.Vulkan.DescriptorSetLayout
     createBindlessDescriptorSetLayout,
     managedComputeDescriptorSetLayout,
     createComputeDescriptorSetLayout,
-    managedSkyLUTComputeDescriptorSetLayout,
-    createSkyLUTComputeDescriptorSetLayout,
     managedCubemapComputeDescriptorSetLayout,
     createCubemapComputeDescriptorSetLayout,
     maxBindlessTextures,
@@ -31,7 +29,6 @@ import Graphics.Haskan.Vulkan.DescriptorSetLayout.TH (descriptorSetLayoutBinding
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as Cull
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGen
-import Graphics.Haskan.Vulkan.Shaders.Compute.SkyLUTGen qualified as SkyLUTGen
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds (CloudFragmentDefs)
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as Lighting
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProcedural
@@ -267,33 +264,6 @@ managedComputeDescriptorSetLayout dev =
 createComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 createComputeDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''Cull.Defs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
-
--- | Sky LUT compute descriptor set layout: StorageImage (sky_lut) + Uniform (skyGenData).
--- Also usable for cubemap compute (radiance/irradiance) since binding structure is identical.
-managedSkyLUTComputeDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
-managedSkyLUTComputeDescriptorSetLayout dev =
-  alloc
-    "SkyLUTComputeDescriptorSetLayout"
-    (createSkyLUTComputeDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
-
-createSkyLUTComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
-createSkyLUTComputeDescriptorSetLayout dev = do
-  let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''SkyLUTGen.Defs)
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO

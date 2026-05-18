@@ -203,14 +203,14 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer m
       Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writeUpdatePtr 0 Vulkan.vkNullPtr
 
 -- | Update lighting descriptor sets for procedural sky variant.
--- Expects 8 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive,
--- env_map, irradiance_map, brdf_lut, sky_lut (bindings 0-6 and 9).
+-- Expects 7 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive,
+-- env_map, irradiance_map, brdf_lut (bindings 0-6).
 updateLightingProceduralDescriptorSets ::
   (MonadIO m) =>
   Vulkan.VkDevice ->
   Vulkan.VkDescriptorSet ->
   Vulkan.VkSampler ->
-  -- | 8 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive, env_map, irradiance_map, brdf_lut, sky_lut
+  -- | 7 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive, env_map, irradiance_map, brdf_lut
   [Vulkan.VkImageView] ->
   -- | light SSBO (optional)
   Maybe Vulkan.VkBuffer ->
@@ -239,10 +239,6 @@ updateLightingProceduralDescriptorSets dev descriptorSet sampler imageViews mLig
           )
       -- Bindings 0-6 are the standard textures
       standardWrites = zipWith mkWrite [0 .. 6] (take 7 imageViews)
-      -- sky_lut is at binding 9
-      skyLutWrite = case drop 7 imageViews of
-        (skyLutView : _) -> [mkWrite 9 skyLutView]
-        _ -> []
       lightWrite = case mLightBuffer of
         Nothing -> []
         Just lightBuffer ->
@@ -269,7 +265,7 @@ updateLightingProceduralDescriptorSets dev descriptorSet sampler imageViews mLig
         Nothing -> []
         Just cloudResultView ->
           [mkWrite 8 cloudResultView]
-      allWrites = standardWrites ++ skyLutWrite ++ lightWrite ++ cloudResultWrite
+      allWrites = standardWrites ++ lightWrite ++ cloudResultWrite
   liftIO $
     Foreign.Marshal.Array.withArray allWrites $ \writeUpdatePtr ->
       Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writeUpdatePtr 0 Vulkan.vkNullPtr
@@ -637,57 +633,6 @@ updateCloudFrameDataBuffer dev descriptorSet buffer = do
   liftIO $
     Foreign.Marshal.Array.withArray [write] $ \writeUpdatePtr ->
       Vulkan.vkUpdateDescriptorSets dev 1 writeUpdatePtr 0 Vulkan.vkNullPtr
-
--- | Update sky LUT compute descriptor set with storage image and UBO.
-updateSkyLUTComputeDescriptorSets ::
-  (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkDescriptorSet ->
-  Vulkan.VkImageView -> -- skyLut storage image
-  Vulkan.VkBuffer -> -- skyGenData UBO
-  m ()
-updateSkyLUTComputeDescriptorSets dev descriptorSet skyLutView skyGenDataBuffer = do
-  let imageInfo =
-        Vulkan.createVk
-          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_GENERAL
-              &* set @"imageView" skyLutView
-              &* set @"sampler" Vulkan.VK_NULL_HANDLE
-          )
-      bufferInfo =
-        Vulkan.createVk
-          ( set @"buffer" skyGenDataBuffer
-              &* set @"offset" 0
-              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
-          )
-      writeImage =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
-              &* set @"dstBinding" 0
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-              &* set @"pTexelBufferView" Vulkan.VK_NULL
-              &* set @"pBufferInfo" Vulkan.VK_NULL
-              &* setVkRef @"pImageInfo" imageInfo
-              &* set @"descriptorCount" 1
-              &* set @"dstArrayElement" 0
-          )
-      writeBuffer =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
-              &* set @"dstBinding" 1
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-              &* set @"pTexelBufferView" Vulkan.VK_NULL
-              &* set @"pImageInfo" Vulkan.VK_NULL
-              &* setVkRef @"pBufferInfo" bufferInfo
-              &* set @"descriptorCount" 1
-              &* set @"dstArrayElement" 0
-          )
-  liftIO $
-    Foreign.Marshal.Array.withArray [writeImage, writeBuffer] $ \writePtr ->
-      Vulkan.vkUpdateDescriptorSets dev 2 writePtr 0 Vulkan.vkNullPtr
 
 -- | Update cubemap compute descriptor set with storage image and UBO.
 updateCubemapComputeDescriptorSets ::

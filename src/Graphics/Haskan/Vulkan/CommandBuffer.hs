@@ -672,3 +672,67 @@ cmdBlitImageCubemapMip commandBuffer image srcMip dstMip srcSize dstSize = do
             rPtr
             Vulkan.VK_FILTER_LINEAR
       )
+
+cmdBlitImage3DMip ::
+  (MonadIO m) =>
+  Vulkan.VkCommandBuffer ->
+  Vulkan.VkImage ->
+  -- | src mip level
+  Word32 ->
+  -- | dst mip level
+  Word32 ->
+  -- | src width
+  Int32 ->
+  -- | src height
+  Int32 ->
+  -- | src depth
+  Int32 ->
+  -- | dst width
+  Int32 ->
+  -- | dst height
+  Int32 ->
+  -- | dst depth
+  Int32 ->
+  m ()
+cmdBlitImage3DMip commandBuffer image srcMip dstMip srcW srcH srcD dstW dstH dstD = do
+  let srcSubresource =
+        Vulkan.createVk
+          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+              &* set @"mipLevel" srcMip
+              &* set @"baseArrayLayer" 0
+              &* set @"layerCount" 1
+          )
+      dstSubresource =
+        Vulkan.createVk
+          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+              &* set @"mipLevel" dstMip
+              &* set @"baseArrayLayer" 0
+              &* set @"layerCount" 1
+          )
+      srcOffset0 = Vulkan.createVk (set @"x" 0 &* set @"y" 0 &* set @"z" 0)
+      srcOffset1 = Vulkan.createVk (set @"x" srcW &* set @"y" srcH &* set @"z" srcD)
+      dstOffset0 = Vulkan.createVk (set @"x" 0 &* set @"y" 0 &* set @"z" 0)
+      dstOffset1 = Vulkan.createVk (set @"x" dstW &* set @"y" dstH &* set @"z" dstD)
+      region =
+        Vulkan.createVk
+          ( set @"srcSubresource" srcSubresource
+              &* setAt @"srcOffsets" @0 srcOffset0
+              &* setAt @"srcOffsets" @1 srcOffset1
+              &* set @"dstSubresource" dstSubresource
+              &* setAt @"dstOffsets" @0 dstOffset0
+              &* setAt @"dstOffsets" @1 dstOffset1
+          )
+  liftIO $
+    withPtr
+      region
+      ( \rPtr ->
+          Vulkan.vkCmdBlitImage
+            commandBuffer
+            image
+            Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+            image
+            Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+            1
+            rPtr
+            Vulkan.VK_FILTER_LINEAR
+      )

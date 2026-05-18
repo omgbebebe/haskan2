@@ -91,16 +91,14 @@ library
                         Graphics.Haskan.Vulkan.Shaders.EntityData
                         Graphics.Haskan.Vulkan.Shaders.LightData
                         Graphics.Haskan.Vulkan.Shaders.Compute.Test
-                       Graphics.Haskan.Vulkan.Shaders.Compute.Cull
-                       Graphics.Haskan.Vulkan.Shaders.Compute.SkyLUTGen
-                       Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen
-                       Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen
-                       Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer
-                        Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting
-                        Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural
-                        Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds
-                        Graphics.Haskan.Vulkan.Shaders.Sky.Procedural
-                        Graphics.Haskan.Vulkan.Shaders.Wireframe
+                        Graphics.Haskan.Vulkan.Shaders.Compute.Cull
+                        Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen
+                        Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen
+                        Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer
+                         Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting
+                         Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural
+                         Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds
+                         Graphics.Haskan.Vulkan.Shaders.Wireframe
                        Graphics.Haskan.Vulkan.Semaphore
                        Graphics.Haskan.Vulkan.Swapchain
                        Graphics.Haskan.Vulkan.Texture

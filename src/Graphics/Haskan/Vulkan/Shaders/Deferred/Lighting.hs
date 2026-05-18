@@ -224,7 +224,9 @@ type CameraPushConstant =
        "iblIntensity" ':-> Float,
        "sunDir" ':-> V 3 Float,
        "cloudHeight" ':-> Float,
-       "time" ':-> Float
+       "time" ':-> Float,
+       "sunScreenX" ':-> Float,
+       "sunScreenY" ':-> Float
      ]
 
 type FragmentDefs =

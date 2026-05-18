@@ -80,12 +80,10 @@ import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGenShaders
-import Graphics.Haskan.Vulkan.Shaders.Compute.SkyLUTGen qualified as SkyLUTGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds qualified as CloudShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProceduralShaders
-import Graphics.Haskan.Vulkan.Shaders.Sky.Procedural (defaultSkyParams, generateSkyLUT)
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
@@ -130,8 +128,6 @@ compileAllShaders = do
   logInfo LogGeneral "  wire_frag.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/cull_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CullShaders.program
   logInfo LogGeneral "  cull_comp.spv done"
-  liftIO $ FIR.compileTo "data/shaders/fir/sky_lut_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] SkyLUTGenShaders.program
-  logInfo LogGeneral "  sky_lut_comp.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/radiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] RadianceGenShaders.program
   logInfo LogGeneral "  radiance_comp.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/irradiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] IrradianceGenShaders.program
@@ -177,8 +173,7 @@ createShaderModules device = do
   pure (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, lightProceduralFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader)
 
 data IBLTextures = IBLTextures
-  { iblSkyLut :: !TextureHandle,
-    iblRadianceCubemap :: !TextureHandle,
+  { iblRadianceCubemap :: !TextureHandle,
     iblIrradianceCubemap :: !TextureHandle,
     iblRadianceView :: !(Maybe Vulkan.VkImageView),
     iblIrradianceView :: !(Maybe Vulkan.VkImageView),
@@ -187,8 +182,7 @@ data IBLTextures = IBLTextures
     iblCloudNoiseView :: !(Maybe Vulkan.VkImageView),
     iblBlueNoiseView :: !(Maybe Vulkan.VkImageView),
     iblBlueNoiseSampler :: !Vulkan.VkSampler,
-    iblWeatherMapView :: !(Maybe Vulkan.VkImageView),
-    iblSkyLutView :: !(Maybe Vulkan.VkImageView)
+    iblWeatherMapView :: !(Maybe Vulkan.VkImageView)
   }
 
 -- | Load IBL cubemaps, BRDF LUT, and cloud noise texture
@@ -210,10 +204,8 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
     then do
       logInfo LogGeneral "procedural sky enabled: creating storage images..."
       -- Create storage images for compute shader output
-      skyLutHandle <- Texture.createStorageImage2D rm physicalDevice device 200 200 Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT graphicsQueueHandler textureCommandBuffer
       radianceHandle <- Texture.createStorageImageCube rm physicalDevice device 512 Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT graphicsQueueHandler textureCommandBuffer
       irradianceHandle <- Texture.createStorageImageCube rm physicalDevice device 64 Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT graphicsQueueHandler textureCommandBuffer
-      mSkyLutView <- Texture.textureImageView rm skyLutHandle
       mRadianceView <- Texture.textureImageView rm radianceHandle
       mIrradianceView <- Texture.textureImageView rm irradianceHandle
       logInfo LogGeneral "procedural sky storage images created"
@@ -226,8 +218,8 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
 
       -- Cloud textures (shared)
       logInfo LogGeneral "loading 3D cloud noise texture..."
-      cloudNoiseView <- Texture.managedTexture3D physicalDevice device "data/textures/cloud_noise/cloud_noise_256.raw" 256 256 256 graphicsQueueHandler textureCommandBuffer
-      logInfo LogGeneral "3D cloud noise texture loaded"
+      cloudNoiseView <- Texture.managedTexture3DWithMips physicalDevice device "data/textures/cloud_noise/cloud_noise_256.raw" 256 256 256 5 graphicsQueueHandler textureCommandBuffer
+      logInfo LogGeneral "3D cloud noise texture loaded (5 mip levels)"
 
       logInfo LogGeneral "loading blue noise texture..."
       blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
@@ -248,12 +240,11 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       let V3 dirX dirY dirZ = V3 0.0 0.3 (-1.0)
           defaultSunElevation = pi / 6.0
           defaultSunIntensity = 50.0
-      dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm skyLutHandle radianceHandle irradianceHandle (V3 dirX dirY dirZ) defaultSunElevation defaultSunIntensity
+      dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm radianceHandle irradianceHandle (V3 dirX dirY dirZ) defaultSunElevation defaultSunIntensity
 
       pure
         IBLTextures
-          { iblSkyLut = skyLutHandle,
-            iblRadianceCubemap = radianceHandle,
+          { iblRadianceCubemap = radianceHandle,
             iblIrradianceCubemap = irradianceHandle,
             iblRadianceView = mRadianceView,
             iblIrradianceView = mIrradianceView,
@@ -262,8 +253,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
             iblCloudNoiseView = Just cloudNoiseView,
             iblBlueNoiseView = mBlueNoiseView,
             iblBlueNoiseSampler = blueNoiseSampler,
-            iblWeatherMapView = mWeatherMapView,
-            iblSkyLutView = mSkyLutView
+            iblWeatherMapView = mWeatherMapView
           }
     else do
       -- Photo-based cubemap loading
@@ -290,8 +280,8 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       logInfo LogGeneral "BRDF LUT generated"
 
       logInfo LogGeneral "loading 3D cloud noise texture..."
-      cloudNoiseView <- Texture.managedTexture3D physicalDevice device "data/textures/cloud_noise/cloud_noise_256.raw" 256 256 256 graphicsQueueHandler textureCommandBuffer
-      logInfo LogGeneral "3D cloud noise texture loaded"
+      cloudNoiseView <- Texture.managedTexture3DWithMips physicalDevice device "data/textures/cloud_noise/cloud_noise_256.raw" 256 256 256 5 graphicsQueueHandler textureCommandBuffer
+      logInfo LogGeneral "3D cloud noise texture loaded (5 mip levels)"
 
       logInfo LogGeneral "loading blue noise texture..."
       blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
@@ -310,8 +300,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
 
       pure
         IBLTextures
-          { iblSkyLut = radianceCubemap,
-            iblRadianceCubemap = radianceCubemap,
+          { iblRadianceCubemap = radianceCubemap,
             iblIrradianceCubemap = irradianceCubemap,
             iblRadianceView = mRadianceView,
             iblIrradianceView = mIrradianceView,
@@ -320,8 +309,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
             iblCloudNoiseView = Just cloudNoiseView,
             iblBlueNoiseView = mBlueNoiseView,
             iblBlueNoiseSampler = blueNoiseSampler,
-            iblWeatherMapView = mWeatherMapView,
-            iblSkyLutView = Nothing
+            iblWeatherMapView = mWeatherMapView
           }
 
 data SceneLoadResult = SceneLoadResult
@@ -467,40 +455,33 @@ dispatchProceduralSkyGeneration ::
   Vulkan.VkQueue ->
   Vulkan.VkCommandBuffer ->
   ResourceManager ->
-  TextureHandle -> -- skyLut
   TextureHandle -> -- radiance
   TextureHandle -> -- irradiance
   V3 Float ->      -- sun direction
   Float ->          -- sun elevation (for HW coeffs)
   Float ->          -- sun intensity
   m ()
-dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm skyLutHandle radianceHandle irradianceHandle sunDir sunElevation sunIntensity = do
+dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm radianceHandle irradianceHandle sunDir sunElevation sunIntensity = do
   logInfo LogGeneral "dispatching procedural sky compute shaders..."
 
   -- Load compute shader modules
-  skyLUTShader <- ShaderModule.managedShaderModule device "data/shaders/fir/sky_lut_comp.spv"
   radianceShader <- ShaderModule.managedShaderModule device "data/shaders/fir/radiance_comp.spv"
   irradianceShader <- ShaderModule.managedShaderModule device "data/shaders/fir/irradiance_comp.spv"
 
-  -- Create descriptor set layouts
-  skyLUTLayout <- DescriptorSetLayout.managedSkyLUTComputeDescriptorSetLayout device
+  -- Create descriptor set layout
   cubemapLayout <- DescriptorSetLayout.managedCubemapComputeDescriptorSetLayout device
 
-  -- Create pipeline layouts
-  skyLUTPipelineLayout <- PipelineLayout.managedPipelineLayout device [skyLUTLayout]
+  -- Create pipeline layout
   cubemapPipelineLayout <- PipelineLayout.managedPipelineLayout device [cubemapLayout]
 
   -- Create pipelines
-  skyLUTPipeline <- ComputePipeline.managedComputePipeline device skyLUTPipelineLayout skyLUTShader
   radiancePipeline <- ComputePipeline.managedComputePipeline device cubemapPipelineLayout radianceShader
   irradiancePipeline <- ComputePipeline.managedComputePipeline device cubemapPipelineLayout irradianceShader
 
-  -- Create descriptor pools
-  skyLUTPool <- DescriptorPool.managedSkyLUTComputeDescriptorPool device
+  -- Create descriptor pool
   cubemapPool <- DescriptorPool.managedCubemapComputeDescriptorPool device
 
   -- Allocate descriptor sets
-  skyLUTDescriptorSet <- DescriptorSet.allocateDescriptorSet device skyLUTPool [skyLUTLayout]
   radianceDescriptorSet <- DescriptorSet.allocateDescriptorSet device cubemapPool [cubemapLayout]
   irradianceDescriptorSet <- DescriptorSet.allocateDescriptorSet device cubemapPool [cubemapLayout]
 
@@ -572,14 +553,10 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
   (skyGenDataBuffer, skyGenDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [skyParams]
 
   -- Get image views
-  mSkyLutView <- Texture.textureImageView rm skyLutHandle
   mRadianceView <- Texture.textureImageView rm radianceHandle
   mIrradianceView <- Texture.textureImageView rm irradianceHandle
 
   -- Update descriptor sets
-  case mSkyLutView of
-    Just skyLutView -> DescriptorSet.updateSkyLUTComputeDescriptorSets device skyLUTDescriptorSet skyLutView skyGenDataBuffer
-    Nothing -> logInfo LogGeneral "warning: sky LUT view not found"
   case mRadianceView of
     Just radianceView -> DescriptorSet.updateCubemapComputeDescriptorSets device radianceDescriptorSet radianceView skyGenDataBuffer
     Nothing -> logInfo LogGeneral "warning: radiance view not found"
@@ -588,26 +565,11 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
     Nothing -> logInfo LogGeneral "warning: irradiance view not found"
 
   -- Get VkImage handles for transition
-  mSkyLutTex <- liftIO $ lookupTexture rm skyLutHandle
   mRadianceTex <- liftIO $ lookupTexture rm radianceHandle
   mIrradianceTex <- liftIO $ lookupTexture rm irradianceHandle
 
   -- Dispatch compute shaders
   CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
-    -- Sky LUT: 200x200 / 8x8 = 25x25 workgroups
-    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE skyLUTPipeline
-    liftIO $ Foreign.Marshal.Array.withArray [skyLUTDescriptorSet] $ \dsPtr ->
-      Vulkan.vkCmdBindDescriptorSets
-        textureCommandBuffer
-        Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
-        skyLUTPipelineLayout
-        0
-        1
-        dsPtr
-        0
-        Vulkan.vkNullPtr
-    CommandBuffer.cmdDispatch textureCommandBuffer 25 25 1
-
     -- Radiance: 512x512x6 / 8x8 = 64x64x6 workgroups
     liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE radiancePipeline
     liftIO $ Foreign.Marshal.Array.withArray [radianceDescriptorSet] $ \dsPtr ->
@@ -637,9 +599,6 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
     CommandBuffer.cmdDispatch textureCommandBuffer 8 8 6
 
     -- Transition storage images to SHADER_READ_ONLY_OPTIMAL
-    case mSkyLutTex of
-      Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 1
-      Nothing -> pure ()
     case mRadianceTex of
       Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 6
       Nothing -> pure ()

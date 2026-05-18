@@ -160,7 +160,8 @@ type CloudFrameData =
        "weatherCoverageScale" ':-> Float,
        "weatherTypeBias" ':-> Float,
        "stormIntensity" ':-> Float,
-       "weatherAnimSpeed" ':-> Float
+       "weatherAnimSpeed" ':-> Float,
+       "frameIndex" ':-> Float
      ]
 
 type CloudVertexDefs =
@@ -228,8 +229,6 @@ cloudFragment = shader do
   uv <- get @"in_uv"
   let (Vec2 uvX uvY) = uv
   rayDir <- get @"in_ray"
-  let dir = rayDir ^/ (norm rayDir + 0.0001)
-      ~(Vec3 dirX dirY dirZ) = dir
 
   frameData <- get @"cloud_frame_data"
   let camX = view @(Name "cameraX") frameData
@@ -248,9 +247,19 @@ cloudFragment = shader do
       weatherTypeBias = view @(Name "weatherTypeBias") frameData
       stormIntensity = view @(Name "stormIntensity") frameData
       weatherAnimSpeed = view @(Name "weatherAnimSpeed") frameData
+      frameIndex = view @(Name "frameIndex") frameData
 
-  -- Analytic sky evaluation (dynamic, replaces static env_map cubemap)
-  let cosThetaView = abs dirY
+  -- Sub-pixel jitter for TAA: golden ratio offset per frame
+  let goldenRatio = 0.6180339887
+      jitterX = fract (frameIndex * goldenRatio) * 0.0005
+      jitterY = fract (frameIndex * goldenRatio + 0.5) * 0.0005
+      -- Apply jitter to ray direction (not UV, since rayDir is varying)
+      jitteredRayDir = rayDir ^+^ Vec3 jitterX jitterY 0.0
+      dir = jitteredRayDir ^/ (norm jitteredRayDir + 0.0001)
+      ~(Vec3 dirX dirY dirZ) = dir
+
+      -- Analytic sky evaluation
+      cosThetaView = abs dirY
       cosGamma = dir ^.^ sunDir
       cosGammaClamped = clamp cosGamma (-1.0) 1.0
 
@@ -306,16 +315,25 @@ cloudFragment = shader do
       tNear = max 0.0 (min tToBottom tToTop)
       tFar = max 0.0 (max tToBottom tToTop)
       totalRayLength = min 5000.0 (tFar - tNear)
-      -- LOD: fewer steps for long rays (grazing/horizon), more for short (overhead)
-      -- 48 steps min, 96 max. Step size ~30-50 units regardless of ray length.
-      stepCountF = max 48.0 (min 96.0 (totalRayLength / 40.0))
-      adaptiveStepSize = totalRayLength / stepCountF
-      -- Light march LOD: fewer samples for distant rays
+      -- Geometric step growth: start small near camera, grow exponentially
+      baseStepSize = max 30.0 (min 100.0 (totalRayLength / 60.0))
+      growthRate = 1.01
+      maxStepSize = 300.0
+      emptySkipFactor = 3.0
+      maxEmptySkip = 4.0
+      stepCountF = 200.0 :: Code Float
+      -- Detail LOD: fade detail channels beyond distance
+      detailFadeStart = 500.0
+      detailFadeEnd = 2500.0
+      -- Noise mip LOD: sample coarser mips at distance
+      lodScale = 400.0
+      maxNoiseLod = 4.0
+      -- Light march: fixed small steps toward sun
       lightStepCount = if totalRayLength > 2500.0 then 2.0 else if totalRayLength > 1200.0 then 3.0 else 4.0
       lightStepSize = min 120.0 (cloudThickness / lightStepCount)
   -- Sample blue noise for dithered ray entry
   ~(Vec4 blueR _ _ _) <- use @(ImageTexel "blue_noise") NilOps (Vec2 uvX uvY)
-  let ditherOffset = blueR * adaptiveStepSize
+  let ditherOffset = blueR * baseStepSize
       tEntry = tNear + ditherOffset
       entryPos = Vec3 (camX + dirX * tEntry) (camY + dirY * tEntry) (camZ + dirZ * tEntry)
 
@@ -332,11 +350,14 @@ cloudFragment = shader do
 
   -- Dynamic ray march: mutable accumulators
   _ <- def @"step" @RW @Int32 0
-  _ <- def @"rayPos" @RW @(V 3 Float) (entryPos ^+^ dir ^* (adaptiveStepSize * 0.5))
+  _ <- def @"rayPos" @RW @(V 3 Float) (entryPos ^+^ dir ^* (baseStepSize * 0.5))
   _ <- def @"transmittance" @RW @Float 1.0
   _ <- def @"accR" @RW @Float 0.0
   _ <- def @"accG" @RW @Float 0.0
   _ <- def @"accB" @RW @Float 0.0
+  _ <- def @"currentStepSize" @RW @Float baseStepSize
+  _ <- def @"distFromCam" @RW @Float tEntry
+  _ <- def @"emptySkipMult" @RW @Float 1.0
 
   let cosTheta = dir ^.^ sunDir
       hgPhase g =
@@ -355,9 +376,19 @@ cloudFragment = shader do
     when (t < 0.01) do
       break @1
 
+    css <- get @"currentStepSize"
+    esm <- get @"emptySkipMult"
+    dist <- get @"distFromCam"
+    let stepSize = min maxStepSize (css * esm)
+
     -- Per-step irrational jitter to break deterministic phase alignment
     let stepNoise = fract (blueR + fromIntegral s * 0.618034)
-        jitteredStep = adaptiveStepSize * (1.0 + 0.15 * (stepNoise - 0.5))
+        jitteredStep = stepSize * (1.0 + 0.15 * (stepNoise - 0.5))
+
+    -- Distance-based detail fade and noise LOD
+    let detailFade = 1.0 - smoothstep detailFadeStart detailFadeEnd dist
+        noiseLod = clamp (dist / lodScale) 0.0 maxNoiseLod
+        effectiveDetail = cloudDetail * detailFade
 
     rp <- get @"rayPos"
     let ~(Vec3 px py pz) = rp
@@ -379,7 +410,7 @@ cloudFragment = shader do
         sy = fract ((py + wy) * noiseScale)
         sz = fract ((pz + wz) * noiseScale - windOffsetZ)
 
-    ~(Vec4 nr ng nb na) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 sx sy sz)
+    ~(Vec4 nr ng nb na) <- use @(ImageTexel "cloud_noise") (LOD noiseLod NilOps) (Vec3 sx sy sz)
 
     -- Sample weather map for spatial cloud variation
     let weatherScale = 0.00005
@@ -391,32 +422,39 @@ cloudFragment = shader do
     let combinedCoverage = clamp (weatherR * cloudCoverage * weatherCoverageScale) 0.0 1.0
         cloudType = clamp (weatherG + weatherTypeBias) 0.0 1.0
         stormDarkness = weatherB * stormIntensity
-        hMin = mix 0.1 0.0 cloudType
-        hMax = mix 0.4 1.0 cloudType
         h = (curvedY - cloudBottom) / cloudThickness
-        heightMask = smoothstep hMin (hMin + 0.05) h * (1.0 - smoothstep (hMax - 0.1) hMax h)
-        density = max 0 (nr * (1.0 - cloudDetail * (ng * 0.3 + nb * 0.15 + na * 0.075)) - (1.0 - combinedCoverage)) * heightMask
+        -- Dynamic cloud height: taller clouds with higher coverage
+        heightScale = max 0.3 (combinedCoverage ** 0.25)
+        hPct = min 1.0 (h / heightScale)
+        -- 4-layer height profile
+        baseHeight = mix 0.15 0.25 cloudType
+        baseCurve = mix 0.4 0.8 cloudType
+        topHeight = mix 0.65 0.85 cloudType
+        bottomFunnel = (smoothstep 0.0 baseHeight hPct) ** baseCurve
+        topShape = 1.0 - smoothstep topHeight 1.0 hPct
+        baseFadeIn = smoothstep 0.0 0.08 hPct
+        topFadeOut = 1.0 - smoothstep 0.92 1.0 hPct
+        heightProfile = bottomFunnel * topShape * baseFadeIn * topFadeOut
+        -- Smart remap: coverage becomes exact control
+        shapedNoise = nr * (1.0 - effectiveDetail * (ng * 0.3 + nb * 0.15 + na * 0.075))
+        remappedNoise = if combinedCoverage > 0.001
+                          then clamp ((shapedNoise - (1.0 - combinedCoverage)) / combinedCoverage) 0.0 1.0
+                          else 0.0
+        density = remappedNoise * heightProfile
 
-        -- Height-graded ambient with day-night cycle and storm modulation
-        -- sunDirY encodes elevation: 1.0 = zenith, 0.0 = horizon, <0 = below horizon
-        dayFactor = smoothstep (-0.1) 0.3 sunDirY
-        nightFactor = smoothstep (-0.2) 0.0 sunDirY
-        -- Noon ambient
-        noonGround = Vec3 0.35 0.30 0.25
-        noonSky = Vec3 0.50 0.60 0.80
-        -- Sunset ambient
-        sunsetGround = Vec3 0.50 0.25 0.10
-        sunsetSky = Vec3 0.40 0.25 0.35
-        -- Night ambient (moonlight)
-        nightGround = Vec3 0.02 0.02 0.04
-        nightSky = Vec3 0.03 0.04 0.08
-        -- Interpolate through night -> sunset -> noon
-        groundAmbient = (nightGround ^* (1.0 - nightFactor) ^+^ sunsetGround ^* nightFactor) ^* (1.0 - dayFactor) ^+^ noonGround ^* dayFactor
-        skyAmbient = (nightSky ^* (1.0 - nightFactor) ^+^ sunsetSky ^* nightFactor) ^* (1.0 - dayFactor) ^+^ noonSky ^* dayFactor
-        ambientStrength = 0.18 * max 0.05 dayFactor
-        rawAmbientTerm = (groundAmbient ^* (1.0 - h) ^+^ skyAmbient ^* h) ^* ambientStrength
+    -- Ambient from sky cubemap: sample env_map for physically consistent lighting
+    ~(Vec4 zenithR zenithG zenithB _) <- use @(ImageTexel "env_map") NilOps (Vec3 (0.0 :: Code Float) (1.0 :: Code Float) (0.0 :: Code Float))
+    ~(Vec4 nadirR nadirG nadirB _) <- use @(ImageTexel "env_map") NilOps (Vec3 (0.0 :: Code Float) (-1.0 :: Code Float) (0.0 :: Code Float))
+    let skyAmbientCubemap = Vec3 zenithR zenithG zenithB
+        groundAmbientCubemap = Vec3 nadirR nadirG nadirB
+        -- Height-graded ambient: ground at bottom, sky at top
+        ambientStrength = 0.12 * max 0.05 (smoothstep (-0.1) 0.3 sunDirY)
+        rawAmbientTerm = (groundAmbientCubemap ^* (1.0 - hPct) ^+^ skyAmbientCubemap ^* hPct) ^* ambientStrength
         -- Darken ambient in storm regions
-        ambientTerm = rawAmbientTerm ^* (1.0 - stormDarkness * 0.6)
+        stormAmbient = rawAmbientTerm ^* (1.0 - stormDarkness * 0.6)
+
+    -- Empty-space skip: when density is near zero, multiply next step by skip factor
+    let newEmptySkipMult = if density <= 0.001 then min maxEmptySkip (esm * emptySkipFactor) else 1.0
 
     -- Nested light march toward sun for self-shadowing
     -- Reuse combinedCoverage from primary step (weather varies slowly)
@@ -440,13 +478,25 @@ cloudFragment = shader do
           lsx = fract ((lpx + lwx) * noiseScale - windOffsetX)
           lsy = fract ((lpy + lwy) * noiseScale)
           lsz = fract ((lpz + lwz) * noiseScale - windOffsetZ)
+          -- Light position distance from camera for LOD
+          ldistFromCam = sqrt ((lpx - camX) * (lpx - camX) + (lpy - camY) * (lpy - camY) + (lpz - camZ) * (lpz - camZ))
+          lnoiseLod = clamp (ldistFromCam / lodScale) 0.0 maxNoiseLod
 
-      ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 lsx lsy lsz)
+      ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") (LOD lnoiseLod NilOps) (Vec3 lsx lsy lsz)
 
       -- Reuse primary step coverage (weather map changes slowly over light march distance)
       let lh = (lcurvedY - cloudBottom) / cloudThickness
-          lheightMask = smoothstep hMin (hMin + 0.05) lh * (1.0 - smoothstep (hMax - 0.1) hMax lh)
-          ld = max 0 (lnr * (1.0 - cloudDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075)) - (1.0 - combinedCoverage)) * lheightMask
+          lhPct = min 1.0 (lh / heightScale)
+          lbottomFunnel = (smoothstep 0.0 baseHeight lhPct) ** baseCurve
+          ltopShape = 1.0 - smoothstep topHeight 1.0 lhPct
+          lbaseFadeIn = smoothstep 0.0 0.08 lhPct
+          ltopFadeOut = 1.0 - smoothstep 0.92 1.0 lhPct
+          lheightProfile = lbottomFunnel * ltopShape * lbaseFadeIn * ltopFadeOut
+          lshapedNoise = lnr * (1.0 - effectiveDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075))
+          lremappedNoise = if combinedCoverage > 0.001
+                             then clamp ((lshapedNoise - (1.0 - combinedCoverage)) / combinedCoverage) 0.0 1.0
+                             else 0.0
+          ld = lremappedNoise * lheightProfile
 
       modify @"lightDensity" (+ (ld * lightStepSize))
       put @"lightPos" (lp ^+^ sunDir ^* lightStepSize)
@@ -458,8 +508,16 @@ cloudFragment = shader do
         ms1 = exp (-d * 0.25) * 0.5 -- secondary scatter
         ms2 = exp (-d * 0.05) * 0.25 -- tertiary scatter
         lightT_d = ms0 + ms1 + ms2
+        -- Powder effect: brightens cloud edges facing sun
+        powderTerm = 1.0 - exp (-density * 2.0)
+        powderBoost = mix 1.0 (powderTerm * 2.0 + 1.0) 0.3
+        -- Skylight occlusion: reduce ambient in dense self-shadowed regions
+        skylightOcclusion = exp (-finalLightDensity * 0.25)
+        -- Internal scattering approximation: boost ambient in dense interiors
+        internalScatter = 1.0 + density * 0.5
+        ambientTerm = (stormAmbient ^* skylightOcclusion) ^* internalScatter
 
-    let directLight = cloudBase ^* (lightT_d * phase * (1.0 - stormDarkness * 0.4))
+    let directLight = cloudBase ^* (lightT_d * phase * powderBoost * (1.0 - stormDarkness * 0.4))
         s_scatter = (directLight ^+^ ambientTerm) ^* (density * jitteredStep)
         t_new = exp (-density * jitteredStep)
         ~(Vec3 srx sry srz) = s_scatter
@@ -469,6 +527,10 @@ cloudFragment = shader do
     modify @"accB" (+ (srz * t))
     put @"transmittance" (t * t_new)
     put @"rayPos" (rp ^+^ dir ^* jitteredStep)
+    -- Geometric step growth: increase base step size for next iteration
+    put @"currentStepSize" (css * growthRate)
+    put @"emptySkipMult" newEmptySkipMult
+    put @"distFromCam" (dist + jitteredStep)
     modify @"step" (+ 1)
 
   finalTransmittance <- get @"transmittance"
@@ -525,16 +587,24 @@ cloudFragment = shader do
 
       histUV = Vec2 prevU prevV
 
-  ~(Vec4 histR_h histG_h histB_h _) <- use @(ImageTexel "cloud_history") NilOps histUV
+  ~(Vec4 histR_h histG_h histB_h histA_h) <- use @(ImageTexel "cloud_history") NilOps histUV
   let histR = convert histR_h
       histG = convert histG_h
       histB = convert histB_h
+      histA = convert histA_h
       rayHitCloud = step 0.1 totalRayLength
       maxLum = max cloudSkyR (max cloudSkyG cloudSkyB)
       brightFade = 1.0 - smoothstep 5.0 30.0 maxLum
-      reprojBlend = rayHitCloud * 0.25 * blendFactor * validReproj * brightFade
+      -- Distance-dependent blend: less temporal blend near camera (reduces swimming)
+      distFade = smoothstep 200.0 1500.0 totalRayLength
+      baseBlend = 0.3 * blendFactor * distFade + 0.2 * blendFactor * (1.0 - distFade)
+      -- Alpha-diff ghost suppression: high alpha difference = reject history
+      alphaDiff = abs (cloudOpacity - histA)
+      ghostSuppress = 1.0 - smoothstep 0.05 0.3 alphaDiff
+      reprojBlend = rayHitCloud * baseBlend * validReproj * brightFade * ghostSuppress
       accR = reprojBlend * histR + (1.0 - reprojBlend) * cloudSkyR
       accG = reprojBlend * histG + (1.0 - reprojBlend) * cloudSkyG
       accB = reprojBlend * histB + (1.0 - reprojBlend) * cloudSkyB
+      cloudOpacity = 1.0 - finalTransmittance
 
-  put @"out_colour" (Vec4 accR accG accB 1.0)
+  put @"out_colour" (Vec4 accR accG accB cloudOpacity)
