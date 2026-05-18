@@ -97,10 +97,11 @@ library
                           Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen,
                           Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen,
                           Graphics.Haskan.Vulkan.Shaders.Compute.WeatherMapGen
-                        Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer
-                         Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting
-                         Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural
-                         Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds
+                         Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer,
+                         Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting,
+                         Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural,
+                         Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds,
+                         Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays
                          Graphics.Haskan.Vulkan.Shaders.Wireframe
                        Graphics.Haskan.Vulkan.Semaphore
                        Graphics.Haskan.Vulkan.Swapchain

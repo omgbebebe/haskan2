@@ -603,7 +603,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
 
   compileAllShaders
 
-  (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, lightProceduralFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader) <-
+  (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, lightProceduralFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader, _godrayVertShader, _godrayFragShader) <-
     createShaderModules device
 
   descriptorSetLayout <- DescriptorSetLayout.managedDescriptorSetLayout device
