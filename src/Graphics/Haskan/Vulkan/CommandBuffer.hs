@@ -310,6 +310,12 @@ mipLayerTransition commandBuffer image oldLayout newLayout baseMip levelCount la
               Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT,
               Vulkan.VK_ACCESS_TRANSFER_WRITE_BIT
             )
+          (Vulkan.VK_IMAGE_LAYOUT_UNDEFINED, Vulkan.VK_IMAGE_LAYOUT_GENERAL) ->
+            ( Vulkan.VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+              Vulkan.VK_ZERO_FLAGS,
+              Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+              Vulkan.VK_ACCESS_SHADER_WRITE_BIT
+            )
           (Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL) ->
             ( Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT,
               Vulkan.VK_ACCESS_TRANSFER_WRITE_BIT,
