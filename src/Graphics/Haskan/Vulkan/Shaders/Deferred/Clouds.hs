@@ -456,53 +456,41 @@ cloudFragment = shader do
     -- Empty-space skip: when density is near zero, multiply next step by skip factor
     let newEmptySkipMult = if density <= 0.001 then min maxEmptySkip (esm * emptySkipFactor) else 1.0
 
-    -- Nested light march toward sun for self-shadowing
-    -- Reuse combinedCoverage from primary step (weather varies slowly)
-    _ <- def @"lightStep" @RW @Int32 0
-    _ <- def @"lightPos" @RW @(V 3 Float) rp
-    _ <- def @"lightDensity" @RW @Float 0.0
+    -- Single light sample for self-shadowing (replaces multi-step light march)
+    -- Sample at midpoint of light path toward sun
+    let lightMidPos = rp ^+^ sunDir ^* (lightStepSize * lightStepCount * 0.5)
+        ~(Vec3 lpx lpy lpz) = lightMidPos
+        ldistHorizSq = (lpx - camX) * (lpx - camX) + (lpz - camZ) * (lpz - camZ)
+        lcurvedY = lpy - (ldistHorizSq / (2.0 * 6371000.0))
+        -- Simplified single-octave warp
+        lwx = sin (lpy * warpFreq1 + lpz * warpFreq1 * 0.7) * warpAmp1
+        lwy = cos (lpx * warpFreq1 + lpz * warpFreq1 * 0.5) * warpAmp1
+        lwz = sin (lpz * warpFreq1 * 0.7 + lpx * warpFreq1 * 0.6) * warpAmp1
+        lsx = fract ((lpx + lwx) * noiseScale - windOffsetX)
+        lsy = fract ((lpy + lwy) * noiseScale)
+        lsz = fract ((lpz + lwz) * noiseScale - windOffsetZ)
+        -- Light position distance from camera for LOD
+        ldistFromCam = sqrt ((lpx - camX) * (lpx - camX) + (lpy - camY) * (lpy - camY) + (lpz - camZ) * (lpz - camZ))
+        lnoiseLod = clamp (ldistFromCam / lodScale) 0.0 maxNoiseLod
 
-    loop do
-      ls <- get @"lightStep"
-      when (fromIntegral ls >= lightStepCount) do
-        break @1
+    ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") (LOD lnoiseLod NilOps) (Vec3 lsx lsy lsz)
 
-      lp <- get @"lightPos"
-      let ~(Vec3 lpx lpy lpz) = lp
-          ldistHorizSq = (lpx - camX) * (lpx - camX) + (lpz - camZ) * (lpz - camZ)
-          lcurvedY = lpy - (ldistHorizSq / (2.0 * 6371000.0))
-          -- Simplified single-octave warp for light march (cheaper)
-          lwx = sin (lpy * warpFreq1 + lpz * warpFreq1 * 0.7) * warpAmp1
-          lwy = cos (lpx * warpFreq1 + lpz * warpFreq1 * 0.5) * warpAmp1
-          lwz = sin (lpz * warpFreq1 * 0.7 + lpx * warpFreq1 * 0.6) * warpAmp1
-          lsx = fract ((lpx + lwx) * noiseScale - windOffsetX)
-          lsy = fract ((lpy + lwy) * noiseScale)
-          lsz = fract ((lpz + lwz) * noiseScale - windOffsetZ)
-          -- Light position distance from camera for LOD
-          ldistFromCam = sqrt ((lpx - camX) * (lpx - camX) + (lpy - camY) * (lpy - camY) + (lpz - camZ) * (lpz - camZ))
-          lnoiseLod = clamp (ldistFromCam / lodScale) 0.0 maxNoiseLod
+    -- Reuse primary step coverage (weather map changes slowly)
+    let lh = (lcurvedY - cloudBottom) / cloudThickness
+        lhPct = min 1.0 (lh / heightScale)
+        lbottomFunnel = (smoothstep 0.0 baseHeight lhPct) ** baseCurve
+        ltopShape = 1.0 - smoothstep topHeight 1.0 lhPct
+        lbaseFadeIn = smoothstep 0.0 0.08 lhPct
+        ltopFadeOut = 1.0 - smoothstep 0.92 1.0 lhPct
+        lheightProfile = lbottomFunnel * ltopShape * lbaseFadeIn * ltopFadeOut
+        lshapedNoise = lnr * (1.0 - effectiveDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075))
+        lremappedNoise = if combinedCoverage > 0.001
+                           then clamp ((lshapedNoise - (1.0 - combinedCoverage)) / combinedCoverage) 0.0 1.0
+                           else 0.0
+        ld = lremappedNoise * lheightProfile
+        -- Approximate integral over light path with single sample
+        finalLightDensity = ld * lightStepCount * lightStepSize
 
-      ~(Vec4 lnr lng lnb lna) <- use @(ImageTexel "cloud_noise") (LOD lnoiseLod NilOps) (Vec3 lsx lsy lsz)
-
-      -- Reuse primary step coverage (weather map changes slowly over light march distance)
-      let lh = (lcurvedY - cloudBottom) / cloudThickness
-          lhPct = min 1.0 (lh / heightScale)
-          lbottomFunnel = (smoothstep 0.0 baseHeight lhPct) ** baseCurve
-          ltopShape = 1.0 - smoothstep topHeight 1.0 lhPct
-          lbaseFadeIn = smoothstep 0.0 0.08 lhPct
-          ltopFadeOut = 1.0 - smoothstep 0.92 1.0 lhPct
-          lheightProfile = lbottomFunnel * ltopShape * lbaseFadeIn * ltopFadeOut
-          lshapedNoise = lnr * (1.0 - effectiveDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075))
-          lremappedNoise = if combinedCoverage > 0.001
-                             then clamp ((lshapedNoise - (1.0 - combinedCoverage)) / combinedCoverage) 0.0 1.0
-                             else 0.0
-          ld = lremappedNoise * lheightProfile
-
-      modify @"lightDensity" (+ (ld * lightStepSize))
-      put @"lightPos" (lp ^+^ sunDir ^* lightStepSize)
-      modify @"lightStep" (+ 1)
-
-    finalLightDensity <- get @"lightDensity"
     let d = finalLightDensity * cloudAbsorption
         ms0 = exp (-d * 1.0) -- primary scatter
         ms1 = exp (-d * 0.25) * 0.5 -- secondary scatter
