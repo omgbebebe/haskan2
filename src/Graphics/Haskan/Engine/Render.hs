@@ -81,6 +81,7 @@ import Graphics.Haskan.Engine.Render.Internal.Setup
     SceneLoadResult (..),
     compileAllShaders,
     createShaderModules,
+    dispatchCloudNoiseGeneration,
     dispatchProceduralSkyGeneration,
     loadIBLTextures,
     loadScene,
@@ -201,6 +202,10 @@ data RenderEnv = RenderEnv
     reTvWeatherAnimSpeed :: !(STM.TVar Float),
     reIBLTextures :: !IBLTextures,
     reTvSkyNeedsRegeneration :: !(STM.TVar Bool),
+    reTvNoiseNeedsRegeneration :: !(STM.TVar Bool),
+    reTvNoiseSeed :: !(STM.TVar Float),
+    reTvNoiseFrequency :: !(STM.TVar Float),
+    reTvNoisePersistence :: !(STM.TVar Float),
     reTvPhysicsBodies :: !(STM.TVar (IntMap BodyState)),
     reTvPhysicsBodyToEntity :: !(STM.TVar (IntMap EntityId)),
     reTvPhysicsAutoStep :: !(STM.TVar Bool),
@@ -345,6 +350,29 @@ runFrame frameNumber = do
       sunIntensity
     liftIO $ STM.atomically $ STM.writeTVar reTvSkyNeedsRegeneration False
 
+  -- Check if cloud noise needs regeneration (ImGui trigger)
+  needsNoiseRegen <- liftIO $ STM.readTVarIO reTvNoiseNeedsRegeneration
+  when needsNoiseRegen $ do
+    logInfo LogRender "cloud noise regeneration requested"
+    noiseSeedVal <- liftIO $ STM.readTVarIO reTvNoiseSeed
+    noiseFreqVal <- liftIO $ STM.readTVarIO reTvNoiseFrequency
+    noisePersistVal <- liftIO $ STM.readTVarIO reTvNoisePersistence
+    let IBLTextures {..} = reIBLTextures
+        ctx = reContext
+    -- Create a one-time command buffer and dispatch noise compute shaders
+    regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
+    liftIO $ runManaged $ dispatchCloudNoiseGeneration
+      (device ctx)
+      rePhysicalDevice
+      (graphicsQueueHandler ctx)
+      regenCmdBuf
+      reResourceManager
+      iblRadianceCubemap
+      noiseSeedVal
+      noiseFreqVal
+      noisePersistVal
+    liftIO $ STM.atomically $ STM.writeTVar reTvNoiseNeedsRegeneration False
+
   lights' <- readLights
   let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
   uploadStorageBuffer reLightSsboMemory 0 lightsToUpload
@@ -416,7 +444,10 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
                       Backend.cpWindDirection = reTvWindDirection,
                       Backend.cpWindSpeed = reTvWindSpeed,
                       Backend.cpDetail = reTvCloudDetail,
-                      Backend.cpAbsorption = reTvCloudAbsorption
+                      Backend.cpAbsorption = reTvCloudAbsorption,
+                      Backend.cpNoiseSeed = reTvNoiseSeed,
+                      Backend.cpNoiseFrequency = reTvNoiseFrequency,
+                      Backend.cpNoisePersistence = reTvNoisePersistence
                     },
                 Backend.dpeWeather =
                   Backend.WeatherPanel
@@ -433,7 +464,8 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
                 Backend.dpeDebugMode = reTvDebugMode,
                 Backend.dpeWireframe = reTvWireframe,
                 Backend.dpePhysicsAutoStep = reTvPhysicsAutoStep,
-                Backend.dpePhysicsTimeScale = reTvPhysicsTimeScale
+                Backend.dpePhysicsTimeScale = reTvPhysicsTimeScale,
+                Backend.dpeNoiseNeedsRegeneration = reTvNoiseNeedsRegeneration
               }
       Backend.buildImGuiFrame (runReaderT Backend.buildDebugPanel panelEnv)
     Nothing -> pure Nothing
@@ -921,9 +953,13 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                         reTvWeatherTypeBias = tvWeatherTypeBias,
                         reTvStormIntensity = tvStormIntensity,
                         reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
-                        reIBLTextures = iblTextures,
-                        reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
-                        reTvPhysicsBodies = physicsBodies gameState,
+                         reIBLTextures = iblTextures,
+                         reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
+                         reTvNoiseNeedsRegeneration = noiseNeedsRegeneration gameState,
+                         reTvNoiseSeed = noiseSeed gameState,
+                         reTvNoiseFrequency = noiseFrequency gameState,
+                         reTvNoisePersistence = noisePersistence gameState,
+                         reTvPhysicsBodies = physicsBodies gameState,
                         reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,
                         reTvPhysicsAutoStep = physicsAutoStep gameState,
                         reTvPhysicsTimeScale = physicsTimeScale gameState,

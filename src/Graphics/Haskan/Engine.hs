@@ -139,6 +139,10 @@ mainLoop meshName EngineConfig {..} = do
   tvOrbitalCamera <- liftIO $ STM.newTVarIO initialCam
   tvFlyCamera <- liftIO $ STM.newTVarIO (Camera.Fly defaultFlyCamera)
   tvSkyNeedsRegeneration <- liftIO $ STM.newTVarIO False
+  tvNoiseNeedsRegeneration <- liftIO $ STM.newTVarIO False
+  tvNoiseSeed <- liftIO $ STM.newTVarIO 42.0
+  tvNoiseFrequency <- liftIO $ STM.newTVarIO 2.0
+  tvNoisePersistence <- liftIO $ STM.newTVarIO 0.5
   tvLastSunDirection <- liftIO $ STM.newTVarIO Nothing
   tvPhysicsBodies <- liftIO $ STM.newTVarIO IntMap.empty
   tvPhysicsTimeScale <- liftIO $ STM.newTVarIO 1.0
@@ -183,6 +187,10 @@ mainLoop meshName EngineConfig {..} = do
           tvOrbitalCamera
           tvFlyCamera
           tvSkyNeedsRegeneration
+          tvNoiseNeedsRegeneration
+          tvNoiseSeed
+          tvNoiseFrequency
+          tvNoisePersistence
           tvLastSunDirection
           tvPhysicsBodies
           tvPhysicsTimeScale

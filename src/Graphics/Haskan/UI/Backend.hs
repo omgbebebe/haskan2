@@ -263,7 +263,10 @@ data CloudPanel = CloudPanel
     cpWindDirection :: !(STM.TVar Float),
     cpWindSpeed :: !(STM.TVar Float),
     cpDetail :: !(STM.TVar Float),
-    cpAbsorption :: !(STM.TVar Float)
+    cpAbsorption :: !(STM.TVar Float),
+    cpNoiseSeed :: !(STM.TVar Float),
+    cpNoiseFrequency :: !(STM.TVar Float),
+    cpNoisePersistence :: !(STM.TVar Float)
   }
 
 -- | Parameters for the Weather section of the debug panel.
@@ -287,7 +290,8 @@ data DebugPanelEnv = DebugPanelEnv
     dpeDebugMode :: !(STM.TVar Word32),
     dpeWireframe :: !(STM.TVar Bool),
     dpePhysicsAutoStep :: !(STM.TVar Bool),
-    dpePhysicsTimeScale :: !(STM.TVar Float)
+    dpePhysicsTimeScale :: !(STM.TVar Float),
+    dpeNoiseNeedsRegeneration :: !(STM.TVar Bool)
   }
 
 -- | Build the debug panel using ReaderT for clean parameter access.
@@ -302,6 +306,7 @@ buildDebugPanel = do
       tvTimeSpeed = dpeTimeSpeed env
       tvPhysicsAutoStep = dpePhysicsAutoStep env
       tvPhysicsTimeScale = dpePhysicsTimeScale env
+      tvNoiseNeedsRegeneration = dpeNoiseNeedsRegeneration env
       frameStatsRef = dpeFrameStatsRef env
       cam = dpeCamera env
   liftIO $ withCString "Debug Panels" $ \windowTitle -> do
@@ -342,6 +347,13 @@ buildDebugPanel = do
         withCString "Wind Speed" $ \label -> sliderFloatTVar label 0.0 100.0 cpWindSpeed
         withCString "Detail" $ \label -> sliderFloatTVar label 0.0 1.0 cpDetail
         withCString "Absorption" $ \label -> sliderFloatTVar label 0.0 10.0 cpAbsorption
+        ImGui.Raw.separator
+        withCString "Noise Seed" $ \label -> sliderFloatTVar label 0.0 1000.0 cpNoiseSeed
+        withCString "Noise Frequency" $ \label -> sliderFloatTVar label 0.1 8.0 cpNoiseFrequency
+        withCString "Noise Persistence" $ \label -> sliderFloatTVar label 0.1 0.9 cpNoisePersistence
+        withCString "Regenerate Noise" $ \label -> do
+          clicked <- ImGui.Raw.button label
+          when clicked $ liftIO $ STM.atomically $ STM.writeTVar tvNoiseNeedsRegeneration True
 
     -- Weather section
     withCString "Weather" $ \weatherLabel -> do

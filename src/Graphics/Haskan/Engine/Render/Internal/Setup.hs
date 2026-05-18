@@ -232,7 +232,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       -- Cloud textures (shared)
       logInfo LogGeneral "creating 3D cloud noise storage image..."
       cloudNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 256 256 256 5 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
-      dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudNoiseHandle
+      dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudNoiseHandle 42.0 2.0 0.5
       cloudNoiseView <- Texture.textureImageView rm cloudNoiseHandle
       logInfo LogGeneral "3D cloud noise texture generated"
 
@@ -302,7 +302,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
 
       logInfo LogGeneral "creating 3D cloud noise storage image..."
       cloudNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 256 256 256 5 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
-      dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudNoiseHandle
+      dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudNoiseHandle 42.0 2.0 0.5
       cloudNoiseView <- Texture.textureImageView rm cloudNoiseHandle
       logInfo LogGeneral "3D cloud noise texture generated"
 
@@ -646,8 +646,11 @@ dispatchCloudNoiseGeneration ::
   Vulkan.VkCommandBuffer ->
   ResourceManager ->
   TextureHandle -> -- 3D noise storage image
+  Float -> -- seed
+  Float -> -- frequency
+  Float -> -- persistence
   m ()
-dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm noiseHandle = do
+dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm noiseHandle seed freq persist = do
   logInfo LogGeneral "dispatching cloud noise compute shader..."
 
   -- Load compute shader module
@@ -671,9 +674,9 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
   -- Create UBO with noise params
   let noiseParams =
         NoiseGenUniforms
-          { ngSeed = 42.0,
-            ngFrequency = 2.0,
-            ngPersistence = 0.5,
+          { ngSeed = seed,
+            ngFrequency = freq,
+            ngPersistence = persist,
             ngZSlice = 0.0
           }
   (noiseParamsBuffer, _noiseParamsMemory) <- Buffer.managedUniformBuffer physicalDevice device [noiseParams]
