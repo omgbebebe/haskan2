@@ -252,14 +252,14 @@ type FragmentDefs =
        ':-> Texture2D
               '[Binding 3, DescriptorSet 0]
               (RGBA8 UNorm),
-     "env_map"
-       ':-> TextureCube
-              '[Binding 4, DescriptorSet 0]
-              (RGBA8 UNorm),
-     "irradiance_map"
-       ':-> TextureCube
-              '[Binding 5, DescriptorSet 0]
-              (RGBA8 UNorm),
+      "env_map"
+        ':-> TextureCube
+               '[Binding 4, DescriptorSet 0]
+               (RGBA16 F),
+      "irradiance_map"
+        ':-> TextureCube
+               '[Binding 5, DescriptorSet 0]
+               (RGBA16 F),
      "brdf_lut"
        ':-> Texture2D
               '[Binding 6, DescriptorSet 0]
@@ -339,9 +339,9 @@ fragment = shader do
   -- Sample cloud result texture (rendered in separate pass)
   ~(Vec4 cloudSkyR_h cloudSkyG_h cloudSkyB_h _) <- use @(ImageTexel "cloud_result") NilOps uv
 
-  let cloudSkyR = convert cloudSkyR_h
-      cloudSkyG = convert cloudSkyG_h
-      cloudSkyB = convert cloudSkyB_h
+  let cloudSkyR = cloudSkyR_h
+      cloudSkyG = cloudSkyG_h
+      cloudSkyB = cloudSkyB_h
 
       dbgCloud = cloudSkyR * 0.5
       dbgHeight = cloudSkyG * 0.5
@@ -352,20 +352,20 @@ fragment = shader do
       sunScreenY = view @(Name "sunScreenY") cameraPos
       toSunX = sunScreenX - uvX
       toSunY = sunScreenY - uvY
-      sampleX1 = uvX + toSunX * 0.25
-      sampleY1 = uvY + toSunY * 0.25
-      sampleX2 = uvX + toSunX * 0.5
-      sampleY2 = uvY + toSunY * 0.5
-      sampleX3 = uvX + toSunX * 0.75
-      sampleY3 = uvY + toSunY * 0.75
+      sampleX1 = clamp (uvX + toSunX * 0.25) 0.0 1.0
+      sampleY1 = clamp (uvY + toSunY * 0.25) 0.0 1.0
+      sampleX2 = clamp (uvX + toSunX * 0.5) 0.0 1.0
+      sampleY2 = clamp (uvY + toSunY * 0.5) 0.0 1.0
+      sampleX3 = clamp (uvX + toSunX * 0.75) 0.0 1.0
+      sampleY3 = clamp (uvY + toSunY * 0.75) 0.0 1.0
 
   ~(Vec4 _ _ _ occ1) <- use @(ImageTexel "cloud_result") NilOps (Vec2 sampleX1 sampleY1)
   ~(Vec4 _ _ _ occ2) <- use @(ImageTexel "cloud_result") NilOps (Vec2 sampleX2 sampleY2)
   ~(Vec4 _ _ _ occ3) <- use @(ImageTexel "cloud_result") NilOps (Vec2 sampleX3 sampleY3)
 
-  let occ1f = convert occ1
-      occ2f = convert occ2
-      occ3f = convert occ3
+  let occ1f = occ1
+      occ2f = occ2
+      occ3f = occ3
       godRayAccum = occ1f * 0.5 + occ2f * 0.3 + occ3f * 0.2
       godRayStrength = godRayAccum * 0.15
       godRayR = 1.0 * godRayStrength

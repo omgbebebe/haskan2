@@ -249,14 +249,14 @@ type FragmentDefs =
        ':-> Texture2D
               '[Binding 3, DescriptorSet 0]
               (RGBA8 UNorm),
-     "env_map"
-       ':-> TextureCube
-              '[Binding 4, DescriptorSet 0]
-              (RGBA8 UNorm),
-     "irradiance_map"
-       ':-> TextureCube
-              '[Binding 5, DescriptorSet 0]
-              (RGBA8 UNorm),
+      "env_map"
+        ':-> TextureCube
+               '[Binding 4, DescriptorSet 0]
+               (RGBA16 F),
+      "irradiance_map"
+        ':-> TextureCube
+               '[Binding 5, DescriptorSet 0]
+               (RGBA16 F),
      "brdf_lut"
        ':-> Texture2D
               '[Binding 6, DescriptorSet 0]
@@ -339,9 +339,9 @@ fragment = shader do
   -- Sample cloud result texture (rendered in separate pass)
   ~(Vec4 cloudSkyR_h cloudSkyG_h cloudSkyB_h _) <- use @(ImageTexel "cloud_result") NilOps uv
 
-  let cloudSkyR = convert cloudSkyR_h
-      cloudSkyG = convert cloudSkyG_h
-      cloudSkyB = convert cloudSkyB_h
+  let cloudSkyR = cloudSkyR_h
+      cloudSkyG = cloudSkyG_h
+      cloudSkyB = cloudSkyB_h
 
       dbgCloud = cloudSkyR * 0.5
       dbgHeight = cloudSkyG * 0.5

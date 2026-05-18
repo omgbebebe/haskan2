@@ -291,7 +291,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender $ "ImGui framebuffers created: " <> showT (length imGuiFramebuffers)
 
   -- Lighting descriptor pool and sets
-  let lightingTexturesPerSet = 7
+  let lightingTexturesPerSet = 8
   lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages lightingTexturesPerSet
   lightingDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
     DescriptorSet.allocateDescriptorSet device lightingDescriptorPool [lightingDescriptorSetLayout]

@@ -76,9 +76,10 @@
 2. **Dynamic sky regeneration no-op**: `needsSkyRegen` flag checked but handler is TODO. Day/night cycle doesn't update procedural sky.
 
 ### P1 — High
-3. **Cloud flickering on camera vertical movement**: `dirY_safe` discontinuity + Y-axis warp aliasing
+3. **Cloud ghosting in lighting pass**: God ray opacity sampling (`ImageTexel "cloud_result" NilOps`) in LightingProcedural.hs produces light-gray copy of clouds that glitches on camera rotation. Disabling god rays fixes it; UV clamping alone doesn't. Likely nearest-neighbor aliasing on half-res texture. Needs bilinear sampling or blurred opacity texture.
 4. **Cloud push constant 216 bytes**: Exceeds Vulkan 128-byte minimum. Won't run on mobile/integrated.
 5. **No `abs` for `Code` types**: `step()` workaround in 4+ places
+6. **Zenith solid color**: Looking straight up, cloud layer fills entire view with solid color + pixelated noise. Related to `maxNoiseLod` and small `totalRayLength` at zenith.
 
 ### P2 — Medium
 6. Blue noise tileability unverified
@@ -115,6 +116,29 @@
 - **Never use**: `unsafeCoerce` (wrong heap layout), `undefined` for Cmds (strict field, crashes)
 
 ## Session History (condensed)
+
+### 2026-05-18: Cloud Black Screen Root Cause + Validation Fixes
+- **Root cause of black screen**: `FormatDefault` type family in FIR mapped `Floating (16 ': _)` → `Half`. Vulkan requires `Float` (32-bit) sampled type for ALL SFLOAT image formats (VUID-SampledType-04471). Shader reads returned undefined → black.
+  - **Fix**: `3rdparty/fir/src/FIR/Syntax/Synonyms.hs:339` — removed `Half` case, all `Floating` formats now map to `Float`
+- **Cubemap format mismatch**: `env_map`/`irradiance_map` declared as `RGBA8 UNorm` but Vulkan images are `R16G16B16A16_SFLOAT`. Changed to `RGBA16 F` in Clouds.hs, Lighting.hs, LightingProcedural.hs
+- **Removed redundant `convert` calls**: Clouds.hs, Lighting.hs, LightingProcedural.hs had `Half→Float` conversions that became identity after FormatDefault fix
+- **NaN density bug**: `hPct = min 1.0 (h / heightScale)` allowed negative values. `negative ** 0.4` = NaN, poisoning transmittance accumulation. **Fix**: `clamp (h / heightScale) 0.0 1.0`
+- **Density remap fix**: Old formula `clamp((noise - (1-coverage)) / coverage)` amplified noise too aggressively (division by small coverage). **Fix**: `max 0.0 (noise - (1.0 - combinedCoverage))` — sparse threshold
+- **Same fixes applied to light density** (`lhPct` clamp + remap)
+- **Validation fixes**: moved history copy outside render pass, added pre-dispatch cubemap layout transitions, fixed `lightingTexturesPerSet 7→8`
+- **God ray UV clamping**: `sampleX/Y = clamp(...)` prevents `cloud_result` sampling outside [0,1]
+- **maxNoiseLod 4→2**: prevents sampling 16³ blocky mip at zenith
+- **Empty-space skip disabled**: causes vertical banding artifacts (step-size jumps)
+
+### 2026-05-18 (later): Ghosting Investigation — NOT FIXED
+- **Ghosting identified**: light-gray copy of clouds that "glitches" when rotating camera
+- **Cause isolated**: God ray opacity sampling in `LightingProcedural.hs` lines 362-364. Disabling god rays (`godRayStrength = 0`) eliminates ghosting completely.
+- **UV clamping alone insufficient**: Even with clamped UVs, ghosting persists
+- **Not temporal blend**: Setting `blendFactor = 0.0` didn't fix it
+- **Not history copy**: Disabling history copy didn't fix it  
+- **Not empty-space skip**: Disabling skip didn't fix it
+- **Hypothesis**: `ImageTexel` with `NilOps` uses `OpImageFetch` (nearest-neighbor). Cloud texture is half-res. Sampling at sub-texel offsets with nearest-neighbor produces aliasing/Moiré that looks like ghosting. Needs bilinear sampling or blurred opacity texture for god rays.
+- **Status**: Clouds render correctly (density, color, sun response). Ghosting is cosmetic issue in lighting compositing. Deferred to deep analysis.
 
 ### 2026-05-12: FIR Math + IBL Rotation + Clouds
 - Added GLSL math to FIR: clamp, mix, step, smoothstep, fract + 20 vector ops

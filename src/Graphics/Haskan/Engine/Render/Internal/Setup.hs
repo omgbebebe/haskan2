@@ -599,6 +599,25 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
 
   -- Dispatch compute shaders
   CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
+    -- Transition cubemaps to GENERAL for compute writes
+    -- Using UNDEFINED as oldLayout is valid per spec regardless of actual layout
+    case mRadianceTex of
+      Just tex -> CommandBuffer.layerTransitionAll
+        textureCommandBuffer
+        (trImage tex)
+        Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+        Vulkan.VK_IMAGE_LAYOUT_GENERAL
+        6
+      Nothing -> pure ()
+    case mIrradianceTex of
+      Just tex -> CommandBuffer.layerTransitionAll
+        textureCommandBuffer
+        (trImage tex)
+        Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+        Vulkan.VK_IMAGE_LAYOUT_GENERAL
+        6
+      Nothing -> pure ()
+
     -- Radiance: 512x512x6 / 8x8 = 64x64x6 workgroups
     liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE radiancePipeline
     liftIO $ Foreign.Marshal.Array.withArray [radianceDescriptorSet] $ \dsPtr ->

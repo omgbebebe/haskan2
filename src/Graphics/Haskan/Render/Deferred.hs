@@ -261,12 +261,12 @@ buildDeferredGraph DeferredPassData {..} = do
                     [CFloat]
              in liftIO $ Buffer.copyDataToDeviceMemory dpdDevice dpdCloudFrameDataMemory cloudFrameData
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
-            -- Copy current cloud result to history buffer for next frame
-            CommandBuffer.layerTransition commandBuffer dpdCloudImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-            CommandBuffer.layerTransition commandBuffer dpdCloudHistoryImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-            CommandBuffer.cmdCopyImage commandBuffer dpdCloudImage dpdCloudHistoryImage (Vulkan.getField @"width" dpdCloudExtent) (Vulkan.getField @"height" dpdCloudExtent)
-            CommandBuffer.layerTransition commandBuffer dpdCloudImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-            CommandBuffer.layerTransition commandBuffer dpdCloudHistoryImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          -- Copy current cloud result to history buffer for next frame (OUTSIDE render pass)
+          CommandBuffer.layerTransition commandBuffer dpdCloudImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+          CommandBuffer.layerTransition commandBuffer dpdCloudHistoryImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+          CommandBuffer.cmdCopyImage commandBuffer dpdCloudImage dpdCloudHistoryImage (Vulkan.getField @"width" dpdCloudExtent) (Vulkan.getField @"height" dpdCloudExtent)
+          CommandBuffer.layerTransition commandBuffer dpdCloudImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          CommandBuffer.layerTransition commandBuffer dpdCloudHistoryImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       }
 
   -- Lighting pass: fullscreen triangle compositing

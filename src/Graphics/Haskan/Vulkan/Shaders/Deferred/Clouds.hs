@@ -196,10 +196,10 @@ cloudVertex = shader do
 type CloudFragmentDefs =
   '[ "in_uv" ':-> Input '[Location 0] (V 2 Float),
      "in_ray" ':-> Input '[Location 1] (V 3 Float),
-     "env_map"
-       ':-> TextureCube
-              '[Binding 0, DescriptorSet 0]
-              (RGBA8 UNorm),
+      "env_map"
+        ':-> TextureCube
+               '[Binding 0, DescriptorSet 0]
+               (RGBA16 F),
      "cloud_noise"
        ':-> Texture3D
               '[Binding 1, DescriptorSet 0]
@@ -319,21 +319,21 @@ cloudFragment = shader do
       baseStepSize = max 30.0 (min 100.0 (totalRayLength / 32.0))
       growthRate = 1.03
       maxStepSize = 300.0
-      emptySkipFactor = 3.0
-      maxEmptySkip = 4.0
+      emptySkipFactor = 3.0 :: Code Float
+      maxEmptySkip = 4.0 :: Code Float
       stepCountF = 96.0 :: Code Float
       -- Detail LOD: fade detail channels beyond distance
       detailFadeStart = 500.0
       detailFadeEnd = 2500.0
       -- Noise mip LOD: sample coarser mips at distance
       lodScale = 400.0
-      maxNoiseLod = 4.0
+      maxNoiseLod = 2.0
       -- Light march: fixed small steps toward sun
       lightStepCount = if totalRayLength > 2500.0 then 2.0 else if totalRayLength > 1200.0 then 3.0 else 4.0
       lightStepSize = min 120.0 (cloudThickness / lightStepCount)
   -- Sample blue noise for dithered ray entry
   ~(Vec4 blueR _ _ _) <- use @(ImageTexel "blue_noise") NilOps (Vec2 uvX uvY)
-  let ditherOffset = blueR * baseStepSize
+  let ditherOffset = blueR * baseStepSize * 0.5
       tEntry = tNear + ditherOffset
       entryPos = Vec3 (camX + dirX * tEntry) (camY + dirY * tEntry) (camZ + dirZ * tEntry)
 
@@ -440,7 +440,7 @@ cloudFragment = shader do
         h = (curvedY - cloudBottom) / cloudThickness
         -- Dynamic cloud height: taller clouds with higher coverage
         heightScale = max 0.3 (combinedCoverage ** 0.25)
-        hPct = min 1.0 (h / heightScale)
+        hPct = clamp (h / heightScale) 0.0 1.0
         -- Parametric height profile: organic cloud shape
         baseCurve = mix 0.4 0.8 cloudType
         topDecay = mix 2.0 4.0 cloudType
@@ -448,10 +448,8 @@ cloudFragment = shader do
         -- Subtractive detail erosion: detail can only reduce density
         detailFBM = ng * 0.625 + nb * 0.25 + na * 0.125
         shapedNoise = max 0.0 (nr - detailFBM * effectiveDetail)
-        -- Linear smart remap: coverage is exact dial
-        remappedNoise = if combinedCoverage > 0.001
-                           then clamp ((shapedNoise - (1.0 - combinedCoverage)) / combinedCoverage) 0.0 1.0
-                           else 0.0
+        -- Sparse cloud threshold: coverage controls how much noise survives
+        remappedNoise = max 0.0 (shapedNoise - (1.0 - combinedCoverage))
         density = remappedNoise * heightProfile
 
     -- Ambient from sky cubemap (hoisted, constant directions)
@@ -460,8 +458,8 @@ cloudFragment = shader do
         -- Darken ambient in storm regions
         stormAmbient = rawAmbientTerm ^* (1.0 - entryStormDarkness * 0.6)
 
-    -- Empty-space skip: when density is near zero, multiply next step by skip factor
-    let newEmptySkipMult = if density <= 0.001 then min maxEmptySkip (esm * emptySkipFactor) else 1.0
+    -- Empty-space skip DISABLED (causes vertical banding)
+    let newEmptySkipMult = 1.0
 
     -- Single light sample for self-shadowing (replaces multi-step light march)
     -- Sample at midpoint of light path toward sun
@@ -484,16 +482,14 @@ cloudFragment = shader do
 
     -- Reuse primary step coverage (weather map changes slowly)
     let lh = (lcurvedY - cloudBottom) / cloudThickness
-        lhPct = min 1.0 (lh / heightScale)
+        lhPct = clamp (lh / heightScale) 0.0 1.0
         -- Parametric height profile (matching primary step)
         lheightProfile = (lhPct ** baseCurve) * exp (-lhPct * topDecay)
         -- Subtractive detail erosion (matching primary step)
         ldetailFBM = lng * 0.625 + lnb * 0.25 + lna * 0.125
         lshapedNoise = max 0.0 (lnr - ldetailFBM * effectiveDetail)
-        -- Linear remap (matching primary step)
-        lremappedNoise = if entryCoverage > 0.001
-                           then clamp ((lshapedNoise - (1.0 - entryCoverage)) / entryCoverage) 0.0 1.0
-                           else 0.0
+        -- Sparse cloud threshold (matching primary step)
+        lremappedNoise = max 0.0 (lshapedNoise - (1.0 - entryCoverage))
         ld = lremappedNoise * lheightProfile
         -- Approximate integral over light path with single sample
         finalLightDensity = ld * lightStepCount * lightStepSize
@@ -584,10 +580,10 @@ cloudFragment = shader do
       histUV = Vec2 prevU prevV
 
   ~(Vec4 histR_h histG_h histB_h histA_h) <- use @(ImageTexel "cloud_history") NilOps histUV
-  let histR = convert histR_h
-      histG = convert histG_h
-      histB = convert histB_h
-      histA = convert histA_h
+  let histR = histR_h
+      histG = histG_h
+      histB = histB_h
+      histA = histA_h
       rayHitCloud = step 0.01 cloudOpacity
       maxLum = max cloudSkyR (max cloudSkyG cloudSkyB)
       brightFade = 1.0 - smoothstep 5.0 30.0 maxLum
