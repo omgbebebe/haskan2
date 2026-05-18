@@ -32,9 +32,9 @@ vertex = shader do
   -- vert 1: ( 3, -1) clip -> UV (2, 1)
   -- vert 2: (-1,  3) clip -> UV (0,-1)
   vid <- get @"gl_VertexIndex"
-  let x = if vid == 0 then (-1.0) else 3.0
+  let x = if vid == 1 then 3.0 else (-1.0)
       y = if vid == 2 then 3.0 else (-1.0)
-      u = if vid == 0 then 0.0 else 2.0
+      u = if vid == 1 then 2.0 else 0.0
       v = if vid == 2 then (-1.0) else 1.0
   put @"gl_Position" (Vec4 x y 0.0 1.0)
   put @"out_uv" (Vec2 u v)
