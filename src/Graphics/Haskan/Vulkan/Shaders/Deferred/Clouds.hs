@@ -316,12 +316,12 @@ cloudFragment = shader do
       tFar = max 0.0 (max tToBottom tToTop)
       totalRayLength = min 5000.0 (tFar - tNear)
       -- Geometric step growth: start small near camera, grow exponentially
-      baseStepSize = max 30.0 (min 100.0 (totalRayLength / 60.0))
-      growthRate = 1.01
+      baseStepSize = max 30.0 (min 100.0 (totalRayLength / 32.0))
+      growthRate = 1.03
       maxStepSize = 300.0
       emptySkipFactor = 3.0
       maxEmptySkip = 4.0
-      stepCountF = 200.0 :: Code Float
+      stepCountF = 96.0 :: Code Float
       -- Detail LOD: fade detail channels beyond distance
       detailFadeStart = 500.0
       detailFadeEnd = 2500.0
@@ -336,6 +336,28 @@ cloudFragment = shader do
   let ditherOffset = blueR * baseStepSize
       tEntry = tNear + ditherOffset
       entryPos = Vec3 (camX + dirX * tEntry) (camY + dirY * tEntry) (camZ + dirZ * tEntry)
+
+  -- Hoist constant-direction cubemap samples (zenith/nadir don't change per step)
+  ~(Vec4 zenithR zenithG zenithB _) <- use @(ImageTexel "env_map") NilOps (Vec3 (0.0 :: Code Float) (1.0 :: Code Float) (0.0 :: Code Float))
+  ~(Vec4 nadirR nadirG nadirB _) <- use @(ImageTexel "env_map") NilOps (Vec3 (0.0 :: Code Float) (-1.0 :: Code Float) (0.0 :: Code Float))
+  let skyAmbientCubemap = Vec3 zenithR zenithG zenithB
+      groundAmbientCubemap = Vec3 nadirR nadirG nadirB
+
+  -- Hoist weather map sample (varies slowly, sample once at entry point)
+  let ~(Vec3 epx epy epz) = entryPos
+      eDistHorizSq = (epx - camX) * (epx - camX) + (epz - camZ) * (epz - camZ)
+      eCurvedY = epy - (eDistHorizSq / (2.0 * 6371000.0))
+      eWeatherScale = 0.00005
+      eWeatherWindOffsetX = time * 0.002 * windDirX * weatherAnimSpeed
+      eWeatherWindOffsetZ = time * 0.002 * windDirZ * weatherAnimSpeed
+      eHorizDist = sqrt (epx * epx + epz * epz)
+      eLongitude = atan2 epz epx / (2.0 * 3.14159265)
+      eLatitude = eCurvedY / 2000.0
+      eWeatherUV = Vec2 (eLongitude - eWeatherWindOffsetX * 0.1) ((eLatitude + eHorizDist * eWeatherScale) - eWeatherWindOffsetZ * 0.1)
+  ~(Vec4 eWeatherR eWeatherG eWeatherB _eWeatherA) <- use @(ImageTexel "weather_map") NilOps eWeatherUV
+  let entryCoverage = clamp (eWeatherR * cloudCoverage * weatherCoverageScale) 0.0 1.0
+      entryCloudType = clamp (eWeatherG + weatherTypeBias) 0.0 1.0
+      entryStormDarkness = eWeatherB * stormIntensity
 
       noiseScale = 0.0003
       windSpeed = 0.05
@@ -412,21 +434,9 @@ cloudFragment = shader do
 
     ~(Vec4 nr ng nb na) <- use @(ImageTexel "cloud_noise") (LOD noiseLod NilOps) (Vec3 sx sy sz)
 
-    -- Sample weather map for spatial cloud variation
-    -- Use spherical-inspired UV to avoid planar banding at grazing angles
-    let weatherScale = 0.00005
-        weatherWindOffsetX = time * 0.002 * windDirX * weatherAnimSpeed
-        weatherWindOffsetZ = time * 0.002 * windDirZ * weatherAnimSpeed
-        -- Spherical UV: longitude from XZ angle, latitude from height
-        horizDist = sqrt (px * px + pz * pz)
-        longitude = atan2 pz px / (2.0 * 3.14159265)
-        latitude = curvedY / 2000.0  -- normalize by approximate cloud layer height
-        weatherUV = Vec2 (longitude - weatherWindOffsetX * 0.1) ((latitude + horizDist * weatherScale) - weatherWindOffsetZ * 0.1)
-    ~(Vec4 weatherR weatherG weatherB _weatherA) <- use @(ImageTexel "weather_map") NilOps weatherUV
-
-    let combinedCoverage = clamp (weatherR * cloudCoverage * weatherCoverageScale) 0.0 1.0
-        cloudType = clamp (weatherG + weatherTypeBias) 0.0 1.0
-        stormDarkness = weatherB * stormIntensity
+    let combinedCoverage = entryCoverage
+        cloudType = entryCloudType
+        stormDarkness = entryStormDarkness
         h = (curvedY - cloudBottom) / cloudThickness
         -- Dynamic cloud height: taller clouds with higher coverage
         heightScale = max 0.3 (combinedCoverage ** 0.25)
@@ -435,25 +445,20 @@ cloudFragment = shader do
         baseCurve = mix 0.4 0.8 cloudType
         topDecay = mix 2.0 4.0 cloudType
         heightProfile = (hPct ** baseCurve) * exp (-hPct * topDecay)
-        -- Additive detail: detail creates billowing structure instead of holes
+        -- Subtractive detail erosion: detail can only reduce density
         detailFBM = ng * 0.625 + nb * 0.25 + na * 0.125
-        shapedNoise = mix nr detailFBM effectiveDetail
-        -- Smooth remap: gradual transition instead of hard threshold
+        shapedNoise = max 0.0 (nr - detailFBM * effectiveDetail)
+        -- Linear smart remap: coverage is exact dial
         remappedNoise = if combinedCoverage > 0.001
-                           then smoothstep (1.0 - combinedCoverage) 1.0 shapedNoise
+                           then clamp ((shapedNoise - (1.0 - combinedCoverage)) / combinedCoverage) 0.0 1.0
                            else 0.0
         density = remappedNoise * heightProfile
 
-    -- Ambient from sky cubemap: sample env_map for physically consistent lighting
-    ~(Vec4 zenithR zenithG zenithB _) <- use @(ImageTexel "env_map") NilOps (Vec3 (0.0 :: Code Float) (1.0 :: Code Float) (0.0 :: Code Float))
-    ~(Vec4 nadirR nadirG nadirB _) <- use @(ImageTexel "env_map") NilOps (Vec3 (0.0 :: Code Float) (-1.0 :: Code Float) (0.0 :: Code Float))
-    let skyAmbientCubemap = Vec3 zenithR zenithG zenithB
-        groundAmbientCubemap = Vec3 nadirR nadirG nadirB
-        -- Height-graded ambient: ground at bottom, sky at top
-        ambientStrength = 0.12 * max 0.05 (smoothstep (-0.1) 0.3 sunDirY)
+    -- Ambient from sky cubemap (hoisted, constant directions)
+    let ambientStrength = 0.12 * max 0.05 (smoothstep (-0.1) 0.3 sunDirY)
         rawAmbientTerm = (groundAmbientCubemap ^* (1.0 - hPct) ^+^ skyAmbientCubemap ^* hPct) ^* ambientStrength
         -- Darken ambient in storm regions
-        stormAmbient = rawAmbientTerm ^* (1.0 - stormDarkness * 0.6)
+        stormAmbient = rawAmbientTerm ^* (1.0 - entryStormDarkness * 0.6)
 
     -- Empty-space skip: when density is near zero, multiply next step by skip factor
     let newEmptySkipMult = if density <= 0.001 then min maxEmptySkip (esm * emptySkipFactor) else 1.0
@@ -482,12 +487,12 @@ cloudFragment = shader do
         lhPct = min 1.0 (lh / heightScale)
         -- Parametric height profile (matching primary step)
         lheightProfile = (lhPct ** baseCurve) * exp (-lhPct * topDecay)
-        -- Additive detail (matching primary step)
+        -- Subtractive detail erosion (matching primary step)
         ldetailFBM = lng * 0.625 + lnb * 0.25 + lna * 0.125
-        lshapedNoise = mix lnr ldetailFBM effectiveDetail
-        -- Smooth remap (matching primary step)
-        lremappedNoise = if combinedCoverage > 0.001
-                           then smoothstep (1.0 - combinedCoverage) 1.0 lshapedNoise
+        lshapedNoise = max 0.0 (lnr - ldetailFBM * effectiveDetail)
+        -- Linear remap (matching primary step)
+        lremappedNoise = if entryCoverage > 0.001
+                           then clamp ((lshapedNoise - (1.0 - entryCoverage)) / entryCoverage) 0.0 1.0
                            else 0.0
         ld = lremappedNoise * lheightProfile
         -- Approximate integral over light path with single sample
@@ -498,8 +503,8 @@ cloudFragment = shader do
         ms1 = exp (-d * 0.25) * 0.5 -- secondary scatter
         ms2 = exp (-d * 0.05) * 0.25 -- tertiary scatter
         lightT_d = ms0 + ms1 + ms2
-        -- Powder effect: brightens cloud edges facing sun
-        powderTerm = 1.0 - exp (-density * 2.0)
+        -- Powder effect: brightens cloud edges facing sun (uses light-density)
+        powderTerm = 1.0 - exp (-ld * 2.0)
         powderBoost = mix 1.0 (powderTerm * 2.0 + 1.0) 0.3
         -- Skylight occlusion: reduce ambient in dense self-shadowed regions
         skylightOcclusion = exp (-finalLightDensity * 0.25)
