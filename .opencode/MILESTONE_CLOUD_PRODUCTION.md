@@ -29,14 +29,16 @@
 
 ## Phase 0 — Fix Dynamic Sky Regeneration (P0 blocker)
 
+**Status**: ✅ Complete
+
 **Why**: The Hosek-Wilkie model is wasted if cubemaps never update. Day/night cycle currently changes the analytic sky in the cloud shader but IBL/reflections stay frozen at startup values.
 
 **Tasks**:
-1. Wire `needsSkyRegen` flag to actually dispatch the 3 compute shaders (RadianceGen, SkyLUTGen, IrradianceGen)
-2. Update `SkyGenUniforms` with current sun direction from `DayNight.hs` before each dispatch
-3. Regenerate on sun elevation change > 2° (existing threshold in `Update.hs:263`)
-4. Verify: sunset should produce reddish cubemap, night should be dark, dawn should warm up
-5. Delete or integrate the unused 200² SkyLUT (either wire it into the lighting shader or remove the dispatch)
+1. ✅ Wire `needsSkyRegen` flag to actually dispatch the 3 compute shaders (RadianceGen, SkyLUTGen, IrradianceGen)
+2. ✅ Update `SkyGenUniforms` with current sun direction from `DayNight.hs` before each dispatch
+3. ✅ Regenerate on sun elevation change > 2° (existing threshold in `Update.hs:263`)
+4. ⬜ Verify: sunset should produce reddish cubemap, night should be dark, dawn should warm up
+5. ⬜ Delete or integrate the unused 200² SkyLUT (either wire it into the lighting shader or remove the dispatch)
 
 **Files**: `Engine/Render.hs:320-326`, `Engine/Render/Internal/Setup.hs:498+`, `Engine/Types.hs:537`, `DayNight.hs`
 
