@@ -31,6 +31,8 @@
 - **Procedural Sky COMPLETE**: Compute-shader generated cubemap with Hosek-Wilkie scattering
 - **Jolt Physics COMPLETE**: All 7 phases — Nix build, C wrapper, Haskell FFI, async thread, render sync, scene loading, ImGui panel
 - **Cloud Ghosting FIXED**: Per-swapchain-image VP ring buffer eliminates temporal reprojection mismatch
+- **God Ray Render Pass COMPLETE**: 32-sample radial blur on cloud opacity mask, between cloud and lighting passes
+- **Sunset Colors FIXED**: Directional color temperature (warmth = sunProximity × horizonFactor) — orange/red near sun at dusk, deep blue away from sun
 
 ## Key Design Decisions
 1. **glTF UV**: Matches Vulkan (0,0 = top-left). No `flipV`.
@@ -93,7 +95,8 @@
 - `src/Graphics/Haskan/Engine.hs` — Main loop, ECS, deferred graph, input polling with ImGui
 - `src/Graphics/Haskan/Engine/Physics.hs` — Physics thread lifecycle
 - `src/Graphics/Haskan/Engine/Types.hs` — GameState with TVars, PhysicsBodySpec
-- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Clouds.hs` — Cloud raymarching shader (most workarounds)
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/GodRays.hs` — God ray radial blur shader
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Clouds.hs` — Cloud raymarching + analytic sky
 - `src/Graphics/Haskan/Vulkan/Shaders/Deferred/LightingProcedural.hs` — Lighting + skybox + debug modes
 - `src/Graphics/Haskan/Vulkan/Shaders/Deferred/GBuffer.hs` — G-buffer shaders, normal mapping
 - `src/Graphics/Haskan/UI/Backend.hs` — ImGui Vulkan backend, debug panels
@@ -117,6 +120,23 @@
 - **Never use**: `unsafeCoerce` (wrong heap layout), `undefined` for Cmds (strict field, crashes)
 
 ## Session History (condensed)
+
+### 2026-05-19 (later): God Ray Render Pass + Sunset Color Fix
+- **God ray render pass**: Implemented proper 32-sample radial blur between cloud and lighting passes:
+  - `GodRays.hs`: 32-sample loop with exponential decay (decay=0.95), samples `cloud_result` alpha as occlusion mask
+  - Full Vulkan infrastructure: images, framebuffers, pipeline, descriptor sets (1 sampler binding for cloud_result)
+  - Render graph: inserted between cloud and lighting passes
+  - `LightingProcedural.hs`: samples `god_ray` texture at binding 9, composites additively with sky
+- **God ray half-screen bug**: Vertex shader had `x = if vid == 0 then (-1.0) else 3.0` — when vid=2, x=3.0, y=3.0. The large triangle only covered ~half the screen.
+  - **Fix**: `x = if vid == 1 then 3.0 else (-1.0); y = if vid == 2 then 3.0 else (-1.0)` — produces correct (-1,-1), (3,-1), (-1,3) large triangle
+- **Sunset/dusk blue→red fix**: `env_map` cubemap sampling returned black/very dark in cloud pass. Reverted to analytic sky with directional color temperature:
+  - `warmth = sunProximity * horizonFactor`
+  - `sunProximity = max(0, dot(viewDir, sunDir))` — 1.0 when looking directly at sun
+  - `horizonFactor = 1.0 - clamp((sunElev + 0.1) / 0.4, 0, 1)` — 1.0 when sun near horizon
+  - At sunset looking at sun: warmth ≈ 1.0, colorTemp = (1.0, 0.55, 0.25) → orange/red
+  - At sunset looking away: warmth ≈ 0, no tint → pure Rayleigh scattering → deep blue
+  - At noon: horizonFactor ≈ 0, no tint → natural blue sky
+- **LightingProcedural.hs**: Added `god_ray` texture at binding 9, replaced hardcoded `godRayR=0` with sampled values
 
 ### 2026-05-19: Cloud Ghosting — ROOT CAUSE FOUND AND FIXED
 - **True root cause**: `prevViewProj` and `prevTime` were single TVars overwritten every frame, but cloud history textures are per-swapchain-image. With `numSwapchainImages=3` and `maxFramesInFlight=2`, history could be 2+ frames old while VP was only 1 frame old. Temporal reprojection used wrong matrix → displaced ghost.
