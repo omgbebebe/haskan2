@@ -431,20 +431,17 @@ cloudFragment = shader do
         -- Dynamic cloud height: taller clouds with higher coverage
         heightScale = max 0.3 (combinedCoverage ** 0.25)
         hPct = min 1.0 (h / heightScale)
-        -- 4-layer height profile
-        baseHeight = mix 0.15 0.25 cloudType
+        -- Parametric height profile: organic cloud shape
         baseCurve = mix 0.4 0.8 cloudType
-        topHeight = mix 0.65 0.85 cloudType
-        bottomFunnel = (smoothstep 0.0 baseHeight hPct) ** baseCurve
-        topShape = 1.0 - smoothstep topHeight 1.0 hPct
-        baseFadeIn = smoothstep 0.0 0.08 hPct
-        topFadeOut = 1.0 - smoothstep 0.92 1.0 hPct
-        heightProfile = bottomFunnel * topShape * baseFadeIn * topFadeOut
-        -- Smart remap: coverage becomes exact control
-        shapedNoise = nr * (1.0 - effectiveDetail * (ng * 0.3 + nb * 0.15 + na * 0.075))
+        topDecay = mix 2.0 4.0 cloudType
+        heightProfile = (hPct ** baseCurve) * exp (-hPct * topDecay)
+        -- Additive detail: detail creates billowing structure instead of holes
+        detailFBM = ng * 0.625 + nb * 0.25 + na * 0.125
+        shapedNoise = mix nr detailFBM effectiveDetail
+        -- Smooth remap: gradual transition instead of hard threshold
         remappedNoise = if combinedCoverage > 0.001
-                          then clamp ((shapedNoise - (1.0 - combinedCoverage)) / combinedCoverage) 0.0 1.0
-                          else 0.0
+                           then smoothstep (1.0 - combinedCoverage) 1.0 shapedNoise
+                           else 0.0
         density = remappedNoise * heightProfile
 
     -- Ambient from sky cubemap: sample env_map for physically consistent lighting
@@ -483,14 +480,14 @@ cloudFragment = shader do
     -- Reuse primary step coverage (weather map changes slowly)
     let lh = (lcurvedY - cloudBottom) / cloudThickness
         lhPct = min 1.0 (lh / heightScale)
-        lbottomFunnel = (smoothstep 0.0 baseHeight lhPct) ** baseCurve
-        ltopShape = 1.0 - smoothstep topHeight 1.0 lhPct
-        lbaseFadeIn = smoothstep 0.0 0.08 lhPct
-        ltopFadeOut = 1.0 - smoothstep 0.92 1.0 lhPct
-        lheightProfile = lbottomFunnel * ltopShape * lbaseFadeIn * ltopFadeOut
-        lshapedNoise = lnr * (1.0 - effectiveDetail * (lng * 0.3 + lnb * 0.15 + lna * 0.075))
+        -- Parametric height profile (matching primary step)
+        lheightProfile = (lhPct ** baseCurve) * exp (-lhPct * topDecay)
+        -- Additive detail (matching primary step)
+        ldetailFBM = lng * 0.625 + lnb * 0.25 + lna * 0.125
+        lshapedNoise = mix lnr ldetailFBM effectiveDetail
+        -- Smooth remap (matching primary step)
         lremappedNoise = if combinedCoverage > 0.001
-                           then clamp ((lshapedNoise - (1.0 - combinedCoverage)) / combinedCoverage) 0.0 1.0
+                           then smoothstep (1.0 - combinedCoverage) 1.0 lshapedNoise
                            else 0.0
         ld = lremappedNoise * lheightProfile
         -- Approximate integral over light path with single sample
