@@ -81,6 +81,7 @@ import Graphics.Haskan.Engine.Render.Internal.Setup
     SceneLoadResult (..),
     compileAllShaders,
     createShaderModules,
+    dispatchProceduralSkyGeneration,
     loadIBLTextures,
     loadScene,
   )
@@ -198,6 +199,7 @@ data RenderEnv = RenderEnv
     reTvWeatherTypeBias :: !(STM.TVar Float),
     reTvStormIntensity :: !(STM.TVar Float),
     reTvWeatherAnimSpeed :: !(STM.TVar Float),
+    reIBLTextures :: !IBLTextures,
     reTvSkyNeedsRegeneration :: !(STM.TVar Bool),
     reTvPhysicsBodies :: !(STM.TVar (IntMap BodyState)),
     reTvPhysicsBodyToEntity :: !(STM.TVar (IntMap EntityId)),
@@ -321,8 +323,27 @@ runFrame frameNumber = do
   needsSkyRegen <- liftIO $ STM.readTVarIO reTvSkyNeedsRegeneration
   when needsSkyRegen $ do
     logInfo LogRender "sky regeneration requested (sun angle > 2°)"
-    -- TODO: dynamic compute dispatch would go here
-    -- For now, just clear the flag
+    timeOfDay <- readTimeOfDay
+    let sunState = DayNight.computeSunState DayNight.defaultDayNightConfig timeOfDay
+        sunDir = DayNight.ssDirection sunState
+        sunElevation = max 0.0 (sunDir ^._y) -- elevation from Y component
+        sunIntensity = DayNight.ssIntensity sunState * 50.0 -- scale to HW intensity range
+        IBLTextures {..} = reIBLTextures
+        ctx = reContext
+    -- Create a one-time command buffer and dispatch sky compute shaders
+    regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
+    liftIO $ runManaged $ dispatchProceduralSkyGeneration
+      (device ctx)
+      rePhysicalDevice
+      (graphicsQueueHandler ctx)
+      regenCmdBuf
+      reResourceManager
+      iblSkyLut
+      iblRadianceCubemap
+      iblIrradianceCubemap
+      sunDir
+      sunElevation
+      sunIntensity
     liftIO $ STM.atomically $ STM.writeTVar reTvSkyNeedsRegeneration False
 
   lights' <- readLights
@@ -901,6 +922,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                         reTvWeatherTypeBias = tvWeatherTypeBias,
                         reTvStormIntensity = tvStormIntensity,
                         reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
+                        reIBLTextures = iblTextures,
                         reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
                         reTvPhysicsBodies = physicsBodies gameState,
                         reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,

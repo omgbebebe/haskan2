@@ -7,6 +7,7 @@ module Graphics.Haskan.Engine.Render.Internal.Setup
     IBLTextures (..),
     SceneLoadResult (..),
     loadScene,
+    dispatchProceduralSkyGeneration,
   )
 where
 
@@ -176,7 +177,8 @@ createShaderModules device = do
   pure (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, lightProceduralFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader)
 
 data IBLTextures = IBLTextures
-  { iblRadianceCubemap :: !TextureHandle,
+  { iblSkyLut :: !TextureHandle,
+    iblRadianceCubemap :: !TextureHandle,
     iblIrradianceCubemap :: !TextureHandle,
     iblRadianceView :: !(Maybe Vulkan.VkImageView),
     iblIrradianceView :: !(Maybe Vulkan.VkImageView),
@@ -243,11 +245,15 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       logInfo LogGeneral "weather map texture loaded"
 
       -- Dispatch compute shaders to fill storage images
-      dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm skyLutHandle radianceHandle irradianceHandle
+      let V3 dirX dirY dirZ = V3 0.0 0.3 (-1.0)
+          defaultSunElevation = pi / 6.0
+          defaultSunIntensity = 50.0
+      dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm skyLutHandle radianceHandle irradianceHandle (V3 dirX dirY dirZ) defaultSunElevation defaultSunIntensity
 
       pure
         IBLTextures
-          { iblRadianceCubemap = radianceHandle,
+          { iblSkyLut = skyLutHandle,
+            iblRadianceCubemap = radianceHandle,
             iblIrradianceCubemap = irradianceHandle,
             iblRadianceView = mRadianceView,
             iblIrradianceView = mIrradianceView,
@@ -304,7 +310,8 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
 
       pure
         IBLTextures
-          { iblRadianceCubemap = radianceCubemap,
+          { iblSkyLut = radianceCubemap,
+            iblRadianceCubemap = radianceCubemap,
             iblIrradianceCubemap = irradianceCubemap,
             iblRadianceView = mRadianceView,
             iblIrradianceView = mIrradianceView,
@@ -463,8 +470,11 @@ dispatchProceduralSkyGeneration ::
   TextureHandle -> -- skyLut
   TextureHandle -> -- radiance
   TextureHandle -> -- irradiance
+  V3 Float ->      -- sun direction
+  Float ->          -- sun elevation (for HW coeffs)
+  Float ->          -- sun intensity
   m ()
-dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm skyLutHandle radianceHandle irradianceHandle = do
+dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm skyLutHandle radianceHandle irradianceHandle sunDir sunElevation sunIntensity = do
   logInfo LogGeneral "dispatching procedural sky compute shaders..."
 
   -- Load compute shader modules
@@ -494,8 +504,8 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
   radianceDescriptorSet <- DescriptorSet.allocateDescriptorSet device cubemapPool [cubemapLayout]
   irradianceDescriptorSet <- DescriptorSet.allocateDescriptorSet device cubemapPool [cubemapLayout]
 
-  -- Create UBO with default sky params (HW coefficients for turbidity=2, albedo=0.3, solar elevation=π/6)
-  let hwCoeffs = computeHWCoeffs 2.0 0.3 (pi / 6.0)
+  -- Create UBO with dynamic sky params
+  let hwCoeffs = computeHWCoeffs 2.0 0.3 (max 0.0 sunElevation)
       [ hwAR,
         hwAG,
         hwAB,
@@ -524,12 +534,13 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
         hwIG,
         hwIB
         ] = hwCoeffsToList hwCoeffs
+      (V3 dirX dirY dirZ) = sunDir
       skyParams =
         SkyGenUniforms
-          { sgSunDirX = 0.0,
-            sgSunDirY = 0.3,
-            sgSunDirZ = (-1.0),
-            sgSunIntensity = 50.0,
+          { sgSunDirX = dirX,
+            sgSunDirY = dirY,
+            sgSunDirZ = dirZ,
+            sgSunIntensity = sunIntensity,
             sgHwAR = hwAR,
             sgHwAG = hwAG,
             sgHwAB = hwAB,
