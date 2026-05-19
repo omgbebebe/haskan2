@@ -322,6 +322,25 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 _ -> lightingPassCtx
           liftIO $ recordFn passCtx
 
+          -- After g-buffer, run AP volume compute
+          when (Graph.rpName pass == "gbuffer") $ do
+            let apVolumePipeline = drAPVolumePipeline rcDeferred
+                apVolumeLayout = drAPVolumePipelineLayout rcDeferred
+                apVolumeDescriptorSet = drAPVolumeDescriptorSets rcDeferred !! fromIntegral imageIdx
+            liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE apVolumePipeline
+            liftIO $ Foreign.Marshal.Array.withArray [apVolumeDescriptorSet] $ \dsPtr ->
+              Vulkan.vkCmdBindDescriptorSets
+                commandBuffer
+                Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
+                apVolumeLayout
+                0
+                1
+                dsPtr
+                0
+                Vulkan.vkNullPtr
+            -- Dispatch: 64x32x64 voxels with 4x4x4 local size = 16x8x16 workgroups
+            liftIO $ CommandBuffer.cmdDispatch commandBuffer 16 8 16
+
         -- Dear ImGui overlay pass
         for_ rcImGuiDrawData $ \drawData -> liftIO $ do
           let imGuiFramebuffer = rcImGuiFramebuffers !! fromIntegral imageIdx
