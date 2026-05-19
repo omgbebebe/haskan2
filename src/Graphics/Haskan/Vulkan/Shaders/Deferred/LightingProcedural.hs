@@ -252,14 +252,14 @@ type FragmentDefs =
        ':-> Texture2D
               '[Binding 3, DescriptorSet 0]
               (RGBA8 UNorm),
-      "env_map"
-        ':-> TextureCube
-               '[Binding 4, DescriptorSet 0]
-               (RGBA16 F),
-      "irradiance_map"
-        ':-> TextureCube
-               '[Binding 5, DescriptorSet 0]
-               (RGBA16 F),
+     "env_map"
+       ':-> TextureCube
+              '[Binding 4, DescriptorSet 0]
+              (RGBA16 F),
+     "irradiance_map"
+       ':-> TextureCube
+              '[Binding 5, DescriptorSet 0]
+              (RGBA16 F),
      "brdf_lut"
        ':-> Texture2D
               '[Binding 6, DescriptorSet 0]
@@ -268,18 +268,18 @@ type FragmentDefs =
        ':-> StorageBuffer
               '[Binding 7, DescriptorSet 0]
               LightsData,
-       "cloud_result"
-         ':-> Texture2D
-                '[Binding 8, DescriptorSet 0]
-                (RGBA16 F),
-       "god_ray"
-         ':-> Texture2D
-                '[Binding 9, DescriptorSet 0]
-                (RGBA16 F),
-       "cameraPos"
-         ':-> PushConstant
-                '[]
-                CameraPushConstant,
+     "cloud_result"
+       ':-> Texture2D
+              '[Binding 8, DescriptorSet 0]
+              (RGBA16 F),
+     "god_ray"
+       ':-> Texture2D
+              '[Binding 9, DescriptorSet 0]
+              (RGBA16 F),
+     "cameraPos"
+       ':-> PushConstant
+              '[]
+              CameraPushConstant,
      "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]

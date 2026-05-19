@@ -142,9 +142,9 @@ createCloudDescriptorPool dev numSets = do
    in liftIO $
         withPtr
           createInfo
-           ( \ciPtr ->
-               allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
-           )
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
+          )
 
 managedGodRayDescriptorPool :: (MonadManaged m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
 managedGodRayDescriptorPool dev numSets =

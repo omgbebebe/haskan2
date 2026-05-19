@@ -260,10 +260,10 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac dpdWeatherCoverageScale, -- 184
                     realToFrac dpdWeatherTypeBias, -- 188
                     realToFrac dpdStormIntensity, -- 192
-                     realToFrac dpdWeatherAnimSpeed, -- 196
-                     realToFrac dpdFrameIndex, -- 200
-                     0,
-                     0 -- 204-208 pad to 208
+                    realToFrac dpdWeatherAnimSpeed, -- 196
+                    realToFrac dpdFrameIndex, -- 200
+                    0,
+                    0 -- 204-208 pad to 208
                   ] ::
                     [CFloat]
              in liftIO $ Buffer.copyDataToDeviceMemory dpdDevice dpdCloudFrameDataMemory cloudFrameData
@@ -301,13 +301,15 @@ buildDeferredGraph DeferredPassData {..} = do
             let godRayData =
                   [ realToFrac dpdSunScreenX,
                     realToFrac dpdSunScreenY,
-                    1.0,  -- intensity
+                    1.0, -- intensity
                     32.0, -- numSamples
                     0.95, -- decay
                     0.02, -- density
                     0.25, -- weight
                     0.25, -- exposure
-                    0, 0, 0  -- padding
+                    0,
+                    0,
+                    0 -- padding
                   ] ::
                     [CFloat]
              in Foreign.Marshal.Array.withArray godRayData $ Vulkan.vkCmdPushConstants commandBuffer dpdGodRayLayout Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT 0 (fromIntegral (length godRayData * 4)) . Foreign.castPtr

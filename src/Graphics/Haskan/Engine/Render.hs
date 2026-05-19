@@ -334,23 +334,25 @@ runFrame frameNumber = do
     timeOfDay <- readTimeOfDay
     let sunState = DayNight.computeSunState DayNight.defaultDayNightConfig timeOfDay
         sunDir = DayNight.ssDirection sunState
-        sunElevation = max 0.0 (sunDir ^._y) -- elevation from Y component
+        sunElevation = max 0.0 (sunDir ^. _y) -- elevation from Y component
         sunIntensity = DayNight.ssIntensity sunState * 50.0 -- scale to HW intensity range
         IBLTextures {..} = reIBLTextures
         ctx = reContext
     -- Create a one-time command buffer and dispatch sky compute shaders
     regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
-    liftIO $ runManaged $ dispatchProceduralSkyGeneration
-      (device ctx)
-      rePhysicalDevice
-      (graphicsQueueHandler ctx)
-      regenCmdBuf
-      reResourceManager
-      iblRadianceCubemap
-      iblIrradianceCubemap
-      sunDir
-      sunElevation
-      sunIntensity
+    liftIO $
+      runManaged $
+        dispatchProceduralSkyGeneration
+          (device ctx)
+          rePhysicalDevice
+          (graphicsQueueHandler ctx)
+          regenCmdBuf
+          reResourceManager
+          iblRadianceCubemap
+          iblIrradianceCubemap
+          sunDir
+          sunElevation
+          sunIntensity
     liftIO $ STM.atomically $ STM.writeTVar reTvSkyNeedsRegeneration False
 
   -- Check if cloud noise needs regeneration (ImGui trigger)
@@ -364,16 +366,18 @@ runFrame frameNumber = do
         ctx = reContext
     -- Create a one-time command buffer and dispatch noise compute shaders
     regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
-    liftIO $ runManaged $ dispatchCloudNoiseGeneration
-      (device ctx)
-      rePhysicalDevice
-      (graphicsQueueHandler ctx)
-      regenCmdBuf
-      reResourceManager
-      iblCloudNoiseHandle
-      noiseSeedVal
-      noiseFreqVal
-      noisePersistVal
+    liftIO $
+      runManaged $
+        dispatchCloudNoiseGeneration
+          (device ctx)
+          rePhysicalDevice
+          (graphicsQueueHandler ctx)
+          regenCmdBuf
+          reResourceManager
+          iblCloudNoiseHandle
+          noiseSeedVal
+          noiseFreqVal
+          noisePersistVal
     liftIO $ STM.atomically $ STM.writeTVar reTvNoiseNeedsRegeneration False
 
   lights' <- readLights
@@ -606,7 +610,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
 
   compileAllShaders
 
-  ShaderModules{..} <-
+  ShaderModules {..} <-
     createShaderModules device
 
   descriptorSetLayout <- DescriptorSetLayout.managedDescriptorSetLayout device
@@ -899,98 +903,103 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
         unless exit $ do
-           renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context -> do
-               let dcfg = Deferred.DeferredConfig
-                     { Deferred.dcPhysicalDevice = physicalDevice
-                     , Deferred.dcDevice = device
-                     , Deferred.dcRenderContext = context
-                     , Deferred.dcBindlessDescSetLayout = descriptorSetLayout
-                     , Deferred.dcShaders = Deferred.DeferredShaders
-                         { Deferred.dsGBuffer   = ShaderProgram smGbufVert Nothing Nothing Nothing smGbufFrag
-                         , Deferred.dsLighting  = ShaderProgram smLightVert Nothing Nothing Nothing (if proceduralSkyEnabled then smLightProcFrag else smLightFrag)
-                         , Deferred.dsWireframe = ShaderProgram smWireVert Nothing Nothing (Just smWireGeom) smWireFrag
-                         , Deferred.dsCloud     = ShaderProgram smCloudVert Nothing Nothing Nothing smCloudFrag
-                         , Deferred.dsGodRay    = ShaderProgram smGodrayVert Nothing Nothing Nothing smGodrayFrag
-                         }
-                     , Deferred.dcIBL = Deferred.IBLResources
-                         { Deferred.irRadianceView   = iblRadianceView
-                         , Deferred.irIrradianceView = iblIrradianceView
-                         , Deferred.irBrdfView       = iblBrdfView
-                         , Deferred.irSampler        = iblSampler
-                         }
-                     , Deferred.dcCloudTextures = Deferred.CloudTextures
-                         { Deferred.ctNoiseView        = iblCloudNoiseView
-                         , Deferred.ctBlueNoiseView    = iblBlueNoiseView
-                         , Deferred.ctWeatherMapView   = iblWeatherMapView
-                         , Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler
-                         }
-                     , Deferred.dcLightBuffer     = Just lightSsboBuffer
-                     , Deferred.dcImGuiRenderPass = imGuiRenderPass
-                     , Deferred.dcProceduralSky   = proceduralSkyEnabled
-                       }
-               with (Deferred.createDeferredResources dcfg) $ \dr -> do
-                 let numSwapchainImages = length (drCloudImages dr)
-                 prevViewProjTVars <- replicateM numSwapchainImages (STM.newTVarIO (identity :: M44 Foreign.C.CFloat))
-                 prevTimeTVars <- replicateM numSwapchainImages (STM.newTVarIO 0.0)
-                 let renderEnv = RenderEnv
-                       { reWindow = window
-                       , reContext = context
-                       , reDeferred = dr
-                       , reTargetFPS = targetFPS
-                       , reImageAvailableSemaphores = imageAvailableSemaphores
-                       , reControl = control
-                       , reFrameMvpMemories = frameMvpMemories
-                       , reTvCamera = tvCamera
-                       , reTvInspect = tvInspect
-                       , reTvInsp = tvInsp
-                       , reTvRenderDebug = tvRenderDebug
-                       , reECSWorld = ecsWorld
-                       , reResourceManager = rm
-                       , reTextureSampler = textureSampler
-                       , reFrameDescriptorSets = frameDescriptorSets
-                       , reTextureIndexMap = textureIndexMap
-                       , reTvWireframe = tvWireframe
-                       , reFrameStatsRef = frameStatsRef
-                       , reCullResources = computeCullResources
-                       , reTvDebugMode = tvDebugMode
-                       , reTvAxisOverlay = tvAxisOverlay
-                       , reTvGroundPlane = tvGroundPlane
-                       , reTvPendingScreenshot = tvPendingScreenshot
-                       , reTvPendingAllStages = tvPendingAllStages
-                       , reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot
-                       , rePhysicalDevice = physicalDevice
-                       , reLightSsboBuffer = lightSsboBuffer
-                       , reLightSsboMemory = lightSsboMemory
-                       , reTvLights = tvLights
-                       , reTvTimeOfDay = tvTimeOfDay
-                       , reTvTimeSpeed = tvTimeSpeed
-                       , reTvDayNightEnabled = tvDayNightEnabled
-                       , reTvCloudHeight = tvCloudHeight
-                       , reTvWindDirection = tvWindDirection
-                       , reTvWindSpeed = tvWindSpeed
-                       , reTvCloudCoverage = tvCloudCoverage
-                       , reTvCloudDetail = tvCloudDetail
-                       , reTvCloudAbsorption = tvCloudAbsorption
-                       , reTvWeatherCoverageScale = tvWeatherCoverageScale
-                       , reTvWeatherTypeBias = tvWeatherTypeBias
-                       , reTvStormIntensity = tvStormIntensity
-                       , reTvWeatherAnimSpeed = tvWeatherAnimSpeed
-                       , reIBLTextures = iblTextures
-                       , reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState
-                       , reTvNoiseNeedsRegeneration = noiseNeedsRegeneration gameState
-                       , reTvNoiseSeed = noiseSeed gameState
-                       , reTvNoiseFrequency = noiseFrequency gameState
-                       , reTvNoisePersistence = noisePersistence gameState
-                       , reTvPhysicsBodies = physicsBodies gameState
-                       , reTvPhysicsBodyToEntity = physicsBodyToEntity gameState
-                       , reTvPhysicsAutoStep = physicsAutoStep gameState
-                       , reTvPhysicsTimeScale = physicsTimeScale gameState
-                       , rePrevViewProj = prevViewProjTVars
-                       , rePrevTime = prevTimeTVars
-                       , reImGuiBackend = mImGuiBackend
-                       }
-                 renderFrameLoop renderEnv 0
-           outerLoop renderFrameLoopFinished
+          renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context -> do
+            let dcfg =
+                  Deferred.DeferredConfig
+                    { Deferred.dcPhysicalDevice = physicalDevice,
+                      Deferred.dcDevice = device,
+                      Deferred.dcRenderContext = context,
+                      Deferred.dcBindlessDescSetLayout = descriptorSetLayout,
+                      Deferred.dcShaders =
+                        Deferred.DeferredShaders
+                          { Deferred.dsGBuffer = ShaderProgram smGbufVert Nothing Nothing Nothing smGbufFrag,
+                            Deferred.dsLighting = ShaderProgram smLightVert Nothing Nothing Nothing (if proceduralSkyEnabled then smLightProcFrag else smLightFrag),
+                            Deferred.dsWireframe = ShaderProgram smWireVert Nothing Nothing (Just smWireGeom) smWireFrag,
+                            Deferred.dsCloud = ShaderProgram smCloudVert Nothing Nothing Nothing smCloudFrag,
+                            Deferred.dsGodRay = ShaderProgram smGodrayVert Nothing Nothing Nothing smGodrayFrag
+                          },
+                      Deferred.dcIBL =
+                        Deferred.IBLResources
+                          { Deferred.irRadianceView = iblRadianceView,
+                            Deferred.irIrradianceView = iblIrradianceView,
+                            Deferred.irBrdfView = iblBrdfView,
+                            Deferred.irSampler = iblSampler
+                          },
+                      Deferred.dcCloudTextures =
+                        Deferred.CloudTextures
+                          { Deferred.ctNoiseView = iblCloudNoiseView,
+                            Deferred.ctBlueNoiseView = iblBlueNoiseView,
+                            Deferred.ctWeatherMapView = iblWeatherMapView,
+                            Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler
+                          },
+                      Deferred.dcLightBuffer = Just lightSsboBuffer,
+                      Deferred.dcImGuiRenderPass = imGuiRenderPass,
+                      Deferred.dcProceduralSky = proceduralSkyEnabled
+                    }
+            with (Deferred.createDeferredResources dcfg) $ \dr -> do
+              let numSwapchainImages = length (drCloudImages dr)
+              prevViewProjTVars <- replicateM numSwapchainImages (STM.newTVarIO (identity :: M44 Foreign.C.CFloat))
+              prevTimeTVars <- replicateM numSwapchainImages (STM.newTVarIO 0.0)
+              let renderEnv =
+                    RenderEnv
+                      { reWindow = window,
+                        reContext = context,
+                        reDeferred = dr,
+                        reTargetFPS = targetFPS,
+                        reImageAvailableSemaphores = imageAvailableSemaphores,
+                        reControl = control,
+                        reFrameMvpMemories = frameMvpMemories,
+                        reTvCamera = tvCamera,
+                        reTvInspect = tvInspect,
+                        reTvInsp = tvInsp,
+                        reTvRenderDebug = tvRenderDebug,
+                        reECSWorld = ecsWorld,
+                        reResourceManager = rm,
+                        reTextureSampler = textureSampler,
+                        reFrameDescriptorSets = frameDescriptorSets,
+                        reTextureIndexMap = textureIndexMap,
+                        reTvWireframe = tvWireframe,
+                        reFrameStatsRef = frameStatsRef,
+                        reCullResources = computeCullResources,
+                        reTvDebugMode = tvDebugMode,
+                        reTvAxisOverlay = tvAxisOverlay,
+                        reTvGroundPlane = tvGroundPlane,
+                        reTvPendingScreenshot = tvPendingScreenshot,
+                        reTvPendingAllStages = tvPendingAllStages,
+                        reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
+                        rePhysicalDevice = physicalDevice,
+                        reLightSsboBuffer = lightSsboBuffer,
+                        reLightSsboMemory = lightSsboMemory,
+                        reTvLights = tvLights,
+                        reTvTimeOfDay = tvTimeOfDay,
+                        reTvTimeSpeed = tvTimeSpeed,
+                        reTvDayNightEnabled = tvDayNightEnabled,
+                        reTvCloudHeight = tvCloudHeight,
+                        reTvWindDirection = tvWindDirection,
+                        reTvWindSpeed = tvWindSpeed,
+                        reTvCloudCoverage = tvCloudCoverage,
+                        reTvCloudDetail = tvCloudDetail,
+                        reTvCloudAbsorption = tvCloudAbsorption,
+                        reTvWeatherCoverageScale = tvWeatherCoverageScale,
+                        reTvWeatherTypeBias = tvWeatherTypeBias,
+                        reTvStormIntensity = tvStormIntensity,
+                        reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
+                        reIBLTextures = iblTextures,
+                        reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
+                        reTvNoiseNeedsRegeneration = noiseNeedsRegeneration gameState,
+                        reTvNoiseSeed = noiseSeed gameState,
+                        reTvNoiseFrequency = noiseFrequency gameState,
+                        reTvNoisePersistence = noisePersistence gameState,
+                        reTvPhysicsBodies = physicsBodies gameState,
+                        reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,
+                        reTvPhysicsAutoStep = physicsAutoStep gameState,
+                        reTvPhysicsTimeScale = physicsTimeScale gameState,
+                        rePrevViewProj = prevViewProjTVars,
+                        rePrevTime = prevTimeTVars,
+                        reImGuiBackend = mImGuiBackend
+                      }
+              renderFrameLoop renderEnv 0
+          outerLoop renderFrameLoopFinished
 
   logInfo LogGeneral "Starting render loop"
   outerLoop False

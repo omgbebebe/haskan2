@@ -55,9 +55,10 @@ type GodRayPushConstant =
 type GodRayFragmentDefs =
   '[ "in_uv" ':-> Input '[Location 0] (V 2 Float),
      "cloud_result" ':-> Texture2D '[Binding 0, DescriptorSet 0] (RGBA16 F),
-     "god_ray_data" ':-> PushConstant
-               '[]
-               GodRayPushConstant,
+     "god_ray_data"
+       ':-> PushConstant
+              '[]
+              GodRayPushConstant,
      "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
@@ -83,9 +84,12 @@ fragment = shader do
       deltaY = uvY - sunScreenY
       distToSun = sqrt (deltaX * deltaX + deltaY * deltaY)
 
-  -- Only compute god rays if sun is on screen and intensity > 0
-      sunOnScreen = step 0.0 sunScreenX * step sunScreenX 1.0 *
-                    step 0.0 sunScreenY * step sunScreenY 1.0
+      -- Only compute god rays if sun is on screen and intensity > 0
+      sunOnScreen =
+        step 0.0 sunScreenX
+          * step sunScreenX 1.0
+          * step 0.0 sunScreenY
+          * step sunScreenY 1.0
 
   -- Radial blur: sample along line from pixel toward sun
   -- Beer-Lambert attenuation with in-scattering for proper crepuscular rays

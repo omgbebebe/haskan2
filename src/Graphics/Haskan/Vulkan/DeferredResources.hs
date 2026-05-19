@@ -42,38 +42,38 @@ import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 data DeferredShaders = DeferredShaders
-  { dsGBuffer   :: !ShaderProgram,
-    dsLighting  :: !ShaderProgram,
+  { dsGBuffer :: !ShaderProgram,
+    dsLighting :: !ShaderProgram,
     dsWireframe :: !ShaderProgram,
-    dsCloud     :: !ShaderProgram,
-    dsGodRay    :: !ShaderProgram
+    dsCloud :: !ShaderProgram,
+    dsGodRay :: !ShaderProgram
   }
 
 data IBLResources = IBLResources
-  { irRadianceView   :: !(Maybe Vulkan.VkImageView),
+  { irRadianceView :: !(Maybe Vulkan.VkImageView),
     irIrradianceView :: !(Maybe Vulkan.VkImageView),
-    irBrdfView       :: !(Maybe Vulkan.VkImageView),
-    irSampler        :: !Vulkan.VkSampler
+    irBrdfView :: !(Maybe Vulkan.VkImageView),
+    irSampler :: !Vulkan.VkSampler
   }
 
 data CloudTextures = CloudTextures
-  { ctNoiseView        :: !(Maybe Vulkan.VkImageView),
-    ctBlueNoiseView    :: !(Maybe Vulkan.VkImageView),
-    ctWeatherMapView   :: !(Maybe Vulkan.VkImageView),
+  { ctNoiseView :: !(Maybe Vulkan.VkImageView),
+    ctBlueNoiseView :: !(Maybe Vulkan.VkImageView),
+    ctWeatherMapView :: !(Maybe Vulkan.VkImageView),
     ctBlueNoiseSampler :: !Vulkan.VkSampler
   }
 
 data DeferredConfig = DeferredConfig
-  { dcPhysicalDevice       :: !Vulkan.VkPhysicalDevice,
-    dcDevice               :: !Vulkan.VkDevice,
-    dcRenderContext        :: !RenderContext,
+  { dcPhysicalDevice :: !Vulkan.VkPhysicalDevice,
+    dcDevice :: !Vulkan.VkDevice,
+    dcRenderContext :: !RenderContext,
     dcBindlessDescSetLayout :: !Vulkan.VkDescriptorSetLayout,
-    dcShaders              :: !DeferredShaders,
-    dcIBL                  :: !IBLResources,
-    dcCloudTextures        :: !CloudTextures,
-    dcLightBuffer          :: !(Maybe Vulkan.VkBuffer),
-    dcImGuiRenderPass      :: !Vulkan.VkRenderPass,
-    dcProceduralSky        :: !Bool
+    dcShaders :: !DeferredShaders,
+    dcIBL :: !IBLResources,
+    dcCloudTextures :: !CloudTextures,
+    dcLightBuffer :: !(Maybe Vulkan.VkBuffer),
+    dcImGuiRenderPass :: !Vulkan.VkRenderPass,
+    dcProceduralSky :: !Bool
   }
 
 data DeferredResources = DeferredResources
@@ -119,13 +119,13 @@ createDeferredResources ::
   (MonadIO m, MonadManaged m) =>
   DeferredConfig ->
   m DeferredResources
-createDeferredResources DeferredConfig{..} = do
+createDeferredResources DeferredConfig {..} = do
   let pdev = dcPhysicalDevice
       device = dcDevice
       ctx = dcRenderContext
-      DeferredShaders{..} = dcShaders
-      IBLResources{..} = dcIBL
-      CloudTextures{..} = dcCloudTextures
+      DeferredShaders {..} = dcShaders
+      IBLResources {..} = dcIBL
+      CloudTextures {..} = dcCloudTextures
       mEnvMapView = irRadianceView
       mIrradianceView = irIrradianceView
       mBrdfView = irBrdfView

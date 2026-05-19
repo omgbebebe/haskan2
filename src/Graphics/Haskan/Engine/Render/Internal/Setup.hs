@@ -158,21 +158,21 @@ compileAllShaders = do
 
 -- | Create all shader modules from compiled SPIR-V
 data ShaderModules = ShaderModules
-  { smForwardVert   :: !Vulkan.VkShaderModule,
-    smForwardFrag   :: !Vulkan.VkShaderModule,
-    smGbufVert      :: !Vulkan.VkShaderModule,
-    smGbufFrag      :: !Vulkan.VkShaderModule,
-    smLightVert     :: !Vulkan.VkShaderModule,
-    smLightFrag     :: !Vulkan.VkShaderModule,
+  { smForwardVert :: !Vulkan.VkShaderModule,
+    smForwardFrag :: !Vulkan.VkShaderModule,
+    smGbufVert :: !Vulkan.VkShaderModule,
+    smGbufFrag :: !Vulkan.VkShaderModule,
+    smLightVert :: !Vulkan.VkShaderModule,
+    smLightFrag :: !Vulkan.VkShaderModule,
     smLightProcFrag :: !Vulkan.VkShaderModule,
-    smWireVert      :: !Vulkan.VkShaderModule,
-    smWireGeom      :: !Vulkan.VkShaderModule,
-    smWireFrag      :: !Vulkan.VkShaderModule,
-    smCull          :: !Vulkan.VkShaderModule,
-    smCloudVert     :: !Vulkan.VkShaderModule,
-    smCloudFrag     :: !Vulkan.VkShaderModule,
-    smGodrayVert    :: !Vulkan.VkShaderModule,
-    smGodrayFrag    :: !Vulkan.VkShaderModule
+    smWireVert :: !Vulkan.VkShaderModule,
+    smWireGeom :: !Vulkan.VkShaderModule,
+    smWireFrag :: !Vulkan.VkShaderModule,
+    smCull :: !Vulkan.VkShaderModule,
+    smCloudVert :: !Vulkan.VkShaderModule,
+    smCloudFrag :: !Vulkan.VkShaderModule,
+    smGodrayVert :: !Vulkan.VkShaderModule,
+    smGodrayFrag :: !Vulkan.VkShaderModule
   }
 
 createShaderModules ::
@@ -195,7 +195,7 @@ createShaderModules device = do
   smCloudFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_frag.spv"
   smGodrayVert <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_vert.spv"
   smGodrayFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_frag.spv"
-  pure ShaderModules{..}
+  pure ShaderModules {..}
 
 data IBLTextures = IBLTextures
   { iblRadianceCubemap :: !TextureHandle,
@@ -502,9 +502,9 @@ dispatchProceduralSkyGeneration ::
   ResourceManager ->
   TextureHandle -> -- radiance
   TextureHandle -> -- irradiance
-  V3 Float ->      -- sun direction
-  Float ->          -- sun elevation (for HW coeffs)
-  Float ->          -- sun intensity
+  V3 Float -> -- sun direction
+  Float -> -- sun elevation (for HW coeffs)
+  Float -> -- sun intensity
   m ()
 dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm radianceHandle irradianceHandle sunDir sunElevation sunIntensity = do
   logInfo LogGeneral "dispatching procedural sky compute shaders..."
@@ -618,20 +618,22 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
     -- Transition cubemaps to GENERAL for compute writes
     -- Using UNDEFINED as oldLayout is valid per spec regardless of actual layout
     case mRadianceTex of
-      Just tex -> CommandBuffer.layerTransitionAll
-        textureCommandBuffer
-        (trImage tex)
-        Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-        Vulkan.VK_IMAGE_LAYOUT_GENERAL
-        6
+      Just tex ->
+        CommandBuffer.layerTransitionAll
+          textureCommandBuffer
+          (trImage tex)
+          Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+          Vulkan.VK_IMAGE_LAYOUT_GENERAL
+          6
       Nothing -> pure ()
     case mIrradianceTex of
-      Just tex -> CommandBuffer.layerTransitionAll
-        textureCommandBuffer
-        (trImage tex)
-        Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-        Vulkan.VK_IMAGE_LAYOUT_GENERAL
-        6
+      Just tex ->
+        CommandBuffer.layerTransitionAll
+          textureCommandBuffer
+          (trImage tex)
+          Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+          Vulkan.VK_IMAGE_LAYOUT_GENERAL
+          6
       Nothing -> pure ()
 
     -- Radiance: 512x512x6 / 8x8 = 64x64x6 workgroups

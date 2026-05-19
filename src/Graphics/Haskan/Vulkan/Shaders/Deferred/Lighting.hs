@@ -249,14 +249,14 @@ type FragmentDefs =
        ':-> Texture2D
               '[Binding 3, DescriptorSet 0]
               (RGBA8 UNorm),
-      "env_map"
-        ':-> TextureCube
-               '[Binding 4, DescriptorSet 0]
-               (RGBA16 F),
-      "irradiance_map"
-        ':-> TextureCube
-               '[Binding 5, DescriptorSet 0]
-               (RGBA16 F),
+     "env_map"
+       ':-> TextureCube
+              '[Binding 4, DescriptorSet 0]
+              (RGBA16 F),
+     "irradiance_map"
+       ':-> TextureCube
+              '[Binding 5, DescriptorSet 0]
+              (RGBA16 F),
      "brdf_lut"
        ':-> Texture2D
               '[Binding 6, DescriptorSet 0]

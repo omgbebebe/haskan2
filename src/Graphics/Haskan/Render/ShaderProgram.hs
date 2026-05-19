@@ -64,7 +64,7 @@ toPipelineStages ShaderProgram {..} =
 
 -- | Convert shader stages with specialization info.
 toPipelineStagesWithSpec :: [ShaderStage] -> [Vulkan.VkPipelineShaderStageCreateInfo]
-toPipelineStagesWithSpec = map $ \ShaderStage{..} ->
+toPipelineStagesWithSpec = map $ \ShaderStage {..} ->
   Vulkan.createVk
     ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
         &* set @"pNext" Vulkan.VK_NULL

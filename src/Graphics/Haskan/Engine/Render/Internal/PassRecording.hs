@@ -8,6 +8,7 @@ module Graphics.Haskan.Engine.Render.Internal.PassRecording
 where
 
 import Control.Concurrent.STM qualified as STM
+import Control.Lens ((^.))
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
@@ -17,10 +18,9 @@ import DearImGui.Raw qualified
 import Foreign.C (CFloat)
 import Foreign.Marshal.Array qualified
 import Foreign.Storable (Storable (..))
-import Control.Lens ((^.))
 import Graphics.Haskan.Camera (AnyCamera, Camera (..))
-import Graphics.Haskan.Camera.Types (ViewMatrix (..))
 import Graphics.Haskan.Camera qualified as Camera
+import Graphics.Haskan.Camera.Types (ViewMatrix (..))
 import Graphics.Haskan.Engine.Render.Internal.FrameState (FrameState (..))
 import Graphics.Haskan.Engine.Types (ComputeCullResources (..), DrawIndexedIndirectCommand (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
@@ -125,46 +125,46 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
       sunScreenX = if cw > 0 then cx / cw * 0.5 + 0.5 else (-1.0)
       sunScreenY = if cw > 0 then -cy / cw * 0.5 + 0.5 else (-1.0)
    in RecordContext
-    { rcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
-      rcFrameDescriptorSets = frameDescriptorSets,
-      rcTextureSampler = textureSampler,
-      rcLightSsboBuffer = lightSsboBuffer,
-      rcDrawList = drawList,
-      rcCameraPos = realToFrac <$> Camera.cameraPosition camera,
-      rcSkyboxRays = skyboxRays,
-      rcDebugMode = fsDebugMode frameState,
-      rcAxisOverlay = fsAxisOverlay frameState,
-      rcGroundPlane = fsGroundPlane frameState,
-      rcLightCount = lightCount,
-      rcSkyTint = skyTint,
-      rcIBLIntensity = iblInt,
-      rcSunAzimuth = sunAzimuth,
-      rcSunScreenX = sunScreenX,
-      rcSunScreenY = sunScreenY,
-      rcSunDir = sunDir,
-      rcCloudHeight = fsCloudHeight frameState,
-      rcTime = time,
-      rcPrevViewProjTVars = prevViewProjTVars,
-      rcPrevTimeTVars = prevTimeTVars,
-      rcCurrentCloudViewProj = currentCloudViewProj,
-      rcWindDirX = windDirX,
-      rcWindDirZ = windDirZ,
-      rcCloudCoverage = cloudCoverage,
-      rcCloudDetail = cloudDetail,
-      rcCloudAbsorption = cloudAbsorption,
-      rcWeatherCoverageScale = weatherCoverageScale,
-      rcWeatherTypeBias = weatherTypeBias,
-      rcStormIntensity = stormIntensity,
-      rcWeatherAnimSpeed = weatherAnimSpeed,
-      rcWireframeEnabled = fsWireframe frameState,
-      rcDeferred = dr,
-      rcCullResources = ccr,
-      rcDevice = device ctx,
-      rcPassSurfaceExtent = rcSurfaceExtent ctx,
-      rcImGuiRenderPass = drImGuiRenderPass dr,
-      rcImGuiFramebuffers = drImGuiFramebuffers dr,
-      rcImGuiDrawData = mDrawData
-    }
+        { rcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
+          rcFrameDescriptorSets = frameDescriptorSets,
+          rcTextureSampler = textureSampler,
+          rcLightSsboBuffer = lightSsboBuffer,
+          rcDrawList = drawList,
+          rcCameraPos = realToFrac <$> Camera.cameraPosition camera,
+          rcSkyboxRays = skyboxRays,
+          rcDebugMode = fsDebugMode frameState,
+          rcAxisOverlay = fsAxisOverlay frameState,
+          rcGroundPlane = fsGroundPlane frameState,
+          rcLightCount = lightCount,
+          rcSkyTint = skyTint,
+          rcIBLIntensity = iblInt,
+          rcSunAzimuth = sunAzimuth,
+          rcSunScreenX = sunScreenX,
+          rcSunScreenY = sunScreenY,
+          rcSunDir = sunDir,
+          rcCloudHeight = fsCloudHeight frameState,
+          rcTime = time,
+          rcPrevViewProjTVars = prevViewProjTVars,
+          rcPrevTimeTVars = prevTimeTVars,
+          rcCurrentCloudViewProj = currentCloudViewProj,
+          rcWindDirX = windDirX,
+          rcWindDirZ = windDirZ,
+          rcCloudCoverage = cloudCoverage,
+          rcCloudDetail = cloudDetail,
+          rcCloudAbsorption = cloudAbsorption,
+          rcWeatherCoverageScale = weatherCoverageScale,
+          rcWeatherTypeBias = weatherTypeBias,
+          rcStormIntensity = stormIntensity,
+          rcWeatherAnimSpeed = weatherAnimSpeed,
+          rcWireframeEnabled = fsWireframe frameState,
+          rcDeferred = dr,
+          rcCullResources = ccr,
+          rcDevice = device ctx,
+          rcPassSurfaceExtent = rcSurfaceExtent ctx,
+          rcImGuiRenderPass = drImGuiRenderPass dr,
+          rcImGuiFramebuffers = drImGuiFramebuffers dr,
+          rcImGuiDrawData = mDrawData
+        }
 
 buildRecordAction :: RecordContext -> Vulkan.Word32 -> Int -> IO ()
 buildRecordAction RecordContext {..} imageIdx frameIdx = do
@@ -244,10 +244,10 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdLightBuffer = rcLightSsboBuffer,
                 dpdSkyTint = rcSkyTint,
                 dpdIBLIntensity = rcIBLIntensity,
-                 dpdSunAzimuth = rcSunAzimuth,
-                 dpdSunScreenX = rcSunScreenX,
-                 dpdSunScreenY = rcSunScreenY,
-                 dpdSunDir = rcSunDir,
+                dpdSunAzimuth = rcSunAzimuth,
+                dpdSunScreenX = rcSunScreenX,
+                dpdSunScreenY = rcSunScreenY,
+                dpdSunDir = rcSunDir,
                 dpdCloudHeight = rcCloudHeight,
                 dpdTime = rcTime,
                 dpdPrevViewProj = prevViewProjF,
@@ -261,24 +261,24 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdWeatherCoverageScale = rcWeatherCoverageScale,
                 dpdWeatherTypeBias = rcWeatherTypeBias,
                 dpdStormIntensity = rcStormIntensity,
-                 dpdWeatherAnimSpeed = rcWeatherAnimSpeed,
-                 dpdFrameIndex = frameIdx,
+                dpdWeatherAnimSpeed = rcWeatherAnimSpeed,
+                dpdFrameIndex = frameIdx,
                 dpdCloudFrameDataMemory = drCloudFrameDataMemory rcDeferred,
                 dpdCloudRenderPass = drCloudRenderPass rcDeferred,
                 dpdCloudFramebuffer = cloudFramebuffer,
                 dpdCloudPipeline = drCloudPipeline rcDeferred,
                 dpdCloudLayout = drCloudPipelineLayout rcDeferred,
                 dpdCloudDescriptor = cloudDescriptorSet,
-                 dpdCloudExtent = drCloudExtent rcDeferred,
-                 dpdCloudImage = cloudImage,
-                 dpdCloudHistoryImage = cloudHistoryImage,
-                 dpdGodRayRenderPass = drGodRayRenderPass rcDeferred,
-                 dpdGodRayFramebuffer = drGodRayFramebuffers rcDeferred !! fromIntegral imageIdx,
-                 dpdGodRayPipeline = drGodRayPipeline rcDeferred,
-                 dpdGodRayLayout = drGodRayPipelineLayout rcDeferred,
-                 dpdGodRayDescriptor = drGodRayDescriptorSets rcDeferred !! fromIntegral imageIdx,
-                 dpdGodRayExtent = drCloudExtent rcDeferred,
-                 dpdGBufferImages = gBufferImagesForFrame,
+                dpdCloudExtent = drCloudExtent rcDeferred,
+                dpdCloudImage = cloudImage,
+                dpdCloudHistoryImage = cloudHistoryImage,
+                dpdGodRayRenderPass = drGodRayRenderPass rcDeferred,
+                dpdGodRayFramebuffer = drGodRayFramebuffers rcDeferred !! fromIntegral imageIdx,
+                dpdGodRayPipeline = drGodRayPipeline rcDeferred,
+                dpdGodRayLayout = drGodRayPipelineLayout rcDeferred,
+                dpdGodRayDescriptor = drGodRayDescriptorSets rcDeferred !! fromIntegral imageIdx,
+                dpdGodRayExtent = drCloudExtent rcDeferred,
+                dpdGBufferImages = gBufferImagesForFrame,
                 dpdWireframePipeline = drWireframePipeline rcDeferred,
                 dpdWireframeLayout = drWireframePipelineLayout rcDeferred,
                 dpdWireframeEnabled = rcWireframeEnabled

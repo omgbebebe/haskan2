@@ -196,10 +196,10 @@ cloudVertex = shader do
 type CloudFragmentDefs =
   '[ "in_uv" ':-> Input '[Location 0] (V 2 Float),
      "in_ray" ':-> Input '[Location 1] (V 3 Float),
-      "env_map"
-        ':-> TextureCube
-               '[Binding 0, DescriptorSet 0]
-               (RGBA16 F),
+     "env_map"
+       ':-> TextureCube
+              '[Binding 0, DescriptorSet 0]
+              (RGBA16 F),
      "cloud_noise"
        ':-> Texture3D
               '[Binding 1, DescriptorSet 0]
