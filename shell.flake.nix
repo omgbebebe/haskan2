@@ -4,6 +4,17 @@ with pkgs;
 
 let
   ghc = haskell.compiler.${compiler};
+  myHaskellPackages = pkgs.haskell.packages.ghc914.override {
+    overrides = hself: hsuper: {
+#      ghc-trace-events = pkgs.haskell.lib.doJailbreak hsuper.ghc-trace-events;
+#      hie-compat = pkgs.haskell.lib.doJailbreak hsuper.hie-compat;
+#      dec = pkgs.haskell.lib.doJailbreak hsuper.dec;
+#      singleton-bool = pkgs.haskell.lib.doJailbreak hsuper.singleton-bool;
+#      Cabal-syntax = pkgs.haskell.lib.doJailbreak hsuper.Cabal-syntax;
+#      haskell-language-server = pkgs.haskell.lib.doJailbreak hsuper.haskell-language-server;
+#      cabal-install = pkgs.haskell.lib.doJailbreak hsuper.cabal-install;
+    };
+  };
 
   jolt-physics = stdenv.mkDerivation rec {
     pname = "jolt-physics";
@@ -63,6 +74,17 @@ let
     shaderc
     zlib
   ];
+
+#  haskellPackages = pkgs.haskell.packages.ghc914.override {
+#    overrides = hself: hsuper: {
+#      # This "jailbreaks" the package, stripping its strict upper bounds
+#      ghc-trace-events = pkgs.haskell.lib.doJailbreak hsuper.ghc-trace-events;
+#      hie-compat = pkgs.haskell.lib.doJailbreak hsuper.hie-compat;
+#      dec = pkgs.haskell.lib.doJailbreak hsuper.dec;
+#      singleton-bool = pkgs.haskell.lib.doJailbreak hsuper.singleton-bool;
+#      Cabal-syntax = pkgs.haskell.lib.doJailbreak hsuper.Cabal-syntax;
+#    };
+#  };
 in
 mkShell {
   name = "haskan-dev";
@@ -71,7 +93,7 @@ mkShell {
     gdb
     tree
     haskell-language-server
-    ghc
+#    ghc
     cabal-install
     pkg-config
     socat
@@ -89,8 +111,13 @@ mkShell {
     ktx-tools
     openexr imagemagick # to work with exr (HDRi)
     # Linting/formatting tools (built with ghc98 since ghc914 versions are broken)
-    haskell.packages.ghc98.hlint
-    haskell.packages.ghc98.apply-refact
+#    haskell.packages.ghc98.hlint
+#    haskell.packages.ghc98.apply-refact
+#    myHaskellPackages.haskell-language-server
+#    haskell.packages.ghc914.haskell-language-server
+    myHaskellPackages.ghc
+#    myHaskellPackages.cabal-install
+    vscodium
   ];
   buildInputs = [
     jolt-physics

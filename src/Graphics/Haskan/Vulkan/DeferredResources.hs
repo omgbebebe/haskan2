@@ -24,6 +24,7 @@ import Graphics.Haskan.Vertex (Vertex)
 import Graphics.Haskan.Vertex qualified as Vertex
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
+import Graphics.Haskan.Vulkan.ComputePipeline qualified as ComputePipeline
 import Graphics.Haskan.Vulkan.DescriptorPool qualified as DescriptorPool
 import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.DescriptorSetLayout qualified as DescriptorSetLayout
@@ -47,7 +48,8 @@ data DeferredShaders = DeferredShaders
     dsLighting :: !ShaderProgram,
     dsWireframe :: !ShaderProgram,
     dsCloud :: !ShaderProgram,
-    dsGodRay :: !ShaderProgram
+    dsGodRay :: !ShaderProgram,
+    dsAPVolume :: !Vulkan.VkShaderModule
   }
 
 data IBLResources = IBLResources
@@ -110,6 +112,12 @@ data DeferredResources = DeferredResources
     drAPVolumeImage :: !Vulkan.VkImage,
     drAPVolumeImageView :: !Vulkan.VkImageView,
     drAPVolumeMemory :: !Vulkan.VkDeviceMemory,
+    drAPVolumePipeline :: !Vulkan.VkPipeline,
+    drAPVolumePipelineLayout :: !Vulkan.VkPipelineLayout,
+    drAPVolumeDescriptorPool :: !Vulkan.VkDescriptorPool,
+    drAPVolumeDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    drAPVolumeUniformBuffer :: !Vulkan.VkBuffer,
+    drAPVolumeUniformMemory :: !Vulkan.VkDeviceMemory,
     drGBufferImages :: ![[Vulkan.VkImage]],
     drGBufferImageViews :: ![[Vulkan.VkImageView]],
     drSampler :: !Vulkan.VkSampler,
@@ -446,6 +454,33 @@ createDeferredResources DeferredConfig {..} = do
     DescriptorSet.updateGodRayDescriptorSets device ds sampler cloudView
   logDebugIO LogRender "god ray descriptor sets updated"
 
+  -- AP volume compute pipeline
+  apVolumeDescriptorSetLayout <- DescriptorSetLayout.managedAPVolumeComputeDescriptorSetLayout device
+  logDebugIO LogRender "AP volume descriptor set layout created"
+  apVolumePipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [apVolumeDescriptorSetLayout] []
+  logDebugIO LogRender "AP volume pipeline layout created"
+  apVolumePipeline <- ComputePipeline.managedComputePipeline device apVolumePipelineLayout dsAPVolume
+  logDebugIO LogRender "AP volume compute pipeline created"
+
+  -- AP volume descriptor pool and sets
+  apVolumeDescriptorPool <- DescriptorPool.managedAPVolumeDescriptorPool device numSwapchainImages
+  apVolumeDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
+    DescriptorSet.allocateDescriptorSet device apVolumeDescriptorPool [apVolumeDescriptorSetLayout]
+  logDebugIO LogRender $ "AP volume descriptor sets allocated: " <> showT (length apVolumeDescriptorSets)
+
+  -- AP volume uniform buffer (256 bytes, std140 aligned)
+  let apUniformSize = 256
+  (apUniformBuffer, apUniformMemoryRequirement) <-
+    Buffer.managedBuffer device (replicate apUniformSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+  apUniformMemory <- Buffer.managedBufferMemory pdev device apUniformMemoryRequirement
+  liftIO $ Buffer.bindBufferMemory device apUniformBuffer apUniformMemory (replicate apUniformSize (0 :: Word8))
+  logDebugIO LogRender "AP volume uniform buffer created"
+
+  -- Update AP volume descriptor sets
+  liftIO $ for_ apVolumeDescriptorSets $ \ds -> do
+    DescriptorSet.updateAPVolumeDescriptorSets device ds apImageView apUniformBuffer
+  logDebugIO LogRender "AP volume descriptor sets updated"
+
   pure
     DeferredResources
       { drGBufferRenderPass = gBufferRenderPass,
@@ -480,6 +515,12 @@ createDeferredResources DeferredConfig {..} = do
         drAPVolumeImage = apImage,
         drAPVolumeImageView = apImageView,
         drAPVolumeMemory = apMemory,
+        drAPVolumePipeline = apVolumePipeline,
+        drAPVolumePipelineLayout = apVolumePipelineLayout,
+        drAPVolumeDescriptorPool = apVolumeDescriptorPool,
+        drAPVolumeDescriptorSets = apVolumeDescriptorSets,
+        drAPVolumeUniformBuffer = apUniformBuffer,
+        drAPVolumeUniformMemory = apUniformMemory,
         drGBufferImages = gBufferImages,
         drGBufferImageViews = gBufferImageViews,
         drSampler = sampler,

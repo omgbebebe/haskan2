@@ -7,6 +7,8 @@ module Graphics.Haskan.Vulkan.DescriptorPool
     createCloudDescriptorPool,
     managedGodRayDescriptorPool,
     createGodRayDescriptorPool,
+    managedAPVolumeDescriptorPool,
+    createAPVolumeDescriptorPool,
     managedBindlessDescriptorPool,
     createBindlessDescriptorPool,
     managedComputeDescriptorPool,
@@ -167,6 +169,46 @@ createGodRayDescriptorPool dev numSets = do
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
               &* set @"poolSizeCount" 1
               &* setListRef @"pPoolSizes" [samplerPoolSize]
+              &* set @"maxSets" (fromIntegral numSets)
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
+          )
+
+managedAPVolumeDescriptorPool :: (MonadManaged m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+managedAPVolumeDescriptorPool dev numSets =
+  alloc
+    "APVolumeDescriptorPool"
+    (createAPVolumeDescriptorPool dev numSets)
+    (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
+
+createAPVolumeDescriptorPool :: (MonadIO m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+createAPVolumeDescriptorPool dev numSets = do
+  let storageImagePoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+              &* set @"descriptorCount" (fromIntegral (numSets * 1))
+          )
+      samplerPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"descriptorCount" (fromIntegral (numSets * 1))
+          )
+      uniformBufferPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"descriptorCount" (fromIntegral (numSets * 1))
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"poolSizeCount" 3
+              &* setListRef @"pPoolSizes" [storageImagePoolSize, samplerPoolSize, uniformBufferPoolSize]
               &* set @"maxSets" (fromIntegral numSets)
           )
    in liftIO $

@@ -917,9 +917,10 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                           { Deferred.dsGBuffer = ShaderProgram smGbufVert Nothing Nothing Nothing smGbufFrag,
                             Deferred.dsLighting = ShaderProgram smLightVert Nothing Nothing Nothing (if proceduralSkyEnabled then smLightProcFrag else smLightFrag),
                             Deferred.dsWireframe = ShaderProgram smWireVert Nothing Nothing (Just smWireGeom) smWireFrag,
-                            Deferred.dsCloud = ShaderProgram smCloudVert Nothing Nothing Nothing smCloudFrag,
-                            Deferred.dsGodRay = ShaderProgram smGodrayVert Nothing Nothing Nothing smGodrayFrag
-                          },
+                             Deferred.dsCloud = ShaderProgram smCloudVert Nothing Nothing Nothing smCloudFrag,
+                             Deferred.dsGodRay = ShaderProgram smGodrayVert Nothing Nothing Nothing smGodrayFrag,
+                             Deferred.dsAPVolume = smAPVolume
+                           },
                       Deferred.dcIBL =
                         Deferred.IBLResources
                           { Deferred.irRadianceView = iblRadianceView,

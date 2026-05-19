@@ -82,6 +82,7 @@ import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..), TextureResource (..), lookupTexture)
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
+import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolumeShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen qualified as CloudNoiseGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
@@ -155,6 +156,8 @@ compileAllShaders = do
   logInfo LogGeneral "  godray_vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/godray_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GodRayShaders.fragment
   logInfo LogGeneral "  godray_frag.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/ap_volume_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] APVolumeShaders.program
+  logInfo LogGeneral "  ap_volume_comp.spv done"
 
 -- | Create all shader modules from compiled SPIR-V
 data ShaderModules = ShaderModules
@@ -172,7 +175,8 @@ data ShaderModules = ShaderModules
     smCloudVert :: !Vulkan.VkShaderModule,
     smCloudFrag :: !Vulkan.VkShaderModule,
     smGodrayVert :: !Vulkan.VkShaderModule,
-    smGodrayFrag :: !Vulkan.VkShaderModule
+    smGodrayFrag :: !Vulkan.VkShaderModule,
+    smAPVolume :: !Vulkan.VkShaderModule
   }
 
 createShaderModules ::
@@ -195,6 +199,7 @@ createShaderModules device = do
   smCloudFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_frag.spv"
   smGodrayVert <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_vert.spv"
   smGodrayFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_frag.spv"
+  smAPVolume <- ShaderModule.managedShaderModule device "data/shaders/fir/ap_volume_comp.spv"
   pure ShaderModules {..}
 
 data IBLTextures = IBLTextures
