@@ -1,5 +1,11 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Graphics.Haskan.Vulkan.DeferredResources
   ( DeferredResources (..),
+    DeferredConfig (..),
+    DeferredShaders (..),
+    IBLResources (..),
+    CloudTextures (..),
     createDeferredResources,
   )
 where
@@ -34,6 +40,41 @@ import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+
+data DeferredShaders = DeferredShaders
+  { dsGBuffer   :: !ShaderProgram,
+    dsLighting  :: !ShaderProgram,
+    dsWireframe :: !ShaderProgram,
+    dsCloud     :: !ShaderProgram,
+    dsGodRay    :: !ShaderProgram
+  }
+
+data IBLResources = IBLResources
+  { irRadianceView   :: !(Maybe Vulkan.VkImageView),
+    irIrradianceView :: !(Maybe Vulkan.VkImageView),
+    irBrdfView       :: !(Maybe Vulkan.VkImageView),
+    irSampler        :: !Vulkan.VkSampler
+  }
+
+data CloudTextures = CloudTextures
+  { ctNoiseView        :: !(Maybe Vulkan.VkImageView),
+    ctBlueNoiseView    :: !(Maybe Vulkan.VkImageView),
+    ctWeatherMapView   :: !(Maybe Vulkan.VkImageView),
+    ctBlueNoiseSampler :: !Vulkan.VkSampler
+  }
+
+data DeferredConfig = DeferredConfig
+  { dcPhysicalDevice       :: !Vulkan.VkPhysicalDevice,
+    dcDevice               :: !Vulkan.VkDevice,
+    dcRenderContext        :: !RenderContext,
+    dcBindlessDescSetLayout :: !Vulkan.VkDescriptorSetLayout,
+    dcShaders              :: !DeferredShaders,
+    dcIBL                  :: !IBLResources,
+    dcCloudTextures        :: !CloudTextures,
+    dcLightBuffer          :: !(Maybe Vulkan.VkBuffer),
+    dcImGuiRenderPass      :: !Vulkan.VkRenderPass,
+    dcProceduralSky        :: !Bool
+  }
 
 data DeferredResources = DeferredResources
   { drGBufferRenderPass :: !Vulkan.VkRenderPass,
@@ -76,36 +117,28 @@ data DeferredResources = DeferredResources
 
 createDeferredResources ::
   (MonadIO m, MonadManaged m) =>
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
-  RenderContext ->
-  Vulkan.VkDescriptorSetLayout ->
-  [Vulkan.VkPushConstantRange] ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  Maybe Vulkan.VkImageView ->
-  Maybe Vulkan.VkImageView ->
-  Maybe Vulkan.VkImageView ->
-  Vulkan.VkSampler ->
-  Maybe Vulkan.VkImageView ->
-  Maybe Vulkan.VkImageView ->
-  Maybe Vulkan.VkImageView ->
-  Vulkan.VkSampler ->
-  Maybe Vulkan.VkBuffer ->
-  Vulkan.VkRenderPass ->
-  Bool ->
+  DeferredConfig ->
   m DeferredResources
-createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges gbufVertShader gbufFragShader litVertShader litFragShader lightProceduralFragShader wireVertShader wireGeomShader wireFragShader cloudVertShader cloudFragShader godrayVertShader godrayFragShader mEnvMapView mIrradianceView mBrdfView sampler mCloudNoiseView mBlueNoiseView mWeatherMapView blueNoiseSampler mLightBuffer imGuiRenderPass proceduralSkyEnabled = do
+createDeferredResources DeferredConfig{..} = do
+  let pdev = dcPhysicalDevice
+      device = dcDevice
+      ctx = dcRenderContext
+      DeferredShaders{..} = dcShaders
+      IBLResources{..} = dcIBL
+      CloudTextures{..} = dcCloudTextures
+      mEnvMapView = irRadianceView
+      mIrradianceView = irIrradianceView
+      mBrdfView = irBrdfView
+      sampler = irSampler
+      mCloudNoiseView = ctNoiseView
+      mBlueNoiseView = ctBlueNoiseView
+      mWeatherMapView = ctWeatherMapView
+      blueNoiseSampler = ctBlueNoiseSampler
+      mLightBuffer = dcLightBuffer
+      imGuiRenderPass = dcImGuiRenderPass
+      proceduralSkyEnabled = dcProceduralSky
+      descriptorSetLayout = dcBindlessDescSetLayout
+      pushConstantRanges = []
   let extent = rcSurfaceExtent ctx
       cloudExtent =
         Vulkan.createVk
@@ -213,13 +246,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       device
       gBufferPipelineLayout
       gBufferRenderPass
-      ShaderProgram
-        { spVertex = gbufVertShader,
-          spTessControl = Nothing,
-          spTessEvaluation = Nothing,
-          spGeometry = Nothing,
-          spFragment = gbufFragShader
-        }
+      dsGBuffer
       extent
       Vertex.vertexFormat
       4
@@ -240,19 +267,12 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
   logDebugIO LogRender "lighting pipeline layout created"
 
   -- Lighting pipeline
-  let selectedLitFragShader = if proceduralSkyEnabled then lightProceduralFragShader else litFragShader
   lightingPipeline <-
     GraphicsPipeline.managedFullscreenPipeline
       device
       lightingPipelineLayout
       lightingRenderPass
-      ShaderProgram
-        { spVertex = litVertShader,
-          spTessControl = Nothing,
-          spTessEvaluation = Nothing,
-          spGeometry = Nothing,
-          spFragment = selectedLitFragShader
-        }
+      dsLighting
       extent
   logDebugIO LogRender "lighting pipeline created"
 
@@ -271,13 +291,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       device
       cloudPipelineLayout
       cloudRenderPass
-      ShaderProgram
-        { spVertex = cloudVertShader,
-          spTessControl = Nothing,
-          spTessEvaluation = Nothing,
-          spGeometry = Nothing,
-          spFragment = cloudFragShader
-        }
+      dsCloud
       cloudExtent
   logDebugIO LogRender "cloud pipeline created"
 
@@ -287,13 +301,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       device
       gBufferPipelineLayout
       gBufferRenderPass
-      ShaderProgram
-        { spVertex = wireVertShader,
-          spTessControl = Nothing,
-          spTessEvaluation = Nothing,
-          spGeometry = Just wireGeomShader,
-          spFragment = wireFragShader
-        }
+      dsWireframe
       extent
       Vertex.vertexFormat
       4
@@ -308,13 +316,7 @@ createDeferredResources pdev device ctx descriptorSetLayout pushConstantRanges g
       device
       godRayPipelineLayout
       cloudRenderPass
-      ShaderProgram
-        { spVertex = godrayVertShader,
-          spTessControl = Nothing,
-          spTessEvaluation = Nothing,
-          spGeometry = Nothing,
-          spFragment = godrayFragShader
-        }
+      dsGodRay
       cloudExtent
   logDebugIO LogRender "god ray pipeline created"
 

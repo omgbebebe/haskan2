@@ -1,8 +1,10 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Engine.Render.Internal.Setup
   ( compileAllShaders,
     createShaderModules,
+    ShaderModules (..),
     loadIBLTextures,
     IBLTextures (..),
     SceneLoadResult (..),
@@ -62,7 +64,7 @@ import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.CommandPool qualified as CommandPool
 import Graphics.Haskan.Vulkan.ComputePipeline qualified as ComputePipeline
-import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..), createDeferredResources)
+import Graphics.Haskan.Vulkan.DeferredResources qualified as Deferred
 import Graphics.Haskan.Vulkan.DescriptorPool qualified as DescriptorPool
 import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.DescriptorSetLayout qualified as DescriptorSetLayout
@@ -155,43 +157,45 @@ compileAllShaders = do
   logInfo LogGeneral "  godray_frag.spv done"
 
 -- | Create all shader modules from compiled SPIR-V
+data ShaderModules = ShaderModules
+  { smForwardVert   :: !Vulkan.VkShaderModule,
+    smForwardFrag   :: !Vulkan.VkShaderModule,
+    smGbufVert      :: !Vulkan.VkShaderModule,
+    smGbufFrag      :: !Vulkan.VkShaderModule,
+    smLightVert     :: !Vulkan.VkShaderModule,
+    smLightFrag     :: !Vulkan.VkShaderModule,
+    smLightProcFrag :: !Vulkan.VkShaderModule,
+    smWireVert      :: !Vulkan.VkShaderModule,
+    smWireGeom      :: !Vulkan.VkShaderModule,
+    smWireFrag      :: !Vulkan.VkShaderModule,
+    smCull          :: !Vulkan.VkShaderModule,
+    smCloudVert     :: !Vulkan.VkShaderModule,
+    smCloudFrag     :: !Vulkan.VkShaderModule,
+    smGodrayVert    :: !Vulkan.VkShaderModule,
+    smGodrayFrag    :: !Vulkan.VkShaderModule
+  }
+
 createShaderModules ::
   (MonadManaged m, MonadIO m) =>
   Vulkan.VkDevice ->
-  m
-    ( Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule,
-      Vulkan.VkShaderModule
-    )
+  m ShaderModules
 createShaderModules device = do
-  vertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/vert.spv"
-  fragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/frag.spv"
-  gbufVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_vert.spv"
-  gbufFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_frag.spv"
-  lightVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/light_vert.spv"
-  lightFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/light_frag.spv"
-  lightProceduralFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/light_procedural_frag.spv"
-  wireVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_vert.spv"
-  wireGeomShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_geom.spv"
-  wireFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_frag.spv"
-  cullShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cull_comp.spv"
-  cloudVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_vert.spv"
-  cloudFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_frag.spv"
-  godrayVertShader <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_vert.spv"
-  godrayFragShader <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_frag.spv"
-  pure (vertShader, fragShader, gbufVertShader, gbufFragShader, lightVertShader, lightFragShader, lightProceduralFragShader, wireVertShader, wireGeomShader, wireFragShader, cullShader, cloudVertShader, cloudFragShader, godrayVertShader, godrayFragShader)
+  smForwardVert <- ShaderModule.managedShaderModule device "data/shaders/fir/vert.spv"
+  smForwardFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/frag.spv"
+  smGbufVert <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_vert.spv"
+  smGbufFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_frag.spv"
+  smLightVert <- ShaderModule.managedShaderModule device "data/shaders/fir/light_vert.spv"
+  smLightFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/light_frag.spv"
+  smLightProcFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/light_procedural_frag.spv"
+  smWireVert <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_vert.spv"
+  smWireGeom <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_geom.spv"
+  smWireFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_frag.spv"
+  smCull <- ShaderModule.managedShaderModule device "data/shaders/fir/cull_comp.spv"
+  smCloudVert <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_vert.spv"
+  smCloudFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_frag.spv"
+  smGodrayVert <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_vert.spv"
+  smGodrayFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_frag.spv"
+  pure ShaderModules{..}
 
 data IBLTextures = IBLTextures
   { iblRadianceCubemap :: !TextureHandle,
