@@ -17,6 +17,23 @@ import Graphics.Vulkan.Marshal.Create (set, setAt, setListRef, setStrRef, setVkR
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Linear (V3 (..))
 
+managedGraphicsPipelineWithCull ::
+  (MonadManaged m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkPipelineLayout ->
+  Vulkan.VkRenderPass ->
+  ShaderProgram ->
+  Vulkan.VkExtent2D ->
+  VertexFormat v ->
+  Int ->
+  Vulkan.VkCullModeFlags ->
+  m Vulkan.VkPipeline
+managedGraphicsPipelineWithCull dev layout renderPass shaderProgram swapchainExtent vertexFormat colorAttachmentCount cullMode =
+  alloc
+    "GraphicsPipeline"
+    (createGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent vertexFormat colorAttachmentCount cullMode)
+    (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
+
 managedGraphicsPipeline ::
   (MonadManaged m) =>
   Vulkan.VkDevice ->
@@ -28,10 +45,7 @@ managedGraphicsPipeline ::
   Int ->
   m Vulkan.VkPipeline
 managedGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent vertexFormat colorAttachmentCount =
-  alloc
-    "GraphicsPipeline"
-    (createGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent vertexFormat colorAttachmentCount)
-    (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
+  managedGraphicsPipelineWithCull dev layout renderPass shaderProgram swapchainExtent vertexFormat colorAttachmentCount Vulkan.VK_CULL_MODE_BACK_BIT
 
 createGraphicsPipeline ::
   (MonadIO m) =>
@@ -42,8 +56,9 @@ createGraphicsPipeline ::
   Vulkan.VkExtent2D ->
   VertexFormat v ->
   Int ->
+  Vulkan.VkCullModeFlags ->
   m Vulkan.VkPipeline
-createGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent vertexFormat colorAttachmentCount = do
+createGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent vertexFormat colorAttachmentCount cullMode = do
   let stages = toPipelineStages shaderProgram
       numStages = stageCount shaderProgram
       positionBindingDescription =
@@ -113,7 +128,7 @@ createGraphicsPipeline dev layout renderPass shaderProgram swapchainExtent verte
               &* set @"rasterizerDiscardEnable" Vulkan.VK_FALSE
               &* set @"polygonMode" Vulkan.VK_POLYGON_MODE_FILL
               &* set @"lineWidth" 1.0
-              &* set @"cullMode" Vulkan.VK_CULL_MODE_NONE
+              &* set @"cullMode" cullMode
               &* set @"frontFace" Vulkan.VK_FRONT_FACE_COUNTER_CLOCKWISE
               &* set @"depthBiasEnable" Vulkan.VK_FALSE
               &* set @"depthBiasConstantFactor" 0.0

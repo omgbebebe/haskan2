@@ -93,6 +93,10 @@ cmdDrawIndexedIndirect :: (MonadIO m) => Vulkan.VkCommandBuffer -> Vulkan.VkBuff
 cmdDrawIndexedIndirect commandBuffer buffer drawCount stride =
   liftIO $ Vulkan.vkCmdDrawIndexedIndirect commandBuffer buffer 0 drawCount stride
 
+cmdDrawIndexedIndirectOffset :: (MonadIO m) => Vulkan.VkCommandBuffer -> Vulkan.VkBuffer -> Vulkan.VkDeviceSize -> Word32 -> Word32 -> m ()
+cmdDrawIndexedIndirectOffset commandBuffer buffer offset drawCount stride =
+  liftIO $ Vulkan.vkCmdDrawIndexedIndirect commandBuffer buffer offset drawCount stride
+
 cmdDispatch :: (MonadIO m) => Vulkan.VkCommandBuffer -> Word32 -> Word32 -> Word32 -> m ()
 cmdDispatch commandBuffer gx gy gz = liftIO $ Vulkan.vkCmdDispatch commandBuffer gx gy gz
 

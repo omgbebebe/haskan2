@@ -38,6 +38,7 @@ data DeferredPassData = DeferredPassData
     dpdGBufferRenderPass :: !Vulkan.VkRenderPass,
     dpdGBufferFramebuffer :: !Vulkan.VkFramebuffer,
     dpdGBufferPipeline :: !Vulkan.VkPipeline,
+    dpdGBufferDoubleSidedPipeline :: !Vulkan.VkPipeline,
     dpdGBufferLayout :: !Vulkan.VkPipelineLayout,
     dpdGBufferDescriptor :: !Vulkan.VkDescriptorSet,
     dpdGBufferSampler :: !Vulkan.VkSampler,
@@ -127,7 +128,10 @@ buildDeferredGraph DeferredPassData {..} = do
         rpRecord = PassRecordFunc $ \ctx -> do
           let commandBuffer = pcCommandBuffer ctx
           RenderPass.withGBufferRenderPass commandBuffer dpdGBufferRenderPass dpdGBufferFramebuffer dpdExtent $ do
-            -- Solid geometry pass
+            -- Solid geometry pass: split by doubleSided flag
+            let (culledDraws, doubleSidedDraws) = span (not . dcDoubleSided) dpdDrawList
+                culledCount = fromIntegral (length culledDraws) :: Word32
+                dsCount = fromIntegral (length doubleSidedDraws) :: Word32
             GraphicsPipeline.cmdBindPipeline commandBuffer dpdGBufferPipeline
             -- Bind merged vertex/index buffers once (all entities share them)
             case dpdDrawList of
@@ -150,9 +154,13 @@ buildDeferredGraph DeferredPassData {..} = do
                 dsPtr
                 0
                 Vulkan.vkNullPtr
-            -- Single indirect draw call for all entities
-            when (dpdEntityCount > 0) $
-              CommandBuffer.cmdDrawIndexedIndirect commandBuffer dpdDrawCommandsBuffer dpdEntityCount 20
+            -- Draw culled entities (backface culling enabled)
+            when (culledCount > 0) $
+              CommandBuffer.cmdDrawIndexedIndirect commandBuffer dpdDrawCommandsBuffer culledCount 20
+            -- Draw double-sided entities (no culling)
+            when (dsCount > 0) $ do
+              GraphicsPipeline.cmdBindPipeline commandBuffer dpdGBufferDoubleSidedPipeline
+              CommandBuffer.cmdDrawIndexedIndirectOffset commandBuffer dpdDrawCommandsBuffer (fromIntegral culledCount * 20) dsCount 20
             -- Wireframe overlay pass
             when dpdWireframeEnabled $ do
               GraphicsPipeline.cmdBindPipeline commandBuffer dpdWireframePipeline

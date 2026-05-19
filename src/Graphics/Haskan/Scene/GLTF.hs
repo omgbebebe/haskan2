@@ -52,8 +52,9 @@ import Text.GLTF.Loader.Gltf
     gltfNodes,
     gltfTextures,
     materialEmissiveTexture,
-    materialOcclusionStrength,
+    materialNormalTexture,
     materialOcclusionTexture,
+    materialDoubleSided,
     meshPrimitiveIndices,
     meshPrimitiveMaterial,
     meshPrimitiveNormals,
@@ -533,6 +534,10 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
                         ECS.setMetallicFactor world entity met
                         ECS.setRoughnessFactor world entity rou
                       Nothing -> pure ()
+                    let ds = GLTFTypes.materialDoubleSided mat
+                    when ds $ do
+                      logInfoIO LogGeneral $ "entity " <> showT entity <> " material " <> showT matIdx <> " -> doubleSided=true"
+                    ECS.setDoubleSided world entity ds
                   -- Set metallic-roughness texture if present
                   when (matIdx >= 0 && matIdx < length materialMRTextures) $ do
                     case materialMRTextures !! matIdx of

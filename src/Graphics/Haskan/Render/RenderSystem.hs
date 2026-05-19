@@ -36,7 +36,8 @@ data DrawCall = DrawCall
     dcNormalIndex :: !Word32,
     dcOcclusionIndex :: !Word32,
     dcOcclusionStrength :: !Float,
-    dcEmissiveIndex :: !Word32
+    dcEmissiveIndex :: !Word32,
+    dcDoubleSided :: !Bool
   }
 
 extractDrawList ::
@@ -58,10 +59,11 @@ extractDrawList world rm texIndexMap = liftIO $ do
   occlusionTextures <- STM.readTVarIO (wOcclusionTextures world)
   occlusionStrengths <- STM.readTVarIO (wOcclusionStrengths world)
   emissiveTextures <- STM.readTVarIO (wEmissiveTextures world)
+  doubleSided <- STM.readTVarIO (wDoubleSided world)
 
   let worldMatrices = computeWorldMatrices transforms parents
 
-  catMaybes <$> mapM (resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures occlusionTextures occlusionStrengths emissiveTextures worldMatrices texIndexMap) (IntMap.toList meshes)
+  catMaybes <$> mapM (resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures occlusionTextures occlusionStrengths emissiveTextures doubleSided worldMatrices texIndexMap) (IntMap.toList meshes)
 
 computeWorldMatrices ::
   IntMap Transform ->
@@ -89,11 +91,12 @@ resolveEntity ::
   IntMap TextureHandle ->
   IntMap Float ->
   IntMap TextureHandle ->
+  IntMap Bool ->
   IntMap (M44 Float) ->
   IntMap Word32 ->
   (Int, MeshHandle) ->
   IO (Maybe DrawCall)
-resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures occlusionTextures occlusionStrengths emissiveTextures worldMatrices texIndexMap (eidKey, meshHandle) = do
+resolveEntity rm transforms materials metallicFactors roughnessFactors mrTextures normalTextures occlusionTextures occlusionStrengths emissiveTextures doubleSided worldMatrices texIndexMap (eidKey, meshHandle) = do
   mMeshRes <- lookupMesh rm meshHandle
   let mTransform = IntMap.lookup eidKey transforms
       mMaterialHandle = IntMap.lookup eidKey materials
@@ -105,6 +108,7 @@ resolveEntity rm transforms materials metallicFactors roughnessFactors mrTexture
       mOcclusionTexture = IntMap.lookup eidKey occlusionTextures
       mOcclusionStrength = IntMap.lookup eidKey occlusionStrengths
       mEmissiveTexture = IntMap.lookup eidKey emissiveTextures
+      mDoubleSided = IntMap.lookup eidKey doubleSided
 
   mMatRes <- case mMaterialHandle of
     Just h -> lookupTexture rm h
@@ -121,6 +125,7 @@ resolveEntity rm transforms materials metallicFactors roughnessFactors mrTexture
       metallic = fromMaybe 0.0 mMetallic
       roughness = fromMaybe 0.5 mRoughness
       occlusionStrength = fromMaybe 1.0 mOcclusionStrength
+      isDoubleSided = fromMaybe False mDoubleSided
 
   case (mMeshRes, mTransform, mWorldMatrix) of
     (Just mesh, Just trans, Just wm) ->
@@ -138,6 +143,7 @@ resolveEntity rm transforms materials metallicFactors roughnessFactors mrTexture
               dcNormalIndex = normalIdx,
               dcOcclusionIndex = occlusionIdx,
               dcOcclusionStrength = occlusionStrength,
-              dcEmissiveIndex = emissiveIdx
+              dcEmissiveIndex = emissiveIdx,
+              dcDoubleSided = isDoubleSided
             }
     _ -> pure Nothing

@@ -79,6 +79,7 @@ data DeferredConfig = DeferredConfig
 data DeferredResources = DeferredResources
   { drGBufferRenderPass :: !Vulkan.VkRenderPass,
     drGBufferPipeline :: !Vulkan.VkPipeline,
+    drGBufferDoubleSidedPipeline :: !Vulkan.VkPipeline,
     drGBufferPipelineLayout :: !Vulkan.VkPipelineLayout,
     drGBufferFramebuffers :: ![Vulkan.VkFramebuffer],
     drLightingRenderPass :: !Vulkan.VkRenderPass,
@@ -252,6 +253,19 @@ createDeferredResources DeferredConfig {..} = do
       4
   logDebugIO LogRender "g-buffer pipeline created"
 
+  -- G-buffer double-sided pipeline (no backface culling)
+  gBufferDoubleSidedPipeline <-
+    GraphicsPipeline.managedGraphicsPipelineWithCull
+      device
+      gBufferPipelineLayout
+      gBufferRenderPass
+      dsGBuffer
+      extent
+      Vertex.vertexFormat
+      4
+      Vulkan.VK_CULL_MODE_NONE
+  logDebugIO LogRender "g-buffer double-sided pipeline created"
+
   -- Lighting pipeline layout
   lightingDescriptorSetLayout <-
     if proceduralSkyEnabled
@@ -390,6 +404,7 @@ createDeferredResources DeferredConfig {..} = do
     DeferredResources
       { drGBufferRenderPass = gBufferRenderPass,
         drGBufferPipeline = gBufferPipeline,
+        drGBufferDoubleSidedPipeline = gBufferDoubleSidedPipeline,
         drGBufferPipelineLayout = gBufferPipelineLayout,
         drGBufferFramebuffers = gBufferFramebuffers,
         drLightingRenderPass = lightingRenderPass,

@@ -27,7 +27,7 @@ import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Int (Int32)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
-import Data.List (nub, sort)
+import Data.List (nub, sort, sortOn)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Vector.Storable qualified as Vector
@@ -313,16 +313,18 @@ runFrame frameNumber = do
 
   drawList <- extractDrawList reECSWorld reResourceManager reTextureIndexMap
   logDebug LogRender $ "draw list: " <> showT (length drawList) <> " entities"
-  let camPos = realToFrac <$> Camera.cameraPosition camera
+  -- Sort: culled entities first, then double-sided (matches pipeline split in gbuffer pass)
+  let sortedDrawList = sortOn dcDoubleSided drawList
+      camPos = realToFrac <$> Camera.cameraPosition camera
       camTarget = realToFrac <$> Camera.cameraTarget camera
       (w, h) = surfaceExtentWH (rcSurfaceExtent reContext)
       projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> makeProjectionMatrix w h :: M44 Float
       viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
-      entityDebugInfos = computeEntityDebugInfos drawList projMat viewMat
+      entityDebugInfos = computeEntityDebugInfos sortedDrawList projMat viewMat
       renderDebugInfo = buildRenderDebugInfo frameNumber camPos camTarget projMat entityDebugInfos
   liftIO $ STM.atomically $ STM.writeTVar reTvRenderDebug $ Just renderDebugInfo
-  let entityData = buildAllEntityData drawList
-      cullData = buildCullData w h camera drawList
+  let entityData = buildAllEntityData sortedDrawList
+      cullData = buildCullData w h camera sortedDrawList
   uploadStorageBuffer (ccrEntityMemory reCullResources) 0 entityData
   uploadUniformBuffer (ccrCullDataMemory reCullResources) 0 [cullData]
   logDebug LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
@@ -385,9 +387,9 @@ runFrame frameNumber = do
   uploadStorageBuffer reLightSsboMemory 0 lightsToUpload
   let lightCount = fromIntegral (length lights') :: Word32
   logDebug LogRender $ "lights uploaded: " <> showT (length lights')
-  case drawList of
+  case sortedDrawList of
     [] -> pure (False, False)
-    _ -> renderAndPresent env frameNumber camera drawList lightCount mvpMemory imageAvailableSemaphore
+    _ -> renderAndPresent env frameNumber camera sortedDrawList lightCount mvpMemory imageAvailableSemaphore
 
 -- | Render and present a non-empty frame
 renderAndPresent ::
