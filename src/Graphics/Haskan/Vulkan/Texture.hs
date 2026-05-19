@@ -14,6 +14,7 @@ module Graphics.Haskan.Vulkan.Texture
     generateGridTexture,
     generateCheckerboardTexture,
     createTextureFromData,
+    createTextureFromDataSRGB,
     createTextureFromHalfFloatData,
     createStorageImage2D,
     createStorageImage3D,
@@ -658,6 +659,33 @@ uploadTextureWithFormat rm pdev dev width height imgData format queue commandBuf
 
   registerTexture rm resource
   pure texH
+
+uploadTextureSRGB ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Int ->
+  Int ->
+  Data.Vector.Storable.Vector Word8 ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+uploadTextureSRGB rm pdev dev width height imgData queue commandBuffer =
+  uploadTextureWithFormat rm pdev dev width height imgData Vulkan.VK_FORMAT_R8G8B8A8_SRGB queue commandBuffer
+
+createTextureFromDataSRGB ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Int ->
+  Int ->
+  Data.Vector.Storable.Vector Word8 ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  m TextureHandle
+createTextureFromDataSRGB = uploadTextureSRGB
 
 uploadTexture ::
   (MonadManaged m, MonadIO m) =>

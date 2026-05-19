@@ -101,23 +101,10 @@ program = Module $ entryPoint @"main" @Compute do
           lod1Sq = lodDist1 * lodDist1
           lod2Sq = lodDist2 * lodDist2
 
-          -- Integer LOD: ensure complete triangles (multiples of 3)
-          triCount = idxCount `div` 3
-          halfTriCount = triCount `div` 2
-          quarterTriCount = triCount `div` 4
-          safeHalf = if halfTriCount >= 1 then halfTriCount * 3 else 3
-          safeQuarter = if quarterTriCount >= 1 then quarterTriCount * 3 else 3
-
           ic =
             if visible == 0
               then 0
-              else
-                if distSq < lod1Sq
-                  then idxCount
-                  else
-                    if distSq < lod2Sq
-                      then safeHalf
-                      else safeQuarter
+              else idxCount
 
       assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "indexCount") idx ic
       assign @(Name "drawCommands" :.: Name "commands" :.: AnIndex Word32 :.: Name "instanceCount") idx 1

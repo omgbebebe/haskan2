@@ -824,7 +824,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                 Just texRes -> case trPixelData texRes of
                   Nothing -> pure (256, 256, Texture.generateCheckerboardTexture 256 256 32)
                   Just pixelData -> pure (trWidth texRes, trHeight texRes, pixelData)
-          texHandle' <- Texture.createTextureFromData rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
+          texHandle' <- Texture.createTextureFromDataSRGB rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
           mView <- Texture.textureImageView rm texHandle'
           case mView of
             Just view -> pure view
