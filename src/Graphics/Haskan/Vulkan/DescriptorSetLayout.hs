@@ -23,6 +23,8 @@ module Graphics.Haskan.Vulkan.DescriptorSetLayout
     createCloudDetailNoiseComputeDescriptorSetLayout,
     managedWeatherMapComputeDescriptorSetLayout,
     createWeatherMapComputeDescriptorSetLayout,
+    managedAPVolumeComputeDescriptorSetLayout,
+    createAPVolumeComputeDescriptorSetLayout,
     maxBindlessTextures,
     layoutBinding,
   )
@@ -34,6 +36,7 @@ import Data.Bits ((.|.))
 import Foreign (castPtr)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
 import Graphics.Haskan.Vulkan.DescriptorSetLayout.TH (descriptorSetLayoutBindings)
+import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolume
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen qualified as CloudNoiseGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as Cull
@@ -403,6 +406,32 @@ managedWeatherMapComputeDescriptorSetLayout dev =
 createWeatherMapComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 createWeatherMapComputeDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''WeatherMapGen.Defs)
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"bindingCount" (fromIntegral (length bindings))
+              &* setListRef @"pBindings" bindings
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+          )
+
+-- | AP volume compute descriptor set layout: StorageImage (3D) + Texture3D + Uniform.
+managedAPVolumeComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedAPVolumeComputeDescriptorSetLayout dev =
+  alloc
+    "APVolumeComputeDescriptorSetLayout"
+    (createAPVolumeComputeDescriptorSetLayout dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+
+createAPVolumeComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createAPVolumeComputeDescriptorSetLayout dev = do
+  let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''APVolume.Defs)
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO

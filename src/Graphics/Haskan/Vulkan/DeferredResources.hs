@@ -19,7 +19,7 @@ import Data.Word (Word8)
 import Foreign.Marshal.Array qualified
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
 import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..))
-import Graphics.Haskan.Resources (alloc, allocaAndPeek)
+import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
 import Graphics.Haskan.Vertex (Vertex)
 import Graphics.Haskan.Vertex qualified as Vertex
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
@@ -30,6 +30,7 @@ import Graphics.Haskan.Vulkan.DescriptorSetLayout qualified as DescriptorSetLayo
 import Graphics.Haskan.Vulkan.Framebuffer qualified as Framebuffer
 import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.ImageView qualified as ImageView
+import Graphics.Haskan.Vulkan.Memory qualified as Memory
 import Graphics.Haskan.Vulkan.PipelineLayout qualified as PipelineLayout
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Swapchain qualified as Swapchain
@@ -106,7 +107,9 @@ data DeferredResources = DeferredResources
     drGodRayPipelineLayout :: !Vulkan.VkPipelineLayout,
     drGodRayFramebuffers :: ![Vulkan.VkFramebuffer],
     drGodRayDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    drWeatherMapView :: !(Maybe Vulkan.VkImageView),
+    drAPVolumeImage :: !Vulkan.VkImage,
+    drAPVolumeImageView :: !Vulkan.VkImageView,
+    drAPVolumeMemory :: !Vulkan.VkDeviceMemory,
     drGBufferImages :: ![[Vulkan.VkImage]],
     drGBufferImageViews :: ![[Vulkan.VkImageView]],
     drSampler :: !Vulkan.VkSampler,
@@ -221,6 +224,49 @@ createDeferredResources DeferredConfig {..} = do
     )
   liftIO $ Foreign.Marshal.Array.withArray [tempCmdBuf2] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
   logDebugIO LogRender "god ray images transitioned to SHADER_READ_ONLY_OPTIMAL"
+
+  -- Create AP volume 3D image (RGBA16F, 64x32x64) for compute writes + fragment sampling
+  let apFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
+      apWidth = 64
+      apHeight = 32
+      apDepth = 64
+      apExtent =
+        Vulkan.createVk
+          ( set @"width" (fromIntegral apWidth)
+              &* set @"height" (fromIntegral apHeight)
+              &* set @"depth" (fromIntegral apDepth)
+          )
+      apCreateInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_3D
+              &* set @"extent" apExtent
+              &* set @"mipLevels" 1
+              &* set @"arrayLayers" 1
+              &* set @"format" apFormat
+              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_STORAGE_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
+              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
+              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"queueFamilyIndexCount" 0
+              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
+          )
+  apImage <- liftIO $ withPtr apCreateInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage device ciPtr Vulkan.vkNullPtr))
+  apMemoryRequirements <- allocaAndPeek_ (Vulkan.vkGetImageMemoryRequirements device apImage)
+  apMemory <- Memory.allocateMemoryFor pdev device apMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+  liftIO $ Vulkan.vkBindImageMemory device apImage apMemory 0 >>= throwVkResult
+  apImageView <- ImageView.managedImageView3D device apFormat apImage
+  -- Transition to GENERAL for compute writes
+  tempCmdBufAP <- CommandBuffer.createCommandBuffer device (rcGraphicsCommandPool ctx)
+  CommandBuffer.withCommandBufferOneTime
+    (graphicsQueueHandler ctx)
+    tempCmdBufAP
+    (CommandBuffer.layerTransition tempCmdBufAP apImage Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_GENERAL)
+  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBufAP] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
+  logDebugIO LogRender $ "AP volume 3D image created: " <> showT apWidth <> "x" <> showT apHeight <> "x" <> showT apDepth
 
   -- Shared depth image for g-buffer
   depthImage <- Swapchain.managedDepthImage pdev device extent depthFormat
@@ -431,7 +477,9 @@ createDeferredResources DeferredConfig {..} = do
         drGodRayPipelineLayout = godRayPipelineLayout,
         drGodRayFramebuffers = godRayFramebuffers,
         drGodRayDescriptorSets = godRayDescriptorSets,
-        drWeatherMapView = mWeatherMapView,
+        drAPVolumeImage = apImage,
+        drAPVolumeImageView = apImageView,
+        drAPVolumeMemory = apMemory,
         drGBufferImages = gBufferImages,
         drGBufferImageViews = gBufferImageViews,
         drSampler = sampler,
