@@ -70,17 +70,14 @@ mkShell {
     poppler-utils
     gdb
     tree
-  ];
-  buildInputs = [
+    haskell-language-server
     ghc
     cabal-install
-    haskell-language-server
     pkg-config
     socat
     mermaid-cli
     imagemagick
     feh
-    jolt-physics
     (python3.withPackages (p: with p; [
       sympy
       requests
@@ -94,6 +91,9 @@ mkShell {
     # Linting/formatting tools (built with ghc98 since ghc914 versions are broken)
     haskell.packages.ghc98.hlint
     haskell.packages.ghc98.apply-refact
+  ];
+  buildInputs = [
+    jolt-physics
   ] ++ nativeLibs;
   shellHook = ''
     export LD_LIBRARY_PATH="${lib.makeLibraryPath nativeLibs}:${toString ./3rdparty/jolt-wrapper}:$LD_LIBRARY_PATH"
