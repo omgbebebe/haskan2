@@ -797,12 +797,12 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
 
   -- Dispatch compute shader + generate mipmaps
   CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
-    -- Transition all mips from SHADER_READ_ONLY (or whatever) to GENERAL for compute write
+    -- Transition all mips to GENERAL for compute write (image may be in any layout from creation)
     when (noiseImage /= Vulkan.vkNullPtr) $
       CommandBuffer.mipLayerTransition
         textureCommandBuffer
         noiseImage
-        Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
         Vulkan.VK_IMAGE_LAYOUT_GENERAL
         0
         (fromIntegral mipLevels)
