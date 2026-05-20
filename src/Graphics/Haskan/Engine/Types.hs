@@ -272,11 +272,11 @@ instance Storable DrawIndexedIndirectCommand where
 data ComputeCullResources = ComputeCullResources
   { ccrPipeline :: Vulkan.VkPipeline,
     ccrPipelineLayout :: Vulkan.VkPipelineLayout,
-    ccrDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    ccrDescriptorSet :: Vulkan.VkDescriptorSet,
     ccrEntityBuffer :: Vulkan.VkBuffer,
     ccrEntityMemory :: Vulkan.VkDeviceMemory,
-    ccrDrawCommandsBuffers :: ![Vulkan.VkBuffer],
-    ccrDrawCommandsMemories :: ![Vulkan.VkDeviceMemory],
+    ccrDrawCommandsBuffer :: Vulkan.VkBuffer,
+    ccrDrawCommandsMemory :: Vulkan.VkDeviceMemory,
     ccrCullDataBuffer :: Vulkan.VkBuffer,
     ccrCullDataMemory :: Vulkan.VkDeviceMemory,
     ccrMaxEntities :: Int
@@ -472,7 +472,7 @@ extractFrustumPlanes vp =
 
 filterVisible :: [DrawCall] -> IntMap Word32 -> [DrawCall]
 filterVisible drawList visibleFlags =
-  [dc | (idx, dc) <- zip [0 ..] drawList, IntMap.findWithDefault 0 idx visibleFlags == 1]
+  [dc | (idx, dc) <- zip [0 ..] drawList, IntMap.findWithDefault 1 idx visibleFlags == 1]
 
 data EngineConfig = EngineConfig
   { targetRenderFPS :: !Integer,

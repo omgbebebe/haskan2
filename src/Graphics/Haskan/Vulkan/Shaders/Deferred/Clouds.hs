@@ -369,8 +369,8 @@ cloudFragment = shader do
       windSpeed = 0.05
       windOffsetX = time * windSpeed * windDirX
       windOffsetZ = time * windSpeed * windDirZ
-      -- Domain warp: uses unwrapped world coordinates for non-repeating patterns.
-      -- Avoiding fract() prevents warp from repeating every 1.0 UV unit (~3,333 world units).
+      -- Domain warp: operates in noise-UV space for seamless tiling.
+      -- Using fract(baseUV) ensures warp is periodic with noise tile.
       -- warpAmp in UV units (not world units): 500 world units * noiseScale ≈ 0.15 UV
       warpAmpUV1 = 500.0 * noiseScale
       warpAmpUV2 = 250.0 * noiseScale
@@ -382,13 +382,15 @@ cloudFragment = shader do
       dbg_bux = dbg_epx * noiseScale - windOffsetX
       dbg_buy = dbg_epy * noiseScale
       dbg_buz = dbg_epz * noiseScale - windOffsetZ
-      -- Domain warp uses unwrapped coordinates (no fract) for non-repeating patterns
-      dbg_wx1 = sin (dbg_buy * 6.2831853 * 3.0 + dbg_buz * 6.2831853 * 2.0) * warpAmpUV1
-      dbg_wy1 = cos (dbg_bux * 6.2831853 * 3.0 + dbg_buz * 6.2831853 * 1.0) * warpAmpUV1
-      dbg_wz1 = sin (dbg_buz * 6.2831853 * 2.0 + dbg_bux * 6.2831853 * 3.0) * warpAmpUV1
-      dbg_wx2 = sin (dbg_buy * 6.2831853 * 5.0 + dbg_bux * 6.2831853 * 4.0) * warpAmpUV2
-      dbg_wy2 = cos (dbg_buz * 6.2831853 * 4.0 + dbg_buy * 6.2831853 * 3.0) * warpAmpUV2
-      dbg_wz2 = sin (dbg_bux * 6.2831853 * 6.0 + dbg_buy * 6.2831853 * 5.0) * warpAmpUV2
+      dbg_fux = fract dbg_bux
+      dbg_fuy = fract dbg_buy
+      dbg_fuz = fract dbg_buz
+      dbg_wx1 = sin (dbg_fuy * 6.2831853 * 3.0 + dbg_fuz * 6.2831853 * 2.0) * warpAmpUV1
+      dbg_wy1 = cos (dbg_fux * 6.2831853 * 3.0 + dbg_fuz * 6.2831853 * 1.0) * warpAmpUV1
+      dbg_wz1 = sin (dbg_fuz * 6.2831853 * 2.0 + dbg_fux * 6.2831853 * 3.0) * warpAmpUV1
+      dbg_wx2 = sin (dbg_fuy * 6.2831853 * 5.0 + dbg_fux * 6.2831853 * 4.0) * warpAmpUV2
+      dbg_wy2 = cos (dbg_fuz * 6.2831853 * 4.0 + dbg_fuy * 6.2831853 * 3.0) * warpAmpUV2
+      dbg_wz2 = sin (dbg_fux * 6.2831853 * 6.0 + dbg_fuy * 6.2831853 * 5.0) * warpAmpUV2
       dbg_wx = dbg_wx1 + dbg_wx2
       dbg_wy = dbg_wy1 + dbg_wy2
       dbg_wz = dbg_wz1 + dbg_wz2
@@ -463,14 +465,17 @@ cloudFragment = shader do
         bux = px * noiseScale - windOffsetX
         buy = py * noiseScale
         buz = pz * noiseScale - windOffsetZ
-        -- Domain warp uses unwrapped world coordinates (no fract)
-        -- to avoid repeating every 1.0 UV unit (~3,333 world units)
-        wx1 = sin (buy * 6.2831853 * 3.0 + buz * 6.2831853 * 2.0) * warpAmpUV1
-        wy1 = cos (bux * 6.2831853 * 3.0 + buz * 6.2831853 * 1.0) * warpAmpUV1
-        wz1 = sin (buz * 6.2831853 * 2.0 + bux * 6.2831853 * 3.0) * warpAmpUV1
-        wx2 = sin (buy * 6.2831853 * 5.0 + bux * 6.2831853 * 4.0) * warpAmpUV2
-        wy2 = cos (buz * 6.2831853 * 4.0 + buy * 6.2831853 * 3.0) * warpAmpUV2
-        wz2 = sin (bux * 6.2831853 * 6.0 + buy * 6.2831853 * 5.0) * warpAmpUV2
+        -- Tile-periodic UV for warp input: fract ensures seamless tiling
+        fux = fract bux
+        fuy = fract buy
+        fuz = fract buz
+        -- Domain warp in UV space: uses tile-periodic coords so warp tiles with noise
+        wx1 = sin (fuy * 6.2831853 * 3.0 + fuz * 6.2831853 * 2.0) * warpAmpUV1
+        wy1 = cos (fux * 6.2831853 * 3.0 + fuz * 6.2831853 * 1.0) * warpAmpUV1
+        wz1 = sin (fuz * 6.2831853 * 2.0 + fux * 6.2831853 * 3.0) * warpAmpUV1
+        wx2 = sin (fuy * 6.2831853 * 5.0 + fux * 6.2831853 * 4.0) * warpAmpUV2
+        wy2 = cos (fuz * 6.2831853 * 4.0 + fuy * 6.2831853 * 3.0) * warpAmpUV2
+        wz2 = sin (fux * 6.2831853 * 6.0 + fuy * 6.2831853 * 5.0) * warpAmpUV2
         wx = wx1 + wx2
         wy = wy1 + wy2
         wz = wz1 + wz2

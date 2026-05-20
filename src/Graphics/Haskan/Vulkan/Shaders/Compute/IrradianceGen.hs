@@ -178,7 +178,7 @@ program = Module $ entryPoint @"main" @Compute do
         resultG = max 0.0 (radG + sunDisc)
         resultB = max 0.0 (radB + sunDisc)
 
-        solidAngleWeight = cosTheta * sinTheta * pi * pi / 64.0
+        solidAngleWeight = cosTheta * sinTheta * pi * pi / 32.0
 
         weightedR = resultR * solidAngleWeight
         weightedG = resultG * solidAngleWeight

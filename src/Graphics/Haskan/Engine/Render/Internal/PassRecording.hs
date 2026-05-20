@@ -23,7 +23,7 @@ import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.Camera.Types (ViewMatrix (..))
 import Graphics.Haskan.Engine.Render.Internal.FrameState (FrameState (..))
 import Graphics.Haskan.Engine.Scene (makeProjectionMatrix)
-import Graphics.Haskan.Engine.Types (ComputeCullResources (..), ComputeEntityData, DrawIndexedIndirectCommand (..))
+import Graphics.Haskan.Engine.Types (ComputeCullResources (..), DrawIndexedIndirectCommand (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
 import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..))
@@ -253,7 +253,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdGBufferSampler = rcTextureSampler,
                 dpdDrawList = rcDrawList,
                 dpdDevice = rcDevice,
-                dpdDrawCommandsBuffer = ccrDrawCommandsBuffers rcCullResources !! frameIdx,
+                dpdDrawCommandsBuffer = ccrDrawCommandsBuffer rcCullResources,
                 dpdEntityCount = fromIntegral (length rcDrawList),
                 dpdLightingRenderPass = drLightingRenderPass rcDeferred,
                 dpdLightingFramebuffer = lightingFramebuffer,
@@ -316,17 +316,8 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
       CommandBuffer.withCommandBuffer commandBuffer $ do
         let numWorkgroups = (length rcDrawList + 63) `div` 64
         when (numWorkgroups > 0) $ do
-          -- Barrier: ensure entity data host writes are visible to compute shader reads
-          liftIO $ CommandBuffer.cmdBufferBarrier
-            commandBuffer
-            (ccrEntityBuffer rcCullResources)
-            (fromIntegral (ccrMaxEntities rcCullResources * sizeOf (undefined :: ComputeEntityData)))
-            Vulkan.VK_PIPELINE_STAGE_HOST_BIT
-            Vulkan.VK_ACCESS_HOST_WRITE_BIT
-            Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-            Vulkan.VK_ACCESS_SHADER_READ_BIT
           liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE (ccrPipeline rcCullResources)
-          liftIO $ Foreign.Marshal.Array.withArray [ccrDescriptorSets rcCullResources !! frameIdx] $ \dsPtr ->
+          liftIO $ Foreign.Marshal.Array.withArray [ccrDescriptorSet rcCullResources] $ \dsPtr ->
             Vulkan.vkCmdBindDescriptorSets
               commandBuffer
               Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
@@ -340,7 +331,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
           liftIO $
             CommandBuffer.cmdBufferBarrier
               commandBuffer
-              (ccrDrawCommandsBuffers rcCullResources !! frameIdx)
+              (ccrDrawCommandsBuffer rcCullResources)
               (fromIntegral (ccrMaxEntities rcCullResources * sizeOf (undefined :: DrawIndexedIndirectCommand)))
               Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
               Vulkan.VK_ACCESS_SHADER_WRITE_BIT
@@ -356,72 +347,6 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 "clouds" -> cloudPassCtx
                 _ -> lightingPassCtx
           liftIO $ recordFn passCtx
-
-          -- Barrier: ensure G-buffer color attachment writes are visible to lighting fragment shader reads
-          when (Graph.rpName pass == "gbuffer") $ do
-            let gbufBarrier =
-                  Vulkan.createVk
-                    ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_MEMORY_BARRIER
-                        &* set @"pNext" Vulkan.VK_NULL
-                        &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-                        &* set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
-                    )
-            liftIO $ withPtr gbufBarrier $ \bPtr ->
-              Vulkan.vkCmdPipelineBarrier
-                commandBuffer
-                Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-                Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-                Vulkan.VK_ZERO_FLAGS
-                1
-                bPtr
-                0
-                Vulkan.vkNullPtr
-                0
-                Vulkan.vkNullPtr
-
-          -- Barrier: ensure cloud color attachment writes are visible to god ray fragment shader reads
-          when (Graph.rpName pass == "clouds") $ do
-            let cloudBarrier =
-                  Vulkan.createVk
-                    ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_MEMORY_BARRIER
-                        &* set @"pNext" Vulkan.VK_NULL
-                        &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-                        &* set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
-                    )
-            liftIO $ withPtr cloudBarrier $ \bPtr ->
-              Vulkan.vkCmdPipelineBarrier
-                commandBuffer
-                Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-                Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-                Vulkan.VK_ZERO_FLAGS
-                1
-                bPtr
-                0
-                Vulkan.vkNullPtr
-                0
-                Vulkan.vkNullPtr
-
-          -- Barrier: ensure god ray color attachment writes are visible to lighting fragment shader reads
-          when (Graph.rpName pass == "godrays") $ do
-            let godRayBarrier =
-                  Vulkan.createVk
-                    ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_MEMORY_BARRIER
-                        &* set @"pNext" Vulkan.VK_NULL
-                        &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-                        &* set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
-                    )
-            liftIO $ withPtr godRayBarrier $ \bPtr ->
-              Vulkan.vkCmdPipelineBarrier
-                commandBuffer
-                Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-                Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-                Vulkan.VK_ZERO_FLAGS
-                1
-                bPtr
-                0
-                Vulkan.vkNullPtr
-                0
-                Vulkan.vkNullPtr
 
           -- After g-buffer, run AP volume compute
           when (Graph.rpName pass == "gbuffer") $ do

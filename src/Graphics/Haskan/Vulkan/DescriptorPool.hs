@@ -262,12 +262,12 @@ createComputeDescriptorPool dev = do
   let ssboPoolSize =
         Vulkan.createVk
           ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-              &* set @"descriptorCount" 4
+              &* set @"descriptorCount" 2
           )
       uboPoolSize =
         Vulkan.createVk
           ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-              &* set @"descriptorCount" 2
+              &* set @"descriptorCount" 1
           )
       createInfo =
         Vulkan.createVk
@@ -276,7 +276,7 @@ createComputeDescriptorPool dev = do
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
               &* set @"poolSizeCount" 2
               &* setListRef @"pPoolSizes" [ssboPoolSize, uboPoolSize]
-              &* set @"maxSets" 2
+              &* set @"maxSets" 1
           )
    in liftIO $
         withPtr
