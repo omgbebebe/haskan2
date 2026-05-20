@@ -136,17 +136,13 @@ program = Module $ entryPoint @"main" @Compute do
       buy = wy * noiseScale
       buz = wz * noiseScale - windOffsetZ
 
-      -- Tile-periodic UV for warp input: fract ensures seamless tiling
-      fux = fract bux
-      fuy = fract buy
-      fuz = fract buz
-
-      wx1 = sin (fuy * 6.2831853 * 3.0 + fuz * 6.2831853 * 2.0) * warpAmpUV1
-      wy1 = cos (fux * 6.2831853 * 3.0 + fuz * 6.2831853 * 1.0) * warpAmpUV1
-      wz1 = sin (fuz * 6.2831853 * 2.0 + fux * 6.2831853 * 3.0) * warpAmpUV1
-      wx2 = sin (fuy * 6.2831853 * 5.0 + fux * 6.2831853 * 4.0) * warpAmpUV2
-      wy2 = cos (fuz * 6.2831853 * 4.0 + fuy * 6.2831853 * 3.0) * warpAmpUV2
-      wz2 = sin (fux * 6.2831853 * 6.0 + fuy * 6.2831853 * 5.0) * warpAmpUV2
+      -- Domain warp uses unwrapped coordinates (no fract) for non-repeating patterns
+      wx1 = sin (buy * 6.2831853 * 3.0 + buz * 6.2831853 * 2.0) * warpAmpUV1
+      wy1 = cos (bux * 6.2831853 * 3.0 + buz * 6.2831853 * 1.0) * warpAmpUV1
+      wz1 = sin (buz * 6.2831853 * 2.0 + bux * 6.2831853 * 3.0) * warpAmpUV1
+      wx2 = sin (buy * 6.2831853 * 5.0 + bux * 6.2831853 * 4.0) * warpAmpUV2
+      wy2 = cos (buz * 6.2831853 * 4.0 + buy * 6.2831853 * 3.0) * warpAmpUV2
+      wz2 = sin (bux * 6.2831853 * 6.0 + buy * 6.2831853 * 5.0) * warpAmpUV2
 
       wx_warp = wx1 + wx2
       wy_warp = wy1 + wy2

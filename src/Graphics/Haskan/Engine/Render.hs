@@ -349,6 +349,8 @@ runFrame frameNumber = do
             sunIntensity = DayNight.ssIntensity sunState * 50.0 -- scale to HW intensity range
             IBLTextures {..} = reIBLTextures
             ctx = reContext
+        -- Wait for GPU to finish before overwriting cubemaps
+        deviceWaitIdle
         -- Create a one-time command buffer and dispatch sky compute shaders
         regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
         liftIO $
@@ -694,7 +696,6 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
   computePipelineLayout <- PipelineLayout.managedPipelineLayout device [computeDescriptorSetLayout]
   computePipeline <- ComputePipeline.managedComputePipeline device computePipelineLayout smCull
   computeDescriptorPool <- DescriptorPool.managedComputeDescriptorPool device
-  computeDescriptorSet <- DescriptorSet.allocateDescriptorSet device computeDescriptorPool [computeDescriptorSetLayout]
 
   imageAvailableSemaphores <- replicateM Render.maxFramesInFlight (Semaphore.managedSemaphore device)
   renderFinishedSemaphores <- replicateM 4 (Semaphore.managedSemaphore device)
@@ -808,7 +809,9 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
       initialDrawCommands = replicate maxEntities (DrawIndexedIndirectCommand 0 0 0 0 0)
 
   (entitySsboBuffer, entitySsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxEntities dummyEntityData) Vulkan.VK_ZERO_FLAGS
-  (drawCommandsBuffer, drawCommandsMemory) <- Buffer.managedStorageBuffer physicalDevice device initialDrawCommands Vulkan.VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
+  drawCommandBuffers <- replicateM 2 $ Buffer.managedStorageBuffer physicalDevice device initialDrawCommands Vulkan.VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
+  let drawCommandsBuffers = map fst drawCommandBuffers
+      drawCommandsMemories = map snd drawCommandBuffers
   (cullDataBuffer, cullDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [dummyCullData]
 
   let maxLights = 256 :: Int
@@ -821,18 +824,21 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
 
   logDebug LogBuffer $ "compute buffers created: entitySSBO=" <> showT (maxEntities * sizeOf (undefined :: ComputeEntityData)) <> " drawCommands=" <> showT (maxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)) <> " cullData=" <> showT (sizeOf (undefined :: ComputeCullData))
 
-  DescriptorSet.updateComputeDescriptorSets device computeDescriptorSet entitySsboBuffer drawCommandsBuffer cullDataBuffer
-  logDebug LogRender "compute descriptor set updated"
+  computeDescriptorSets <- forM drawCommandsBuffers $ \dcb -> do
+    ds <- DescriptorSet.allocateDescriptorSet device computeDescriptorPool [computeDescriptorSetLayout]
+    DescriptorSet.updateComputeDescriptorSets device ds entitySsboBuffer dcb cullDataBuffer
+    pure ds
+  logDebug LogRender $ "compute descriptor sets allocated: " <> showT (length computeDescriptorSets)
 
   let computeCullResources =
         ComputeCullResources
           { ccrPipeline = computePipeline,
             ccrPipelineLayout = computePipelineLayout,
-            ccrDescriptorSet = computeDescriptorSet,
+            ccrDescriptorSets = computeDescriptorSets,
             ccrEntityBuffer = entitySsboBuffer,
             ccrEntityMemory = entitySsboMemory,
-            ccrDrawCommandsBuffer = drawCommandsBuffer,
-            ccrDrawCommandsMemory = drawCommandsMemory,
+            ccrDrawCommandsBuffers = drawCommandsBuffers,
+            ccrDrawCommandsMemories = drawCommandsMemories,
             ccrCullDataBuffer = cullDataBuffer,
             ccrCullDataMemory = cullDataMemory,
             ccrMaxEntities = maxEntities

@@ -82,8 +82,10 @@ buildAllEntityData = map buildComputeEntityData
 
 buildCullData :: Float -> Float -> AnyCamera -> [DrawCall] -> ComputeCullData
 buildCullData w h camera drawList =
-  let vp = (realToFrac <$>) <$> (makeProjectionMatrix w h !*! Camera.unViewMatrix (Camera.toMatrix camera)) :: M44 Float
-      planes = extractFrustumPlanes vp
+  let viewMatrix = Camera.unViewMatrix (Camera.toMatrix camera)
+      vp = makeProjectionMatrix w h !*! viewMatrix
+      vpTransposed = transpose ((realToFrac <$>) <$> vp :: M44 Float)
+      planes = extractFrustumPlanes vpTransposed
       camPos = Camera.cameraPosition camera
    in ComputeCullData
         { ccFrustumPlanes = map (fmap realToFrac) planes,

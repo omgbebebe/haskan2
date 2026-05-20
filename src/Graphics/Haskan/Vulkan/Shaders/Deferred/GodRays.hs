@@ -113,8 +113,6 @@ fragment = shader do
     sd <- get @"sampleDecay"
     let sampleDeltaX = deltaX * density / numSamples
         sampleDeltaY = deltaY * density / numSamples
-        clampedU = clamp su 0.0 1.0
-        clampedV = clamp sv 0.0 1.0
         stepOcclusion = cloudA * density
         newT = t * exp (-stepOcclusion)
         -- In-scatter: light that reaches this point and scatters toward camera
@@ -123,8 +121,8 @@ fragment = shader do
     put @"transmittance" newT
     modify @"accLight" (+ scatter)
     put @"sampleDecay" (sd * decay)
-    put @"sampleU" (clampedU - sampleDeltaX)
-    put @"sampleV" (clampedV - sampleDeltaY)
+    put @"sampleU" (clamp (su - sampleDeltaX) 0.0 1.0)
+    put @"sampleV" (clamp (sv - sampleDeltaY) 0.0 1.0)
     modify @"i" (+ 1)
 
   finalLight <- get @"accLight"
