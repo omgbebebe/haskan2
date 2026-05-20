@@ -87,8 +87,9 @@ library
                        Graphics.Haskan.Vulkan.RenderPass
                        Graphics.Haskan.Vulkan.Render
                        Graphics.Haskan.Vulkan.ShaderModule
-                         Graphics.Haskan.Vulkan.Shaders.Texture
-                         Graphics.Haskan.Vulkan.Shaders.EntityData
+                          Graphics.Haskan.Vulkan.Shaders.Texture
+                          Graphics.Haskan.Vulkan.Shaders.Wireframe
+                          Graphics.Haskan.Vulkan.Shaders.EntityData
                          Graphics.Haskan.Vulkan.Shaders.LightData
                          Graphics.Haskan.Vulkan.Shaders.TH
                          Graphics.Haskan.Vulkan.Shaders.Compile
@@ -105,9 +106,9 @@ library
                          Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting,
                          Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural,
                          Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds,
-                         Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays
-                         Graphics.Haskan.Vulkan.Shaders.Wireframe
-                       Graphics.Haskan.Vulkan.Semaphore
+                          Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays,
+                          Graphics.Haskan.Vulkan.Shaders.Forward.SimpleForward,
+                        Graphics.Haskan.Vulkan.Semaphore
                        Graphics.Haskan.Vulkan.Swapchain
                        Graphics.Haskan.Vulkan.Texture
                        Graphics.Haskan.Vulkan.Types

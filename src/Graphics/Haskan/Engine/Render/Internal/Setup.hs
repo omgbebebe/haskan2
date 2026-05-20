@@ -183,7 +183,9 @@ data ShaderModules = ShaderModules
     smCloudFrag :: !Vulkan.VkShaderModule,
     smGodrayVert :: !Vulkan.VkShaderModule,
     smGodrayFrag :: !Vulkan.VkShaderModule,
-    smAPVolume :: !Vulkan.VkShaderModule
+    smAPVolume :: !Vulkan.VkShaderModule,
+    smSimpleForwardVert :: !Vulkan.VkShaderModule,
+    smSimpleForwardFrag :: !Vulkan.VkShaderModule
   }
 
 createShaderModules ::
@@ -207,6 +209,8 @@ createShaderModules device = do
   smGodrayVert <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_vert.spv"
   smGodrayFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_frag.spv"
   smAPVolume <- ShaderModule.managedShaderModule device "data/shaders/fir/ap_volume_comp.spv"
+  smSimpleForwardVert <- ShaderModule.managedShaderModule device "data/shaders/fir/simple_forward_vert.spv"
+  smSimpleForwardFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/simple_forward_frag.spv"
   pure ShaderModules {..}
 
 data IBLTextures = IBLTextures

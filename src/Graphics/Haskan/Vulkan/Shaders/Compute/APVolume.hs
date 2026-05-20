@@ -111,7 +111,7 @@ program = Module $ entryPoint @"main" @Compute do
       weatherWindOffsetZ = time * 0.002 * windDirZ * weatherAnimSpeed
       weatherUV = Vec2 ((wx - weatherWindOffsetX) * weatherScale) ((wz - weatherWindOffsetZ) * weatherScale)
 
-  ~(Vec4 weatherR weatherG weatherB _weatherA) <- use @(ImageTexel "weather_map") NilOps weatherUV
+  ~(Vec4 weatherR weatherG weatherB _weatherA) <- use @(ImageTexel "weather_map") (LOD (0.0 :: Code Float) NilOps) weatherUV
 
   let coverage = clamp (weatherR * weatherCoverageScale) 0.0 1.0
       cloudType = clamp (weatherG + weatherTypeBias) 0.0 1.0

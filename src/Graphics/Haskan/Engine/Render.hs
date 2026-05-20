@@ -28,6 +28,7 @@ import Data.Int (Int32)
 import Data.IntMap.Strict (IntMap)
 import Data.IntMap.Strict qualified as IntMap
 import Data.List (nub, sort, sortOn)
+import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Vector.Storable qualified as Vector
@@ -163,7 +164,7 @@ type RenderLoopM m = ReaderT RenderEnv m
 data RenderEnv = RenderEnv
   { reWindow :: !SDL.Window,
     reContext :: !RenderContext,
-    reDeferred :: !DeferredResources,
+    reDeferred :: DeferredResources,
     reTargetFPS :: !Integer,
     reImageAvailableSemaphores :: ![Vulkan.VkSemaphore],
     reControl :: !(TChan ControlMessage),
@@ -179,7 +180,7 @@ data RenderEnv = RenderEnv
     reTextureIndexMap :: !(IntMap Word32),
     reTvWireframe :: !(STM.TVar Bool),
     reFrameStatsRef :: !(IORef FrameStats),
-    reCullResources :: !ComputeCullResources,
+    reCullResources :: ComputeCullResources,
     reTvDebugMode :: !(STM.TVar Word32),
     reTvAxisOverlay :: !(STM.TVar Float),
     reTvGroundPlane :: !(STM.TVar Float),
@@ -187,8 +188,8 @@ data RenderEnv = RenderEnv
     reTvPendingAllStages :: !(STM.TVar Bool),
     reTvPendingSwapchainScreenshot :: !(STM.TVar Bool),
     rePhysicalDevice :: !Vulkan.VkPhysicalDevice,
-    reLightSsboBuffer :: !Vulkan.VkBuffer,
-    reLightSsboMemory :: !Vulkan.VkDeviceMemory,
+    reLightSsboBuffer :: Vulkan.VkBuffer,
+    reLightSsboMemory :: Vulkan.VkDeviceMemory,
     reTvLights :: !(STM.TVar [LightData]),
     reTvTimeOfDay :: !(STM.TVar Float),
     reTvTimeSpeed :: !(STM.TVar Float),
@@ -215,7 +216,8 @@ data RenderEnv = RenderEnv
     reTvPhysicsTimeScale :: !(STM.TVar Float),
     rePrevViewProj :: ![TVar (Linear.Matrix.M44 Foreign.C.CFloat)],
     rePrevTime :: ![TVar Float],
-    reImGuiBackend :: !(Maybe Backend.ImGuiBackend)
+    reImGuiBackend :: !(Maybe Backend.ImGuiBackend),
+    reSimpleMode :: !Bool
   }
 
 instance (MonadIO m) => MonadTelemetry (ReaderT RenderEnv m) where
@@ -301,96 +303,103 @@ runFrame frameNumber = do
       mvpMemory = reFrameMvpMemories !! frameNumber
   camera <- readCamera
 
-  -- Sync physics bodies to ECS transforms
-  physicsBodies' <- liftIO $ STM.readTVarIO reTvPhysicsBodies
-  physicsBodyToEntity' <- liftIO $ STM.readTVarIO reTvPhysicsBodyToEntity
-  liftIO $ forM_ (IntMap.toList physicsBodies') $ \(bid, bstate) ->
-    case IntMap.lookup bid physicsBodyToEntity' of
-      Just (EntityId eid) -> do
-        let t = Transform (bsPosition bstate) (bsRotation bstate) (V3 1 1 1)
-        ECS.setTransform reECSWorld (EntityId eid) t
-      Nothing -> pure ()
+  if reSimpleMode
+    then do
+      drawList <- extractDrawList reECSWorld reResourceManager reTextureIndexMap
+      case drawList of
+        [] -> pure (False, False)
+        _ -> renderAndPresentSimple env frameNumber camera drawList mvpMemory imageAvailableSemaphore
+    else do
+      -- Sync physics bodies to ECS transforms
+      physicsBodies' <- liftIO $ STM.readTVarIO reTvPhysicsBodies
+      physicsBodyToEntity' <- liftIO $ STM.readTVarIO reTvPhysicsBodyToEntity
+      liftIO $ forM_ (IntMap.toList physicsBodies') $ \(bid, bstate) ->
+        case IntMap.lookup bid physicsBodyToEntity' of
+          Just (EntityId eid) -> do
+            let t = Transform (bsPosition bstate) (bsRotation bstate) (V3 1 1 1)
+            ECS.setTransform reECSWorld (EntityId eid) t
+          Nothing -> pure ()
 
-  drawList <- extractDrawList reECSWorld reResourceManager reTextureIndexMap
-  logDebug LogRender $ "draw list: " <> showT (length drawList) <> " entities"
-  -- Sort: culled entities first, then double-sided (matches pipeline split in gbuffer pass)
-  let sortedDrawList = sortOn dcDoubleSided drawList
-      camPos = realToFrac <$> Camera.cameraPosition camera
-      camTarget = realToFrac <$> Camera.cameraTarget camera
-      (w, h) = surfaceExtentWH (rcSurfaceExtent reContext)
-      projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> makeProjectionMatrix w h :: M44 Float
-      viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
-      entityDebugInfos = computeEntityDebugInfos sortedDrawList projMat viewMat
-      renderDebugInfo = buildRenderDebugInfo frameNumber camPos camTarget projMat entityDebugInfos
-  liftIO $ STM.atomically $ STM.writeTVar reTvRenderDebug $ Just renderDebugInfo
-  let entityData = buildAllEntityData sortedDrawList
-      cullData = buildCullData w h camera sortedDrawList
-  uploadStorageBuffer (ccrEntityMemory reCullResources) 0 entityData
-  uploadUniformBuffer (ccrCullDataMemory reCullResources) 0 [cullData]
-  logDebug LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
+      drawList <- extractDrawList reECSWorld reResourceManager reTextureIndexMap
+      logDebug LogRender $ "draw list: " <> showT (length drawList) <> " entities"
+      -- Sort: culled entities first, then double-sided (matches pipeline split in gbuffer pass)
+      let sortedDrawList = sortOn dcDoubleSided drawList
+          camPos = realToFrac <$> Camera.cameraPosition camera
+          camTarget = realToFrac <$> Camera.cameraTarget camera
+          (w, h) = surfaceExtentWH (rcSurfaceExtent reContext)
+          projMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> makeProjectionMatrix w h :: M44 Float
+          viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
+          entityDebugInfos = computeEntityDebugInfos sortedDrawList projMat viewMat
+          renderDebugInfo = buildRenderDebugInfo frameNumber camPos camTarget projMat entityDebugInfos
+      liftIO $ STM.atomically $ STM.writeTVar reTvRenderDebug $ Just renderDebugInfo
+      let entityData = buildAllEntityData sortedDrawList
+          cullData = buildCullData w h camera sortedDrawList
+      uploadStorageBuffer (ccrEntityMemory reCullResources) 0 entityData
+      uploadUniformBuffer (ccrCullDataMemory reCullResources) 0 [cullData]
+      logDebug LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
 
-  -- Check if procedural sky needs regeneration (day-night cycle)
-  needsSkyRegen <- liftIO $ STM.readTVarIO reTvSkyNeedsRegeneration
-  when needsSkyRegen $ do
-    logInfo LogRender "sky regeneration requested (sun angle > 2°)"
-    timeOfDay <- readTimeOfDay
-    let sunState = DayNight.computeSunState DayNight.defaultDayNightConfig timeOfDay
-        sunDir = DayNight.ssDirection sunState
-        sunElevation = max 0.0 (sunDir ^. _y) -- elevation from Y component
-        sunIntensity = DayNight.ssIntensity sunState * 50.0 -- scale to HW intensity range
-        IBLTextures {..} = reIBLTextures
-        ctx = reContext
-    -- Create a one-time command buffer and dispatch sky compute shaders
-    regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
-    liftIO $
-      runManaged $
-        dispatchProceduralSkyGeneration
-          (device ctx)
-          rePhysicalDevice
-          (graphicsQueueHandler ctx)
-          regenCmdBuf
-          reResourceManager
-          iblRadianceCubemap
-          iblIrradianceCubemap
-          sunDir
-          sunElevation
-          sunIntensity
-    liftIO $ STM.atomically $ STM.writeTVar reTvSkyNeedsRegeneration False
+      -- Check if procedural sky needs regeneration (day-night cycle)
+      needsSkyRegen <- liftIO $ STM.readTVarIO reTvSkyNeedsRegeneration
+      when needsSkyRegen $ do
+        logInfo LogRender "sky regeneration requested (sun angle > 2°)"
+        timeOfDay <- readTimeOfDay
+        let sunState = DayNight.computeSunState DayNight.defaultDayNightConfig timeOfDay
+            sunDir = DayNight.ssDirection sunState
+            sunElevation = max 0.0 (sunDir ^. _y) -- elevation from Y component
+            sunIntensity = DayNight.ssIntensity sunState * 50.0 -- scale to HW intensity range
+            IBLTextures {..} = reIBLTextures
+            ctx = reContext
+        -- Create a one-time command buffer and dispatch sky compute shaders
+        regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
+        liftIO $
+          runManaged $
+            dispatchProceduralSkyGeneration
+              (device ctx)
+              rePhysicalDevice
+              (graphicsQueueHandler ctx)
+              regenCmdBuf
+              reResourceManager
+              iblRadianceCubemap
+              iblIrradianceCubemap
+              sunDir
+              sunElevation
+              sunIntensity
+        liftIO $ STM.atomically $ STM.writeTVar reTvSkyNeedsRegeneration False
 
-  -- Check if cloud noise needs regeneration (ImGui trigger)
-  needsNoiseRegen <- liftIO $ STM.readTVarIO reTvNoiseNeedsRegeneration
-  when needsNoiseRegen $ do
-    logInfo LogRender "cloud noise regeneration requested"
-    noiseSeedVal <- liftIO $ STM.readTVarIO reTvNoiseSeed
-    noiseFreqVal <- liftIO $ STM.readTVarIO reTvNoiseFrequency
-    noisePersistVal <- liftIO $ STM.readTVarIO reTvNoisePersistence
-    let IBLTextures {..} = reIBLTextures
-        ctx = reContext
-    -- Create a one-time command buffer and dispatch noise compute shaders
-    regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
-    liftIO $ Vulkan.vkDeviceWaitIdle (device ctx)
-    liftIO $
-      runManaged $
-        dispatchCloudNoiseGeneration
-          (device ctx)
-          rePhysicalDevice
-          (graphicsQueueHandler ctx)
-          regenCmdBuf
-          reResourceManager
-          iblCloudNoiseHandle
-          noiseSeedVal
-          noiseFreqVal
-          noisePersistVal
-    liftIO $ STM.atomically $ STM.writeTVar reTvNoiseNeedsRegeneration False
+      -- Check if cloud noise needs regeneration (ImGui trigger)
+      needsNoiseRegen <- liftIO $ STM.readTVarIO reTvNoiseNeedsRegeneration
+      when needsNoiseRegen $ do
+        logInfo LogRender "cloud noise regeneration requested"
+        noiseSeedVal <- liftIO $ STM.readTVarIO reTvNoiseSeed
+        noiseFreqVal <- liftIO $ STM.readTVarIO reTvNoiseFrequency
+        noisePersistVal <- liftIO $ STM.readTVarIO reTvNoisePersistence
+        let IBLTextures {..} = reIBLTextures
+            ctx = reContext
+        -- Create a one-time command buffer and dispatch noise compute shaders
+        regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
+        liftIO $ Vulkan.vkDeviceWaitIdle (device ctx)
+        liftIO $
+          runManaged $
+            dispatchCloudNoiseGeneration
+              (device ctx)
+              rePhysicalDevice
+              (graphicsQueueHandler ctx)
+              regenCmdBuf
+              reResourceManager
+              iblCloudNoiseHandle
+              noiseSeedVal
+              noiseFreqVal
+              noisePersistVal
+        liftIO $ STM.atomically $ STM.writeTVar reTvNoiseNeedsRegeneration False
 
-  lights' <- readLights
-  let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
-  uploadStorageBuffer reLightSsboMemory 0 lightsToUpload
-  let lightCount = fromIntegral (length lights') :: Word32
-  logDebug LogRender $ "lights uploaded: " <> showT (length lights')
-  case sortedDrawList of
-    [] -> pure (False, False)
-    _ -> renderAndPresent env frameNumber camera sortedDrawList lightCount mvpMemory imageAvailableSemaphore
+      lights' <- readLights
+      let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
+      uploadStorageBuffer reLightSsboMemory 0 lightsToUpload
+      let lightCount = fromIntegral (length lights') :: Word32
+      logDebug LogRender $ "lights uploaded: " <> showT (length lights')
+      case sortedDrawList of
+        [] -> pure (False, False)
+        _ -> renderAndPresent env frameNumber camera sortedDrawList lightCount mvpMemory imageAvailableSemaphore
 
 -- | Render and present a non-empty frame
 renderAndPresent ::
@@ -484,6 +493,55 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
   handleFrameResult env frameNumber camera drawList res
 
+-- | Simple forward rendering for runSimple: single pass directly to swapchain.
+renderAndPresentSimple ::
+  (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
+  RenderEnv ->
+  Int ->
+  AnyCamera ->
+  [DrawCall] ->
+  Vulkan.VkDeviceMemory ->
+  Vulkan.VkSemaphore ->
+  RenderLoopM m (Bool, Bool)
+renderAndPresentSimple env@RenderEnv {..} frameNumber camera drawList mvpMemory imageAvailableSemaphore = do
+  let ctx = reContext
+      (w, h) = surfaceExtentWH (rcSurfaceExtent ctx)
+      view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
+      projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
+  uploadUniformBuffer mvpMemory 0 [view, projection]
+  res <- drawFrameGraphics imageAvailableSemaphore frameNumber (recordAction ctx)
+  handleFrameResult env frameNumber camera drawList res
+ where
+  recordAction ctx imageIdx frameIdx = do
+    let commandBuffer = graphicsCommandBuffers ctx !! fromIntegral imageIdx
+        framebuffer = rcFramebuffers ctx !! fromIntegral imageIdx
+        renderPass = rcRenderPass ctx
+        pipeline = rcGraphicsPipeline ctx
+        pipelineLayout = rcPipelineLayout ctx
+        descriptorSet = reFrameDescriptorSets !! frameIdx
+        extent = rcSurfaceExtent ctx
+        colorClear = Vulkan.createVk (Vulkan.setAt @"float32" @0 0.2 Vulkan.&* Vulkan.setAt @"float32" @1 0.2 Vulkan.&* Vulkan.setAt @"float32" @2 0.2 Vulkan.&* Vulkan.setAt @"float32" @3 1.0)
+        depthClear = Vulkan.createVk (Vulkan.set @"depth" 1.0 Vulkan.&* Vulkan.set @"stencil" 0)
+        clearValues = [Vulkan.createVk (Vulkan.set @"color" colorClear), Vulkan.createVk (Vulkan.set @"depthStencil" depthClear)]
+    case drawList of
+      [] -> pure ()
+      (drawCall : _) -> do
+        let vertexBuffer = brVkBuffer (mrVertexBuffer (dcMesh drawCall))
+            indexBuffer = brVkBuffer (mrIndexBuffer (dcMesh drawCall))
+            indexCount = fromIntegral (mrIndexCount (dcMesh drawCall))
+            firstIndex = fromIntegral (mrFirstIndex (dcMesh drawCall))
+            vertexOffset = fromIntegral (mrVertexOffset (dcMesh drawCall))
+        CommandBuffer.withCommandBuffer commandBuffer $ do
+          RenderPass.withRenderPass commandBuffer renderPass framebuffer extent clearValues $ do
+            liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS pipeline
+            liftIO $ Foreign.Marshal.Array.withArray [descriptorSet] $ \dsPtr ->
+              Vulkan.vkCmdBindDescriptorSets commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS pipelineLayout 0 1 dsPtr 0 Vulkan.vkNullPtr
+            liftIO $ Foreign.Marshal.Array.withArray [vertexBuffer] $ \vbPtr ->
+              Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
+                Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 vbPtr offsetPtr
+            liftIO $ Vulkan.vkCmdBindIndexBuffer commandBuffer indexBuffer 0 Vulkan.VK_INDEX_TYPE_UINT32
+            liftIO $ Vulkan.vkCmdDrawIndexed commandBuffer indexCount 1 firstIndex vertexOffset 0
+
 -- | Handle frame draw result
 handleFrameResult ::
   (MonadFail m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
@@ -523,15 +581,16 @@ handlePresentResult env@RenderEnv {..} frameNumber camera drawList imageIndex = 
     shouldInspect <- consumeInspectFlag
     when shouldInspect $ do
       handleInspector frameNumber drawList reContext camera (rcSurfaceExtent reContext)
-    shouldScreenshot <- consumeScreenshotFlag
-    shouldAllStages <- consumeAllStagesFlag
-    shouldSwapchain <- consumeSwapchainScreenshotFlag
-    when shouldScreenshot $ do
-      handleScreenshotSingle reDeferred (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
-    when shouldAllStages $ do
-      handleScreenshotAllStages reDeferred (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
-    when shouldSwapchain $ do
-      handleScreenshotSwapchain reContext (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
+    unless reSimpleMode $ do
+      shouldScreenshot <- consumeScreenshotFlag
+      shouldAllStages <- consumeAllStagesFlag
+      shouldSwapchain <- consumeSwapchainScreenshotFlag
+      when shouldScreenshot $ do
+        handleScreenshotSingle reDeferred (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
+      when shouldAllStages $ do
+        handleScreenshotAllStages reDeferred (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
+      when shouldSwapchain $ do
+        handleScreenshotSwapchain reContext (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
     pure (False, False)
   Vulkan.VK_SUBOPTIMAL_KHR ->
     pure (True, False)
@@ -882,6 +941,21 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
           presentQueueHandler
           renderFinishedFences
           renderFinishedSemaphores
+      mkSimpleRenderContext =
+        Render.createRenderContext
+          physicalDevice
+          device
+          surface
+          pipelineLayout
+          smSimpleForwardVert
+          smSimpleForwardFrag
+          []
+          graphicsCommandPool
+          graphicsQueueHandler
+          presentQueueHandler
+          renderFinishedFences
+          renderFinishedSemaphores
+      isSimple = isJust simpleMesh
 
   worldState <- liftIO $ STM.readTVarIO (world gameState)
   frameStatsRef <- liftIO $ newIORef emptyFrameStats
@@ -914,50 +988,13 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
         unless exit $ do
-          renderFrameLoopFinished <- liftIO $ with mkRenderContext $ \context -> do
-            let dcfg =
-                  Deferred.DeferredConfig
-                    { Deferred.dcPhysicalDevice = physicalDevice,
-                      Deferred.dcDevice = device,
-                      Deferred.dcRenderContext = context,
-                      Deferred.dcBindlessDescSetLayout = descriptorSetLayout,
-                      Deferred.dcShaders =
-                        Deferred.DeferredShaders
-                          { Deferred.dsGBuffer = ShaderProgram smGbufVert Nothing Nothing Nothing smGbufFrag,
-                            Deferred.dsLighting = ShaderProgram smLightVert Nothing Nothing Nothing (if proceduralSkyEnabled then smLightProcFrag else smLightFrag),
-                            Deferred.dsWireframe = ShaderProgram smWireVert Nothing Nothing (Just smWireGeom) smWireFrag,
-                             Deferred.dsCloud = ShaderProgram smCloudVert Nothing Nothing Nothing smCloudFrag,
-                             Deferred.dsGodRay = ShaderProgram smGodrayVert Nothing Nothing Nothing smGodrayFrag,
-                             Deferred.dsAPVolume = smAPVolume
-                           },
-                      Deferred.dcIBL =
-                        Deferred.IBLResources
-                          { Deferred.irRadianceView = iblRadianceView,
-                            Deferred.irIrradianceView = iblIrradianceView,
-                            Deferred.irBrdfView = iblBrdfView,
-                            Deferred.irSampler = iblSampler
-                          },
-                      Deferred.dcCloudTextures =
-                        Deferred.CloudTextures
-                          { Deferred.ctNoiseView = iblCloudNoiseView,
-                            Deferred.ctBlueNoiseView = iblBlueNoiseView,
-                            Deferred.ctWeatherMapView = iblWeatherMapView,
-                            Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler,
-                            Deferred.ctNoiseSampler = iblNoiseSampler
-                          },
-                      Deferred.dcLightBuffer = Just lightSsboBuffer,
-                      Deferred.dcImGuiRenderPass = imGuiRenderPass,
-                      Deferred.dcProceduralSky = proceduralSkyEnabled
-                    }
-            with (Deferred.createDeferredResources dcfg) $ \dr -> do
-              let numSwapchainImages = length (drCloudImages dr)
-              prevViewProjTVars <- replicateM numSwapchainImages (STM.newTVarIO (identity :: M44 Foreign.C.CFloat))
-              prevTimeTVars <- replicateM numSwapchainImages (STM.newTVarIO 0.0)
+          renderFrameLoopFinished <- liftIO $ if isSimple
+            then with mkSimpleRenderContext $ \context -> do
               let renderEnv =
                     RenderEnv
                       { reWindow = window,
                         reContext = context,
-                        reDeferred = dr,
+                        reDeferred = undefined,
                         reTargetFPS = targetFPS,
                         reImageAvailableSemaphores = imageAvailableSemaphores,
                         reControl = control,
@@ -973,7 +1010,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                         reTextureIndexMap = textureIndexMap,
                         reTvWireframe = tvWireframe,
                         reFrameStatsRef = frameStatsRef,
-                        reCullResources = computeCullResources,
+                        reCullResources = undefined,
                         reTvDebugMode = tvDebugMode,
                         reTvAxisOverlay = tvAxisOverlay,
                         reTvGroundPlane = tvGroundPlane,
@@ -981,8 +1018,8 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                         reTvPendingAllStages = tvPendingAllStages,
                         reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
                         rePhysicalDevice = physicalDevice,
-                        reLightSsboBuffer = lightSsboBuffer,
-                        reLightSsboMemory = lightSsboMemory,
+                        reLightSsboBuffer = undefined,
+                        reLightSsboMemory = undefined,
                         reTvLights = tvLights,
                         reTvTimeOfDay = tvTimeOfDay,
                         reTvTimeSpeed = tvTimeSpeed,
@@ -1007,11 +1044,111 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                         reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,
                         reTvPhysicsAutoStep = physicsAutoStep gameState,
                         reTvPhysicsTimeScale = physicsTimeScale gameState,
-                        rePrevViewProj = prevViewProjTVars,
-                        rePrevTime = prevTimeTVars,
-                        reImGuiBackend = mImGuiBackend
+                        rePrevViewProj = [],
+                        rePrevTime = [],
+                        reImGuiBackend = Nothing,
+                        reSimpleMode = True
                       }
               renderFrameLoop renderEnv 0
+            else with mkRenderContext $ \context -> do
+              let dcfg =
+                    Deferred.DeferredConfig
+                      { Deferred.dcPhysicalDevice = physicalDevice,
+                        Deferred.dcDevice = device,
+                        Deferred.dcRenderContext = context,
+                        Deferred.dcBindlessDescSetLayout = descriptorSetLayout,
+                        Deferred.dcShaders =
+                          Deferred.DeferredShaders
+                            { Deferred.dsGBuffer = ShaderProgram smGbufVert Nothing Nothing Nothing smGbufFrag,
+                              Deferred.dsLighting = ShaderProgram smLightVert Nothing Nothing Nothing (if proceduralSkyEnabled then smLightProcFrag else smLightFrag),
+                              Deferred.dsWireframe = ShaderProgram smWireVert Nothing Nothing (Just smWireGeom) smWireFrag,
+                               Deferred.dsCloud = ShaderProgram smCloudVert Nothing Nothing Nothing smCloudFrag,
+                               Deferred.dsGodRay = ShaderProgram smGodrayVert Nothing Nothing Nothing smGodrayFrag,
+                               Deferred.dsAPVolume = smAPVolume
+                             },
+                        Deferred.dcIBL =
+                          Deferred.IBLResources
+                            { Deferred.irRadianceView = iblRadianceView,
+                              Deferred.irIrradianceView = iblIrradianceView,
+                              Deferred.irBrdfView = iblBrdfView,
+                              Deferred.irSampler = iblSampler
+                            },
+                        Deferred.dcCloudTextures =
+                          Deferred.CloudTextures
+                            { Deferred.ctNoiseView = iblCloudNoiseView,
+                              Deferred.ctBlueNoiseView = iblBlueNoiseView,
+                              Deferred.ctWeatherMapView = iblWeatherMapView,
+                              Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler,
+                              Deferred.ctNoiseSampler = iblNoiseSampler
+                            },
+                        Deferred.dcLightBuffer = Just lightSsboBuffer,
+                        Deferred.dcImGuiRenderPass = imGuiRenderPass,
+                        Deferred.dcProceduralSky = proceduralSkyEnabled
+                      }
+              with (Deferred.createDeferredResources dcfg) $ \dr -> do
+                let numSwapchainImages = length (drCloudImages dr)
+                prevViewProjTVars <- replicateM numSwapchainImages (STM.newTVarIO (identity :: M44 Foreign.C.CFloat))
+                prevTimeTVars <- replicateM numSwapchainImages (STM.newTVarIO 0.0)
+                let renderEnv =
+                      RenderEnv
+                        { reWindow = window,
+                          reContext = context,
+                          reDeferred = dr,
+                          reTargetFPS = targetFPS,
+                          reImageAvailableSemaphores = imageAvailableSemaphores,
+                          reControl = control,
+                          reFrameMvpMemories = frameMvpMemories,
+                          reTvCamera = tvCamera,
+                          reTvInspect = tvInspect,
+                          reTvInsp = tvInsp,
+                          reTvRenderDebug = tvRenderDebug,
+                          reECSWorld = ecsWorld,
+                          reResourceManager = rm,
+                          reTextureSampler = textureSampler,
+                          reFrameDescriptorSets = frameDescriptorSets,
+                          reTextureIndexMap = textureIndexMap,
+                          reTvWireframe = tvWireframe,
+                          reFrameStatsRef = frameStatsRef,
+                          reCullResources = computeCullResources,
+                          reTvDebugMode = tvDebugMode,
+                          reTvAxisOverlay = tvAxisOverlay,
+                          reTvGroundPlane = tvGroundPlane,
+                          reTvPendingScreenshot = tvPendingScreenshot,
+                          reTvPendingAllStages = tvPendingAllStages,
+                          reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
+                          rePhysicalDevice = physicalDevice,
+                          reLightSsboBuffer = lightSsboBuffer,
+                          reLightSsboMemory = lightSsboMemory,
+                          reTvLights = tvLights,
+                          reTvTimeOfDay = tvTimeOfDay,
+                          reTvTimeSpeed = tvTimeSpeed,
+                          reTvDayNightEnabled = tvDayNightEnabled,
+                          reTvCloudHeight = tvCloudHeight,
+                          reTvWindDirection = tvWindDirection,
+                          reTvWindSpeed = tvWindSpeed,
+                          reTvCloudCoverage = tvCloudCoverage,
+                          reTvCloudDetail = tvCloudDetail,
+                          reTvCloudAbsorption = tvCloudAbsorption,
+                          reTvWeatherCoverageScale = tvWeatherCoverageScale,
+                          reTvWeatherTypeBias = tvWeatherTypeBias,
+                          reTvStormIntensity = tvStormIntensity,
+                          reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
+                          reIBLTextures = iblTextures,
+                          reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
+                          reTvNoiseNeedsRegeneration = noiseNeedsRegeneration gameState,
+                          reTvNoiseSeed = noiseSeed gameState,
+                          reTvNoiseFrequency = noiseFrequency gameState,
+                          reTvNoisePersistence = noisePersistence gameState,
+                          reTvPhysicsBodies = physicsBodies gameState,
+                          reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,
+                          reTvPhysicsAutoStep = physicsAutoStep gameState,
+                          reTvPhysicsTimeScale = physicsTimeScale gameState,
+                          rePrevViewProj = prevViewProjTVars,
+                          rePrevTime = prevTimeTVars,
+                          reImGuiBackend = mImGuiBackend,
+                          reSimpleMode = False
+                        }
+                renderFrameLoop renderEnv 0
           outerLoop renderFrameLoopFinished
 
   logInfo LogGeneral "Starting render loop"

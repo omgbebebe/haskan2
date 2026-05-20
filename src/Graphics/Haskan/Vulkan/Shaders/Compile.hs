@@ -28,6 +28,7 @@ import Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays qualified as GodRays
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as Lighting
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProcedural
 import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as Wireframe
+import Graphics.Haskan.Vulkan.Shaders.Forward.SimpleForward qualified as SimpleForward
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as TextureShader
 
 -- Compile all shaders at build time
@@ -92,4 +93,10 @@ $( compileShader "data/shaders/fir/godray_frag.spv" [FIR.SPIRV (FIR.Version 1 5)
    )
 
 $( compileShader "data/shaders/fir/ap_volume_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] APVolume.program
+   )
+
+$( compileShader "data/shaders/fir/simple_forward_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] SimpleForward.vertex
+   )
+
+$( compileShader "data/shaders/fir/simple_forward_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] SimpleForward.fragment
    )
