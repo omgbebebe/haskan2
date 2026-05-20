@@ -80,16 +80,15 @@ fragment = shader do
       exposure = view @(Name "exposure") godRayData
 
   -- Direction from current pixel to sun position
-  let deltaX = uvX - sunScreenX
-      deltaY = uvY - sunScreenY
+  let clampedSunX = clamp sunScreenX (-0.5) 1.5
+      clampedSunY = clamp sunScreenY (-0.5) 1.5
+      deltaX = uvX - clampedSunX
+      deltaY = uvY - clampedSunY
       distToSun = sqrt (deltaX * deltaX + deltaY * deltaY)
 
-      -- Only compute god rays if sun is on screen and intensity > 0
-      sunOnScreen =
-        step 0.0 sunScreenX
-          * step sunScreenX 1.0
-          * step 0.0 sunScreenY
-          * step sunScreenY 1.0
+      -- Soft falloff when sun is off-screen
+      sunDist = max (abs (sunScreenX - 0.5) - 0.5) (abs (sunScreenY - 0.5) - 0.5)
+      sunFalloff = 1.0 - smoothstep 0.0 0.5 sunDist
 
   -- Radial blur: sample along line from pixel toward sun
   -- Beer-Lambert attenuation with in-scattering for proper crepuscular rays
@@ -112,7 +111,11 @@ fragment = shader do
 
     t <- get @"transmittance"
     sd <- get @"sampleDecay"
-    let stepOcclusion = cloudA * density
+    let sampleDeltaX = deltaX * density / numSamples
+        sampleDeltaY = deltaY * density / numSamples
+        clampedU = clamp su 0.0 1.0
+        clampedV = clamp sv 0.0 1.0
+        stepOcclusion = cloudA * density
         newT = t * exp (-stepOcclusion)
         -- In-scatter: light that reaches this point and scatters toward camera
         scatter = t * (1.0 - exp (-stepOcclusion)) * sd * weight
@@ -120,15 +123,15 @@ fragment = shader do
     put @"transmittance" newT
     modify @"accLight" (+ scatter)
     put @"sampleDecay" (sd * decay)
-    put @"sampleU" (su - deltaX * density)
-    put @"sampleV" (sv - deltaY * density)
+    put @"sampleU" (clampedU - sampleDeltaX)
+    put @"sampleV" (clampedV - sampleDeltaY)
     modify @"i" (+ 1)
 
   finalLight <- get @"accLight"
 
   -- Apply exposure and intensity, mask by sun visibility
-  let godRayR = finalLight * exposure * intensity * sunOnScreen
-      godRayG = finalLight * exposure * intensity * sunOnScreen
-      godRayB = finalLight * exposure * intensity * sunOnScreen
+  let godRayR = finalLight * exposure * intensity * sunFalloff
+      godRayG = finalLight * exposure * intensity * sunFalloff
+      godRayB = finalLight * exposure * intensity * sunFalloff
 
   put @"out_colour" (Vec4 godRayR godRayG godRayB 1.0)

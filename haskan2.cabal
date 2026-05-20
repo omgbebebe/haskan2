@@ -97,8 +97,9 @@ library
                         Graphics.Haskan.Vulkan.Shaders.Compute.Cull
                          Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen
                          Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen
-                          Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen,
-                          Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen,
+                           Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen,
+                           Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseMipGen,
+                           Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen,
                           Graphics.Haskan.Vulkan.Shaders.Compute.WeatherMapGen
                           Graphics.Haskan.Vulkan.Shaders.Compute.APVolume,
                           Graphics.Haskan.Vulkan.Shaders.Compute.APVolumeUniforms

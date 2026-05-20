@@ -403,10 +403,10 @@ cloudFragment = shader do
   let -- Debug: compute density/height/noise at entry point
       dbg_cloudThickness = 800.0
       dbg_h = (epy - cloudBottom) / dbg_cloudThickness
-      dbg_heightScale = max 0.3 (entryCoverage ** 0.25)
+      dbg_heightScale = max 0.6 (entryCoverage ** 0.25)
       dbg_hPct = clamp (dbg_h / dbg_heightScale) 0.0 1.0
-      dbg_baseCurve = mix 0.4 0.8 entryCloudType
-      dbg_topDecay = mix 2.0 4.0 entryCloudType
+      dbg_baseCurve = mix 0.8 1.2 entryCloudType
+      dbg_topDecay = mix 0.8 1.5 entryCloudType
       dbg_heightProfile = (dbg_hPct ** dbg_baseCurve) * exp (-dbg_hPct * dbg_topDecay)
       dbg_detailFBM = dbg_ng * 0.625 + dbg_nb * 0.25 + dbg_na * 0.125
       dbg_shapedNoise = max 0.0 (dbg_nr - dbg_detailFBM * cloudDetail)
@@ -490,11 +490,11 @@ cloudFragment = shader do
         stormDarkness = entryStormDarkness
         h = (curvedY - cloudBottom) / cloudThickness
         -- Dynamic cloud height: taller clouds with higher coverage
-        heightScale = max 0.3 (combinedCoverage ** 0.25)
+        heightScale = max 0.6 (combinedCoverage ** 0.25)
         hPct = clamp (h / heightScale) 0.0 1.0
         -- Parametric height profile: organic cloud shape
-        baseCurve = mix 0.4 0.8 cloudType
-        topDecay = mix 2.0 4.0 cloudType
+        baseCurve = mix 0.8 1.2 cloudType
+        topDecay = mix 0.8 1.5 cloudType
         heightProfile = (hPct ** baseCurve) * exp (-hPct * topDecay)
         -- Subtractive detail erosion: detail can only reduce density
         detailFBM = ng * 0.625 + nb * 0.25 + na * 0.125

@@ -18,6 +18,7 @@ import Graphics.Haskan.Vulkan.Shaders.TH (compileShader)
 import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolume
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen qualified as CloudNoiseGen
+import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseMipGen qualified as CloudNoiseMipGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as Cull
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGen
@@ -66,6 +67,9 @@ $( compileShader "data/shaders/fir/cull_comp.spv" [FIR.SPIRV (FIR.Version 1 5), 
    )
 
 $( compileShader "data/shaders/fir/cloud_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudNoiseGen.program
+   )
+
+$( compileShader "data/shaders/fir/cloud_noise_mipgen_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudNoiseMipGen.program
    )
 
 $( compileShader "data/shaders/fir/cloud_detail_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudDetailNoiseGen.program

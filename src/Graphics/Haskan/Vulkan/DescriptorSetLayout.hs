@@ -21,6 +21,8 @@ module Graphics.Haskan.Vulkan.DescriptorSetLayout
     createCloudNoiseComputeDescriptorSetLayout,
     managedCloudDetailNoiseComputeDescriptorSetLayout,
     createCloudDetailNoiseComputeDescriptorSetLayout,
+    managedCloudNoiseMipGenComputeDescriptorSetLayout,
+    createCloudNoiseMipGenComputeDescriptorSetLayout,
     managedWeatherMapComputeDescriptorSetLayout,
     createWeatherMapComputeDescriptorSetLayout,
     managedAPVolumeComputeDescriptorSetLayout,
@@ -39,6 +41,7 @@ import Graphics.Haskan.Vulkan.DescriptorSetLayout.TH (descriptorSetLayoutBinding
 import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolume
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen qualified as CloudNoiseGen
+import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseMipGen qualified as CloudNoiseMipGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as Cull
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGen
@@ -381,6 +384,31 @@ managedCloudDetailNoiseComputeDescriptorSetLayout dev =
 createCloudDetailNoiseComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 createCloudDetailNoiseComputeDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''CloudDetailNoiseGen.Defs)
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"bindingCount" (fromIntegral (length bindings))
+              &* setListRef @"pBindings" bindings
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+          )
+
+managedCloudNoiseMipGenComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedCloudNoiseMipGenComputeDescriptorSetLayout dev =
+  alloc
+    "CloudNoiseMipGenComputeDescriptorSetLayout"
+    (createCloudNoiseMipGenComputeDescriptorSetLayout dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+
+createCloudNoiseMipGenComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createCloudNoiseMipGenComputeDescriptorSetLayout dev = do
+  let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''CloudNoiseMipGen.Defs)
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO

@@ -641,30 +641,27 @@ fragment = shader do
       coly = lity + emissiveG + iblDiffy + iblSpecy
       colz = litz + emissiveB + iblDiffz + iblSpecz
 
-      -- Tone mapping (Reinhard)
-      mapx = colx / (colx + 1)
-      mapy = coly / (coly + 1)
-      mapz = colz / (colz + 1)
+      -- Add god rays in linear HDR (atmospheric scattering affects everything)
+      hdrR = (if hasGeometry then colx else cloudSkyR) + godRayR
+      hdrG = (if hasGeometry then coly else cloudSkyG) + godRayG
+      hdrB = (if hasGeometry then colz else cloudSkyB) + godRayB
 
-      -- Gamma correction (approximate with sqrt for gamma 2.0)
+      -- Unified tone mapping + gamma for all pixels
+      mapx = hdrR / (hdrR + 1.0)
+      mapy = hdrG / (hdrG + 1.0)
+      mapz = hdrB / (hdrB + 1.0)
       gamx = sqrt mapx
       gamy = sqrt mapy
       gamz = sqrt mapz
 
-      -- Tinted skybox for background pixels (no geometry)
-      -- Apply same tone map + gamma as geometry pixels
-      cloudMapR = cloudSkyR / (cloudSkyR + 1.0)
-      cloudMapG = cloudSkyG / (cloudSkyG + 1.0)
-      cloudMapB = cloudSkyB / (cloudSkyB + 1.0)
-      cloudGamR = sqrt cloudMapR
-      cloudGamG = sqrt cloudMapG
-      cloudGamB = sqrt cloudMapB
-      tintedSkyR = cloudGamR * skyTintR
-      tintedSkyG = cloudGamG * skyTintG
-      tintedSkyB = cloudGamB * skyTintB
-      finalx = if hasGeometry then gamx else tintedSkyR + godRayR
-      finaly = if hasGeometry then gamy else tintedSkyG + godRayG
-      finalz = if hasGeometry then gamz else tintedSkyB + godRayB
+      -- Sky tint in gamma space (preserving artistic intent of day/night cycle)
+      tintedSkyR = gamx * skyTintR
+      tintedSkyG = gamy * skyTintG
+      tintedSkyB = gamz * skyTintB
+
+      finalx = if hasGeometry then gamx else tintedSkyR
+      finaly = if hasGeometry then gamy else tintedSkyG
+      finalz = if hasGeometry then gamz else tintedSkyB
 
   -- Sample AP volume for aerial perspective
   let distToCam = sqrt ((posX - camX) * (posX - camX) + (posY - camY) * (posY - camY) + (posZ - camZ) * (posZ - camZ))

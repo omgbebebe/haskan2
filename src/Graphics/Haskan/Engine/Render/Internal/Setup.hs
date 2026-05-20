@@ -72,6 +72,7 @@ import Graphics.Haskan.Vulkan.Device qualified as Device
 import Graphics.Haskan.Vulkan.DeviceCapabilities (DeviceCapabilities (..), queryDeviceCapabilities)
 import Graphics.Haskan.Vulkan.Fence qualified as Fence
 import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
+import Graphics.Haskan.Vulkan.ImageView qualified as ImageView
 import Graphics.Haskan.Vulkan.Instance qualified as Instance
 import Graphics.Haskan.Vulkan.PhysicalDevice qualified as PhysicalDevice
 import Graphics.Haskan.Vulkan.PipelineLayout qualified as PipelineLayout
@@ -86,6 +87,7 @@ import Graphics.Haskan.Vulkan.Shaders.Compile () -- forces TH shader compilation
 import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolumeShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen qualified as CloudNoiseGenShaders
+import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseMipGen qualified as CloudNoiseMipGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGenShaders
@@ -787,13 +789,39 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
     Just noiseView -> DescriptorSet.updateCloudNoiseComputeDescriptorSets device noiseDescriptorSet noiseView noiseParamsBuffer
     Nothing -> logInfo LogGeneral "warning: cloud noise view not found"
 
-  -- Get VkImage handle and dimensions for transition/mipgen
+  -- Get VkImage handle and dimensions for mipgen
   mNoiseTex <- liftIO $ lookupTexture rm noiseHandle
   let (noiseImage, noiseW, noiseH) = case mNoiseTex of
         Just tex -> (trImage tex, trWidth tex, trHeight tex)
         Nothing -> (Vulkan.vkNullPtr, 0, 0)
       noiseD = noiseW -- 3D texture, depth == width (256)
       mipLevels = 5
+
+  -- Set up mipgen compute pipeline
+  mipgenShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_noise_mipgen_comp.spv"
+  mipgenLayout <- DescriptorSetLayout.managedCloudNoiseMipGenComputeDescriptorSetLayout device
+  mipgenPipelineLayout <- PipelineLayout.managedPipelineLayout device [mipgenLayout]
+  mipgenPipeline <- ComputePipeline.managedComputePipeline device mipgenPipelineLayout mipgenShader
+  mipgenPool <- DescriptorPool.managedCloudNoiseMipGenComputeDescriptorPool device
+  -- Allocate 4 descriptor sets (one per mip level)
+  mipgenDescriptorSets <- replicateM (mipLevels - 1) $ DescriptorSet.allocateDescriptorSet device mipgenPool [mipgenLayout]
+
+  -- Create per-mip image views for the noise texture
+  let noiseFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+  mipViews <- if noiseImage /= Vulkan.vkNullPtr
+    then forM [0 .. mipLevels - 1] $ \mip -> do
+      liftIO $ ImageView.createImageView3DSingleMip device noiseFormat noiseImage (fromIntegral mip)
+    else pure (replicate mipLevels Vulkan.vkNullPtr)
+
+  -- Create per-mip UBOs and pre-update all descriptor sets
+  mipParamsBuffers <- forM [1 .. mipLevels - 1] $ \mip -> do
+    let srcMip = mip - 1
+        dstMip = mip
+        srcSize = fromIntegral (noiseW `div` (2 ^ srcMip)) :: Foreign.C.CInt
+    (buf, mem) <- Buffer.managedUniformBuffer physicalDevice device [srcSize]
+    -- Update descriptor set with src/dst views
+    DescriptorSet.updateCloudNoiseMipGenComputeDescriptorSets device (mipgenDescriptorSets !! (mip - 1)) (mipViews !! srcMip) (mipViews !! dstMip) buf
+    pure (buf, mem)
 
   -- Dispatch compute shader + generate mipmaps
   CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
@@ -821,63 +849,66 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
         Vulkan.vkNullPtr
     CommandBuffer.cmdDispatch textureCommandBuffer 32 32 64
 
-    -- Transition mip 0 from GENERAL to TRANSFER_SRC for blitting
+    -- Generate mipmaps 1..4 using REPEAT-aware compute shader
     when (noiseImage /= Vulkan.vkNullPtr) $ do
-      CommandBuffer.mipLayerTransition
-        textureCommandBuffer
-        noiseImage
-        Vulkan.VK_IMAGE_LAYOUT_GENERAL
-        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-        0
-        1
-        1
-
-      -- Generate mipmaps 1..4
       forM_ [1 .. mipLevels - 1] $ \mip -> do
-        let srcMip = fromIntegral (mip - 1)
-            dstMip = fromIntegral mip
-            srcW = fromIntegral (noiseW `div` (2 ^ (mip - 1)))
-            srcH = fromIntegral (noiseH `div` (2 ^ (mip - 1)))
-            srcD = fromIntegral (noiseD `div` (2 ^ (mip - 1)))
-            dstW = fromIntegral (noiseW `div` (2 ^ mip))
-            dstH = fromIntegral (noiseH `div` (2 ^ mip))
-            dstD = fromIntegral (noiseD `div` (2 ^ mip))
+        let srcMip = mip - 1
+            dstMip = mip
+            dstW = noiseW `div` (2 ^ mip)
+            dstH = noiseH `div` (2 ^ mip)
+            dstD = noiseD `div` (2 ^ mip)
+            ds = mipgenDescriptorSets !! (mip - 1)
 
+        -- Transition dst mip to GENERAL for compute write
         CommandBuffer.mipLayerTransition
           textureCommandBuffer
           noiseImage
           Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-          Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-          dstMip
+          Vulkan.VK_IMAGE_LAYOUT_GENERAL
+          (fromIntegral dstMip)
           1
           1
 
-        CommandBuffer.cmdBlitImage3DMip
-          textureCommandBuffer
-          noiseImage
-          srcMip
-          dstMip
-          srcW
-          srcH
-          srcD
-          dstW
-          dstH
-          dstD
+        -- Dispatch mipgen compute shader
+        liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE mipgenPipeline
+        liftIO $ Foreign.Marshal.Array.withArray [ds] $ \dsPtr ->
+          Vulkan.vkCmdBindDescriptorSets
+            textureCommandBuffer
+            Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
+            mipgenPipelineLayout
+            0
+            1
+            dsPtr
+            0
+            Vulkan.vkNullPtr
+        CommandBuffer.cmdDispatch textureCommandBuffer (fromIntegral (dstW `div` 8)) (fromIntegral (dstH `div` 8)) (fromIntegral (dstD `div` 4))
 
-        CommandBuffer.mipLayerTransition
-          textureCommandBuffer
-          noiseImage
-          Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-          Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-          dstMip
-          1
-          1
+        -- Barrier: ensure compute writes are visible to next dispatch's reads
+        let memoryBarrier =
+              Vulkan.createVk
+                ( Vulkan.set @"sType" Vulkan.VK_STRUCTURE_TYPE_MEMORY_BARRIER
+                    Vulkan.&* Vulkan.set @"pNext" Vulkan.VK_NULL
+                    Vulkan.&* Vulkan.set @"srcAccessMask" Vulkan.VK_ACCESS_SHADER_WRITE_BIT
+                    Vulkan.&* Vulkan.set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
+                )
+        liftIO $ Vulkan.withPtr memoryBarrier $ \bPtr ->
+          Vulkan.vkCmdPipelineBarrier
+            textureCommandBuffer
+            Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            Vulkan.VK_ZERO_FLAGS
+            1
+            bPtr
+            0
+            Vulkan.vkNullPtr
+            0
+            Vulkan.vkNullPtr
 
       -- Transition all mips to SHADER_READ_ONLY_OPTIMAL
       CommandBuffer.mipLayerTransition
         textureCommandBuffer
         noiseImage
-        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        Vulkan.VK_IMAGE_LAYOUT_GENERAL
         Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         0
         (fromIntegral mipLevels)
