@@ -6,8 +6,8 @@ import Graphics.Haskan.Engine (EngineConfig (..))
 import Graphics.Haskan.Engine qualified as Engine
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
 
-runHaskan :: Text -> String -> Maybe Integer -> Maybe FilePath -> Bool -> Bool -> Bool -> String -> Int -> Float -> Float -> Bool -> Bool -> Bool -> IO ()
-runHaskan title meshName mTimeout mDebugSocket uvCheckCube uvCheckSphere uvCheckPlane envDir numLights initialTime speed dayNight cloudTest proceduralSky = do
+runHaskan :: Text -> String -> Maybe Integer -> Maybe FilePath -> Bool -> Bool -> Bool -> Bool -> String -> Int -> Float -> Float -> Bool -> Bool -> Bool -> IO ()
+runHaskan title meshName mTimeout mDebugSocket uvCheckCube uvCheckSphere uvCheckPlane uvCheckTriangle envDir numLights initialTime speed dayNight cloudTest proceduralSky = do
   logInfoIO LogGeneral "Initializing Haskan Engine"
   logInfoIO LogGeneral "Starting Engine main loop"
   Engine.mainLoop
@@ -29,7 +29,10 @@ runHaskan title meshName mTimeout mDebugSocket uvCheckCube uvCheckSphere uvCheck
                 else
                   if uvCheckPlane
                     then Just "plane"
-                    else Nothing,
+                    else
+                      if uvCheckTriangle
+                        then Just "triangle"
+                        else Nothing,
         envMapDir = envDir,
         lightCount = numLights,
         initialTimeOfDay = initialTime,

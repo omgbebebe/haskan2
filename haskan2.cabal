@@ -197,6 +197,21 @@ executable haskan2
     default-extensions:
                       OverloadedStrings
 
+executable example1
+    if os(windows)
+      ghc-options:         -optl-mconsole -O2 -threaded
+    else
+      ghc-options:         -O2 -threaded
+
+    main-is:          Main.hs
+
+    build-depends:    base >=4.17 && <4.24
+                     , haskan2
+    hs-source-dirs:   examples/example1
+    default-language: GHC2021
+    default-extensions:
+                      OverloadedStrings
+
 test-suite haskan2-test
     type:               exitcode-stdio-1.0
     main-is:            Tests.hs

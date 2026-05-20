@@ -412,21 +412,29 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
   case uvCheckMode of
     Just mode -> do
       world <- ECS.createWorld
-      let uvCheckerPath = "data/textures/uv_checker.png"
-      uvTexHandle <-
-        liftIO (doesFileExist uvCheckerPath) >>= \exists ->
-          if exists
-            then do
-              (pixelData, tw, th) <- Texture.readImageFromFile uvCheckerPath
-              Texture.createTextureFromData rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
-            else do
-              let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
-              Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
-
-      let testMesh = case mode of
-            "cube" -> Mesh.unitCube
-            "sphere" -> Mesh.uvSphere 32 16 1.0
-            _ -> Mesh.uvPlane 1.0
+      (testMesh, mTexWH, testTexData) <- case mode of
+        "triangle" -> do
+          let whiteTexData = Texture.generateGridTexture 2 2 1
+          pure (Mesh.coloredTriangle, Nothing, whiteTexData)
+        _ -> do
+          let uvCheckerPath = "data/textures/uv_checker.png"
+          (tw, th, pixelData) <- liftIO (doesFileExist uvCheckerPath) >>= \exists ->
+            if exists
+              then do
+                (pixelData, tw, th) <- Texture.readImageFromFile uvCheckerPath
+                pure (tw, th, pixelData)
+              else do
+                let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
+                pure (256, 256, checkerTexData)
+          let testMesh = case mode of
+                "cube" -> Mesh.unitCube
+                "sphere" -> Mesh.uvSphere 32 16 1.0
+                _ -> Mesh.uvPlane 1.0
+          pure (testMesh, Just (tw, th), pixelData)
+      let (tw, th) = case mTexWH of
+            Just (w, h) -> (w, h)
+            Nothing -> (2, 2)
+      uvTexHandle <- Texture.createTextureFromData rm physicalDevice device tw th testTexData graphicsQueueHandler textureCommandBuffer
       testMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices testMesh) (Mesh.indices testMesh)
       testEntity <- ECS.spawnEntity world
       ECS.setTransform world testEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))

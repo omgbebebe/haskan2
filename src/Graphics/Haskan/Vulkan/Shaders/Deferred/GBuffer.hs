@@ -203,7 +203,15 @@ fragment = shader do
   matIdx <- get @"in_materialIndex"
   entityIdx <- get @"in_entityIndex"
   tangent <- get @"in_tangent"
+  albedo <- get @"in_albedo"
   texColor <- use @(BindlessTexel "tex") matIdx NilOps uv
+
+  -- Blend texture with vertex color: texture * vertexColor
+  -- When vertex color is white (1,1,1), this is a no-op (backward compatible)
+  -- When no texture is bound (white), vertex color shows through
+  let baseR = view @(Index 0) texColor * view @(Index 0) albedo
+      baseG = view @(Index 1) texColor * view @(Index 1) albedo
+      baseB = view @(Index 2) texColor * view @(Index 2) albedo
 
   -- Read PBR indices and scalar factors from entity SSBO
   mrIdx <- use @(Name "entities" :.: Name "data" :.: AnIndex Word32 :.: Name "metallicRoughnessIndex") entityIdx
@@ -280,5 +288,5 @@ fragment = shader do
   put @"out_position" (Vec4 (view @(Index 0) pos) (view @(Index 1) pos) (view @(Index 2) pos) metallicFinal)
   -- Encode normal from [-1,1] to [0,1] for UNORM storage
   put @"out_normal" (Vec4 (worldNx / worldNLen * 0.5 + 0.5) (worldNy / worldNLen * 0.5 + 0.5) (worldNz / worldNLen * 0.5 + 0.5) roughnessFinal)
-  put @"out_albedo" (Vec4 (view @(Index 0) texColor) (view @(Index 1) texColor) (view @(Index 2) texColor) ao)
+  put @"out_albedo" (Vec4 baseR baseG baseB ao)
   put @"out_emissive" (Vec4 emissiveR emissiveG emissiveB 1.0)

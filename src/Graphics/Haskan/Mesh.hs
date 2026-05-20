@@ -12,6 +12,25 @@ data Mesh = Mesh
   }
   deriving (Eq, Show)
 
+-- | Create a colored triangle in the XY plane (Z=0).
+-- Vertex 0 = red (top), Vertex 1 = green (bottom-left), Vertex 2 = blue (bottom-right).
+-- Produces smooth color interpolation across the triangle face.
+coloredTriangle :: Mesh
+coloredTriangle =
+  let -- Normal facing +Z (towards camera)
+      n = V3 0 0 1
+      t = V4 1 0 0 1
+      -- Top vertex: red
+      v0 = Vertex (V3 0 1 0) (V2 0.5 1.0) n t (V3 1 0 0)
+      -- Bottom-left vertex: green
+      v1 = Vertex (V3 (-0.866) (-0.5) 0) (V2 0 0) n t (V3 0 1 0)
+      -- Bottom-right vertex: blue
+      v2 = Vertex (V3 0.866 (-0.5) 0) (V2 1 0) n t (V3 0 0 1)
+   in Mesh
+        { vertices = [v0, v1, v2],
+          indices = [0, 1, 2]
+        }
+
 -- | Create a large ground plane mesh in the XZ plane (Y=0).
 -- Size is the half-extent; total plane is from (-size,-size) to (size,size).
 groundPlaneMesh :: Foreign.C.CFloat -> Mesh
