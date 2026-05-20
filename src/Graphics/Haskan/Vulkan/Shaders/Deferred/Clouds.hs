@@ -160,9 +160,10 @@ type CloudFrameData =
        "weatherCoverageScale" ':-> Float,
        "weatherTypeBias" ':-> Float,
        "stormIntensity" ':-> Float,
-       "weatherAnimSpeed" ':-> Float,
-       "frameIndex" ':-> Float
-     ]
+        "weatherAnimSpeed" ':-> Float,
+        "frameIndex" ':-> Float,
+        "debugMode" ':-> Float
+      ]
 
 type CloudVertexDefs =
   '[ "out_uv" ':-> Output '[Location 0] (V 2 Float),
@@ -248,6 +249,7 @@ cloudFragment = shader do
       stormIntensity = view @(Name "stormIntensity") frameData
       weatherAnimSpeed = view @(Name "weatherAnimSpeed") frameData
       frameIndex = view @(Name "frameIndex") frameData
+      debugMode = view @(Name "debugMode") frameData
 
   -- Sub-pixel jitter for TAA: golden ratio offset per frame
   let goldenRatio = 0.6180339887
@@ -367,12 +369,49 @@ cloudFragment = shader do
       windSpeed = 0.05
       windOffsetX = time * windSpeed * windDirX
       windOffsetZ = time * windSpeed * windDirZ
-      -- Primary domain warp: large amplitude to break up noise tiling
-      warpAmp1 = 500.0
-      warpFreq1 = 0.0015
-      -- Secondary warp: higher frequency, smaller amplitude for detail
-      warpAmp2 = 250.0
-      warpFreq2 = 0.0042
+      -- Domain warp: operates in noise-UV space for seamless tiling.
+      -- Using fract(baseUV) ensures warp is periodic with noise tile.
+      -- warpAmp in UV units (not world units): 500 world units * noiseScale ≈ 0.15 UV
+      warpAmpUV1 = 500.0 * noiseScale
+      warpAmpUV2 = 250.0 * noiseScale
+
+      -- Debug: compute at un-dithered entry point for consistent visualization
+      dbg_epx = camX + dirX * tNear
+      dbg_epy = camY + dirY * tNear
+      dbg_epz = camZ + dirZ * tNear
+      dbg_bux = dbg_epx * noiseScale - windOffsetX
+      dbg_buy = dbg_epy * noiseScale
+      dbg_buz = dbg_epz * noiseScale - windOffsetZ
+      dbg_fux = fract dbg_bux
+      dbg_fuy = fract dbg_buy
+      dbg_fuz = fract dbg_buz
+      dbg_wx1 = sin (dbg_fuy * 6.2831853 * 3.0 + dbg_fuz * 6.2831853 * 2.0) * warpAmpUV1
+      dbg_wy1 = cos (dbg_fux * 6.2831853 * 3.0 + dbg_fuz * 6.2831853 * 1.0) * warpAmpUV1
+      dbg_wz1 = sin (dbg_fuz * 6.2831853 * 2.0 + dbg_fux * 6.2831853 * 3.0) * warpAmpUV1
+      dbg_wx2 = sin (dbg_fuy * 6.2831853 * 5.0 + dbg_fux * 6.2831853 * 4.0) * warpAmpUV2
+      dbg_wy2 = cos (dbg_fuz * 6.2831853 * 4.0 + dbg_fuy * 6.2831853 * 3.0) * warpAmpUV2
+      dbg_wz2 = sin (dbg_fux * 6.2831853 * 6.0 + dbg_fuy * 6.2831853 * 5.0) * warpAmpUV2
+      dbg_wx = dbg_wx1 + dbg_wx2
+      dbg_wy = dbg_wy1 + dbg_wy2
+      dbg_wz = dbg_wz1 + dbg_wz2
+      dbg_sx = dbg_bux + dbg_wx
+      dbg_sy = dbg_buy + dbg_wy
+      dbg_sz = dbg_buz + dbg_wz
+
+  ~(Vec4 dbg_nr dbg_ng dbg_nb dbg_na) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 dbg_sx dbg_sy dbg_sz)
+
+  let -- Debug: compute density/height/noise at entry point
+      dbg_cloudThickness = 800.0
+      dbg_h = (epy - cloudBottom) / dbg_cloudThickness
+      dbg_heightScale = max 0.3 (entryCoverage ** 0.25)
+      dbg_hPct = clamp (dbg_h / dbg_heightScale) 0.0 1.0
+      dbg_baseCurve = mix 0.4 0.8 entryCloudType
+      dbg_topDecay = mix 2.0 4.0 entryCloudType
+      dbg_heightProfile = (dbg_hPct ** dbg_baseCurve) * exp (-dbg_hPct * dbg_topDecay)
+      dbg_detailFBM = dbg_ng * 0.625 + dbg_nb * 0.25 + dbg_na * 0.125
+      dbg_shapedNoise = max 0.0 (dbg_nr - dbg_detailFBM * cloudDetail)
+      dbg_remappedNoise = max 0.0 (dbg_shapedNoise - (1.0 - entryCoverage))
+      dbg_density = dbg_remappedNoise * dbg_heightProfile
 
   -- Dynamic ray march: mutable accumulators
   _ <- def @"step" @RW @Int32 0
@@ -422,19 +461,27 @@ cloudFragment = shader do
         earthRadius = 6371000.0
         distHorizSq = (px - camX) * (px - camX) + (pz - camZ) * (pz - camZ)
         curvedY = py - (distHorizSq / (2.0 * earthRadius))
-        -- Multi-octave domain warping to break up noise tiling
-        wx1 = sin (py * warpFreq1 + pz * warpFreq1 * 0.7) * warpAmp1
-        wy1 = cos (px * warpFreq1 + pz * warpFreq1 * 0.5) * warpAmp1
-        wz1 = sin (pz * warpFreq1 * 0.7 + px * warpFreq1 * 0.6) * warpAmp1
-        wx2 = sin (py * warpFreq2 * 1.3 + px * warpFreq2 * 0.9) * warpAmp2
-        wy2 = cos (pz * warpFreq2 * 1.1 + py * warpFreq2 * 0.8) * warpAmp2
-        wz2 = sin (px * warpFreq2 * 1.5 + py * warpFreq2 * 1.2) * warpAmp2
+        -- Base noise UV (before warp)
+        bux = px * noiseScale - windOffsetX
+        buy = py * noiseScale
+        buz = pz * noiseScale - windOffsetZ
+        -- Tile-periodic UV for warp input: fract ensures seamless tiling
+        fux = fract bux
+        fuy = fract buy
+        fuz = fract buz
+        -- Domain warp in UV space: uses tile-periodic coords so warp tiles with noise
+        wx1 = sin (fuy * 6.2831853 * 3.0 + fuz * 6.2831853 * 2.0) * warpAmpUV1
+        wy1 = cos (fux * 6.2831853 * 3.0 + fuz * 6.2831853 * 1.0) * warpAmpUV1
+        wz1 = sin (fuz * 6.2831853 * 2.0 + fux * 6.2831853 * 3.0) * warpAmpUV1
+        wx2 = sin (fuy * 6.2831853 * 5.0 + fux * 6.2831853 * 4.0) * warpAmpUV2
+        wy2 = cos (fuz * 6.2831853 * 4.0 + fuy * 6.2831853 * 3.0) * warpAmpUV2
+        wz2 = sin (fux * 6.2831853 * 6.0 + fuy * 6.2831853 * 5.0) * warpAmpUV2
         wx = wx1 + wx2
         wy = wy1 + wy2
         wz = wz1 + wz2
-        sx = (px + wx) * noiseScale - windOffsetX
-        sy = (py + wy) * noiseScale
-        sz = (pz + wz) * noiseScale - windOffsetZ
+        sx = bux + wx
+        sy = buy + wy
+        sz = buz + wz
 
     ~(Vec4 nr ng nb na) <- use @(ImageTexel "cloud_noise") (LOD noiseLod NilOps) (Vec3 sx sy sz)
 
@@ -471,13 +518,19 @@ cloudFragment = shader do
         ~(Vec3 lpx lpy lpz) = lightMidPos
         ldistHorizSq = (lpx - camX) * (lpx - camX) + (lpz - camZ) * (lpz - camZ)
         lcurvedY = lpy - (ldistHorizSq / (2.0 * 6371000.0))
-        -- Simplified single-octave warp
-        lwx = sin (lpy * warpFreq1 + lpz * warpFreq1 * 0.7) * warpAmp1
-        lwy = cos (lpx * warpFreq1 + lpz * warpFreq1 * 0.5) * warpAmp1
-        lwz = sin (lpz * warpFreq1 * 0.7 + lpx * warpFreq1 * 0.6) * warpAmp1
-        lsx = (lpx + lwx) * noiseScale - windOffsetX
-        lsy = (lpy + lwy) * noiseScale
-        lsz = (lpz + lwz) * noiseScale - windOffsetZ
+        -- Simplified single-octave warp (UV-space, tile-periodic)
+        lbux = lpx * noiseScale - windOffsetX
+        lbuy = lpy * noiseScale
+        lbuz = lpz * noiseScale - windOffsetZ
+        lfux = fract lbux
+        lfuy = fract lbuy
+        lfuz = fract lbuz
+        lwx = sin (lfuy * 6.2831853 * 3.0 + lfuz * 6.2831853 * 2.0) * warpAmpUV1
+        lwy = cos (lfux * 6.2831853 * 3.0 + lfuz * 6.2831853 * 1.0) * warpAmpUV1
+        lwz = sin (lfuz * 6.2831853 * 2.0 + lfux * 6.2831853 * 3.0) * warpAmpUV1
+        lsx = lbux + lwx
+        lsy = lbuy + lwy
+        lsz = lbuz + lwz
         -- Light position distance from camera for LOD
         ldistFromCam = sqrt ((lpx - camX) * (lpx - camX) + (lpy - camY) * (lpy - camY) + (lpz - camZ) * (lpz - camZ))
         lnoiseLod = clamp (ldistFromCam / lodScale) 0.0 maxNoiseLod
@@ -602,4 +655,9 @@ cloudFragment = shader do
       accG = reprojBlend * histG + (1.0 - reprojBlend) * cloudSkyG
       accB = reprojBlend * histB + (1.0 - reprojBlend) * cloudSkyB
 
-  put @"out_colour" (Vec4 accR accG accB cloudOpacity)
+  let outR = if debugMode == 13.0 then entryCoverage else if debugMode == 14.0 then dbg_heightProfile else if debugMode == 15.0 then dbg_nr else accR
+      outG = if debugMode == 13.0 then entryCloudType else if debugMode == 14.0 then dbg_heightProfile else if debugMode == 15.0 then dbg_nr else accG
+      outB = if debugMode == 13.0 then entryStormDarkness else if debugMode == 14.0 then dbg_heightProfile else if debugMode == 15.0 then dbg_nr else accB
+      outA = if debugMode == 13.0 || debugMode == 14.0 || debugMode == 15.0 then 1.0 else cloudOpacity
+
+  put @"out_colour" (Vec4 outR outG outB outA)

@@ -29,15 +29,20 @@ import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.UI.Backend qualified as Backend
+import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Graphics.Vulkan.Marshal (withPtr)
+import Graphics.Vulkan.Marshal.Create (set, (&*))
+import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Linear (M44, V3 (..), V4 (..), (^*))
 import Linear.Matrix ((!*), (!*!))
 import Linear.Projection (perspective)
 import Linear.V3 (_x, _y, _z)
+import Linear.V4 (_w)
 
 -- | All values pre-computed before creating the IO callback
 data RecordContext = RecordContext
@@ -79,7 +84,14 @@ data RecordContext = RecordContext
     rcPassSurfaceExtent :: !Vulkan.VkExtent2D,
     rcImGuiRenderPass :: !Vulkan.VkRenderPass,
     rcImGuiFramebuffers :: ![Vulkan.VkFramebuffer],
-    rcImGuiDrawData :: !(Maybe DearImGui.Raw.DrawData)
+    rcImGuiDrawData :: !(Maybe DearImGui.Raw.DrawData),
+    -- AP volume uniform data
+    rcInvViewProj :: !(M44 Float),
+    rcNearPlane :: !Float,
+    rcFarPlane :: !Float,
+    rcSunColor :: !(V3 Float),
+    rcCloudBase :: !Float,
+    rcCloudTop :: !Float
   }
 
 buildRecordContext ::
@@ -111,9 +123,15 @@ buildRecordContext ::
   Float ->
   Float ->
   Float ->
+  M44 Float ->
+  Float ->
+  Float ->
+  V3 Float ->
+  Float ->
+  Float ->
   Maybe DearImGui.Raw.DrawData ->
   RecordContext
-buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProjTVars prevTimeTVars currentCloudViewProj windDirX windDirZ cloudCoverage cloudDetail cloudAbsorption weatherCoverageScale weatherTypeBias stormIntensity weatherAnimSpeed mDrawData =
+buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProjTVars prevTimeTVars currentCloudViewProj windDirX windDirZ cloudCoverage cloudDetail cloudAbsorption weatherCoverageScale weatherTypeBias stormIntensity weatherAnimSpeed invViewProj nearPlane farPlane sunColor cloudBase cloudTop mDrawData =
   let viewMat = fmap (fmap realToFrac) (unViewMatrix (Camera.toMatrix camera)) :: M44 Float
       extent = rcSurfaceExtent ctx
       width = realToFrac (Vulkan.getField @"width" extent) :: Float
@@ -156,15 +174,21 @@ buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer
           rcWeatherTypeBias = weatherTypeBias,
           rcStormIntensity = stormIntensity,
           rcWeatherAnimSpeed = weatherAnimSpeed,
-          rcWireframeEnabled = fsWireframe frameState,
-          rcDeferred = dr,
-          rcCullResources = ccr,
-          rcDevice = device ctx,
-          rcPassSurfaceExtent = rcSurfaceExtent ctx,
-          rcImGuiRenderPass = drImGuiRenderPass dr,
-          rcImGuiFramebuffers = drImGuiFramebuffers dr,
-          rcImGuiDrawData = mDrawData
-        }
+           rcWireframeEnabled = fsWireframe frameState,
+           rcDeferred = dr,
+           rcCullResources = ccr,
+           rcDevice = device ctx,
+           rcPassSurfaceExtent = rcSurfaceExtent ctx,
+           rcImGuiRenderPass = drImGuiRenderPass dr,
+           rcImGuiFramebuffers = drImGuiFramebuffers dr,
+           rcImGuiDrawData = mDrawData,
+           rcInvViewProj = invViewProj,
+           rcNearPlane = nearPlane,
+           rcFarPlane = farPlane,
+           rcSunColor = sunColor,
+           rcCloudBase = cloudBase,
+           rcCloudTop = cloudTop
+         }
 
 buildRecordAction :: RecordContext -> Vulkan.Word32 -> Int -> IO ()
 buildRecordAction RecordContext {..} imageIdx frameIdx = do
@@ -324,6 +348,30 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
 
           -- After g-buffer, run AP volume compute
           when (Graph.rpName pass == "gbuffer") $ do
+            -- Write AP volume uniform data (std140 layout, 256 byte buffer)
+            let (V3 camX camY camZ) = rcCameraPos
+                (V4 r0x r0y r0z r0w) = rcInvViewProj ^. _x
+                (V4 r1x r1y r1z r1w) = rcInvViewProj ^. _y
+                (V4 r2x r2y r2z r2w) = rcInvViewProj ^. _z
+                (V4 r3x r3y r3z r3w) = rcInvViewProj ^. _w
+                (V3 sunDirX sunDirY sunDirZ) = rcSunDir
+                (V3 sunColorR sunColorG sunColorB) = rcSunColor
+                apVolumeData =
+                  [ realToFrac camX, realToFrac camY, realToFrac camZ, 0,
+                    realToFrac r0x, realToFrac r0y, realToFrac r0z, realToFrac r0w,
+                    realToFrac r1x, realToFrac r1y, realToFrac r1z, realToFrac r1w,
+                    realToFrac r2x, realToFrac r2y, realToFrac r2z, realToFrac r2w,
+                    realToFrac r3x, realToFrac r3y, realToFrac r3z, realToFrac r3w,
+                    realToFrac sunDirX, realToFrac sunDirY, realToFrac sunDirZ, 0,
+                    realToFrac sunColorR, realToFrac sunColorG, realToFrac sunColorB, 0,
+                    realToFrac rcCloudBase,
+                    realToFrac rcCloudTop,
+                    realToFrac rcTime,
+                    realToFrac rcNearPlane,
+                    realToFrac rcFarPlane,
+                    64.0
+                  ] :: [CFloat]
+            liftIO $ Buffer.copyDataToDeviceMemory rcDevice (drAPVolumeUniformMemory rcDeferred) apVolumeData
             let apVolumePipeline = drAPVolumePipeline rcDeferred
                 apVolumeLayout = drAPVolumePipelineLayout rcDeferred
                 apVolumeDescriptorSet = drAPVolumeDescriptorSets rcDeferred !! fromIntegral imageIdx
@@ -340,6 +388,26 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 Vulkan.vkNullPtr
             -- Dispatch: 64x32x64 voxels with 4x4x4 local size = 16x8x16 workgroups
             liftIO $ CommandBuffer.cmdDispatch commandBuffer 16 8 16
+            -- Barrier: ensure compute writes are visible to fragment shader reads
+            let memoryBarrier =
+                  Vulkan.createVk
+                    ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_MEMORY_BARRIER
+                        &* set @"pNext" Vulkan.VK_NULL
+                        &* set @"srcAccessMask" Vulkan.VK_ACCESS_SHADER_WRITE_BIT
+                        &* set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
+                    )
+            liftIO $ withPtr memoryBarrier $ \bPtr ->
+              Vulkan.vkCmdPipelineBarrier
+                commandBuffer
+                Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+                Vulkan.VK_ZERO_FLAGS
+                1
+                bPtr
+                0
+                Vulkan.vkNullPtr
+                0
+                Vulkan.vkNullPtr
 
         -- Dear ImGui overlay pass
         for_ rcImGuiDrawData $ \drawData -> liftIO $ do

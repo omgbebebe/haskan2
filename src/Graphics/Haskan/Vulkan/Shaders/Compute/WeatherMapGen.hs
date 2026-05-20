@@ -87,32 +87,33 @@ program = Module $ entryPoint @"main" @Compute do
             n11 = hash2b (ix + 1.0) (iy + 1.0) period
          in biLerp n00 n10 n01 n11 ux uy
 
-      vnoise2_1 px py f = vnoise2 (px * f) (py * f) f
+      vnoise2_1 px py f period = vnoise2 (px * f) (py * f) period
 
-      -- Domain warp for coverage (periodic with same period as coverage)
-      warpFreq = covScale * 0.3
-      warpAmt = 0.2
+      -- Domain warp for coverage: coordinates must be x*period with no offsets
+      -- for seamless tiling. period must be integer.
+      warpFreq = covScale
+      warpAmt = 0.15
 
-      wx = vnoise2b (x * warpFreq + 100.0) (y * warpFreq + 200.0) warpFreq * warpAmt
-      wy = vnoise2b (x * warpFreq + 300.0) (y * warpFreq + 400.0) warpFreq * warpAmt
+      wx = vnoise2b (x * warpFreq) (y * warpFreq) warpFreq * warpAmt
+      wy = vnoise2b (y * warpFreq) (x * warpFreq) warpFreq * warpAmt
 
       wx1 = x + wx
       wy1 = y + wy
 
-      -- Coverage: large-scale tileable FBM with domain warp
-      c1 = vnoise2_1 wx1 wy1 covScale
-      c2 = vnoise2_1 wx1 wy1 (covScale * 2.0) * 0.5
-      c3 = vnoise2_1 wx1 wy1 (covScale * 4.0) * 0.25
+      -- Coverage FBM: period = frequency for each octave
+      c1 = vnoise2_1 wx1 wy1 covScale covScale
+      c2 = vnoise2_1 wx1 wy1 (covScale * 2.0) (covScale * 2.0) * 0.5
+      c3 = vnoise2_1 wx1 wy1 (covScale * 4.0) (covScale * 4.0) * 0.25
       coverage = (c1 + c2 + c3) / 1.75
 
-      -- Cloud type: different warp + scale
-      t1 = vnoise2_1 (x + wx * 0.5) (y + wy * 0.5) typeScale
-      t2 = vnoise2_1 (x + wx * 0.5) (y + wy * 0.5) (typeScale * 2.0) * 0.5
+      -- Cloud type: no warp (different period than coverage)
+      t1 = vnoise2_1 x y typeScale typeScale
+      t2 = vnoise2_1 x y (typeScale * 2.0) (typeScale * 2.0) * 0.5
       cloudType = (t1 + t2) / 1.5
 
-      -- Height offset: simple tileable noise
-      h1 = vnoise2_1 x y hScale
-      h2 = vnoise2_1 x y (hScale * 2.0) * 0.5
+      -- Height offset
+      h1 = vnoise2_1 x y hScale hScale
+      h2 = vnoise2_1 x y (hScale * 2.0) (hScale * 2.0) * 0.5
       heightOffset = (h1 + h2) / 1.5
 
   imageWrite @"weatherImage" (Vec2 gidX gidY) (Vec4 coverage cloudType heightOffset 1.0)

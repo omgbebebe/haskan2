@@ -34,6 +34,21 @@
 - **God Ray Render Pass COMPLETE**: 32-sample radial blur on cloud opacity mask, between cloud and lighting passes
 - **Sunset Colors FIXED**: Directional color temperature (warmth = sunProximity × horizonFactor) — orange/red near sun at dusk, deep blue away from sun
 
+- **AP Volume Phase 1-2 COMPLETE**: 3D aerial perspective volume compute shader (64×32×64 RGBA16F) with raymarched scattering, samples cloud noise texture, writes to 3D storage image, read by lighting pass
+- **Compile-time Shader Compilation**: Template Haskell `compileShader` runs FIR→SPIR-V during `cabal build`. Build fails immediately on shader errors, not deferred to runtime.
+- **Tileable Noise FIXED**: Cloud noise (256³) and weather map (512²) generators now use period-based hashing. Frequencies are powers of 2 (2, 8, 16, 32 for noise; configurable for weather). Eliminates hard world-axis seams when sampler REPEAT wraps.
+- **Cloud Debug Modes FIXED**: Shift+F1/F2/F3 now show actual internal values:
+  - F1: Weather map (R=coverage, G=cloud type, B=storm intensity)
+  - F2: Height profile (parametric curve at un-dithered entry point)
+  - F3: Raw 3D noise (R channel of cloud_noise at entry point)
+  - Previously showed final composited sky color channels (identical white/grey)
+- **God Ray Push Constant Fix**: Pipeline layout was missing `VkPushConstantRange` declaration (44 bytes, FRAGMENT_BIT) — pre-existing bug exposed by validation layer.
+- **Image Layout Transition Fixes**: Added initial transitions for cloud images, cloud history images, and g-buffer images from UNDEFINED→SHADER_READ_ONLY_OPTIMAL. Changed cloud render pass initialLayout from UNDEFINED to SHADER_READ_ONLY_OPTIMAL.
+- **AP Volume Uniform Struct**: `V 4 (V 4 Float)` → 4 separate `V 4 Float` fields (`invViewProj0-3`). FIR cannot compute alignment for nested vectors in Struct.
+- **AP Volume Pipeline Barrier**: Memory barrier after compute dispatch (COMPUTE_SHADER/SHADER_WRITE → FRAGMENT_SHADER/SHADER_READ).
+- **Lighting Descriptor Pool**: Increased `lightingTexturesPerSet` from 9 to 10 (added ap_volume 3D texture binding).
+- **AP Volume Image Layout**: Descriptor sets use `VK_IMAGE_LAYOUT_GENERAL` for sampling (same layout as compute writes, avoids transition).
+
 ## Key Design Decisions
 1. **glTF UV**: Matches Vulkan (0,0 = top-left). No `flipV`.
 2. **Y-down**: Negative viewport height (`height = -h; y = h`), Vulkan 1.1+ core
@@ -51,6 +66,10 @@
 14. **Cloud pass**: Half-resolution, 250-step adaptive raymarch, temporal history
 15. **ImGui backend**: `DearImGui.SDL.Vulkan`, sync in render loop, separate descriptor pool
 16. **Physics**: Jolt v5.5.0 via C wrapper, async thread, TVar state sync, `_physics_box` naming convention
+17. **FIR Struct matrix fields**: Must be declared as separate `V 4 Float` rows, NOT `V 4 (V 4 Float)`. FIR cannot compute Extended alignment for nested vectors.
+18. **3D image layout for compute+graphics**: Use `GENERAL` for both compute writes and fragment sampler reads. No layout transitions needed between passes.
+19. **Compile-time shader compilation**: `Graphics.Haskan.Vulkan.Shaders.Compile` module triggers all 20 shader compilations via TH. Import it (or import it from Setup.hs) to enforce build-time validation. Runtime `compileAllShaders` still runs but overwrites pre-compiled files.
+20. **Tileable noise periods**: Hash coordinates must wrap with `fract(px / period) * period`. Frequencies must be powers of 2 for seamless tiling in power-of-2 textures.
 
 ## Camera
 - **Distance**: 20.0 default, min 0.1, max 20.0
@@ -65,12 +84,13 @@
 | `MILESTONE_EEVEE_PARITY.md` | Not started | 5-phase EEVEE parity plan (~50-80 weeks, FIR fixes first) |
 | `MILESTONE_CLOUD_SHADER_PRODUCTION.md` | Phase 7 pending | Cloud production quality, automated tests |
 | `MILESTONE_CLOUD_LIGHTING_AMBIENT.md` | Not started | Height-graded ambient + multi-scattering |
-| `MILESTONE_CLOUD_WEATHER_MAP.md` | Not started | 2D weather map texture for spatial cloud variation |
+| `MILESTONE_CLOUD_WEATHER_MAP.md` | **Complete** | 2D weather map texture for spatial cloud variation — tileable hash, domain warp, coverage/type/height channels |
 | `MILESTONE_DEAR_IMGUI.md` | Phases 5-7 pending | Status panel, rendering controls, physics panel |
 | `MILESTONE_JOLT_PHYSICS.md` | Complete | Physics integration |
 | `MILESTONE_FIR_IMPROVEMENTS.md` | Complete | Texture checking, layout gen, vector unpack QoL |
 | `MILESTONE_FIR_GAPS.md` | Open issues | Choose overlap, abs, type inference cascades |
 | `MILESTONE_FIR_MATH.md` | Complete | All 20 vector/matrix ops implemented |
+| **AP Volume** | **Phase 2 Complete** | 3D aerial perspective volume compute + lighting integration |
 
 ## Active Issues (See `.opencode/PROJECT_STATE.md` for full audit)
 
@@ -83,6 +103,8 @@
 4. **Cloud push constant 216 bytes**: Exceeds Vulkan 128-byte minimum. Won't run on mobile/integrated.
 5. **No `abs` for `Code` types**: `step()` workaround in 4+ places
 6. ~~**Zenith solid color**~~ **FIXED 2026-05-19**: Removed `fract()` from noise UVs; sampler REPEAT handles tiling seamlessly. Horizon epsilon increased to 0.05.
+7. ~~**Cloud density tiling seams**~~ **FIXED 2026-05-19 (latest)**: Hash functions now wrap coordinates with `fract(px/period)*period`. Frequencies are powers of 2 for seamless tiling.
+8. ~~**Cloud debug modes misleading**~~ **FIXED 2026-05-19 (latest)**: Debug modes 13/14/15 now show actual weather map, height profile, and raw noise (not final sky color channels).
 
 ### P2 — Medium
 6. Blue noise tileability unverified
@@ -95,17 +117,24 @@
 - `src/Graphics/Haskan/Engine.hs` — Main loop, ECS, deferred graph, input polling with ImGui
 - `src/Graphics/Haskan/Engine/Physics.hs` — Physics thread lifecycle
 - `src/Graphics/Haskan/Engine/Types.hs` — GameState with TVars, PhysicsBodySpec
+- `src/Graphics/Haskan/Vulkan/Shaders/Compute/APVolume.hs` — AP volume compute shader (raymarched scattering)
+- `src/Graphics/Haskan/Vulkan/Shaders/Compute/APVolumeUniforms.hs` — AP volume uniform struct definition
+- `src/Graphics/Haskan/Vulkan/Shaders/Compute/CloudNoiseGen.hs` — Tileable 3D cloud noise generator
+- `src/Graphics/Haskan/Vulkan/Shaders/Compute/WeatherMapGen.hs` — Tileable 2D weather map generator
 - `src/Graphics/Haskan/Vulkan/Shaders/Deferred/GodRays.hs` — God ray radial blur shader
-- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Clouds.hs` — Cloud raymarching + analytic sky
-- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/LightingProcedural.hs` — Lighting + skybox + debug modes
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Clouds.hs` — Cloud raymarching + analytic sky + debug modes
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/LightingProcedural.hs` — Lighting + skybox + AP volume sampling
+- `src/Graphics/Haskan/Vulkan/Shaders/Deferred/Lighting.hs` — Lighting + skybox + AP volume sampling (non-procedural)
 - `src/Graphics/Haskan/Vulkan/Shaders/Deferred/GBuffer.hs` — G-buffer shaders, normal mapping
+- `src/Graphics/Haskan/Vulkan/Shaders/TH.hs` — Template Haskell compile-time shader compilation
+- `src/Graphics/Haskan/Vulkan/Shaders/Compile.hs` — Triggers all 20 shader compilations at build time
 - `src/Graphics/Haskan/UI/Backend.hs` — ImGui Vulkan backend, debug panels
 - `src/Graphics/Haskan/Camera.hs` — Orbital camera, quaternion rotation, animation
 - `src/Graphics/Haskan/DayNight.hs` — Sun trajectory, sky color, IBL intensity
-- `src/Graphics/Haskan/Render/Deferred.hs` — Deferred graph builder, push constant packing
-- `src/Graphics/Haskan/Vulkan/DeferredResources.hs` — Cloud extent, images, pipelines
+- `src/Graphics/Haskan/Render/Deferred.hs` — Deferred graph builder, push constant packing, cloud debug data
+- `src/Graphics/Haskan/Vulkan/DeferredResources.hs` — Cloud extent, images, pipelines, AP volume resources
 - `src/Graphics/Haskan/Engine/Render.hs` — Render loop, ImGui init/shutdown, frame building, sky regen TODO
-- `src/Graphics/Haskan/Engine/Render/Internal/PassRecording.hs` — Command buffer recording, ImGui overlay
+- `src/Graphics/Haskan/Engine/Render/Internal/PassRecording.hs` — Command buffer recording, AP volume dispatch + barrier
 - `src/Graphics/Haskan/Scene/ECS.hs` — Entity component system
 - `src/Graphics/Haskan/Scene/GLTF.hs` — glTF loading, physics body creation from naming convention
 - `src/Graphics/Haskan/Input.hs` — Key bindings
@@ -120,6 +149,47 @@
 - **Never use**: `unsafeCoerce` (wrong heap layout), `undefined` for Cmds (strict field, crashes)
 
 ## Session History (condensed)
+
+### 2026-05-19 (latest): AP Volume Integration + Compile-Time Shaders + Tileable Noise
+- **AP Volume compute shader**: 64×32×64 RGBA16F 3D texture, local size 4×4×4, dispatch 16×8×16 workgroups.
+  - `APVolume.hs`: Raymarched scattering with cloud noise sampling, Beer-Lambert transmittance, Henyey-Greenstein phase function
+  - `APVolumeUniforms.hs`: Camera pos, 4× invViewProj rows, sun dir/color, cloud base/top, time, near/far
+  - Wired into lighting pass (both `Lighting.hs` and `LightingProcedural.hs`) at binding 9/10
+  - Samples 3D texture at `(uvX, uvY, depthT)` where `depthT = log(dist/near) / log(far/near)`
+  - Applies: `final = sceneColor * (1.0 - alpha) + rgb`
+- **AP Volume infrastructure**:
+  - `DescriptorSetLayout.hs`: TH-generated layout with StorageImage + Texture3D + Uniform
+  - `DescriptorPool.hs`: Pool with storage image, sampler, and UBO slots
+  - `DeferredResources.hs`: 3D image creation, memory allocation, view, initial layout transition to GENERAL
+  - `PassRecording.hs`: Dispatch after g-buffer pass + memory barrier (COMPUTE→FRAGMENT)
+  - `Setup.hs`: Shader compilation to `ap_volume_comp.spv`
+- **Compile-time shader compilation**:
+  - `Graphics.Haskan.Vulkan.Shaders.TH`: `compileShader` TH function using `FIR.compileTo` in `runIO`
+  - `Graphics.Haskan.Vulkan.Shaders.Compile`: imports all 20 shader modules, calls `$(compileShader ...)` for each
+  - `Setup.hs:85`: imports `Compile` module to trigger build-time compilation
+  - `haskan2.cabal`: added `text-short` dependency, exposed `Shaders.TH` and `Shaders.Compile`
+  - Build fails immediately with `[Shader Compile Error] path: message` if any shader is invalid
+- **Tileable noise fix**:
+  - `CloudNoiseGen.hs`: Added `period` parameter to hash functions. Frequencies changed to 2.0, 8.0, 16.0, 32.0 (powers of 2).
+  - `WeatherMapGen.hs`: Same tileable hash approach for 2D weather map.
+  - Hash wraps coordinates: `fract(px / period) * period` before hashing.
+  - Eliminates hard seams when sampler REPEAT wraps texture boundaries.
+- **Cloud debug modes fixed**:
+  - Added `debugMode` field to `CloudFrameData` struct
+  - Pass `dpdDebugMode` from host to cloud UBO
+  - Debug values computed at un-dithered entry point (`tNear`, not `tEntry`) for consistent visualization
+  - Shift+F1: Weather map RGB (coverage, cloud type, storm intensity)
+  - Shift+F2: Height profile (parametric curve value)
+  - Shift+F3: Raw noise (cloud_noise R channel)
+- **Validation fixes**:
+  - God ray pipeline layout: added `VkPushConstantRange` (44 bytes, FRAGMENT_BIT)
+  - Cloud history images: initial transition UNDEFINED→SHADER_READ_ONLY_OPTIMAL
+  - G-buffer images: initial transition UNDEFINED→SHADER_READ_ONLY_OPTIMAL
+  - Cloud images: initial transition UNDEFINED→SHADER_READ_ONLY_OPTIMAL
+  - Cloud render pass: `initialLayout` changed from UNDEFINED to SHADER_READ_ONLY_OPTIMAL
+  - AP volume descriptor sets: use `GENERAL` layout for combined image sampler binding
+  - Lighting descriptor pool: `lightingTexturesPerSet` 9→10
+- **AP Volume uniform struct fix**: `V 4 (V 4 Float)` caused `primTySizeAndAli: cannot compute Extended size & alignment for Vector {size=4, eltTy=Vector...}`. Changed to 4 separate `V 4 Float` fields.
 
 ### 2026-05-19 (later): God Ray Render Pass + Sunset Color Fix
 - **God ray render pass**: Implemented proper 32-sample radial blur between cloud and lighting passes:

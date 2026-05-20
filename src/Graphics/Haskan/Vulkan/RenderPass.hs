@@ -475,7 +475,7 @@ createCloudRenderPass dev =
               &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
               &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
               &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
               &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
           )
       colorAttachmentRef =

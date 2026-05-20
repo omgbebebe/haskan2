@@ -63,7 +63,8 @@ data CloudTextures = CloudTextures
   { ctNoiseView :: !(Maybe Vulkan.VkImageView),
     ctBlueNoiseView :: !(Maybe Vulkan.VkImageView),
     ctWeatherMapView :: !(Maybe Vulkan.VkImageView),
-    ctBlueNoiseSampler :: !Vulkan.VkSampler
+    ctBlueNoiseSampler :: !Vulkan.VkSampler,
+    ctNoiseSampler :: !Vulkan.VkSampler
   }
 
 data DeferredConfig = DeferredConfig
@@ -146,6 +147,7 @@ createDeferredResources DeferredConfig {..} = do
       mBlueNoiseView = ctBlueNoiseView
       mWeatherMapView = ctWeatherMapView
       blueNoiseSampler = ctBlueNoiseSampler
+      noiseSampler = ctNoiseSampler
       mLightBuffer = dcLightBuffer
       imGuiRenderPass = dcImGuiRenderPass
       proceduralSkyEnabled = dcProceduralSky
@@ -193,6 +195,18 @@ createDeferredResources DeferredConfig {..} = do
       gBufferImageViews = map snd gBufferImagesAndViews
   logDebugIO LogRender $ "g-buffer images created: " <> showT (length gBufferImages) <> " sets"
 
+  -- Initial layout transition for g-buffer images
+  tempCmdBufGbuf <- CommandBuffer.createCommandBuffer device (rcGraphicsCommandPool ctx)
+  CommandBuffer.withCommandBufferOneTime
+    (graphicsQueueHandler ctx)
+    tempCmdBufGbuf
+    ( do
+        for_ (concat gBufferImages) $ \img ->
+          CommandBuffer.layerTransition tempCmdBufGbuf img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    )
+  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBufGbuf] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
+  logDebugIO LogRender "g-buffer images transitioned to SHADER_READ_ONLY_OPTIMAL"
+
   -- Create cloud images and views (RGBA16F, quarter resolution)
   let cloudFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
   cloudImagesAndViews <- for [0 .. numSwapchainImages - 1] $ \_ -> do
@@ -203,6 +217,18 @@ createDeferredResources DeferredConfig {..} = do
       cloudImageViews = map snd cloudImagesAndViews
   logDebugIO LogRender $ "cloud images created: " <> showT (length cloudImages) <> " sets"
 
+  -- Initial layout transition for cloud images
+  tempCmdBufCloud <- CommandBuffer.createCommandBuffer device (rcGraphicsCommandPool ctx)
+  CommandBuffer.withCommandBufferOneTime
+    (graphicsQueueHandler ctx)
+    tempCmdBufCloud
+    ( do
+        for_ cloudImages $ \img ->
+          CommandBuffer.layerTransition tempCmdBufCloud img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    )
+  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBufCloud] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
+  logDebugIO LogRender "cloud images transitioned to SHADER_READ_ONLY_OPTIMAL"
+
   -- Create cloud history images and views (same format/size)
   cloudHistoryImagesAndViews <- for [0 .. numSwapchainImages - 1] $ \_ -> do
     histImage <- Swapchain.managedGBufferImage pdev device cloudExtent cloudFormat
@@ -211,6 +237,18 @@ createDeferredResources DeferredConfig {..} = do
   let cloudHistoryImages = map fst cloudHistoryImagesAndViews
       cloudHistoryImageViews = map snd cloudHistoryImagesAndViews
   logDebugIO LogRender $ "cloud history images created: " <> showT (length cloudHistoryImages) <> " sets"
+
+  -- Initial layout transition for cloud history images (sampled in cloud pass)
+  tempCmdBufHist <- CommandBuffer.createCommandBuffer device (rcGraphicsCommandPool ctx)
+  CommandBuffer.withCommandBufferOneTime
+    (graphicsQueueHandler ctx)
+    tempCmdBufHist
+    ( do
+        for_ cloudHistoryImages $ \img ->
+          CommandBuffer.layerTransition tempCmdBufHist img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    )
+  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBufHist] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
+  logDebugIO LogRender "cloud history images transitioned to SHADER_READ_ONLY_OPTIMAL"
 
   -- Create god ray images and views (RGBA16F, half resolution)
   godRayImagesAndViews <- for [0 .. numSwapchainImages - 1] $ \_ -> do
@@ -376,7 +414,13 @@ createDeferredResources DeferredConfig {..} = do
   logDebugIO LogRender "wireframe pipeline created"
 
   -- God ray pipeline (reuses cloud render pass since same format)
-  godRayPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [godRayDescriptorSetLayout] []
+  let godRayPushConstantRange =
+        Vulkan.createVk
+          ( set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+              &* set @"offset" 0
+              &* set @"size" 44
+          )
+  godRayPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [godRayDescriptorSetLayout] [godRayPushConstantRange]
   logDebugIO LogRender "god ray pipeline layout created"
 
   godRayPipeline <-
@@ -405,7 +449,7 @@ createDeferredResources DeferredConfig {..} = do
   logDebugIO LogRender $ "ImGui framebuffers created: " <> showT (length imGuiFramebuffers)
 
   -- Lighting descriptor pool and sets
-  let lightingTexturesPerSet = 9
+  let lightingTexturesPerSet = 10
   lightingDescriptorPool <- DescriptorPool.managedLightingDescriptorPool device numSwapchainImages lightingTexturesPerSet
   lightingDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
     DescriptorSet.allocateDescriptorSet device lightingDescriptorPool [lightingDescriptorSetLayout]
@@ -418,9 +462,9 @@ createDeferredResources DeferredConfig {..} = do
           _ -> views ++ replicate 3 Vulkan.VK_NULL_HANDLE
     if proceduralSkyEnabled
       then do
-        DescriptorSet.updateLightingProceduralDescriptorSets device ds sampler baseViews mLightBuffer (Just cloudView) (Just godRayView)
+        DescriptorSet.updateLightingProceduralDescriptorSets device ds sampler baseViews mLightBuffer (Just cloudView) (Just godRayView) (Just apImageView)
       else do
-        DescriptorSet.updateLightingDescriptorSets device ds sampler baseViews mLightBuffer (Just cloudView)
+        DescriptorSet.updateLightingDescriptorSets device ds sampler baseViews mLightBuffer (Just cloudView) (Just apImageView)
   logDebugIO LogRender "lighting descriptor sets updated"
 
   -- Create cloud frame data UBO (256 bytes, minimum UBO alignment)
@@ -439,7 +483,7 @@ createDeferredResources DeferredConfig {..} = do
 
   -- Update cloud descriptor sets
   liftIO $ for_ (zip cloudDescriptorSets cloudHistoryImageViews) $ \(ds, histView) -> do
-    DescriptorSet.updateCloudDescriptorSets device ds sampler mEnvMapView mCloudNoiseView (Just histView) mBlueNoiseView mWeatherMapView blueNoiseSampler
+    DescriptorSet.updateCloudDescriptorSets device ds sampler noiseSampler mEnvMapView mCloudNoiseView (Just histView) mBlueNoiseView mWeatherMapView blueNoiseSampler
     DescriptorSet.updateCloudFrameDataBuffer device ds cloudFrameDataBuffer
   logDebugIO LogRender "cloud descriptor sets updated"
 
@@ -478,7 +522,7 @@ createDeferredResources DeferredConfig {..} = do
 
   -- Update AP volume descriptor sets
   liftIO $ for_ apVolumeDescriptorSets $ \ds -> do
-    DescriptorSet.updateAPVolumeDescriptorSets device ds apImageView apUniformBuffer
+    DescriptorSet.updateAPVolumeDescriptorSets device ds apImageView mCloudNoiseView noiseSampler apUniformBuffer
   logDebugIO LogRender "AP volume descriptor sets updated"
 
   pure

@@ -265,14 +265,18 @@ type FragmentDefs =
        ':-> StorageBuffer
               '[Binding 7, DescriptorSet 0]
               LightsData,
-     "cloud_result"
-       ':-> Texture2D
-              '[Binding 8, DescriptorSet 0]
-              (RGBA16 F),
-     "cameraPos"
-       ':-> PushConstant
-              '[]
-              CameraPushConstant,
+      "cloud_result"
+        ':-> Texture2D
+               '[Binding 8, DescriptorSet 0]
+               (RGBA16 F),
+      "ap_volume"
+        ':-> Texture3D
+               '[Binding 9, DescriptorSet 0]
+               (RGBA16 F),
+      "cameraPos"
+        ':-> PushConstant
+               '[]
+               CameraPushConstant,
      "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
@@ -291,9 +295,9 @@ type FragmentDefs =
 -- 10 = specular IBL    (Ctrl+F12)
 -- 11 = Fresnel         (Shift+F12)
 -- 12 = skybox (raw env_map sample, all pixels) (Shift+Ctrl+F12)
--- 13 = cloud density   (Shift+F1)
--- 14 = height mask     (Shift+F2)
--- 15 = raw noise       (Shift+F3)
+-- 13 = cloud weather map R=coverage (Shift+F1)
+-- 14 = cloud height profile (Shift+F2)
+-- 15 = cloud raw noise (Shift+F3)
 
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do
@@ -651,10 +655,26 @@ fragment = shader do
       finaly = if hasGeometry then gamy else tintedSkyG
       finalz = if hasGeometry then gamz else tintedSkyB
 
+  -- Sample AP volume for aerial perspective
+  let distToCam = sqrt ((posX - camX) * (posX - camX) + (posY - camY) * (posY - camY) + (posZ - camZ) * (posZ - camZ))
+      -- Exponential depth mapping (match AP volume compute)
+      nearVal = 0.1 :: Code Float
+      farVal = 10000.0 :: Code Float
+      depthT = clamp (log (distToCam / nearVal) / log (farVal / nearVal)) 0.0 1.0
+  ~(Vec4 apR apG apB apA) <- use @(ImageTexel "ap_volume") NilOps (Vec3 uvX uvY depthT)
+  let apTransmittance = 1.0 - apA
+      apInScatterR = apR
+      apInScatterG = apG
+      apInScatterB = apB
+      -- Apply AP volume: attenuate scene + add in-scattered light
+      apFinalR = finalx * apTransmittance + apInScatterR
+      apFinalG = finaly * apTransmittance + apInScatterG
+      apFinalB = finalz * apTransmittance + apInScatterB
+
       -- Debug mode 12.0: raw skybox for ALL pixels
-      dbgSkyR = if debugMode == 12.0 then tintedSkyR else finalx
-      dbgSkyG = if debugMode == 12.0 then tintedSkyG else finaly
-      dbgSkyB = if debugMode == 12.0 then tintedSkyB else finalz
+      dbgSkyR = if debugMode == 12.0 then tintedSkyR else apFinalR
+      dbgSkyG = if debugMode == 12.0 then tintedSkyG else apFinalG
+      dbgSkyB = if debugMode == 12.0 then tintedSkyB else apFinalB
 
       -- Debug visualization helpers
       -- Normals: map [-1,1] to [0,1]

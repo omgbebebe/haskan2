@@ -82,6 +82,7 @@ import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..), TextureResource (..), lookupTexture)
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
+import Graphics.Haskan.Vulkan.Shaders.Compile () -- forces TH shader compilation at build time
 import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolumeShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen qualified as CloudNoiseGenShaders
@@ -138,12 +139,18 @@ compileAllShaders = do
   logInfo LogGeneral "  wire_frag.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/cull_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CullShaders.program
   logInfo LogGeneral "  cull_comp.spv done"
-  liftIO $ FIR.compileTo "data/shaders/fir/cloud_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudNoiseGenShaders.program
-  logInfo LogGeneral "  cloud_noise_comp.spv done"
-  liftIO $ FIR.compileTo "data/shaders/fir/cloud_detail_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudDetailNoiseGenShaders.program
-  logInfo LogGeneral "  cloud_detail_noise_comp.spv done"
-  liftIO $ FIR.compileTo "data/shaders/fir/weather_map_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WeatherMapGenShaders.program
-  logInfo LogGeneral "  weather_map_comp.spv done"
+  cnResult <- liftIO $ FIR.compileTo "data/shaders/fir/cloud_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudNoiseGenShaders.program
+  case cnResult of
+    Left err -> logInfo LogGeneral $ "  cloud_noise_comp.spv FAILED: " <> showT err
+    Right _ -> logInfo LogGeneral "  cloud_noise_comp.spv done"
+  cdResult <- liftIO $ FIR.compileTo "data/shaders/fir/cloud_detail_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudDetailNoiseGenShaders.program
+  case cdResult of
+    Left err -> logInfo LogGeneral $ "  cloud_detail_noise_comp.spv FAILED: " <> showT err
+    Right _ -> logInfo LogGeneral "  cloud_detail_noise_comp.spv done"
+  wmResult <- liftIO $ FIR.compileTo "data/shaders/fir/weather_map_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WeatherMapGenShaders.program
+  case wmResult of
+    Left err -> logInfo LogGeneral $ "  weather_map_comp.spv FAILED: " <> showT err
+    Right _ -> logInfo LogGeneral "  weather_map_comp.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/radiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] RadianceGenShaders.program
   logInfo LogGeneral "  radiance_comp.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/irradiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] IrradianceGenShaders.program
@@ -214,6 +221,7 @@ data IBLTextures = IBLTextures
     iblCloudDetailNoiseView :: !(Maybe Vulkan.VkImageView),
     iblBlueNoiseView :: !(Maybe Vulkan.VkImageView),
     iblBlueNoiseSampler :: !Vulkan.VkSampler,
+    iblNoiseSampler :: !Vulkan.VkSampler,
     iblWeatherMapView :: !(Maybe Vulkan.VkImageView)
   }
 
@@ -267,6 +275,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       blueNoiseHandle <- Texture.createTextureFromData rm physicalDevice device 64 64 blueNoisePixels graphicsQueueHandler textureCommandBuffer
       mBlueNoiseView <- Texture.textureImageView rm blueNoiseHandle
       blueNoiseSampler <- Texture.managedSamplerNearest device
+      noiseSampler <- Texture.managedSamplerWithLod device 4.0
       logInfo LogGeneral "blue noise texture loaded"
 
       logInfo LogGeneral "creating weather map storage image..."
@@ -294,6 +303,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
             iblCloudDetailNoiseView = cloudDetailNoiseView,
             iblBlueNoiseView = mBlueNoiseView,
             iblBlueNoiseSampler = blueNoiseSampler,
+            iblNoiseSampler = noiseSampler,
             iblWeatherMapView = weatherMapView
           }
     else do
@@ -338,6 +348,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       blueNoiseHandle <- Texture.createTextureFromData rm physicalDevice device 64 64 blueNoisePixels graphicsQueueHandler textureCommandBuffer
       mBlueNoiseView <- Texture.textureImageView rm blueNoiseHandle
       blueNoiseSampler <- Texture.managedSamplerNearest device
+      noiseSampler <- Texture.managedSamplerWithLod device 4.0
       logInfo LogGeneral "blue noise texture loaded"
 
       logInfo LogGeneral "creating weather map storage image..."
@@ -359,6 +370,7 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
             iblCloudDetailNoiseView = cloudDetailNoiseView,
             iblBlueNoiseView = mBlueNoiseView,
             iblBlueNoiseSampler = blueNoiseSampler,
+            iblNoiseSampler = noiseSampler,
             iblWeatherMapView = weatherMapView
           }
 
@@ -741,6 +753,16 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
 
   -- Dispatch compute shader + generate mipmaps
   CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
+    -- Transition all mips from SHADER_READ_ONLY (or whatever) to GENERAL for compute write
+    when (noiseImage /= Vulkan.vkNullPtr) $
+      CommandBuffer.mipLayerTransition
+        textureCommandBuffer
+        noiseImage
+        Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        Vulkan.VK_IMAGE_LAYOUT_GENERAL
+        0
+        (fromIntegral mipLevels)
+        1
     -- 256x256x256 / 8x8x4 = 32x32x64 workgroups
     liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE noisePipeline
     liftIO $ Foreign.Marshal.Array.withArray [noiseDescriptorSet] $ \dsPtr ->

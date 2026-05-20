@@ -41,13 +41,19 @@ program = Module $ entryPoint @"main" @Compute do
       y = (fromIntegral gidY :: Code Float) / size
       z = (fromIntegral gidZ :: Code Float) / size
 
-      -- 3D hash functions
-      hash3 px py pz =
-        let dp = px * 127.1 + py * 311.7 + pz * 74.7 + seed
+      -- Tileable 3D hash: wraps cell coordinates to [0, period)
+      hash3 px py pz period =
+        let pxWrap = fract (px / period) * period
+            pyWrap = fract (py / period) * period
+            pzWrap = fract (pz / period) * period
+            dp = pxWrap * 127.1 + pyWrap * 311.7 + pzWrap * 74.7 + seed
          in fract (sin dp * 43758.5453)
 
-      hash3b px py pz =
-        let dp = px * 269.5 + py * 183.3 + pz * 421.1 + seed + 1000.0
+      hash3b px py pz period =
+        let pxWrap = fract (px / period) * period
+            pyWrap = fract (py / period) * period
+            pzWrap = fract (pz / period) * period
+            dp = pxWrap * 269.5 + pyWrap * 183.3 + pzWrap * 421.1 + seed + 1000.0
          in fract (sin dp * 43758.5453)
 
       -- Trilinear interpolation
@@ -60,8 +66,8 @@ program = Module $ entryPoint @"main" @Compute do
             cxy1 = mix cx01 cx11 fy
          in mix cxy0 cxy1 fz
 
-      -- Value noise at a point
-      vnoise px py pz =
+      -- Tileable value noise at a point
+      vnoise px py pz period =
         let ix = floor px
             iy = floor py
             iz = floor pz
@@ -71,18 +77,18 @@ program = Module $ entryPoint @"main" @Compute do
             ux = fx * fx * (3.0 - 2.0 * fx)
             uy = fy * fy * (3.0 - 2.0 * fy)
             uz = fz * fz * (3.0 - 2.0 * fz)
-            n000 = hash3 ix iy iz
-            n100 = hash3 (ix + 1.0) iy iz
-            n010 = hash3 ix (iy + 1.0) iz
-            n110 = hash3 (ix + 1.0) (iy + 1.0) iz
-            n001 = hash3 ix iy (iz + 1.0)
-            n101 = hash3 (ix + 1.0) iy (iz + 1.0)
-            n011 = hash3 ix (iy + 1.0) (iz + 1.0)
-            n111 = hash3 (ix + 1.0) (iy + 1.0) (iz + 1.0)
+            n000 = hash3 ix iy iz period
+            n100 = hash3 (ix + 1.0) iy iz period
+            n010 = hash3 ix (iy + 1.0) iz period
+            n110 = hash3 (ix + 1.0) (iy + 1.0) iz period
+            n001 = hash3 ix iy (iz + 1.0) period
+            n101 = hash3 (ix + 1.0) iy (iz + 1.0) period
+            n011 = hash3 ix (iy + 1.0) (iz + 1.0) period
+            n111 = hash3 (ix + 1.0) (iy + 1.0) (iz + 1.0) period
          in triLerp n000 n100 n010 n110 n001 n101 n011 n111 ux uy uz
 
       -- Value noise with different hash (for domain warping)
-      vnoiseB px py pz =
+      vnoiseB px py pz period =
         let ix = floor px
             iy = floor py
             iz = floor pz
@@ -92,55 +98,54 @@ program = Module $ entryPoint @"main" @Compute do
             ux = fx * fx * (3.0 - 2.0 * fx)
             uy = fy * fy * (3.0 - 2.0 * fy)
             uz = fz * fz * (3.0 - 2.0 * fz)
-            n000 = hash3b ix iy iz
-            n100 = hash3b (ix + 1.0) iy iz
-            n010 = hash3b ix (iy + 1.0) iz
-            n110 = hash3b (ix + 1.0) (iy + 1.0) iz
-            n001 = hash3b ix iy (iz + 1.0)
-            n101 = hash3b (ix + 1.0) iy (iz + 1.0)
-            n011 = hash3b ix (iy + 1.0) (iz + 1.0)
-            n111 = hash3b (ix + 1.0) (iy + 1.0) (iz + 1.0)
+            n000 = hash3b ix iy iz period
+            n100 = hash3b (ix + 1.0) iy iz period
+            n010 = hash3b ix (iy + 1.0) iz period
+            n110 = hash3b (ix + 1.0) (iy + 1.0) iz period
+            n001 = hash3b ix iy (iz + 1.0) period
+            n101 = hash3b (ix + 1.0) iy (iz + 1.0) period
+            n011 = hash3b ix (iy + 1.0) (iz + 1.0) period
+            n111 = hash3b (ix + 1.0) (iy + 1.0) (iz + 1.0) period
          in triLerp n000 n100 n010 n110 n001 n101 n011 n111 ux uy uz
 
-      -- Single octave of value noise
-      vnoise1 px py pz f = vnoise (px * f) (py * f) (pz * f)
+      vnoise1 px py pz f period = vnoise (px * f) (py * f) (pz * f) period
 
-      -- Domain-warped FBM: low-freq warp distorts high-freq sampling
-      -- This creates billowy, cloud-like shapes
-      warpFreq = freq * 0.5
-      warpAmt = 0.3
+      -- Frequencies as powers of 2 so they tile seamlessly in 256^3
+      macroFreq = 2.0
+      mediumFreq = 8.0
+      highFreq = 16.0
+      microFreq = 32.0
 
-      wx = vnoiseB (x * warpFreq + 100.0) (y * warpFreq + 200.0) (z * warpFreq + 300.0) * warpAmt
-      wy = vnoiseB (x * warpFreq + 400.0) (y * warpFreq + 500.0) (z * warpFreq + 600.0) * warpAmt
-      wz = vnoiseB (x * warpFreq + 700.0) (y * warpFreq + 800.0) (z * warpFreq + 900.0) * warpAmt
+      -- Domain warp: coordinates must be x*period with no offsets,
+      -- so warp(0) == warp(1) for seamless tiling.
+      -- period must be integer for grid-point wrapping to align.
+      warpFreq = macroFreq
+      warpAmt = 0.25
+
+      wx = vnoiseB (x * warpFreq) (y * warpFreq) (z * warpFreq) warpFreq * warpAmt
+      wy = vnoiseB (y * warpFreq) (z * warpFreq) (x * warpFreq) warpFreq * warpAmt
+      wz = vnoiseB (z * warpFreq) (x * warpFreq) (y * warpFreq) warpFreq * warpAmt
 
       -- Warped coordinates for macro noise
       wx1 = x + wx
       wy1 = y + wy
       wz1 = z + wz
 
-      -- FBM on warped coordinates (4 octaves, unrolled)
-      o1 = vnoise1 wx1 wy1 wz1 freq
-      o2 = vnoise1 wx1 wy1 wz1 (freq * 2.0) * persist
-      o3 = vnoise1 wx1 wy1 wz1 (freq * 4.0) * persist * persist
-      o4 = vnoise1 wx1 wy1 wz1 (freq * 8.0) * persist * persist * persist
+      -- FBM: each octave uses period = frequency for distinct grid points.
+      -- With fixed period, hash wraps higher-freq grid points to the same
+      -- values, collapsing FBM into repeated low-freq patterns.
+      o1 = vnoise1 wx1 wy1 wz1 macroFreq macroFreq
+      o2 = vnoise1 wx1 wy1 wz1 (macroFreq * 2.0) (macroFreq * 2.0) * persist
+      o3 = vnoise1 wx1 wy1 wz1 (macroFreq * 4.0) (macroFreq * 4.0) * persist * persist
+      o4 = vnoise1 wx1 wy1 wz1 (macroFreq * 8.0) (macroFreq * 8.0) * persist * persist * persist
 
       maxAmp = 1.0 + persist + persist * persist + persist * persist * persist
       macroNoise = (o1 + o2 + o3 + o4) / maxAmp
 
-      -- Medium detail: domain-warped at different scale
-      mwx = x + vnoiseB (x * 2.0 + 50.0) (y * 2.0 + 150.0) (z * 2.0 + 250.0) * 0.2
-      mwy = y + vnoiseB (x * 2.0 + 350.0) (y * 2.0 + 450.0) (z * 2.0 + 550.0) * 0.2
-      mwz = z + vnoiseB (x * 2.0 + 650.0) (y * 2.0 + 750.0) (z * 2.0 + 850.0) * 0.2
-      mediumNoise = vnoise1 mwx mwy mwz 14.8
+      -- Detail channels: no warp needed (fragment shader handles domain warping)
+      mediumNoise = vnoise1 x y z mediumFreq mediumFreq
+      highNoise = vnoise1 x y z highFreq highFreq
+      microNoise = vnoise1 x y z microFreq microFreq
 
-      -- High detail: simpler domain warp
-      hwx = x + vnoiseB (x * 4.0 + 25.0) (y * 4.0 + 75.0) (z * 4.0 + 125.0) * 0.15
-      hwy = y + vnoiseB (x * 4.0 + 175.0) (y * 4.0 + 225.0) (z * 4.0 + 275.0) * 0.15
-      hwz = z + vnoiseB (x * 4.0 + 325.0) (y * 4.0 + 375.0) (z * 4.0 + 425.0) * 0.15
-      highNoise = vnoise1 hwx hwy hwz 29.6
-
-      -- Micro detail: no warp, just value noise
-      microNoise = vnoise1 x y z 59.2
 
   imageWrite @"noiseImage" (Vec3 gidX gidY gidZ) (Vec4 macroNoise mediumNoise highNoise microNoise)

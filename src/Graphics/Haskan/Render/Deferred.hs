@@ -270,8 +270,8 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac dpdStormIntensity, -- 192
                     realToFrac dpdWeatherAnimSpeed, -- 196
                     realToFrac dpdFrameIndex, -- 200
-                    0,
-                    0 -- 204-208 pad to 208
+                    realToFrac dpdDebugMode, -- 204
+                    0 -- 208 pad to 208
                   ] ::
                     [CFloat]
              in liftIO $ Buffer.copyDataToDeviceMemory dpdDevice dpdCloudFrameDataMemory cloudFrameData

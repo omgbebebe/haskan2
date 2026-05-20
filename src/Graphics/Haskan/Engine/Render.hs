@@ -368,6 +368,7 @@ runFrame frameNumber = do
         ctx = reContext
     -- Create a one-time command buffer and dispatch noise compute shaders
     regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
+    liftIO $ Vulkan.vkDeviceWaitIdle (device ctx)
     liftIO $
       runManaged $
         dispatchCloudNoiseGeneration
@@ -412,10 +413,17 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       viewProj = projection !*! view
       skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
       cloudPrevViewProj = view !*! projection
+      invViewProj = (realToFrac <$>) <$> inv44 (view !*! projection) :: M44 Float
+      nearPlane = 1.0
+      farPlane = 50000.0
   uploadUniformBuffer mvpMemory 0 [view, projection]
 
   frameState <- readFrameState
   let (sunState, skyTint, iblInt, sunAzimuth, sunDir) = computeSkyParams (fsDayNightEnabled frameState) (fsTimeOfDay frameState)
+      sunColor = DayNight.ssColor sunState
+      cloudHeight = fsCloudHeight frameState
+      cloudBase = cloudHeight - 300.0
+      cloudTop = cloudHeight + 300.0
 
   windDirDeg <- liftIO $ STM.readTVarIO reTvWindDirection
   windSpeedVal <- liftIO $ STM.readTVarIO reTvWindSpeed
@@ -470,7 +478,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       Backend.buildImGuiFrame (runReaderT Backend.buildDebugPanel panelEnv)
     Nothing -> pure Nothing
 
-  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds rePrevViewProj rePrevTime cloudPrevViewProj windDirXVal windDirZVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal weatherCoverageScaleVal weatherTypeBiasVal stormIntensityVal weatherAnimSpeedVal mDrawData
+  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds rePrevViewProj rePrevTime cloudPrevViewProj windDirXVal windDirZVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal weatherCoverageScaleVal weatherTypeBiasVal stormIntensityVal weatherAnimSpeedVal invViewProj nearPlane farPlane sunColor cloudBase cloudTop mDrawData
       recordAction = buildRecordAction recordCtx
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
@@ -933,7 +941,8 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                           { Deferred.ctNoiseView = iblCloudNoiseView,
                             Deferred.ctBlueNoiseView = iblBlueNoiseView,
                             Deferred.ctWeatherMapView = iblWeatherMapView,
-                            Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler
+                            Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler,
+                            Deferred.ctNoiseSampler = iblNoiseSampler
                           },
                       Deferred.dcLightBuffer = Just lightSsboBuffer,
                       Deferred.dcImGuiRenderPass = imGuiRenderPass,

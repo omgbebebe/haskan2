@@ -8,6 +8,7 @@ module Graphics.Haskan.Vulkan.Texture
     managedTexture3DWithMips,
     managedSampler,
     managedSamplerNearest,
+    managedSamplerWithLod,
     createSamplerWithLod,
     createTextureResource,
     textureImageView,
@@ -523,6 +524,17 @@ managedSamplerNearest dev =
   alloc
     "SamplerNearest"
     (createSamplerNearest dev)
+    (\ptr -> Vulkan.vkDestroySampler dev ptr Vulkan.vkNullPtr)
+
+managedSamplerWithLod ::
+  (MonadManaged m) =>
+  Vulkan.VkDevice ->
+  Float ->
+  m Vulkan.VkSampler
+managedSamplerWithLod dev maxLod =
+  alloc
+    "SamplerWithLod"
+    (createSamplerWithLod dev maxLod)
     (\ptr -> Vulkan.vkDestroySampler dev ptr Vulkan.vkNullPtr)
 
 createSamplerNearest ::
