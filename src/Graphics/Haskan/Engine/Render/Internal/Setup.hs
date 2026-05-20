@@ -396,7 +396,7 @@ data SceneLoadResult = SceneLoadResult
 
 -- | Load scene based on mode (UV check, stress test, GLTF, or OBJ)
 loadScene ::
-  (MonadFail m, MonadIO m, MonadLog m, MonadManaged m) =>
+  (MonadManaged m, MonadIO m, MonadLog m) =>
   ResourceManager ->
   Vulkan.VkPhysicalDevice ->
   Vulkan.VkDevice ->
@@ -405,18 +405,17 @@ loadScene ::
   AssetCache ->
   String ->
   Maybe String ->
+  Maybe Mesh.Mesh ->
   m SceneLoadResult
-loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName uvCheckMode = do
+loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName uvCheckMode mSimpleMesh = do
   let isGLTF = ".gltf" `Text.isSuffixOf` Text.pack meshName || ".glb" `Text.isSuffixOf` Text.pack meshName
       isStressTest = meshName == "stress_test"
-  case uvCheckMode of
-    Just mode -> do
-      world <- ECS.createWorld
-      (testMesh, mTexWH, testTexData) <- case mode of
-        "triangle" -> do
-          let whiteTexData = Texture.generateGridTexture 2 2 1
-          pure (Mesh.coloredTriangle, Nothing, whiteTexData)
-        _ -> do
+  case mSimpleMesh of
+    Just mesh -> loadSimpleMesh rm physicalDevice device graphicsQueueHandler textureCommandBuffer mesh
+    Nothing ->
+      case uvCheckMode of
+        Just mode -> do
+          world <- ECS.createWorld
           let uvCheckerPath = "data/textures/uv_checker.png"
           (tw, th, pixelData) <- liftIO (doesFileExist uvCheckerPath) >>= \exists ->
             if exists
@@ -430,25 +429,21 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
                 "cube" -> Mesh.unitCube
                 "sphere" -> Mesh.uvSphere 32 16 1.0
                 _ -> Mesh.uvPlane 1.0
-          pure (testMesh, Just (tw, th), pixelData)
-      let (tw, th) = case mTexWH of
-            Just (w, h) -> (w, h)
-            Nothing -> (2, 2)
-      uvTexHandle <- Texture.createTextureFromData rm physicalDevice device tw th testTexData graphicsQueueHandler textureCommandBuffer
-      testMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices testMesh) (Mesh.indices testMesh)
-      testEntity <- ECS.spawnEntity world
-      ECS.setTransform world testEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-      ECS.setMesh world testEntity testMeshHandle
-      ECS.setMaterial world testEntity uvTexHandle
-      ECS.setMetallicFactor world testEntity 0.0
-      ECS.setRoughnessFactor world testEntity 0.5
+          uvTexHandle <- Texture.createTextureFromData rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
+          testMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices testMesh) (Mesh.indices testMesh)
+          testEntity <- ECS.spawnEntity world
+          ECS.setTransform world testEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+          ECS.setMesh world testEntity testMeshHandle
+          ECS.setMaterial world testEntity uvTexHandle
+          ECS.setMetallicFactor world testEntity 0.0
+          ECS.setRoughnessFactor world testEntity 0.5
 
-      let sceneBbox = BBox (V3 (-1) (-1) (-1)) (V3 1 1 1)
-          uvCheckSpecs = [PhysicsBodySpec (BoxBody (V3 0.5 0.5 0.5) 10.0) (V3 0 0 0) testEntity]
-      pure $ SceneLoadResult world 1 sceneBbox IntMap.empty uvCheckSpecs
-    Nothing ->
-      if isStressTest
-        then do
+          let sceneBbox = BBox (V3 (-1) (-1) (-1)) (V3 1 1 1)
+              uvCheckSpecs = [PhysicsBodySpec (BoxBody (V3 0.5 0.5 0.5) 10.0) (V3 0 0 0) testEntity]
+          pure $ SceneLoadResult world 1 sceneBbox IntMap.empty uvCheckSpecs
+        Nothing ->
+          if isStressTest
+            then do
           world <- ECS.createWorld
           let cubeMesh = Mesh.unitCube
           meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices cubeMesh) (Mesh.indices cubeMesh)
@@ -527,6 +522,31 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
               logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
 
               pure $ SceneLoadResult world 1 sceneBbox IntMap.empty []
+
+-- | Load a single user-provided mesh with a white texture fallback.
+-- Used by the 'runSimple' API for minimal primitive rendering.
+loadSimpleMesh ::
+  (MonadManaged m, MonadIO m, MonadLog m) =>
+  ResourceManager ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkDevice ->
+  Vulkan.VkQueue ->
+  Vulkan.VkCommandBuffer ->
+  Mesh.Mesh ->
+  m SceneLoadResult
+loadSimpleMesh rm physicalDevice device graphicsQueueHandler textureCommandBuffer mesh = do
+  world <- ECS.createWorld
+  let whiteTexData = Texture.generateGridTexture 2 2 1
+  whiteTexHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
+  meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
+  entity <- ECS.spawnEntity world
+  ECS.setTransform world entity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+  ECS.setMesh world entity meshHandle
+  ECS.setMaterial world entity whiteTexHandle
+  ECS.setMetallicFactor world entity 0.0
+  ECS.setRoughnessFactor world entity 0.5
+  let sceneBbox = BBox (V3 (-1) (-1) (-1)) (V3 1 1 1)
+  pure $ SceneLoadResult world 1 sceneBbox IntMap.empty []
 
 -- | Dispatch compute shaders to generate procedural sky content.
 -- Creates temporary pipelines, dispatches, transitions images, and cleans up.

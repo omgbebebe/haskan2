@@ -1,12 +1,18 @@
 module Main where
 
-import Graphics.Haskan qualified as Haskan
+import Graphics.Haskan.Mesh (Mesh (..))
+import Graphics.Haskan.Vertex (Vertex (..))
+import Linear (V2 (..), V3 (..), V4 (..))
+import qualified Graphics.Haskan as Haskan
 
 -- | Example 1: Colored Triangle
 --
 -- This example demonstrates the minimal setup to render a single triangle
 -- using Haskan2 as a library. The triangle has three vertices colored
 -- red, green, and blue, producing a smooth gradient across the face.
+--
+-- The mesh is defined entirely on the user side and passed to 'runSimple'.
+-- No engine patching, no file loading, no ECS setup required.
 --
 -- To run:
 --   cabal run example1
@@ -25,21 +31,18 @@ main = do
   putStrLn "  Escape      - exit"
   putStrLn ""
 
-  -- Use runHaskan with uvCheckTriangle=True to render the built-in
-  -- colored triangle mesh. We disable most features for clarity.
-  Haskan.runHaskan
-    "Haskan2 Example 1 - Colored Triangle" -- window title
-    ""                                      -- no external mesh file
-    Nothing                                 -- no timeout
-    Nothing                                 -- no debug socket
-    False                                   -- uvCheckCube
-    False                                   -- uvCheckSphere
-    False                                   -- uvCheckPlane
-    True                                    -- uvCheckTriangle
-    "debug"                                 -- envMapDir (minimal cubemap)
-    1                                       -- 1 light
-    12.0                                    -- noon time of day
-    0.0                                     -- time paused
-    False                                   -- no day/night cycle
-    False                                   -- not cloud test mode
-    False                                   -- no procedural sky
+  let triangle :: Mesh
+      triangle =
+        let n = V3 0 0 1
+            t = V4 1 0 0 1
+            v0 = Vertex (V3 0 1 0) (V2 0.5 1.0) n t (V3 1 0 0)
+            v1 = Vertex (V3 (-0.866) (-0.5) 0) (V2 0 0) n t (V3 0 1 0)
+            v2 = Vertex (V3 0.866 (-0.5) 0) (V2 1 0) n t (V3 0 0 1)
+         in Mesh
+              { vertices = [v0, v1, v2],
+                indices = [0, 1, 2]
+              }
+
+  Haskan.runSimple
+    "Haskan2 Example 1 - Colored Triangle"
+    triangle

@@ -159,7 +159,6 @@ main = do
          (optUVCheckCube cli)
          (optUVCheckSphere cli)
          (optUVCheckPlane cli)
-         False  -- uvCheckTriangle (not exposed in CLI)
          (optEnvDir cli)
          (optLights cli)
          (optTimeOfDay cli)

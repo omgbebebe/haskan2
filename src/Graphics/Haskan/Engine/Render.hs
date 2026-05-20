@@ -607,8 +607,9 @@ renderLoop ::
   String ->
   Bool ->
   Bool ->
+  Maybe Mesh.Mesh ->
   m ()
-renderLoop window physicalDevice surface inst layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir cloudTestMode proceduralSkyEnabled = do
+renderLoop window physicalDevice surface inst layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir cloudTestMode proceduralSkyEnabled simpleMesh = do
   control <- liftIO $ STM.atomically $ TChan.dupTChan controlChannel
 
   rm <- newResourceManager
@@ -657,7 +658,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
 
   assetCache <- initCache ".haskan2-cache"
 
-  sceneResult <- loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName uvCheckMode
+  sceneResult <- loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName uvCheckMode simpleMesh
   let SceneLoadResult {..} = sceneResult
       isStressTest = meshName == "stress_test"
       ecsWorld = slrECSWorld

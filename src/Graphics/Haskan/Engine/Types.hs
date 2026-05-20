@@ -57,6 +57,7 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Word (Word32, Word64)
 import Foreign.C qualified
+import Graphics.Haskan.Mesh (Mesh)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (Storable (..), peekByteOff, pokeByteOff)
 import GHC.Generics
@@ -488,7 +489,8 @@ data EngineConfig = EngineConfig
     timeSpeed :: !Float,
     dayNightEnabled :: !Bool,
     cloudTestMode :: !Bool,
-    proceduralSkyEnabled :: !Bool
+    proceduralSkyEnabled :: !Bool,
+    simpleMesh :: !(Maybe Mesh)
   }
   deriving (Show)
 
