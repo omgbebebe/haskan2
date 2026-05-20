@@ -96,8 +96,8 @@ data DeferredResources = DeferredResources
     drCloudPipelineLayout :: !Vulkan.VkPipelineLayout,
     drCloudFramebuffers :: ![Vulkan.VkFramebuffer],
     drCloudDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    drCloudFrameDataBuffer :: !Vulkan.VkBuffer,
-    drCloudFrameDataMemory :: !Vulkan.VkDeviceMemory,
+    drCloudFrameDataBuffers :: ![Vulkan.VkBuffer],
+    drCloudFrameDataMemories :: ![Vulkan.VkDeviceMemory],
     drCloudImages :: ![Vulkan.VkImage],
     drCloudImageViews :: ![Vulkan.VkImageView],
     drCloudHistoryImages :: ![Vulkan.VkImage],
@@ -117,8 +117,8 @@ data DeferredResources = DeferredResources
     drAPVolumePipelineLayout :: !Vulkan.VkPipelineLayout,
     drAPVolumeDescriptorPool :: !Vulkan.VkDescriptorPool,
     drAPVolumeDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    drAPVolumeUniformBuffer :: !Vulkan.VkBuffer,
-    drAPVolumeUniformMemory :: !Vulkan.VkDeviceMemory,
+    drAPVolumeUniformBuffers :: ![Vulkan.VkBuffer],
+    drAPVolumeUniformMemories :: ![Vulkan.VkDeviceMemory],
     drGBufferImages :: ![[Vulkan.VkImage]],
     drGBufferImageViews :: ![[Vulkan.VkImageView]],
     drSampler :: !Vulkan.VkSampler,
@@ -467,13 +467,16 @@ createDeferredResources DeferredConfig {..} = do
         DescriptorSet.updateLightingDescriptorSets device ds sampler baseViews mLightBuffer (Just cloudView) (Just apImageView)
   logDebugIO LogRender "lighting descriptor sets updated"
 
-  -- Create cloud frame data UBO (256 bytes, minimum UBO alignment)
+  -- Create per-swapchain-image cloud frame data UBOs (256 bytes each)
   let cloudFrameDataSize = 256
-  (cloudFrameDataBuffer, cloudFrameDataMemoryRequirement) <-
-    Buffer.managedBuffer device (replicate cloudFrameDataSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
-  cloudFrameDataMemory <- Buffer.managedBufferMemory pdev device cloudFrameDataMemoryRequirement
-  liftIO $ Buffer.bindBufferMemory device cloudFrameDataBuffer cloudFrameDataMemory (replicate cloudFrameDataSize (0 :: Word8))
-  logDebugIO LogRender "cloud frame data UBO created"
+  cloudFrameBuffers <- for [0 .. numSwapchainImages - 1] $ \_ -> do
+    (buf, req) <- Buffer.managedBuffer device (replicate cloudFrameDataSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+    mem <- Buffer.managedBufferMemory pdev device req
+    liftIO $ Buffer.bindBufferMemory device buf mem (replicate cloudFrameDataSize (0 :: Word8))
+    pure (buf, mem)
+  let cloudFrameDataBuffers = map fst cloudFrameBuffers
+      cloudFrameDataMemories = map snd cloudFrameBuffers
+  logDebugIO LogRender $ "cloud frame data UBOs created: " <> showT (length cloudFrameDataBuffers) <> " x " <> showT cloudFrameDataSize <> " bytes"
 
   -- Cloud descriptor pool and sets
   cloudDescriptorPool <- DescriptorPool.managedCloudDescriptorPool device numSwapchainImages
@@ -481,10 +484,10 @@ createDeferredResources DeferredConfig {..} = do
     DescriptorSet.allocateDescriptorSet device cloudDescriptorPool [cloudDescriptorSetLayout]
   logDebugIO LogRender $ "cloud descriptor sets allocated: " <> showT (length cloudDescriptorSets)
 
-  -- Update cloud descriptor sets
-  liftIO $ for_ (zip cloudDescriptorSets cloudHistoryImageViews) $ \(ds, histView) -> do
+  -- Update cloud descriptor sets (each gets its own frame data buffer)
+  liftIO $ for_ (zip3 cloudDescriptorSets cloudHistoryImageViews cloudFrameDataBuffers) $ \(ds, histView, frameBuf) -> do
     DescriptorSet.updateCloudDescriptorSets device ds sampler noiseSampler mEnvMapView mCloudNoiseView (Just histView) mBlueNoiseView mWeatherMapView blueNoiseSampler
-    DescriptorSet.updateCloudFrameDataBuffer device ds cloudFrameDataBuffer
+    DescriptorSet.updateCloudFrameDataBuffer device ds frameBuf
   logDebugIO LogRender "cloud descriptor sets updated"
 
   -- God ray descriptor pool and sets
@@ -512,17 +515,20 @@ createDeferredResources DeferredConfig {..} = do
     DescriptorSet.allocateDescriptorSet device apVolumeDescriptorPool [apVolumeDescriptorSetLayout]
   logDebugIO LogRender $ "AP volume descriptor sets allocated: " <> showT (length apVolumeDescriptorSets)
 
-  -- AP volume uniform buffer (256 bytes, std140 aligned)
+  -- AP volume uniform buffers: one per swapchain image (256 bytes each)
   let apUniformSize = 256
-  (apUniformBuffer, apUniformMemoryRequirement) <-
-    Buffer.managedBuffer device (replicate apUniformSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
-  apUniformMemory <- Buffer.managedBufferMemory pdev device apUniformMemoryRequirement
-  liftIO $ Buffer.bindBufferMemory device apUniformBuffer apUniformMemory (replicate apUniformSize (0 :: Word8))
-  logDebugIO LogRender "AP volume uniform buffer created"
+  apUniformBuffers <- for [0 .. numSwapchainImages - 1] $ \_ -> do
+    (buf, req) <- Buffer.managedBuffer device (replicate apUniformSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+    mem <- Buffer.managedBufferMemory pdev device req
+    liftIO $ Buffer.bindBufferMemory device buf mem (replicate apUniformSize (0 :: Word8))
+    pure (buf, mem)
+  let apUniformBufferList = map fst apUniformBuffers
+      apUniformMemoryList = map snd apUniformBuffers
+  logDebugIO LogRender $ "AP volume uniform buffers created: " <> showT (length apUniformBufferList) <> " x " <> showT apUniformSize <> " bytes"
 
-  -- Update AP volume descriptor sets
-  liftIO $ for_ apVolumeDescriptorSets $ \ds -> do
-    DescriptorSet.updateAPVolumeDescriptorSets device ds apImageView mCloudNoiseView noiseSampler mWeatherMapView noiseSampler apUniformBuffer
+  -- Update AP volume descriptor sets (each gets its own uniform buffer)
+  liftIO $ for_ (zip apVolumeDescriptorSets apUniformBufferList) $ \(ds, buf) -> do
+    DescriptorSet.updateAPVolumeDescriptorSets device ds apImageView mCloudNoiseView noiseSampler mWeatherMapView noiseSampler buf
   logDebugIO LogRender "AP volume descriptor sets updated"
 
   pure
@@ -542,8 +548,8 @@ createDeferredResources DeferredConfig {..} = do
         drCloudPipelineLayout = cloudPipelineLayout,
         drCloudFramebuffers = cloudFramebuffers,
         drCloudDescriptorSets = cloudDescriptorSets,
-        drCloudFrameDataBuffer = cloudFrameDataBuffer,
-        drCloudFrameDataMemory = cloudFrameDataMemory,
+        drCloudFrameDataBuffers = cloudFrameDataBuffers,
+        drCloudFrameDataMemories = cloudFrameDataMemories,
         drCloudImages = cloudImages,
         drCloudImageViews = cloudImageViews,
         drCloudHistoryImages = cloudHistoryImages,
@@ -563,8 +569,8 @@ createDeferredResources DeferredConfig {..} = do
         drAPVolumePipelineLayout = apVolumePipelineLayout,
         drAPVolumeDescriptorPool = apVolumeDescriptorPool,
         drAPVolumeDescriptorSets = apVolumeDescriptorSets,
-        drAPVolumeUniformBuffer = apUniformBuffer,
-        drAPVolumeUniformMemory = apUniformMemory,
+        drAPVolumeUniformBuffers = apUniformBufferList,
+        drAPVolumeUniformMemories = apUniformMemoryList,
         drGBufferImages = gBufferImages,
         drGBufferImageViews = gBufferImageViews,
         drSampler = sampler,

@@ -22,6 +22,7 @@ import Graphics.Haskan.Camera (AnyCamera, Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.Camera.Types (ViewMatrix (..))
 import Graphics.Haskan.Engine.Render.Internal.FrameState (FrameState (..))
+import Graphics.Haskan.Engine.Scene (makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullResources (..), DrawIndexedIndirectCommand (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
 import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
@@ -32,6 +33,7 @@ import Graphics.Haskan.UI.Backend qualified as Backend
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
+import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -39,8 +41,7 @@ import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Linear (M44, V3 (..), V4 (..), (^*))
-import Linear.Matrix ((!*), (!*!))
-import Linear.Projection (perspective)
+import Linear.Matrix ((!*), (!*!), transpose)
 import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
 
@@ -132,11 +133,11 @@ buildRecordContext ::
   Maybe DearImGui.Raw.DrawData ->
   RecordContext
 buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProjTVars prevTimeTVars currentCloudViewProj windDirX windDirZ cloudCoverage cloudDetail cloudAbsorption weatherCoverageScale weatherTypeBias stormIntensity weatherAnimSpeed invViewProj nearPlane farPlane sunColor cloudBase cloudTop mDrawData =
-  let viewMat = fmap (fmap realToFrac) (unViewMatrix (Camera.toMatrix camera)) :: M44 Float
+  let viewMat = transpose $ fmap (fmap realToFrac) (unViewMatrix (Camera.toMatrix camera)) :: M44 Float
       extent = rcSurfaceExtent ctx
       width = realToFrac (Vulkan.getField @"width" extent) :: Float
       height = realToFrac (Vulkan.getField @"height" extent) :: Float
-      projMat = perspective (pi / 3) (width / height) 1.0 50000.0
+      projMat = transpose $ (realToFrac <$>) <$> makeProjectionMatrix width height :: M44 Float
       viewProj = projMat !*! viewMat
       sunWorld = sunDir ^* 10000.0
       V4 cx cy cz cw = viewProj !* V4 (sunWorld ^. _x) (sunWorld ^. _y) (sunWorld ^. _z) 1.0
@@ -238,7 +239,6 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
             pcRenderPass = drLightingRenderPass rcDeferred,
             pcExtent = rcPassSurfaceExtent
           }
-
       (graphRes, graphPasses) =
         Graph.execRenderGraphBuilder $
           buildDeferredGraph
@@ -248,7 +248,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdGBufferFramebuffer = gBufferFramebuffer,
                  dpdGBufferPipeline = drGBufferPipeline rcDeferred,
                  dpdGBufferDoubleSidedPipeline = drGBufferDoubleSidedPipeline rcDeferred,
-                 dpdGBufferLayout = drGBufferPipelineLayout rcDeferred,
+                dpdGBufferLayout = drGBufferPipelineLayout rcDeferred,
                 dpdGBufferDescriptor = frameDescriptorSet,
                 dpdGBufferSampler = rcTextureSampler,
                 dpdDrawList = rcDrawList,
@@ -288,7 +288,7 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdStormIntensity = rcStormIntensity,
                 dpdWeatherAnimSpeed = rcWeatherAnimSpeed,
                 dpdFrameIndex = frameIdx,
-                dpdCloudFrameDataMemory = drCloudFrameDataMemory rcDeferred,
+                dpdCloudFrameDataMemory = drCloudFrameDataMemories rcDeferred !! fromIntegral imageIdx,
                 dpdCloudRenderPass = drCloudRenderPass rcDeferred,
                 dpdCloudFramebuffer = cloudFramebuffer,
                 dpdCloudPipeline = drCloudPipeline rcDeferred,
@@ -308,6 +308,8 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                 dpdWireframeLayout = drWireframePipelineLayout rcDeferred,
                 dpdWireframeEnabled = rcWireframeEnabled
               }
+  -- Update lighting descriptor set to point to the correct double-buffered light SSBO
+  DescriptorSet.updateLightingLightBuffer rcDevice lightingDescriptorSet rcLightSsboBuffer
   case Graph.compileGraph graphRes graphPasses of
     Left err -> logInfoIO LogRender $ "graph compilation failed: " <> Text.pack (show err)
     Right compiled -> do
@@ -379,8 +381,8 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                     realToFrac rcWeatherAnimSpeed,
                     realToFrac rcCloudDetail,
                     0, 0 -- pad to 256 bytes
-                  ] :: [CFloat]
-            liftIO $ Buffer.copyDataToDeviceMemory rcDevice (drAPVolumeUniformMemory rcDeferred) apVolumeData
+                   ] :: [CFloat]
+             in liftIO $ Buffer.copyDataToDeviceMemory rcDevice (drAPVolumeUniformMemories rcDeferred !! fromIntegral imageIdx) apVolumeData
             let apVolumePipeline = drAPVolumePipeline rcDeferred
                 apVolumeLayout = drAPVolumePipelineLayout rcDeferred
                 apVolumeDescriptorSet = drAPVolumeDescriptorSets rcDeferred !! fromIntegral imageIdx

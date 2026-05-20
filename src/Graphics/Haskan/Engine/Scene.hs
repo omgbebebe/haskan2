@@ -29,7 +29,6 @@ import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.Resources (MeshHandle, ResourceManager, lookupMesh, mrBounds, mrIndexCount)
 import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
 import Linear.Matrix (identity, inv33, inv44, transpose, (!*), (!*!))
-import Linear.Projection qualified
 import Linear.Quaternion (Quaternion (..))
 import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
@@ -64,11 +63,21 @@ modelMatrix =
 
 makeProjectionMatrix :: Float -> Float -> M44 Foreign.C.CFloat
 makeProjectionMatrix width height =
-  Linear.Projection.perspective
-    (pi / 3)
-    (realToFrac width / realToFrac height)
-    1.0
-    50000.0
+  let aspect = realToFrac width / realToFrac height
+      fov = pi / 3
+      near = 1.0
+      far = 50000.0
+      f = 1.0 / tan (fov / 2.0)
+      x = f / aspect
+      y = -f
+      z = far / (far - near)
+      w = -(far * near) / (far - near)
+   in V4
+        (V4 (realToFrac x) 0 0 0)
+        (V4 0 (realToFrac y) 0 0)
+        (V4 0 0 (realToFrac z) (realToFrac w))
+        (V4 0 0 1 0)
+
 
 drawCallToSnapshot :: DrawCall -> RenderableSnapshot
 drawCallToSnapshot DrawCall {..} =

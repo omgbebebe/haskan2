@@ -576,10 +576,10 @@ createImGuiRenderPass dev surfaceFormat =
         Vulkan.createVk
           ( set @"srcSubpass" Vulkan.VK_SUBPASS_EXTERNAL
               &* set @"dstSubpass" 0
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"dstAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+              &* set @"srcAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
+              &* set @"dstStageMask" (Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT .|. Vulkan.VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+              &* set @"dstAccessMask" (Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT .|. Vulkan.VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
           )
       renderPassCI =
         Vulkan.createVk

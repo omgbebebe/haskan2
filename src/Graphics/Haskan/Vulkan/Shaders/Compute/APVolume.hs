@@ -118,10 +118,10 @@ program = Module $ entryPoint @"main" @Compute do
       stormDarkness = weatherB * stormIntensity
 
   -- Parametric height profile (matching Clouds shader)
-  let heightScale = max 0.3 (coverage ** 0.25)
+  let heightScale = max 0.6 (coverage ** 0.25)
       hPct = clamp (h / heightScale) 0.0 1.0
-      baseCurve = mix 0.4 0.8 cloudType
-      topDecay = mix 2.0 4.0 cloudType
+      baseCurve = mix 0.8 1.2 cloudType
+      topDecay = mix 0.8 1.5 cloudType
       heightProfile = (hPct ** baseCurve) * exp (-hPct * topDecay)
 
   -- Domain warping (matching Clouds shader)
