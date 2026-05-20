@@ -26,5 +26,13 @@ type APVolumeUniforms =
        "time" ':-> Float,
        "near" ':-> Float,
        "far" ':-> Float,
-       "volumeDepth" ':-> Float
+       "volumeDepth" ':-> Float,
+       "windDirX" ':-> Float,
+       "windDirZ" ':-> Float,
+       "cloudAbsorption" ':-> Float,
+       "weatherCoverageScale" ':-> Float,
+       "weatherTypeBias" ':-> Float,
+       "stormIntensity" ':-> Float,
+       "weatherAnimSpeed" ':-> Float,
+       "cloudDetail" ':-> Float
      ]

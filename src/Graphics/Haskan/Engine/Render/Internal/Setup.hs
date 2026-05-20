@@ -250,6 +250,18 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       mIrradianceView <- Texture.textureImageView rm irradianceHandle
       logInfo LogGeneral "procedural sky storage images created"
 
+      -- Transition radiance/irradiance to SHADER_READ_ONLY_OPTIMAL so fragment
+      -- shaders can sample them before the first procedural sky compute dispatch
+      mRadianceTex <- liftIO $ lookupTexture rm radianceHandle
+      mIrradianceTex <- liftIO $ lookupTexture rm irradianceHandle
+      CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
+        case mRadianceTex of
+          Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 6
+          Nothing -> pure ()
+        case mIrradianceTex of
+          Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 6
+          Nothing -> pure ()
+
       -- BRDF LUT (shared)
       let brdfPixels = BRDF.generateBRDFLUT 256 256
       brdfTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 brdfPixels graphicsQueueHandler textureCommandBuffer

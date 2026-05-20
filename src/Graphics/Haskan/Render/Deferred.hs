@@ -310,11 +310,11 @@ buildDeferredGraph DeferredPassData {..} = do
                   [ realToFrac dpdSunScreenX,
                     realToFrac dpdSunScreenY,
                     1.0, -- intensity
-                    32.0, -- numSamples
-                    0.95, -- decay
-                    0.02, -- density
-                    0.25, -- weight
-                    0.25, -- exposure
+                    8.0, -- numSamples
+                    0.85, -- decay
+                    0.3, -- density (step size + occlusion per sample)
+                    0.6, -- weight
+                    0.5, -- exposure
                     0,
                     0,
                     0 -- padding

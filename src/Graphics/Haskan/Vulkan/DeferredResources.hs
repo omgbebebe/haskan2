@@ -522,7 +522,7 @@ createDeferredResources DeferredConfig {..} = do
 
   -- Update AP volume descriptor sets
   liftIO $ for_ apVolumeDescriptorSets $ \ds -> do
-    DescriptorSet.updateAPVolumeDescriptorSets device ds apImageView mCloudNoiseView noiseSampler apUniformBuffer
+    DescriptorSet.updateAPVolumeDescriptorSets device ds apImageView mCloudNoiseView noiseSampler mWeatherMapView noiseSampler apUniformBuffer
   logDebugIO LogRender "AP volume descriptor sets updated"
 
   pure

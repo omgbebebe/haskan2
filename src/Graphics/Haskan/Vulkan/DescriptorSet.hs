@@ -725,15 +725,17 @@ updateGodRayDescriptorSets dev descriptorSet sampler cloudResultView = do
 
 -- | Update AP volume compute descriptor set with storage image, cloud noise, and UBO.
 updateAPVolumeDescriptorSets ::
- (MonadIO m) =>
- Vulkan.VkDevice ->
- Vulkan.VkDescriptorSet ->
- Vulkan.VkImageView -> -- AP volume 3D storage image
- Maybe Vulkan.VkImageView -> -- cloud noise 3D texture
- Vulkan.VkSampler -> -- sampler for cloud noise
- Vulkan.VkBuffer -> -- uniform buffer
- m ()
-updateAPVolumeDescriptorSets dev descriptorSet apImageView mCloudNoiseView cloudNoiseSampler uniformBuffer = do
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkImageView -> -- AP volume 3D storage image
+  Maybe Vulkan.VkImageView -> -- cloud noise 3D texture
+  Vulkan.VkSampler -> -- sampler for cloud noise
+  Maybe Vulkan.VkImageView -> -- weather map 2D texture
+  Vulkan.VkSampler -> -- sampler for weather map
+  Vulkan.VkBuffer -> -- uniform buffer
+  m ()
+updateAPVolumeDescriptorSets dev descriptorSet apImageView mCloudNoiseView cloudNoiseSampler mWeatherMapView weatherMapSampler uniformBuffer = do
  let imageInfo =
        Vulkan.createVk
          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_GENERAL
@@ -771,31 +773,54 @@ updateAPVolumeDescriptorSets dev descriptorSet apImageView mCloudNoiseView cloud
              &* set @"pTexelBufferView" Vulkan.VK_NULL
              &* set @"descriptorCount" 1
              &* set @"dstArrayElement" 0
-         )
+          )
      noiseWrite = case mCloudNoiseView of
-       Just noiseView ->
-         let noiseInfo =
-               Vulkan.createVk
-                 ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                     &* set @"imageView" noiseView
-                     &* set @"sampler" cloudNoiseSampler
-                 )
-             noiseWriteDescriptor =
-               Vulkan.createVk
-                 ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
-                     &* set @"pNext" Vulkan.VK_NULL
-                     &* set @"dstSet" descriptorSet
-                     &* set @"dstBinding" 1
-                     &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-                     &* set @"pBufferInfo" Vulkan.VK_NULL
-                     &* set @"pTexelBufferView" Vulkan.VK_NULL
-                     &* setVkRef @"pImageInfo" noiseInfo
-                     &* set @"descriptorCount" 1
-                     &* set @"dstArrayElement" 0
-                 )
-          in [noiseWriteDescriptor]
-       Nothing -> []
-     allWrites = [writeImage, writeUniform] ++ noiseWrite
+        Just noiseView ->
+          let noiseInfo =
+                Vulkan.createVk
+                  ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                      &* set @"imageView" noiseView
+                      &* set @"sampler" cloudNoiseSampler
+                  )
+              noiseWriteDescriptor =
+                Vulkan.createVk
+                  ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+                      &* set @"pNext" Vulkan.VK_NULL
+                      &* set @"dstSet" descriptorSet
+                      &* set @"dstBinding" 1
+                      &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                      &* set @"pBufferInfo" Vulkan.VK_NULL
+                      &* set @"pTexelBufferView" Vulkan.VK_NULL
+                      &* setVkRef @"pImageInfo" noiseInfo
+                      &* set @"descriptorCount" 1
+                      &* set @"dstArrayElement" 0
+                  )
+           in [noiseWriteDescriptor]
+        Nothing -> []
+     weatherMapWrite = case mWeatherMapView of
+        Just weatherMapView ->
+          let weatherMapInfo =
+                Vulkan.createVk
+                  ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                      &* set @"imageView" weatherMapView
+                      &* set @"sampler" weatherMapSampler
+                  )
+              weatherMapWriteDescriptor =
+                Vulkan.createVk
+                  ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+                      &* set @"pNext" Vulkan.VK_NULL
+                      &* set @"dstSet" descriptorSet
+                      &* set @"dstBinding" 3
+                      &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                      &* set @"pBufferInfo" Vulkan.VK_NULL
+                      &* set @"pTexelBufferView" Vulkan.VK_NULL
+                      &* setVkRef @"pImageInfo" weatherMapInfo
+                      &* set @"descriptorCount" 1
+                      &* set @"dstArrayElement" 0
+                  )
+            in [weatherMapWriteDescriptor]
+        Nothing -> []
+     allWrites = [writeImage, writeUniform] ++ noiseWrite ++ weatherMapWrite
  liftIO $
    Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
      Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr

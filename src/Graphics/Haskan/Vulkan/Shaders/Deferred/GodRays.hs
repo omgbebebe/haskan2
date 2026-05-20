@@ -103,7 +103,7 @@ fragment = shader do
   _ <- def @"i" @RW @Int32 0
   loop do
     i <- get @"i"
-    when (fromIntegral i >= (32.0 :: Code Float)) do
+    when (fromIntegral i >= numSamples) do
       break @1
 
     su <- get @"sampleU"

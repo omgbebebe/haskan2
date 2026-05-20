@@ -195,7 +195,7 @@ createAPVolumeDescriptorPool dev numSets = do
       samplerPoolSize =
         Vulkan.createVk
           ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-              &* set @"descriptorCount" (fromIntegral (numSets * 1))
+              &* set @"descriptorCount" (fromIntegral (numSets * 2))
           )
       uniformBufferPoolSize =
         Vulkan.createVk

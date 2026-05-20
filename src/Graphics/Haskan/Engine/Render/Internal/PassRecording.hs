@@ -369,7 +369,16 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
                     realToFrac rcTime,
                     realToFrac rcNearPlane,
                     realToFrac rcFarPlane,
-                    64.0
+                    64.0, -- volumeDepth
+                    realToFrac rcWindDirX,
+                    realToFrac rcWindDirZ,
+                    realToFrac rcCloudAbsorption,
+                    realToFrac rcWeatherCoverageScale,
+                    realToFrac rcWeatherTypeBias,
+                    realToFrac rcStormIntensity,
+                    realToFrac rcWeatherAnimSpeed,
+                    realToFrac rcCloudDetail,
+                    0, 0 -- pad to 256 bytes
                   ] :: [CFloat]
             liftIO $ Buffer.copyDataToDeviceMemory rcDevice (drAPVolumeUniformMemory rcDeferred) apVolumeData
             let apVolumePipeline = drAPVolumePipeline rcDeferred
