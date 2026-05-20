@@ -318,10 +318,10 @@ cloudFragment = shader do
       cloudTop = cloudBottom + cloudThickness
 
       -- Slab intersector: handles camera below, inside, or above cloud layer
-      -- Small epsilon for near-horizontal rays; preserves sign for correct intersection order
-      dirY_epsilon = if abs dirY < 0.001 then signum dirY * 0.001 else dirY
-      tToBottom = (cloudBottom - camY) / dirY_epsilon
-      tToTop = (cloudTop - camY) / dirY_epsilon
+      -- Smooth clamp to epsilon: no dead zone discontinuity
+      dirY_safe = if dirY > 0.0 then max 0.05 dirY else min (-0.05) dirY
+      tToBottom = (cloudBottom - camY) / dirY_safe
+      tToTop = (cloudTop - camY) / dirY_safe
       tNear = max 0.0 (min tToBottom tToTop)
       tFar = max 0.0 (max tToBottom tToTop)
       totalRayLength = min 5000.0 (tFar - tNear)
@@ -615,16 +615,16 @@ cloudFragment = shader do
       prevVP2 = view @(Name "prevViewProj2") frameData
       prevVP3 = view @(Name "prevViewProj3") frameData
 
-      -- Manual mat4 * vec4 multiplication (column-vector convention, FIR row-major)
+      -- Manual mat4 * vec4 multiplication (column-vector convention)
       ~(Vec4 m00 m10 m20 m30) = prevVP0
       ~(Vec4 m01 m11 m21 m31) = prevVP1
       ~(Vec4 m02 m12 m22 m32) = prevVP2
       ~(Vec4 m03 m13 m23 m33) = prevVP3
 
-      prevClipX = m00 * windWorldX + m10 * windWorldY + m20 * windWorldZ + m30 * 1.0
-      prevClipY = m01 * windWorldX + m11 * windWorldY + m21 * windWorldZ + m31 * 1.0
-      prevClipZ = m02 * windWorldX + m12 * windWorldY + m22 * windWorldZ + m32 * 1.0
-      prevClipW = m03 * windWorldX + m13 * windWorldY + m23 * windWorldZ + m33 * 1.0
+      prevClipX = m00 * windWorldX + m01 * windWorldY + m02 * windWorldZ + m03 * 1.0
+      prevClipY = m10 * windWorldX + m11 * windWorldY + m12 * windWorldZ + m13 * 1.0
+      prevClipZ = m20 * windWorldX + m21 * windWorldY + m22 * windWorldZ + m23 * 1.0
+      prevClipW = m30 * windWorldX + m31 * windWorldY + m32 * windWorldZ + m33 * 1.0
 
       prevNDCX = prevClipX / max 0.0001 prevClipW
       prevNDCY = prevClipY / max 0.0001 prevClipW

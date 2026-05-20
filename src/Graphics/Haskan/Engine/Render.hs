@@ -188,8 +188,8 @@ data RenderEnv = RenderEnv
     reTvPendingAllStages :: !(STM.TVar Bool),
     reTvPendingSwapchainScreenshot :: !(STM.TVar Bool),
     rePhysicalDevice :: !Vulkan.VkPhysicalDevice,
-    reLightSsboBuffers :: [Vulkan.VkBuffer],
-    reLightSsboMemories :: [Vulkan.VkDeviceMemory],
+    reLightSsboBuffer :: Vulkan.VkBuffer,
+    reLightSsboMemory :: Vulkan.VkDeviceMemory,
     reTvLights :: !(STM.TVar [LightData]),
     reTvTimeOfDay :: !(STM.TVar Float),
     reTvTimeSpeed :: !(STM.TVar Float),
@@ -394,7 +394,7 @@ runFrame frameNumber = do
 
       lights' <- readLights
       let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
-      uploadStorageBuffer (reLightSsboMemories !! (frameNumber `mod` 2)) 0 lightsToUpload
+      uploadStorageBuffer reLightSsboMemory 0 lightsToUpload
       let lightCount = fromIntegral (length lights') :: Word32
       logDebug LogRender $ "lights uploaded: " <> showT (length lights')
       case sortedDrawList of
@@ -419,13 +419,10 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       (w, h) = surfaceExtentWH (rcSurfaceExtent ctx)
       view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
       projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
-      camView = Camera.unViewMatrix (Camera.toMatrix camera)
-      proj = makeProjectionMatrix w h
-      vp = proj !*! camView
       viewProj = projection !*! view
       skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
-      cloudPrevViewProj = Linear.Matrix.transpose vp
-      invViewProj = (realToFrac <$>) <$> inv44 (Linear.Matrix.transpose vp) :: M44 Float
+      cloudPrevViewProj = view !*! projection
+      invViewProj = (realToFrac <$>) <$> inv44 (view !*! projection) :: M44 Float
       nearPlane = 1.0
       farPlane = 50000.0
   uploadUniformBuffer mvpMemory 0 [view, projection]
@@ -490,7 +487,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       Backend.buildImGuiFrame (runReaderT Backend.buildDebugPanel panelEnv)
     Nothing -> pure Nothing
 
-  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler (reLightSsboBuffers !! (frameNumber `mod` 2)) frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds rePrevViewProj rePrevTime cloudPrevViewProj windDirXVal windDirZVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal weatherCoverageScaleVal weatherTypeBiasVal stormIntensityVal weatherAnimSpeedVal invViewProj nearPlane farPlane sunColor cloudBase cloudTop mDrawData
+  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds rePrevViewProj rePrevTime cloudPrevViewProj windDirXVal windDirZVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal weatherCoverageScaleVal weatherTypeBiasVal stormIntensityVal weatherAnimSpeedVal invViewProj nearPlane farPlane sunColor cloudBase cloudTop mDrawData
       recordAction = buildRecordAction recordCtx
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
@@ -813,11 +810,8 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
 
   let maxLights = 256 :: Int
       dummyLightData = LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0
-  lightBuffers <- replicateM 2 $ Buffer.managedStorageBuffer physicalDevice device (replicate maxLights dummyLightData) Vulkan.VK_ZERO_FLAGS
-  let lightSsboBuffers = map fst lightBuffers
-      lightSsboMemories = map snd lightBuffers
-      initLightBuffer = lightSsboBuffers !! 0
-  logDebug LogBuffer $ "light SSBOs created: " <> showT (length lightSsboBuffers) <> " x " <> showT (maxLights * sizeOf (undefined :: LightData)) <> " bytes"
+  (lightSsboBuffer, lightSsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxLights dummyLightData) Vulkan.VK_ZERO_FLAGS
+  logDebug LogBuffer $ "light SSBO created: " <> showT (maxLights * sizeOf (undefined :: LightData)) <> " bytes"
 
   logDebug LogBuffer $ "compute buffers created: entitySSBO=" <> showT (maxEntities * sizeOf (undefined :: ComputeEntityData)) <> " drawCommands=" <> showT (maxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)) <> " cullData=" <> showT (sizeOf (undefined :: ComputeCullData))
 
@@ -1024,8 +1018,8 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                         reTvPendingAllStages = tvPendingAllStages,
                         reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
                         rePhysicalDevice = physicalDevice,
-                        reLightSsboBuffers = [],
-                        reLightSsboMemories = [],
+                        reLightSsboBuffer = undefined,
+                        reLightSsboMemory = undefined,
                         reTvLights = tvLights,
                         reTvTimeOfDay = tvTimeOfDay,
                         reTvTimeSpeed = tvTimeSpeed,
@@ -1087,7 +1081,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                               Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler,
                               Deferred.ctNoiseSampler = iblNoiseSampler
                             },
-                        Deferred.dcLightBuffer = Just initLightBuffer,
+                        Deferred.dcLightBuffer = Just lightSsboBuffer,
                         Deferred.dcImGuiRenderPass = imGuiRenderPass,
                         Deferred.dcProceduralSky = proceduralSkyEnabled
                       }
@@ -1123,8 +1117,8 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                           reTvPendingAllStages = tvPendingAllStages,
                           reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
                           rePhysicalDevice = physicalDevice,
-                          reLightSsboBuffers = lightSsboBuffers,
-                          reLightSsboMemories = lightSsboMemories,
+                          reLightSsboBuffer = lightSsboBuffer,
+                          reLightSsboMemory = lightSsboMemory,
                           reTvLights = tvLights,
                           reTvTimeOfDay = tvTimeOfDay,
                           reTvTimeSpeed = tvTimeSpeed,
