@@ -5,10 +5,10 @@ module Graphics.Haskan.Vulkan.Shaders.TH
   )
 where
 
-import FIR (CompilableProgram)
-import FIR qualified
 import Data.Text.Short (ShortText)
 import Data.Text.Short qualified as ShortText
+import FIR (CompilableProgram)
+import FIR qualified
 import Language.Haskell.TH
 import System.IO (hPutStrLn, stderr)
 
@@ -19,7 +19,7 @@ import System.IO (hPutStrLn, stderr)
 --
 -- This runs FIR compilation during cabal build, failing the build immediately
 -- if the shader has errors, rather than deferring failure to runtime.
-compileShader :: CompilableProgram prog => String -> [FIR.CompilerFlag] -> prog -> Q [Dec]
+compileShader :: (CompilableProgram prog) => String -> [FIR.CompilerFlag] -> prog -> Q [Dec]
 compileShader path targets shader = do
   result <- runIO $ FIR.compileTo path targets shader
   case result of

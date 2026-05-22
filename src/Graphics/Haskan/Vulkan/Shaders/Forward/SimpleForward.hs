@@ -40,7 +40,7 @@ type VertexDefs =
                    ]
               ),
      "main" ':-> EntryPoint '[] Vertex
-    ]
+   ]
 
 vertex :: ShaderModule "main" VertexShader VertexDefs _
 vertex = shader do
@@ -60,7 +60,7 @@ type FragmentDefs =
   '[ "in_colour" ':-> Input '[Location 0] (V 4 Float),
      "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
-    ]
+   ]
 
 fragment :: ShaderModule "main" FragmentShader FragmentDefs _
 fragment = shader do

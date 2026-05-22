@@ -160,10 +160,10 @@ type CloudFrameData =
        "weatherCoverageScale" ':-> Float,
        "weatherTypeBias" ':-> Float,
        "stormIntensity" ':-> Float,
-        "weatherAnimSpeed" ':-> Float,
-        "frameIndex" ':-> Float,
-        "debugMode" ':-> Float
-      ]
+       "weatherAnimSpeed" ':-> Float,
+       "frameIndex" ':-> Float,
+       "debugMode" ':-> Float
+     ]
 
 type CloudVertexDefs =
   '[ "out_uv" ':-> Output '[Location 0] (V 2 Float),

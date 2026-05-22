@@ -464,25 +464,25 @@ createDeferredResources DeferredConfig {..} = do
       then do
         DescriptorSet.updateLightingProceduralDescriptorSets $
           DescriptorSet.LightingProceduralDescriptorUpdate
-            { lpduDevice = device
-            , lpduDescriptorSet = ds
-            , lpduSampler = sampler
-            , lpduImageViews = baseViews
-            , lpduLightBuffer = mLightBuffer
-            , lpduCloudResultView = Just cloudView
-            , lpduGodRayView = Just godRayView
-            , lpduAPVolumeView = Just apImageView
+            { lpduDevice = device,
+              lpduDescriptorSet = ds,
+              lpduSampler = sampler,
+              lpduImageViews = baseViews,
+              lpduLightBuffer = mLightBuffer,
+              lpduCloudResultView = Just cloudView,
+              lpduGodRayView = Just godRayView,
+              lpduAPVolumeView = Just apImageView
             }
       else do
         DescriptorSet.updateLightingDescriptorSets $
           DescriptorSet.LightingDescriptorUpdate
-            { lduDevice = device
-            , lduDescriptorSet = ds
-            , lduSampler = sampler
-            , lduImageViews = baseViews
-            , lduLightBuffer = mLightBuffer
-            , lduCloudResultView = Just cloudView
-            , lduAPVolumeView = Just apImageView
+            { lduDevice = device,
+              lduDescriptorSet = ds,
+              lduSampler = sampler,
+              lduImageViews = baseViews,
+              lduLightBuffer = mLightBuffer,
+              lduCloudResultView = Just cloudView,
+              lduAPVolumeView = Just apImageView
             }
   logDebugIO LogRender "lighting descriptor sets updated"
 
@@ -504,16 +504,16 @@ createDeferredResources DeferredConfig {..} = do
   liftIO $ for_ (zip cloudDescriptorSets cloudHistoryImageViews) $ \(ds, histView) -> do
     DescriptorSet.updateCloudDescriptorSets $
       DescriptorSet.CloudDescriptorUpdate
-        { clduDevice = device
-        , clduDescriptorSet = ds
-        , clduSampler = sampler
-        , clduNoiseSampler = noiseSampler
-        , clduEnvMapView = mEnvMapView
-        , clduCloudNoiseView = mCloudNoiseView
-        , clduCloudHistoryView = Just histView
-        , clduBlueNoiseView = mBlueNoiseView
-        , clduWeatherMapView = mWeatherMapView
-        , clduBlueNoiseSampler = blueNoiseSampler
+        { clduDevice = device,
+          clduDescriptorSet = ds,
+          clduSampler = sampler,
+          clduNoiseSampler = noiseSampler,
+          clduEnvMapView = mEnvMapView,
+          clduCloudNoiseView = mCloudNoiseView,
+          clduCloudHistoryView = Just histView,
+          clduBlueNoiseView = mBlueNoiseView,
+          clduWeatherMapView = mWeatherMapView,
+          clduBlueNoiseSampler = blueNoiseSampler
         }
     DescriptorSet.updateCloudFrameDataBuffer device ds cloudFrameDataBuffer
   logDebugIO LogRender "cloud descriptor sets updated"
@@ -528,10 +528,10 @@ createDeferredResources DeferredConfig {..} = do
   liftIO $ for_ (zip godRayDescriptorSets cloudImageViews) $ \(ds, cloudView) -> do
     DescriptorSet.updateGodRayDescriptorSets $
       DescriptorSet.GodRayDescriptorUpdate
-        { grduDevice = device
-        , grduDescriptorSet = ds
-        , grduSampler = sampler
-        , grduCloudResultView = cloudView
+        { grduDevice = device,
+          grduDescriptorSet = ds,
+          grduSampler = sampler,
+          grduCloudResultView = cloudView
         }
   logDebugIO LogRender "god ray descriptor sets updated"
 
@@ -561,14 +561,14 @@ createDeferredResources DeferredConfig {..} = do
   liftIO $ for_ apVolumeDescriptorSets $ \ds -> do
     DescriptorSet.updateAPVolumeDescriptorSets $
       DescriptorSet.APVolumeDescriptorUpdate
-        { apduDevice = device
-        , apduDescriptorSet = ds
-        , apduAPImageView = apImageView
-        , apduCloudNoiseView = mCloudNoiseView
-        , apduCloudNoiseSampler = noiseSampler
-        , apduWeatherMapView = mWeatherMapView
-        , apduWeatherMapSampler = noiseSampler
-        , apduUniformBuffer = apUniformBuffer
+        { apduDevice = device,
+          apduDescriptorSet = ds,
+          apduAPImageView = apImageView,
+          apduCloudNoiseView = mCloudNoiseView,
+          apduCloudNoiseSampler = noiseSampler,
+          apduWeatherMapView = mWeatherMapView,
+          apduWeatherMapSampler = noiseSampler,
+          apduUniformBuffer = apUniformBuffer
         }
   logDebugIO LogRender "AP volume descriptor sets updated"
 

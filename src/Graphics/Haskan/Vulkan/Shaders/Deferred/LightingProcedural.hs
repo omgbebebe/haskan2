@@ -272,18 +272,18 @@ type FragmentDefs =
        ':-> Texture2D
               '[Binding 8, DescriptorSet 0]
               (RGBA16 F),
-      "god_ray"
-        ':-> Texture2D
-               '[Binding 9, DescriptorSet 0]
-               (RGBA16 F),
-      "ap_volume"
-        ':-> Texture3D
-               '[Binding 10, DescriptorSet 0]
-               (RGBA16 F),
-      "cameraPos"
-        ':-> PushConstant
-               '[]
-               CameraPushConstant,
+     "god_ray"
+       ':-> Texture2D
+              '[Binding 9, DescriptorSet 0]
+              (RGBA16 F),
+     "ap_volume"
+       ':-> Texture3D
+              '[Binding 10, DescriptorSet 0]
+              (RGBA16 F),
+     "cameraPos"
+       ':-> PushConstant
+              '[]
+              CameraPushConstant,
      "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]

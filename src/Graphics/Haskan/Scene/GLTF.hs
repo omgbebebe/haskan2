@@ -53,10 +53,10 @@ import Text.GLTF.Loader.Gltf
     gltfMeshes,
     gltfNodes,
     gltfTextures,
+    materialDoubleSided,
     materialEmissiveTexture,
     materialNormalTexture,
     materialOcclusionTexture,
-    materialDoubleSided,
     meshPrimitiveIndices,
     meshPrimitiveMaterial,
     meshPrimitiveNormals,
@@ -178,13 +178,18 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
   meshes <- loadMeshes rm pdev dev gltf
 
   -- Build scene graph from nodes
-  (rootEntity, physicsSpecs) <- buildSceneGraph world gltf meshes MaterialTextures
-    { mtBaseColor = materialTextures
-    , mtMetallicRoughness = materialMRTextures
-    , mtNormal = materialNormalTextures
-    , mtOcclusion = materialOcclusionTextures
-    , mtEmissive = materialEmissiveTextures
-    }
+  (rootEntity, physicsSpecs) <-
+    buildSceneGraph
+      world
+      gltf
+      meshes
+      MaterialTextures
+        { mtBaseColor = materialTextures,
+          mtMetallicRoughness = materialMRTextures,
+          mtNormal = materialNormalTextures,
+          mtOcclusion = materialOcclusionTextures,
+          mtEmissive = materialEmissiveTextures
+        }
 
   pure
     GLTFImportResult

@@ -147,5 +147,4 @@ program = Module $ entryPoint @"main" @Compute do
       highNoise = vnoise1 x y z highFreq highFreq
       microNoise = vnoise1 x y z microFreq microFreq
 
-
   imageWrite @"noiseImage" (Vec3 gidX gidY gidZ) (Vec4 macroNoise mediumNoise highNoise microNoise)

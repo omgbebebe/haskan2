@@ -90,8 +90,8 @@ import Graphics.Haskan.Engine.Render.Internal.Setup
     SceneLoadResult (..),
     ShaderModules (..),
     ShaderPair (..),
-    WireframeShaders (..),
     VulkanContext (..),
+    WireframeShaders (..),
     compileAllShaders,
     createShaderModules,
     dispatchCloudNoiseGeneration,
@@ -563,36 +563,36 @@ renderAndPresentSimple env@RenderEnv {..} frameNumber camera drawList mvpMemory 
   uploadUniformBuffer mvpMemory 0 [view, projection]
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber (recordAction ctx)
   handleFrameResult env frameNumber camera drawList res
- where
-  recordAction ctx imageIdx frameIdx = do
-    let commandBuffer = graphicsCommandBuffers ctx !! fromIntegral imageIdx
-        framebuffer = rcFramebuffers ctx !! fromIntegral imageIdx
-        renderPass = rcRenderPass ctx
-        pipeline = rcGraphicsPipeline ctx
-        pipelineLayout = rcPipelineLayout ctx
-        descriptorSet = reFrameDescriptorSets !! frameIdx
-        extent = rcSurfaceExtent ctx
-        colorClear = Vulkan.createVk (Vulkan.setAt @"float32" @0 0.2 Vulkan.&* Vulkan.setAt @"float32" @1 0.2 Vulkan.&* Vulkan.setAt @"float32" @2 0.2 Vulkan.&* Vulkan.setAt @"float32" @3 1.0)
-        depthClear = Vulkan.createVk (Vulkan.set @"depth" 1.0 Vulkan.&* Vulkan.set @"stencil" 0)
-        clearValues = [Vulkan.createVk (Vulkan.set @"color" colorClear), Vulkan.createVk (Vulkan.set @"depthStencil" depthClear)]
-    case drawList of
-      [] -> pure ()
-      (drawCall : _) -> do
-        let vertexBuffer = brVkBuffer (mrVertexBuffer (dcMesh drawCall))
-            indexBuffer = brVkBuffer (mrIndexBuffer (dcMesh drawCall))
-            indexCount = fromIntegral (mrIndexCount (dcMesh drawCall))
-            firstIndex = fromIntegral (mrFirstIndex (dcMesh drawCall))
-            vertexOffset = fromIntegral (mrVertexOffset (dcMesh drawCall))
-        CommandBuffer.withCommandBuffer commandBuffer $ do
-          RenderPass.withRenderPass commandBuffer renderPass framebuffer extent clearValues $ do
-            liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS pipeline
-            liftIO $ Foreign.Marshal.Array.withArray [descriptorSet] $ \dsPtr ->
-              Vulkan.vkCmdBindDescriptorSets commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS pipelineLayout 0 1 dsPtr 0 Vulkan.vkNullPtr
-            liftIO $ Foreign.Marshal.Array.withArray [vertexBuffer] $ \vbPtr ->
-              Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
-                Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 vbPtr offsetPtr
-            liftIO $ Vulkan.vkCmdBindIndexBuffer commandBuffer indexBuffer 0 Vulkan.VK_INDEX_TYPE_UINT32
-            liftIO $ Vulkan.vkCmdDrawIndexed commandBuffer indexCount 1 firstIndex vertexOffset 0
+  where
+    recordAction ctx imageIdx frameIdx = do
+      let commandBuffer = graphicsCommandBuffers ctx !! fromIntegral imageIdx
+          framebuffer = rcFramebuffers ctx !! fromIntegral imageIdx
+          renderPass = rcRenderPass ctx
+          pipeline = rcGraphicsPipeline ctx
+          pipelineLayout = rcPipelineLayout ctx
+          descriptorSet = reFrameDescriptorSets !! frameIdx
+          extent = rcSurfaceExtent ctx
+          colorClear = Vulkan.createVk (Vulkan.setAt @"float32" @0 0.2 Vulkan.&* Vulkan.setAt @"float32" @1 0.2 Vulkan.&* Vulkan.setAt @"float32" @2 0.2 Vulkan.&* Vulkan.setAt @"float32" @3 1.0)
+          depthClear = Vulkan.createVk (Vulkan.set @"depth" 1.0 Vulkan.&* Vulkan.set @"stencil" 0)
+          clearValues = [Vulkan.createVk (Vulkan.set @"color" colorClear), Vulkan.createVk (Vulkan.set @"depthStencil" depthClear)]
+      case drawList of
+        [] -> pure ()
+        (drawCall : _) -> do
+          let vertexBuffer = brVkBuffer (mrVertexBuffer (dcMesh drawCall))
+              indexBuffer = brVkBuffer (mrIndexBuffer (dcMesh drawCall))
+              indexCount = fromIntegral (mrIndexCount (dcMesh drawCall))
+              firstIndex = fromIntegral (mrFirstIndex (dcMesh drawCall))
+              vertexOffset = fromIntegral (mrVertexOffset (dcMesh drawCall))
+          CommandBuffer.withCommandBuffer commandBuffer $ do
+            RenderPass.withRenderPass commandBuffer renderPass framebuffer extent clearValues $ do
+              liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS pipeline
+              liftIO $ Foreign.Marshal.Array.withArray [descriptorSet] $ \dsPtr ->
+                Vulkan.vkCmdBindDescriptorSets commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS pipelineLayout 0 1 dsPtr 0 Vulkan.vkNullPtr
+              liftIO $ Foreign.Marshal.Array.withArray [vertexBuffer] $ \vbPtr ->
+                Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
+                  Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 vbPtr offsetPtr
+              liftIO $ Vulkan.vkCmdBindIndexBuffer commandBuffer indexBuffer 0 Vulkan.VK_INDEX_TYPE_UINT32
+              liftIO $ Vulkan.vkCmdDrawIndexed commandBuffer indexCount 1 firstIndex vertexOffset 0
 
 -- | Handle frame draw result
 handleFrameResult ::
@@ -863,11 +863,11 @@ renderLoop RenderLoopConfig {..} = do
 
   DescriptorSet.updateComputeDescriptorSets $
     DescriptorSet.ComputeDescriptorUpdate
-      { cpduDevice = device
-      , cpduDescriptorSet = computeDescriptorSet
-      , cpduEntitiesBuffer = entitySsboBuffer
-      , cpduDrawCommandsBuffer = drawCommandsBuffer
-      , cpduCullDataBuffer = cullDataBuffer
+      { cpduDevice = device,
+        cpduDescriptorSet = computeDescriptorSet,
+        cpduEntitiesBuffer = entitySsboBuffer,
+        cpduDrawCommandsBuffer = drawCommandsBuffer,
+        cpduCullDataBuffer = cullDataBuffer
       }
   logDebug LogRender "compute descriptor set updated"
 
@@ -969,13 +969,13 @@ renderLoop RenderLoopConfig {..} = do
     let ds = frameDescriptorSets !! frameIdx
     DescriptorSet.updateDescriptorSetsBindless $
       DescriptorSet.BindlessDescriptorUpdate
-        { bduDevice = device
-        , bduDescriptorSet = ds
-        , bduBuffer = buf
-        , bduRange = fromIntegral viewProjUniformSize
-        , bduSampler = textureSampler
-        , bduImageViews = bindlessTextureViews
-        , bduEntityBuffer = entitySsboBuffer
+        { bduDevice = device,
+          bduDescriptorSet = ds,
+          bduBuffer = buf,
+          bduRange = fromIntegral viewProjUniformSize,
+          bduSampler = textureSampler,
+          bduImageViews = bindlessTextureViews,
+          bduEntityBuffer = entitySsboBuffer
         }
   logInfo LogVulkan "frame descriptor sets updated"
 
@@ -1047,195 +1047,197 @@ renderLoop RenderLoopConfig {..} = do
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
         unless exit $ do
-          renderFrameLoopFinished <- liftIO $ if isSimple
-            then with mkSimpleRenderContext $ \context -> do
-              let renderEnv =
-                      RenderEnv
-                        { reWindow = rlcWindow,
-                          reContext = context,
-                          reDeferred = undefined,
-                          reTargetFPS = rlcTargetFPS,
-                          reImageAvailableSemaphores = imageAvailableSemaphores,
-                          reControl = control,
-                          reFrameMvpMemories = frameMvpMemories,
-                          reGameState =
-                            GameStateTVars
-                              { gstCamera = tvCamera,
-                                gstInspect = tvInspect,
-                                gstInsp = tvInsp,
-                                gstRenderDebug = tvRenderDebug,
-                                gstWireframe = tvWireframe,
-                                gstDebugMode = tvDebugMode,
-                                gstAxisOverlay = tvAxisOverlay,
-                                gstGroundPlane = tvGroundPlane,
-                                gstLights = tvLights,
-                                gstTimeOfDay = tvTimeOfDay,
-                                gstTimeSpeed = tvTimeSpeed,
-                                gstDayNightEnabled = tvDayNightEnabled
-                              },
-                          reECSWorld = ecsWorld,
-                          reResourceManager = rm,
-                          reTextureSampler = textureSampler,
-                          reFrameDescriptorSets = frameDescriptorSets,
-                          reTextureIndexMap = textureIndexMap,
-                          reFrameStatsRef = frameStatsRef,
-                          reCullResources = undefined,
-                          rePhysicalDevice = rlcPhysicalDevice,
-                          reLightSsboBuffer = undefined,
-                          reLightSsboMemory = undefined,
-                          reCloudState =
-                            CloudStateTVars
-                              { cstCloudHeight = tvCloudHeight,
-                                cstWindDirection = tvWindDirection,
-                                cstWindSpeed = tvWindSpeed,
-                                cstCloudCoverage = tvCloudCoverage,
-                                cstCloudDetail = tvCloudDetail,
-                                cstCloudAbsorption = tvCloudAbsorption,
-                                cstWeatherCoverageScale = tvWeatherCoverageScale,
-                                cstWeatherTypeBias = tvWeatherTypeBias,
-                                cstStormIntensity = tvStormIntensity,
-                                cstWeatherAnimSpeed = tvWeatherAnimSpeed
-                              },
-                          reScreenshotFlags =
-                            ScreenshotFlags
-                              { sfPendingScreenshot = tvPendingScreenshot,
-                                sfPendingAllStages = tvPendingAllStages,
-                                sfPendingSwapchainScreenshot = tvPendingSwapchainScreenshot
-                              },
-                          reSkyNoiseState =
-                            SkyNoiseState
-                              { snsIBLTextures = iblTextures,
-                                snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
-                                snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
-                                snsNoiseSeed = noiseSeed rlcGameState,
-                                snsNoiseFrequency = noiseFrequency rlcGameState,
-                                snsNoisePersistence = noisePersistence rlcGameState
-                              },
-                          rePhysicsState =
-                            PhysicsStateTVars
-                              { pstPhysicsBodies = physicsBodies rlcGameState,
-                                pstPhysicsBodyToEntity = physicsBodyToEntity rlcGameState,
-                                pstPhysicsAutoStep = physicsAutoStep rlcGameState,
-                                pstPhysicsTimeScale = physicsTimeScale rlcGameState
-                              },
-                          reTemporalState = TemporalState {tsPrevViewProj = [], tsPrevTime = []},
-                          reImGuiBackend = Nothing,
-                          reSimpleMode = True
-                        }
-              renderFrameLoop renderEnv 0
-            else with mkRenderContext $ \context -> do
-              let dcfg =
-                    Deferred.DeferredConfig
-                      { Deferred.dcPhysicalDevice = rlcPhysicalDevice,
-                        Deferred.dcDevice = device,
-                        Deferred.dcRenderContext = context,
-                        Deferred.dcBindlessDescSetLayout = descriptorSetLayout,
-                        Deferred.dcShaders =
-                          Deferred.DeferredShaders
-                            { Deferred.dsGBuffer = ShaderProgram (shpVertex smGBuffer) Nothing Nothing Nothing (shpFragment smGBuffer),
-                              Deferred.dsLighting = ShaderProgram (shpVertex smLighting) Nothing Nothing Nothing (if rlcProceduralSkyEnabled then smLightingProcedural else shpFragment smLighting),
-                              Deferred.dsWireframe = ShaderProgram (wsVertex smWireframe) Nothing Nothing (wsGeometry smWireframe) (wsFragment smWireframe),
-                              Deferred.dsCloud = ShaderProgram (shpVertex smCloud) Nothing Nothing Nothing (shpFragment smCloud),
-                              Deferred.dsGodRay = ShaderProgram (shpVertex smGodRay) Nothing Nothing Nothing (shpFragment smGodRay),
-                              Deferred.dsAPVolume = smAPVolume
-                            },
-                        Deferred.dcIBL =
-                          Deferred.IBLResources
-                            { Deferred.irRadianceView = cmView iblRadiance,
-                              Deferred.irIrradianceView = cmView iblIrradiance,
-                              Deferred.irBrdfView = iblBrdfView,
-                              Deferred.irSampler = iblSampler
-                            },
-                        Deferred.dcCloudTextures =
-                          Deferred.CloudTextures
-                            { Deferred.ctNoiseView = cmView iblCloudNoise,
-                              Deferred.ctBlueNoiseView = iblBlueNoiseView,
-                              Deferred.ctWeatherMapView = iblWeatherMapView,
-                              Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler,
-                              Deferred.ctNoiseSampler = iblNoiseSampler
-                            },
-                        Deferred.dcLightBuffer = Just lightSsboBuffer,
-                        Deferred.dcImGuiRenderPass = imGuiRenderPass,
-                        Deferred.dcProceduralSky = rlcProceduralSkyEnabled
-                      }
-              with (Deferred.createDeferredResources dcfg) $ \dr -> do
-                let numSwapchainImages = length (drCloudImages dr)
-                prevViewProjTVars <- replicateM numSwapchainImages (STM.newTVarIO (identity :: M44 Foreign.C.CFloat))
-                prevTimeTVars <- replicateM numSwapchainImages (STM.newTVarIO 0.0)
-                let renderEnv =
-                      RenderEnv
-                        { reWindow = rlcWindow,
-                          reContext = context,
-                          reDeferred = dr,
-                          reTargetFPS = rlcTargetFPS,
-                          reImageAvailableSemaphores = imageAvailableSemaphores,
-                          reControl = control,
-                          reFrameMvpMemories = frameMvpMemories,
-                          reGameState =
-                            GameStateTVars
-                              { gstCamera = tvCamera,
-                                gstInspect = tvInspect,
-                                gstInsp = tvInsp,
-                                gstRenderDebug = tvRenderDebug,
-                                gstWireframe = tvWireframe,
-                                gstDebugMode = tvDebugMode,
-                                gstAxisOverlay = tvAxisOverlay,
-                                gstGroundPlane = tvGroundPlane,
-                                gstLights = tvLights,
-                                gstTimeOfDay = tvTimeOfDay,
-                                gstTimeSpeed = tvTimeSpeed,
-                                gstDayNightEnabled = tvDayNightEnabled
-                              },
-                          reECSWorld = ecsWorld,
-                          reResourceManager = rm,
-                          reTextureSampler = textureSampler,
-                          reFrameDescriptorSets = frameDescriptorSets,
-                          reTextureIndexMap = textureIndexMap,
-                          reFrameStatsRef = frameStatsRef,
-                          reCullResources = computeCullResources,
-                          rePhysicalDevice = rlcPhysicalDevice,
-                          reLightSsboBuffer = lightSsboBuffer,
-                          reLightSsboMemory = lightSsboMemory,
-                          reCloudState =
-                            CloudStateTVars
-                              { cstCloudHeight = tvCloudHeight,
-                                cstWindDirection = tvWindDirection,
-                                cstWindSpeed = tvWindSpeed,
-                                cstCloudCoverage = tvCloudCoverage,
-                                cstCloudDetail = tvCloudDetail,
-                                cstCloudAbsorption = tvCloudAbsorption,
-                                cstWeatherCoverageScale = tvWeatherCoverageScale,
-                                cstWeatherTypeBias = tvWeatherTypeBias,
-                                cstStormIntensity = tvStormIntensity,
-                                cstWeatherAnimSpeed = tvWeatherAnimSpeed
-                              },
-                          reScreenshotFlags =
-                            ScreenshotFlags
-                              { sfPendingScreenshot = tvPendingScreenshot,
-                                sfPendingAllStages = tvPendingAllStages,
-                                sfPendingSwapchainScreenshot = tvPendingSwapchainScreenshot
-                              },
-                          reSkyNoiseState =
-                            SkyNoiseState
-                              { snsIBLTextures = iblTextures,
-                                snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
-                                snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
-                                snsNoiseSeed = noiseSeed rlcGameState,
-                                snsNoiseFrequency = noiseFrequency rlcGameState,
-                                snsNoisePersistence = noisePersistence rlcGameState
-                              },
-                          rePhysicsState =
-                            PhysicsStateTVars
-                              { pstPhysicsBodies = physicsBodies rlcGameState,
-                                pstPhysicsBodyToEntity = physicsBodyToEntity rlcGameState,
-                                pstPhysicsAutoStep = physicsAutoStep rlcGameState,
-                                pstPhysicsTimeScale = physicsTimeScale rlcGameState
-                              },
-                          reTemporalState = TemporalState {tsPrevViewProj = prevViewProjTVars, tsPrevTime = prevTimeTVars},
-                          reImGuiBackend = mImGuiBackend,
-                          reSimpleMode = False
-                        }
-                renderFrameLoop renderEnv 0
+          renderFrameLoopFinished <-
+            liftIO $
+              if isSimple
+                then with mkSimpleRenderContext $ \context -> do
+                  let renderEnv =
+                        RenderEnv
+                          { reWindow = rlcWindow,
+                            reContext = context,
+                            reDeferred = undefined,
+                            reTargetFPS = rlcTargetFPS,
+                            reImageAvailableSemaphores = imageAvailableSemaphores,
+                            reControl = control,
+                            reFrameMvpMemories = frameMvpMemories,
+                            reGameState =
+                              GameStateTVars
+                                { gstCamera = tvCamera,
+                                  gstInspect = tvInspect,
+                                  gstInsp = tvInsp,
+                                  gstRenderDebug = tvRenderDebug,
+                                  gstWireframe = tvWireframe,
+                                  gstDebugMode = tvDebugMode,
+                                  gstAxisOverlay = tvAxisOverlay,
+                                  gstGroundPlane = tvGroundPlane,
+                                  gstLights = tvLights,
+                                  gstTimeOfDay = tvTimeOfDay,
+                                  gstTimeSpeed = tvTimeSpeed,
+                                  gstDayNightEnabled = tvDayNightEnabled
+                                },
+                            reECSWorld = ecsWorld,
+                            reResourceManager = rm,
+                            reTextureSampler = textureSampler,
+                            reFrameDescriptorSets = frameDescriptorSets,
+                            reTextureIndexMap = textureIndexMap,
+                            reFrameStatsRef = frameStatsRef,
+                            reCullResources = undefined,
+                            rePhysicalDevice = rlcPhysicalDevice,
+                            reLightSsboBuffer = undefined,
+                            reLightSsboMemory = undefined,
+                            reCloudState =
+                              CloudStateTVars
+                                { cstCloudHeight = tvCloudHeight,
+                                  cstWindDirection = tvWindDirection,
+                                  cstWindSpeed = tvWindSpeed,
+                                  cstCloudCoverage = tvCloudCoverage,
+                                  cstCloudDetail = tvCloudDetail,
+                                  cstCloudAbsorption = tvCloudAbsorption,
+                                  cstWeatherCoverageScale = tvWeatherCoverageScale,
+                                  cstWeatherTypeBias = tvWeatherTypeBias,
+                                  cstStormIntensity = tvStormIntensity,
+                                  cstWeatherAnimSpeed = tvWeatherAnimSpeed
+                                },
+                            reScreenshotFlags =
+                              ScreenshotFlags
+                                { sfPendingScreenshot = tvPendingScreenshot,
+                                  sfPendingAllStages = tvPendingAllStages,
+                                  sfPendingSwapchainScreenshot = tvPendingSwapchainScreenshot
+                                },
+                            reSkyNoiseState =
+                              SkyNoiseState
+                                { snsIBLTextures = iblTextures,
+                                  snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
+                                  snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
+                                  snsNoiseSeed = noiseSeed rlcGameState,
+                                  snsNoiseFrequency = noiseFrequency rlcGameState,
+                                  snsNoisePersistence = noisePersistence rlcGameState
+                                },
+                            rePhysicsState =
+                              PhysicsStateTVars
+                                { pstPhysicsBodies = physicsBodies rlcGameState,
+                                  pstPhysicsBodyToEntity = physicsBodyToEntity rlcGameState,
+                                  pstPhysicsAutoStep = physicsAutoStep rlcGameState,
+                                  pstPhysicsTimeScale = physicsTimeScale rlcGameState
+                                },
+                            reTemporalState = TemporalState {tsPrevViewProj = [], tsPrevTime = []},
+                            reImGuiBackend = Nothing,
+                            reSimpleMode = True
+                          }
+                  renderFrameLoop renderEnv 0
+                else with mkRenderContext $ \context -> do
+                  let dcfg =
+                        Deferred.DeferredConfig
+                          { Deferred.dcPhysicalDevice = rlcPhysicalDevice,
+                            Deferred.dcDevice = device,
+                            Deferred.dcRenderContext = context,
+                            Deferred.dcBindlessDescSetLayout = descriptorSetLayout,
+                            Deferred.dcShaders =
+                              Deferred.DeferredShaders
+                                { Deferred.dsGBuffer = ShaderProgram (shpVertex smGBuffer) Nothing Nothing Nothing (shpFragment smGBuffer),
+                                  Deferred.dsLighting = ShaderProgram (shpVertex smLighting) Nothing Nothing Nothing (if rlcProceduralSkyEnabled then smLightingProcedural else shpFragment smLighting),
+                                  Deferred.dsWireframe = ShaderProgram (wsVertex smWireframe) Nothing Nothing (wsGeometry smWireframe) (wsFragment smWireframe),
+                                  Deferred.dsCloud = ShaderProgram (shpVertex smCloud) Nothing Nothing Nothing (shpFragment smCloud),
+                                  Deferred.dsGodRay = ShaderProgram (shpVertex smGodRay) Nothing Nothing Nothing (shpFragment smGodRay),
+                                  Deferred.dsAPVolume = smAPVolume
+                                },
+                            Deferred.dcIBL =
+                              Deferred.IBLResources
+                                { Deferred.irRadianceView = cmView iblRadiance,
+                                  Deferred.irIrradianceView = cmView iblIrradiance,
+                                  Deferred.irBrdfView = iblBrdfView,
+                                  Deferred.irSampler = iblSampler
+                                },
+                            Deferred.dcCloudTextures =
+                              Deferred.CloudTextures
+                                { Deferred.ctNoiseView = cmView iblCloudNoise,
+                                  Deferred.ctBlueNoiseView = iblBlueNoiseView,
+                                  Deferred.ctWeatherMapView = iblWeatherMapView,
+                                  Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler,
+                                  Deferred.ctNoiseSampler = iblNoiseSampler
+                                },
+                            Deferred.dcLightBuffer = Just lightSsboBuffer,
+                            Deferred.dcImGuiRenderPass = imGuiRenderPass,
+                            Deferred.dcProceduralSky = rlcProceduralSkyEnabled
+                          }
+                  with (Deferred.createDeferredResources dcfg) $ \dr -> do
+                    let numSwapchainImages = length (drCloudImages dr)
+                    prevViewProjTVars <- replicateM numSwapchainImages (STM.newTVarIO (identity :: M44 Foreign.C.CFloat))
+                    prevTimeTVars <- replicateM numSwapchainImages (STM.newTVarIO 0.0)
+                    let renderEnv =
+                          RenderEnv
+                            { reWindow = rlcWindow,
+                              reContext = context,
+                              reDeferred = dr,
+                              reTargetFPS = rlcTargetFPS,
+                              reImageAvailableSemaphores = imageAvailableSemaphores,
+                              reControl = control,
+                              reFrameMvpMemories = frameMvpMemories,
+                              reGameState =
+                                GameStateTVars
+                                  { gstCamera = tvCamera,
+                                    gstInspect = tvInspect,
+                                    gstInsp = tvInsp,
+                                    gstRenderDebug = tvRenderDebug,
+                                    gstWireframe = tvWireframe,
+                                    gstDebugMode = tvDebugMode,
+                                    gstAxisOverlay = tvAxisOverlay,
+                                    gstGroundPlane = tvGroundPlane,
+                                    gstLights = tvLights,
+                                    gstTimeOfDay = tvTimeOfDay,
+                                    gstTimeSpeed = tvTimeSpeed,
+                                    gstDayNightEnabled = tvDayNightEnabled
+                                  },
+                              reECSWorld = ecsWorld,
+                              reResourceManager = rm,
+                              reTextureSampler = textureSampler,
+                              reFrameDescriptorSets = frameDescriptorSets,
+                              reTextureIndexMap = textureIndexMap,
+                              reFrameStatsRef = frameStatsRef,
+                              reCullResources = computeCullResources,
+                              rePhysicalDevice = rlcPhysicalDevice,
+                              reLightSsboBuffer = lightSsboBuffer,
+                              reLightSsboMemory = lightSsboMemory,
+                              reCloudState =
+                                CloudStateTVars
+                                  { cstCloudHeight = tvCloudHeight,
+                                    cstWindDirection = tvWindDirection,
+                                    cstWindSpeed = tvWindSpeed,
+                                    cstCloudCoverage = tvCloudCoverage,
+                                    cstCloudDetail = tvCloudDetail,
+                                    cstCloudAbsorption = tvCloudAbsorption,
+                                    cstWeatherCoverageScale = tvWeatherCoverageScale,
+                                    cstWeatherTypeBias = tvWeatherTypeBias,
+                                    cstStormIntensity = tvStormIntensity,
+                                    cstWeatherAnimSpeed = tvWeatherAnimSpeed
+                                  },
+                              reScreenshotFlags =
+                                ScreenshotFlags
+                                  { sfPendingScreenshot = tvPendingScreenshot,
+                                    sfPendingAllStages = tvPendingAllStages,
+                                    sfPendingSwapchainScreenshot = tvPendingSwapchainScreenshot
+                                  },
+                              reSkyNoiseState =
+                                SkyNoiseState
+                                  { snsIBLTextures = iblTextures,
+                                    snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
+                                    snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
+                                    snsNoiseSeed = noiseSeed rlcGameState,
+                                    snsNoiseFrequency = noiseFrequency rlcGameState,
+                                    snsNoisePersistence = noisePersistence rlcGameState
+                                  },
+                              rePhysicsState =
+                                PhysicsStateTVars
+                                  { pstPhysicsBodies = physicsBodies rlcGameState,
+                                    pstPhysicsBodyToEntity = physicsBodyToEntity rlcGameState,
+                                    pstPhysicsAutoStep = physicsAutoStep rlcGameState,
+                                    pstPhysicsTimeScale = physicsTimeScale rlcGameState
+                                  },
+                              reTemporalState = TemporalState {tsPrevViewProj = prevViewProjTVars, tsPrevTime = prevTimeTVars},
+                              reImGuiBackend = mImGuiBackend,
+                              reSimpleMode = False
+                            }
+                    renderFrameLoop renderEnv 0
           outerLoop renderFrameLoopFinished
 
   logInfo LogGeneral "Starting render loop"

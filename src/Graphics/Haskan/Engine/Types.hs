@@ -58,7 +58,6 @@ import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Word (Word32, Word64)
 import Foreign.C qualified
-import Graphics.Haskan.Mesh (Mesh)
 import Foreign.Ptr (Ptr, castPtr)
 import Foreign.Storable (Storable (..), peekByteOff, pokeByteOff)
 import GHC.Generics
@@ -69,6 +68,7 @@ import Graphics.Haskan.Debug.Interface (DebugCameraSnapshot (..), DebugCommand (
 import Graphics.Haskan.Debug.Server (CommandQueue, DebugServerHandle)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
+import Graphics.Haskan.Mesh (Mesh)
 import Graphics.Haskan.Physics.Jolt.Types (BodyId, BodyState, BodyType)
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)

@@ -3667,7 +3667,7 @@ datasetRGBRad3 =
     2.893432e+01
   ]
 
-newtype BernsteinPoly5 = BernsteinPoly5 { bp5Coeffs :: (Float, Float, Float, Float, Float, Float) }
+newtype BernsteinPoly5 = BernsteinPoly5 {bp5Coeffs :: (Float, Float, Float, Float, Float, Float)}
   deriving (Eq, Show)
 
 evalBernstein5 :: BernsteinPoly5 -> Float -> Float
@@ -3742,9 +3742,9 @@ cookRadianceChannel dataset turbidity albedo solarElevation =
                 + albedo * turbRem * bernstein5 (elevSample a1high 0) (elevSample a1high 1) (elevSample a1high 2) (elevSample a1high 3) (elevSample a1high 4) (elevSample a1high 5) se
 
 data SkyConfig = SkyConfig
-  { scTurbidity :: !Float
-  , scAlbedo :: !Float
-  , scSolarElevation :: !Float
+  { scTurbidity :: !Float,
+    scAlbedo :: !Float,
+    scSolarElevation :: !Float
   }
 
 computeHWCoeffs :: SkyConfig -> HWCoeffs

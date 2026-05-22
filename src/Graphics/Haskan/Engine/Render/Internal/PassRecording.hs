@@ -345,13 +345,34 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                 (V3 sunDirX sunDirY sunDirZ) = rcSunDir
                 (V3 sunColorR sunColorG sunColorB) = rcSunColor
                 apVolumeData =
-                  [ realToFrac camX, realToFrac camY, realToFrac camZ, 0,
-                    realToFrac r0x, realToFrac r0y, realToFrac r0z, realToFrac r0w,
-                    realToFrac r1x, realToFrac r1y, realToFrac r1z, realToFrac r1w,
-                    realToFrac r2x, realToFrac r2y, realToFrac r2z, realToFrac r2w,
-                    realToFrac r3x, realToFrac r3y, realToFrac r3z, realToFrac r3w,
-                    realToFrac sunDirX, realToFrac sunDirY, realToFrac sunDirZ, 0,
-                    realToFrac sunColorR, realToFrac sunColorG, realToFrac sunColorB, 0,
+                  [ realToFrac camX,
+                    realToFrac camY,
+                    realToFrac camZ,
+                    0,
+                    realToFrac r0x,
+                    realToFrac r0y,
+                    realToFrac r0z,
+                    realToFrac r0w,
+                    realToFrac r1x,
+                    realToFrac r1y,
+                    realToFrac r1z,
+                    realToFrac r1w,
+                    realToFrac r2x,
+                    realToFrac r2y,
+                    realToFrac r2z,
+                    realToFrac r2w,
+                    realToFrac r3x,
+                    realToFrac r3y,
+                    realToFrac r3z,
+                    realToFrac r3w,
+                    realToFrac sunDirX,
+                    realToFrac sunDirY,
+                    realToFrac sunDirZ,
+                    0,
+                    realToFrac sunColorR,
+                    realToFrac sunColorG,
+                    realToFrac sunColorB,
+                    0,
                     realToFrac rcCloudBase,
                     realToFrac rcCloudTop,
                     realToFrac rcTime,
@@ -366,8 +387,10 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                     realToFrac rcStormIntensity,
                     realToFrac rcWeatherAnimSpeed,
                     realToFrac rcCloudDetail,
-                    0, 0 -- pad to 256 bytes
-                  ] :: [CFloat]
+                    0,
+                    0 -- pad to 256 bytes
+                  ] ::
+                    [CFloat]
             liftIO $ Buffer.copyDataToDeviceMemory rcDevice (drAPVolumeUniformMemory rcDeferred) apVolumeData
             let apVolumePipeline = drAPVolumePipeline rcDeferred
                 apVolumeLayout = drAPVolumePipelineLayout rcDeferred

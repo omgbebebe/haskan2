@@ -756,45 +756,45 @@ updateAPVolumeDescriptorSets ::
   APVolumeDescriptorUpdate ->
   m ()
 updateAPVolumeDescriptorSets APVolumeDescriptorUpdate {..} = do
- let imageInfo =
-       Vulkan.createVk
-         ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_GENERAL
-             &* set @"imageView" apduAPImageView
-             &* set @"sampler" Vulkan.VK_NULL_HANDLE
-         )
-     bufferInfo =
-       Vulkan.createVk
-         ( set @"buffer" apduUniformBuffer
-             &* set @"offset" 0
-             &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
-         )
-     writeImage =
-       Vulkan.createVk
-         ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
-             &* set @"pNext" Vulkan.VK_NULL
-             &* set @"dstSet" apduDescriptorSet
-             &* set @"dstBinding" 0
-             &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
-             &* set @"pBufferInfo" Vulkan.VK_NULL
-             &* set @"pTexelBufferView" Vulkan.VK_NULL
-             &* setVkRef @"pImageInfo" imageInfo
-             &* set @"descriptorCount" 1
-             &* set @"dstArrayElement" 0
-         )
-     writeUniform =
-       Vulkan.createVk
-         ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
-             &* set @"pNext" Vulkan.VK_NULL
-             &* set @"dstSet" apduDescriptorSet
-             &* set @"dstBinding" 2
-             &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-             &* setVkRef @"pBufferInfo" bufferInfo
-             &* set @"pImageInfo" Vulkan.VK_NULL
-             &* set @"pTexelBufferView" Vulkan.VK_NULL
-             &* set @"descriptorCount" 1
-             &* set @"dstArrayElement" 0
+  let imageInfo =
+        Vulkan.createVk
+          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_GENERAL
+              &* set @"imageView" apduAPImageView
+              &* set @"sampler" Vulkan.VK_NULL_HANDLE
           )
-     noiseWrite = case apduCloudNoiseView of
+      bufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" apduUniformBuffer
+              &* set @"offset" 0
+              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+          )
+      writeImage =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" apduDescriptorSet
+              &* set @"dstBinding" 0
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+              &* set @"pBufferInfo" Vulkan.VK_NULL
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* setVkRef @"pImageInfo" imageInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+      writeUniform =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" apduDescriptorSet
+              &* set @"dstBinding" 2
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* setVkRef @"pBufferInfo" bufferInfo
+              &* set @"pImageInfo" Vulkan.VK_NULL
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+      noiseWrite = case apduCloudNoiseView of
         Just noiseView ->
           let noiseInfo =
                 Vulkan.createVk
@@ -817,7 +817,7 @@ updateAPVolumeDescriptorSets APVolumeDescriptorUpdate {..} = do
                   )
            in [noiseWriteDescriptor]
         Nothing -> []
-     weatherMapWrite = case apduWeatherMapView of
+      weatherMapWrite = case apduWeatherMapView of
         Just weatherMapView ->
           let weatherMapInfo =
                 Vulkan.createVk
@@ -838,12 +838,12 @@ updateAPVolumeDescriptorSets APVolumeDescriptorUpdate {..} = do
                       &* set @"descriptorCount" 1
                       &* set @"dstArrayElement" 0
                   )
-            in [weatherMapWriteDescriptor]
+           in [weatherMapWriteDescriptor]
         Nothing -> []
-     allWrites = [writeImage, writeUniform] ++ noiseWrite ++ weatherMapWrite
- liftIO $
-   Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
-     Vulkan.vkUpdateDescriptorSets apduDevice (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr
+      allWrites = [writeImage, writeUniform] ++ noiseWrite ++ weatherMapWrite
+  liftIO $
+    Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
+      Vulkan.vkUpdateDescriptorSets apduDevice (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr
 
 -- | Update cubemap compute descriptor set with storage image and UBO.
 updateCubemapComputeDescriptorSets ::

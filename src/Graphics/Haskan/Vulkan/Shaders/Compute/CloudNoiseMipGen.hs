@@ -17,7 +17,7 @@ import Math.Linear
 type MipParams =
   Struct
     '[ "srcSize" ':-> Int32
-      ]
+     ]
 
 type Defs =
   '[ "srcImage" ':-> StorageImage '[DescriptorSet 0, Binding 0] (Properties IntegralCoordinates Float ThreeD (Just NotDepthImage) NonArrayed SingleSampled Storage (Just (RGBA8 UNorm))),

@@ -88,7 +88,8 @@ import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..), TextureResource (..), lookupTexture)
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
-import Graphics.Haskan.Vulkan.Shaders.Compile () -- forces TH shader compilation at build time
+import Graphics.Haskan.Vulkan.Shaders.Compile ()
+-- forces TH shader compilation at build time
 import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolumeShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen qualified as CloudNoiseGenShaders
@@ -443,14 +444,15 @@ loadScene vc@VulkanContext {..} rm assetCache meshName uvCheckMode mSimpleMesh =
         Just mode -> do
           world <- ECS.createWorld
           let uvCheckerPath = "data/textures/uv_checker.png"
-          (tw, th, pixelData) <- liftIO (doesFileExist uvCheckerPath) >>= \exists ->
-            if exists
-              then do
-                (pixelData, tw, th) <- Texture.readImageFromFile uvCheckerPath
-                pure (tw, th, pixelData)
-              else do
-                let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
-                pure (256, 256, checkerTexData)
+          (tw, th, pixelData) <-
+            liftIO (doesFileExist uvCheckerPath) >>= \exists ->
+              if exists
+                then do
+                  (pixelData, tw, th) <- Texture.readImageFromFile uvCheckerPath
+                  pure (tw, th, pixelData)
+                else do
+                  let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
+                  pure (256, 256, checkerTexData)
           let testMesh = case mode of
                 UVCheckCube -> Mesh.unitCube
                 UVCheckSphere -> Mesh.uvSphere 32 16 1.0
@@ -470,84 +472,84 @@ loadScene vc@VulkanContext {..} rm assetCache meshName uvCheckMode mSimpleMesh =
         Nothing ->
           if isStressTest
             then do
-          world <- ECS.createWorld
-          let cubeMesh = Mesh.unitCube
-          meshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices cubeMesh) (Mesh.indices cubeMesh)
-
-          let whiteTexData = Texture.generateGridTexture 2 2 1
-          whiteTexHandle <- Texture.createTextureFromData rm vc 2 2 whiteTexData
-
-          logInfo LogGeneral "spawning 10000 stress test entities"
-          forM_ [0 .. 9999] $ \i -> do
-            let x = fromIntegral (i `mod` 100) * 1.0 - 50.0
-                z = fromIntegral (i `div` 100) * 1.0 - 50.0
-                y = sin (fromIntegral i * 0.1) * 1.0
-            entity <- ECS.spawnEntity world
-            ECS.setTransform world entity (Transform (V3 x y z) (Quaternion 1 (V3 0 0 0)) (V3 0.5 0.5 0.5))
-            ECS.setMesh world entity meshHandle
-            ECS.setMaterial world entity whiteTexHandle
-            ECS.setMetallicFactor world entity 0.0
-            ECS.setRoughnessFactor world entity 0.5
-
-          let sceneBbox = BBox (V3 (-50) (-2) (-50)) (V3 50 2 50)
-          logInfo LogGeneral $ "stress test scene bounds: " <> showT sceneBbox
-          pure $ SceneLoadResult world 10000 sceneBbox IntMap.empty []
-        else
-          if isGLTF
-            then do
-              result <- importGLTF rm vcPhysicalDevice vcDevice vcQueue vcCommandBuffer assetCache meshName
-              let world = girWorld result
-                  textures = girTextures result
-                  textureData = girTextureData result
-                  pixelMap =
-                    IntMap.fromList $
-                      zipWith (\t (w, h, v) -> (fromIntegral (unTextureHandle t), (w, h, v))) textures textureData
-
-              sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
-              logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
-
-              pure $ SceneLoadResult world (length (girMeshes result)) sceneBbox pixelMap (girPhysicsSpecs result)
-            else do
               world <- ECS.createWorld
-              (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj meshName
-              meshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices mesh) (Mesh.indices mesh)
+              let cubeMesh = Mesh.unitCube
+              meshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices cubeMesh) (Mesh.indices cubeMesh)
 
-              let objBounds = computeMeshBounds mesh
-              logInfo LogGeneral $ "OBJ mesh bounds: " <> showT objBounds
+              let whiteTexData = Texture.generateGridTexture 2 2 1
+              whiteTexHandle <- Texture.createTextureFromData rm vc 2 2 whiteTexData
 
-              entity1 <- ECS.spawnEntity world
-              ECS.setTransform world entity1 (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-              ECS.setMesh world entity1 meshHandle
-              ECS.setMetallicFactor world entity1 0.0
-              ECS.setRoughnessFactor world entity1 0.5
+              logInfo LogGeneral "spawning 10000 stress test entities"
+              forM_ [0 .. 9999] $ \i -> do
+                let x = fromIntegral (i `mod` 100) * 1.0 - 50.0
+                    z = fromIntegral (i `div` 100) * 1.0 - 50.0
+                    y = sin (fromIntegral i * 0.1) * 1.0
+                entity <- ECS.spawnEntity world
+                ECS.setTransform world entity (Transform (V3 x y z) (Quaternion 1 (V3 0 0 0)) (V3 0.5 0.5 0.5))
+                ECS.setMesh world entity meshHandle
+                ECS.setMaterial world entity whiteTexHandle
+                ECS.setMetallicFactor world entity 0.0
+                ECS.setRoughnessFactor world entity 0.5
 
-              entity2 <- ECS.spawnEntity world
-              ECS.setTransform world entity2 (Transform (V3 2 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-              ECS.setMesh world entity2 meshHandle
-              ECS.setMetallicFactor world entity2 0.0
-              ECS.setRoughnessFactor world entity2 0.5
+              let sceneBbox = BBox (V3 (-50) (-2) (-50)) (V3 50 2 50)
+              logInfo LogGeneral $ "stress test scene bounds: " <> showT sceneBbox
+              pure $ SceneLoadResult world 10000 sceneBbox IntMap.empty []
+            else
+              if isGLTF
+                then do
+                  result <- importGLTF rm vcPhysicalDevice vcDevice vcQueue vcCommandBuffer assetCache meshName
+                  let world = girWorld result
+                      textures = girTextures result
+                      textureData = girTextureData result
+                      pixelMap =
+                        IntMap.fromList $
+                          zipWith (\t (w, h, v) -> (fromIntegral (unTextureHandle t), (w, h, v))) textures textureData
 
-              entity3 <- ECS.spawnEntity world
-              ECS.setTransform world entity3 (Transform (V3 (-2) 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-              ECS.setMesh world entity3 meshHandle
-              ECS.setMetallicFactor world entity3 0.0
-              ECS.setRoughnessFactor world entity3 0.5
+                  sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
+                  logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
 
-              let groundMesh = Mesh.groundPlaneMesh 50.0
-              groundMeshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
-              let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
-              checkerTexHandle <- Texture.createTextureFromData rm vc 256 256 checkerTexData
-              groundEntity <- ECS.spawnEntity world
-              ECS.setTransform world groundEntity (Transform (V3 0 (-0.5) 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-              ECS.setMesh world groundEntity groundMeshHandle
-              ECS.setMaterial world groundEntity checkerTexHandle
-              ECS.setMetallicFactor world groundEntity 0.0
-              ECS.setRoughnessFactor world groundEntity 1.0
+                  pure $ SceneLoadResult world (length (girMeshes result)) sceneBbox pixelMap (girPhysicsSpecs result)
+                else do
+                  world <- ECS.createWorld
+                  (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj meshName
+                  meshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices mesh) (Mesh.indices mesh)
 
-              sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
-              logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
+                  let objBounds = computeMeshBounds mesh
+                  logInfo LogGeneral $ "OBJ mesh bounds: " <> showT objBounds
 
-              pure $ SceneLoadResult world 1 sceneBbox IntMap.empty []
+                  entity1 <- ECS.spawnEntity world
+                  ECS.setTransform world entity1 (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+                  ECS.setMesh world entity1 meshHandle
+                  ECS.setMetallicFactor world entity1 0.0
+                  ECS.setRoughnessFactor world entity1 0.5
+
+                  entity2 <- ECS.spawnEntity world
+                  ECS.setTransform world entity2 (Transform (V3 2 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+                  ECS.setMesh world entity2 meshHandle
+                  ECS.setMetallicFactor world entity2 0.0
+                  ECS.setRoughnessFactor world entity2 0.5
+
+                  entity3 <- ECS.spawnEntity world
+                  ECS.setTransform world entity3 (Transform (V3 (-2) 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+                  ECS.setMesh world entity3 meshHandle
+                  ECS.setMetallicFactor world entity3 0.0
+                  ECS.setRoughnessFactor world entity3 0.5
+
+                  let groundMesh = Mesh.groundPlaneMesh 50.0
+                  groundMeshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
+                  let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
+                  checkerTexHandle <- Texture.createTextureFromData rm vc 256 256 checkerTexData
+                  groundEntity <- ECS.spawnEntity world
+                  ECS.setTransform world groundEntity (Transform (V3 0 (-0.5) 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+                  ECS.setMesh world groundEntity groundMeshHandle
+                  ECS.setMaterial world groundEntity checkerTexHandle
+                  ECS.setMetallicFactor world groundEntity 0.0
+                  ECS.setRoughnessFactor world groundEntity 1.0
+
+                  sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
+                  logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox
+
+                  pure $ SceneLoadResult world 1 sceneBbox IntMap.empty []
 
 -- | Load a single user-provided mesh with a white texture fallback.
 -- Used by the 'runSimple' API for minimal primitive rendering.
@@ -817,10 +819,11 @@ dispatchCloudNoiseGeneration VulkanContext {..} rm noiseHandle NoiseParams {..} 
 
   -- Create per-mip image views for the noise texture
   let noiseFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
-  mipViews <- if noiseImage /= Vulkan.vkNullPtr
-    then forM [0 .. mipLevels - 1] $ \mip -> do
-      liftIO $ ImageView.createImageView3DSingleMip vcDevice noiseFormat noiseImage (fromIntegral mip)
-    else pure (replicate mipLevels Vulkan.vkNullPtr)
+  mipViews <-
+    if noiseImage /= Vulkan.vkNullPtr
+      then forM [0 .. mipLevels - 1] $ \mip -> do
+        liftIO $ ImageView.createImageView3DSingleMip vcDevice noiseFormat noiseImage (fromIntegral mip)
+      else pure (replicate mipLevels Vulkan.vkNullPtr)
 
   -- Create per-mip UBOs and pre-update all descriptor sets
   mipParamsBuffers <- forM [1 .. mipLevels - 1] $ \mip -> do

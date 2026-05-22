@@ -12,8 +12,6 @@
 module Graphics.Haskan.Vulkan.Shaders.Compile () where
 
 import FIR qualified
-import Graphics.Haskan.Vulkan.Shaders.TH (compileShader)
-
 -- Import all shader modules
 import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolume
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGen
@@ -28,79 +26,56 @@ import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBuffer
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays qualified as GodRays
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as Lighting
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProcedural
-import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as Wireframe
 import Graphics.Haskan.Vulkan.Shaders.Forward.SimpleForward qualified as SimpleForward
+import Graphics.Haskan.Vulkan.Shaders.TH (compileShader)
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as TextureShader
+import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as Wireframe
 
 -- Compile all shaders at build time
-$( compileShader "data/shaders/fir/vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] TextureShader.vertex
-   )
+$(compileShader "data/shaders/fir/vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] TextureShader.vertex)
 
-$( compileShader "data/shaders/fir/frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] TextureShader.fragment
-   )
+$(compileShader "data/shaders/fir/frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] TextureShader.fragment)
 
-$( compileShader "data/shaders/fir/gbuf_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GBuffer.vertex
-   )
+$(compileShader "data/shaders/fir/gbuf_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GBuffer.vertex)
 
-$( compileShader "data/shaders/fir/gbuf_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GBuffer.fragment
-   )
+$(compileShader "data/shaders/fir/gbuf_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GBuffer.fragment)
 
-$( compileShader "data/shaders/fir/light_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Lighting.vertex
-   )
+$(compileShader "data/shaders/fir/light_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Lighting.vertex)
 
-$( compileShader "data/shaders/fir/light_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Lighting.fragment
-   )
+$(compileShader "data/shaders/fir/light_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Lighting.fragment)
 
-$( compileShader "data/shaders/fir/light_procedural_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] LightingProcedural.fragment
-   )
+$(compileShader "data/shaders/fir/light_procedural_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] LightingProcedural.fragment)
 
-$( compileShader "data/shaders/fir/wire_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Wireframe.vertex
-   )
+$(compileShader "data/shaders/fir/wire_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Wireframe.vertex)
 
-$( compileShader "data/shaders/fir/wire_geom.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Wireframe.geometry
-   )
+$(compileShader "data/shaders/fir/wire_geom.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Wireframe.geometry)
 
-$( compileShader "data/shaders/fir/wire_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Wireframe.fragment
-   )
+$(compileShader "data/shaders/fir/wire_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Wireframe.fragment)
 
-$( compileShader "data/shaders/fir/cull_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Cull.program
-   )
+$(compileShader "data/shaders/fir/cull_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Cull.program)
 
-$( compileShader "data/shaders/fir/cloud_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudNoiseGen.program
-   )
+$(compileShader "data/shaders/fir/cloud_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudNoiseGen.program)
 
-$( compileShader "data/shaders/fir/cloud_noise_mipgen_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudNoiseMipGen.program
-   )
+$(compileShader "data/shaders/fir/cloud_noise_mipgen_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudNoiseMipGen.program)
 
-$( compileShader "data/shaders/fir/cloud_detail_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudDetailNoiseGen.program
-   )
+$(compileShader "data/shaders/fir/cloud_detail_noise_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] CloudDetailNoiseGen.program)
 
-$( compileShader "data/shaders/fir/weather_map_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WeatherMapGen.program
-   )
+$(compileShader "data/shaders/fir/weather_map_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] WeatherMapGen.program)
 
-$( compileShader "data/shaders/fir/radiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] RadianceGen.program
-   )
+$(compileShader "data/shaders/fir/radiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] RadianceGen.program)
 
-$( compileShader "data/shaders/fir/irradiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] IrradianceGen.program
-   )
+$(compileShader "data/shaders/fir/irradiance_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] IrradianceGen.program)
 
-$( compileShader "data/shaders/fir/cloud_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Clouds.cloudVertex
-   )
+$(compileShader "data/shaders/fir/cloud_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Clouds.cloudVertex)
 
-$( compileShader "data/shaders/fir/cloud_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Clouds.cloudFragment
-   )
+$(compileShader "data/shaders/fir/cloud_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Clouds.cloudFragment)
 
-$( compileShader "data/shaders/fir/godray_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GodRays.vertex
-   )
+$(compileShader "data/shaders/fir/godray_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GodRays.vertex)
 
-$( compileShader "data/shaders/fir/godray_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GodRays.fragment
-   )
+$(compileShader "data/shaders/fir/godray_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] GodRays.fragment)
 
-$( compileShader "data/shaders/fir/ap_volume_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] APVolume.program
-   )
+$(compileShader "data/shaders/fir/ap_volume_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] APVolume.program)
 
-$( compileShader "data/shaders/fir/simple_forward_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] SimpleForward.vertex
-   )
+$(compileShader "data/shaders/fir/simple_forward_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] SimpleForward.vertex)
 
-$( compileShader "data/shaders/fir/simple_forward_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] SimpleForward.fragment
-   )
+$(compileShader "data/shaders/fir/simple_forward_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] SimpleForward.fragment)

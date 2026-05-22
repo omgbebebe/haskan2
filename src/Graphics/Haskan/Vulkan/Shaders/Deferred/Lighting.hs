@@ -265,18 +265,18 @@ type FragmentDefs =
        ':-> StorageBuffer
               '[Binding 7, DescriptorSet 0]
               LightsData,
-      "cloud_result"
-        ':-> Texture2D
-               '[Binding 8, DescriptorSet 0]
-               (RGBA16 F),
-      "ap_volume"
-        ':-> Texture3D
-               '[Binding 9, DescriptorSet 0]
-               (RGBA16 F),
-      "cameraPos"
-        ':-> PushConstant
-               '[]
-               CameraPushConstant,
+     "cloud_result"
+       ':-> Texture2D
+              '[Binding 8, DescriptorSet 0]
+              (RGBA16 F),
+     "ap_volume"
+       ':-> Texture3D
+              '[Binding 9, DescriptorSet 0]
+              (RGBA16 F),
+     "cameraPos"
+       ':-> PushConstant
+              '[]
+              CameraPushConstant,
      "out_colour" ':-> Output '[Location 0] (V 4 Float),
      "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]

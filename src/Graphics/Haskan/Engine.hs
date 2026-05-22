@@ -221,24 +221,28 @@ mainLoop meshName EngineConfig {..} = do
 
   renderLoopFinished <- liftIO newEmptyMVar
   renderLoopReady <- liftIO newEmptyMVar
-  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop RenderLoopConfig
-    { rlcWindow = window
-    , rlcPhysicalDevice = physicalDevice
-    , rlcSurface = surface
-    , rlcInstance = inst
-    , rlcLayers = layers
-    , rlcTargetFPS = targetRenderFPS
-    , rlcGameState = gameState
-    , rlcFinishedSemaphore = renderLoopFinished
-    , rlcReadySemaphore = renderLoopReady
-    , rlcControlChannel = controlChannel
-    , rlcMeshName = meshName
-    , rlcUvCheckMode = uvCheckMode
-    , rlcEnvMapDir = envMapDir
-    , rlcCloudTestMode = cloudTestMode
-    , rlcProceduralSkyEnabled = proceduralSkyEnabled
-    , rlcSimpleMesh = simpleMesh
-    }
+  liftIO $
+    forkIOWithHandler "renderLoop" renderLoopFinished $
+      runManaged $
+        renderLoop
+          RenderLoopConfig
+            { rlcWindow = window,
+              rlcPhysicalDevice = physicalDevice,
+              rlcSurface = surface,
+              rlcInstance = inst,
+              rlcLayers = layers,
+              rlcTargetFPS = targetRenderFPS,
+              rlcGameState = gameState,
+              rlcFinishedSemaphore = renderLoopFinished,
+              rlcReadySemaphore = renderLoopReady,
+              rlcControlChannel = controlChannel,
+              rlcMeshName = meshName,
+              rlcUvCheckMode = uvCheckMode,
+              rlcEnvMapDir = envMapDir,
+              rlcCloudTestMode = cloudTestMode,
+              rlcProceduralSkyEnabled = proceduralSkyEnabled,
+              rlcSimpleMesh = simpleMesh
+            }
 
   -- Wait for render loop to finish initialization before starting timeout
   logInfoIO LogGeneral "waiting for render loop initialization..."

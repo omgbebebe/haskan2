@@ -20,30 +20,31 @@ import Math.Linear
 type Defs =
   '[ "apImage"
        ':-> StorageImage
-             '[DescriptorSet 0, Binding 0]
-             (Properties
-                IntegralCoordinates
-                Float
-                ThreeD
-                (Just NotDepthImage)
-                NonArrayed
-                SingleSampled
-                Storage
-                (Just (RGBA16 F))),
+              '[DescriptorSet 0, Binding 0]
+              ( Properties
+                  IntegralCoordinates
+                  Float
+                  ThreeD
+                  (Just NotDepthImage)
+                  NonArrayed
+                  SingleSampled
+                  Storage
+                  (Just (RGBA16 F))
+              ),
      "cloudNoise"
        ':-> Texture3D
-             '[Binding 1, DescriptorSet 0]
-             (RGBA8 UNorm),
+              '[Binding 1, DescriptorSet 0]
+              (RGBA8 UNorm),
      "apUniforms"
        ':-> Uniform
-             '[Binding 2, DescriptorSet 0]
-             APVolumeUniforms,
+              '[Binding 2, DescriptorSet 0]
+              APVolumeUniforms,
      "weather_map"
        ':-> Texture2D
-             '[Binding 3, DescriptorSet 0]
-             (RGBA8 UNorm),
+              '[Binding 3, DescriptorSet 0]
+              (RGBA8 UNorm),
      "main" ':-> EntryPoint '[LocalSize 4 4 4] Compute
-    ]
+   ]
 
 -- Phase 2: AP Volume compute shader with raymarched scattering.
 -- Density model synced with Clouds.hs: weather-map driven, domain warped,
@@ -55,20 +56,20 @@ program = Module $ entryPoint @"main" @Compute do
 
   -- Read uniform data
   uniforms <- get @"apUniforms"
-  let camPos     = view @(Name "cameraPos")   uniforms
-      vp0        = view @(Name "invViewProj0") uniforms
-      vp1        = view @(Name "invViewProj1") uniforms
-      vp2        = view @(Name "invViewProj2") uniforms
-      vp3        = view @(Name "invViewProj3") uniforms
-      sunDir     = view @(Name "sunDir")      uniforms
-      sunColor   = view @(Name "sunColor")    uniforms
-      cloudBase  = view @(Name "cloudBase")   uniforms
-      cloudTop   = view @(Name "cloudTop")    uniforms
-      time       = view @(Name "time")        uniforms
-      near       = view @(Name "near")        uniforms
-      far        = view @(Name "far")         uniforms
-      windDirX   = view @(Name "windDirX")    uniforms
-      windDirZ   = view @(Name "windDirZ")    uniforms
+  let camPos = view @(Name "cameraPos") uniforms
+      vp0 = view @(Name "invViewProj0") uniforms
+      vp1 = view @(Name "invViewProj1") uniforms
+      vp2 = view @(Name "invViewProj2") uniforms
+      vp3 = view @(Name "invViewProj3") uniforms
+      sunDir = view @(Name "sunDir") uniforms
+      sunColor = view @(Name "sunColor") uniforms
+      cloudBase = view @(Name "cloudBase") uniforms
+      cloudTop = view @(Name "cloudTop") uniforms
+      time = view @(Name "time") uniforms
+      near = view @(Name "near") uniforms
+      far = view @(Name "far") uniforms
+      windDirX = view @(Name "windDirX") uniforms
+      windDirZ = view @(Name "windDirZ") uniforms
       cloudAbsorption = view @(Name "cloudAbsorption") uniforms
       weatherCoverageScale = view @(Name "weatherCoverageScale") uniforms
       weatherTypeBias = view @(Name "weatherTypeBias") uniforms
@@ -77,9 +78,9 @@ program = Module $ entryPoint @"main" @Compute do
       cloudDetail = view @(Name "cloudDetail") uniforms
 
   -- Map voxel to screen UV and exponential depth
-  let u    = (fromIntegral vx + 0.5) / 64.0
-      v    = (fromIntegral vy + 0.5) / 32.0
-      t    = fromIntegral vz / 64.0
+  let u = (fromIntegral vx + 0.5) / 64.0
+      v = (fromIntegral vy + 0.5) / 32.0
+      t = fromIntegral vz / 64.0
       -- Exponential depth distribution for more detail near camera
       depth = near * ((far / near) ** t)
       ndcX = u * 2.0 - 1.0
@@ -92,10 +93,12 @@ program = Module $ entryPoint @"main" @Compute do
       worldFarY = dot vp1 clipFar
       worldFarZ = dot vp2 clipFar
       worldFarW = dot vp3 clipFar
-      worldFar  = Vec3 (worldFarX / worldFarW)
-                       (worldFarY / worldFarW)
-                       (worldFarZ / worldFarW)
-      rayDir    = normalise (worldFar ^-^ camPos)
+      worldFar =
+        Vec3
+          (worldFarX / worldFarW)
+          (worldFarY / worldFarW)
+          (worldFarZ / worldFarW)
+      rayDir = normalise (worldFar ^-^ camPos)
 
   -- World position at this depth
   let worldPos = camPos ^+^ rayDir ^* depth
@@ -208,15 +211,22 @@ program = Module $ entryPoint @"main" @Compute do
       transmittance = exp (-extinction)
 
   -- Store: RGB = in-scattered light, A = 1 - transmittance (optical depth)
-  let result = Vec4 (view @(Index 0) inScatter)
-                    (view @(Index 1) inScatter)
-                    (view @(Index 2) inScatter)
-                    (1.0 - transmittance)
+  let result =
+        Vec4
+          (view @(Index 0) inScatter)
+          (view @(Index 1) inScatter)
+          (view @(Index 2) inScatter)
+          (1.0 - transmittance)
 
   imageWrite @"apImage" (Vec3 vx vy vz) result
   where
     dot :: Code (V 4 Float) -> Code (V 4 Float) -> Code Float
-    dot a b = view @(Index 0) a * view @(Index 0) b
-            + view @(Index 1) a * view @(Index 1) b
-            + view @(Index 2) a * view @(Index 2) b
-            + view @(Index 3) a * view @(Index 3) b
+    dot a b =
+      view @(Index 0) a
+        * view @(Index 0) b
+        + view @(Index 1) a
+        * view @(Index 1) b
+        + view @(Index 2) a
+        * view @(Index 2) b
+        + view @(Index 3) a
+        * view @(Index 3) b
