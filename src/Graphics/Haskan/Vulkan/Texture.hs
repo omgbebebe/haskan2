@@ -25,6 +25,7 @@ module Graphics.Haskan.Vulkan.Texture
     decodeTextureCached,
     uploadTexture,
     createTexture2DArray,
+    createTexture2DArrayFromHandles,
     createCubemap,
     createCubemapMips,
   )

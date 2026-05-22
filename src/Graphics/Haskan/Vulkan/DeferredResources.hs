@@ -80,7 +80,8 @@ data DeferredConfig = DeferredConfig
     dcCloudTextures :: !CloudTextures,
     dcLightBuffer :: !(Maybe Vulkan.VkBuffer),
     dcImGuiRenderPass :: !Vulkan.VkRenderPass,
-    dcProceduralSky :: !Bool
+    dcProceduralSky :: !Bool,
+    dcBindlessTextureArrayView :: !(Maybe Vulkan.VkImageView)
   }
 
 data DeferredResources = DeferredResources
@@ -606,6 +607,21 @@ createDeferredResources DeferredConfig {..} = do
   bindlessDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
     DescriptorSet.allocateDescriptorSet device bindlessDescriptorPool [bindlessPassDescriptorSetLayout]
   logDebugIO LogRender $ "bindless descriptor sets allocated: " <> showT (length bindlessDescriptorSets)
+
+  -- Update bindless descriptor sets with texture array (if provided)
+  case dcBindlessTextureArrayView of
+    Nothing -> logDebugIO LogRender "no bindless texture array, skipping descriptor update"
+    Just texArrayView -> do
+      for_ bindlessDescriptorSets $ \ds -> do
+        -- UBO will be updated per-frame; for now just bind a dummy buffer
+        DescriptorSet.updateBindlessPassDescriptorSet
+          device
+          ds
+          Vulkan.VK_NULL_HANDLE
+          0
+          texArrayView
+          sampler
+      logDebugIO LogRender "bindless descriptor sets updated with texture array"
 
   pure
     DeferredResources

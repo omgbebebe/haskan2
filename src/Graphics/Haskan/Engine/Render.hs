@@ -956,6 +956,29 @@ renderLoop RenderLoopConfig {..} = do
 
   logInfo LogTexture $ "bindless textures created: " <> showT (length bindlessTextureViews)
 
+  -- Create Texture2DArray for bindless pass (resize all to 256x256)
+  mBindlessTextureArray <-
+    if numUniqueTextures == 0
+      then do
+        let whiteTexData = Texture.generateGridTexture 2 2 1
+        whiteHandle <- Texture.createTextureFromData rm (VulkanContext device rlcPhysicalDevice graphicsQueueHandler textureCommandBuffer) 2 2 whiteTexData
+        mView <- Texture.textureImageView rm whiteHandle
+        case mView of
+          Just view -> pure $ Just view
+          Nothing -> do
+            logInfo LogTexture "failed to create white texture for bindless array"
+            pure Nothing
+      else do
+        textureArrayHandle <- Texture.createTexture2DArrayFromHandles rm (VulkanContext device rlcPhysicalDevice graphicsQueueHandler textureCommandBuffer) 256 256 uniqueTextures
+        mView <- Texture.textureImageView rm textureArrayHandle
+        case mView of
+          Just view -> do
+            logInfo LogTexture "Texture2DArray created for bindless pass"
+            pure $ Just view
+          Nothing -> do
+            logInfo LogTexture "failed to create Texture2DArray view"
+            pure Nothing
+
   let totalDescriptorSets = Render.maxFramesInFlight
   descriptorPool <- DescriptorPool.managedDescriptorPool device totalDescriptorSets
   logDebug LogRender $ "descriptor pool created for " <> showT totalDescriptorSets <> " sets"
@@ -1172,9 +1195,10 @@ renderLoop RenderLoopConfig {..} = do
                                   Deferred.ctNoiseSampler = iblNoiseSampler
                                 },
                             Deferred.dcLightBuffer = Just lightSsboBuffer,
-                            Deferred.dcImGuiRenderPass = imGuiRenderPass,
-                            Deferred.dcProceduralSky = rlcProceduralSkyEnabled
-                          }
+                             Deferred.dcImGuiRenderPass = imGuiRenderPass,
+                             Deferred.dcProceduralSky = rlcProceduralSkyEnabled,
+                             Deferred.dcBindlessTextureArrayView = mBindlessTextureArray
+                           }
                   with (Deferred.createDeferredResources dcfg) $ \dr -> do
                     let numSwapchainImages = length (drCloudImages dr)
                     prevViewProjTVars <- replicateM numSwapchainImages (STM.newTVarIO (identity :: M44 Foreign.C.CFloat))
