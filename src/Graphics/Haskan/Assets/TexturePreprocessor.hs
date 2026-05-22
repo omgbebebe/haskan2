@@ -8,6 +8,7 @@ module Graphics.Haskan.Assets.TexturePreprocessor
     loadTextureCached,
     loadTextureBytesCached,
     resizeToPowerOfTwo,
+    resizeImage,
     nextPowerOfTwo,
   )
 where

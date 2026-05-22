@@ -13,6 +13,8 @@ module Graphics.Haskan.Vulkan.DescriptorSetLayout
     createGodRayDescriptorSetLayout,
     managedBindlessDescriptorSetLayout,
     createBindlessDescriptorSetLayout,
+    managedBindlessPassDescriptorSetLayout,
+    createBindlessPassDescriptorSetLayout,
     managedComputeDescriptorSetLayout,
     createComputeDescriptorSetLayout,
     managedCubemapComputeDescriptorSetLayout,
@@ -293,8 +295,50 @@ createBindlessDescriptorSetLayout dev = do
               &* setListRef @"pBindings" [textureBinding]
           )
    in liftIO $ withPtr bindingFlagsCreateInfo $ \_bfcPtr ->
-        withPtr createInfo $ \ciPtr ->
-          allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+         withPtr createInfo $ \ciPtr ->
+           allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+
+-- | Bindless pass descriptor set layout: UBO (binding 0) + Texture2DArray (binding 1).
+-- Used by the Texture2DArray bindless g-buffer pass.
+managedBindlessPassDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedBindlessPassDescriptorSetLayout dev =
+  alloc
+    "BindlessPassDescriptorSetLayout"
+    (createBindlessPassDescriptorSetLayout dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+
+createBindlessPassDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createBindlessPassDescriptorSetLayout dev = do
+  let uboBinding =
+        Vulkan.createVk
+          ( set @"binding" 0
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"descriptorCount" 1
+              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_VERTEX_BIT
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+          )
+      textureBinding =
+        Vulkan.createVk
+          ( set @"binding" 1
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"descriptorCount" 1
+              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"bindingCount" 2
+              &* setListRef @"pBindings" [uboBinding, textureBinding]
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+          )
 
 -- | Compute culling descriptor set layout: 2 SSBOs + 1 UBO.
 managedComputeDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout

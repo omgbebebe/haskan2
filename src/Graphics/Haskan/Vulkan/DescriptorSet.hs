@@ -557,6 +557,65 @@ updateBindlessTexture dev descriptorSet sampler imageView arrayIndex = do
     Foreign.Marshal.Array.withArray [write] $ \writePtr ->
       Vulkan.vkUpdateDescriptorSets dev 1 writePtr 0 Vulkan.vkNullPtr
 
+-- | Update bindless pass descriptor set: UBO (binding 0) + Texture2DArray (binding 1).
+updateBindlessPassDescriptorSet ::
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  -- | UBO buffer
+  Vulkan.VkBuffer ->
+  -- | UBO range
+  Vulkan.VkDeviceSize ->
+  -- | Texture2DArray image view
+  Vulkan.VkImageView ->
+  -- | Sampler
+  Vulkan.VkSampler ->
+  m ()
+updateBindlessPassDescriptorSet dev descriptorSet buffer bufferRange imageView sampler = do
+  let bufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" buffer
+              &* set @"offset" 0
+              &* set @"range" bufferRange
+          )
+      textureInfo =
+        Vulkan.createVk
+          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+              &* set @"imageView" imageView
+              &* set @"sampler" sampler
+          )
+  liftIO $ do
+    Foreign.Marshal.Array.withArray [bufferInfo] $ \bufferInfoPtr ->
+      Foreign.Marshal.Array.withArray [textureInfo] $ \textureInfoPtr -> do
+        let uboWrite =
+              Vulkan.createVk
+                ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+                    &* set @"pNext" Vulkan.VK_NULL
+                    &* set @"dstSet" descriptorSet
+                    &* set @"dstBinding" 0
+                    &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+                    &* set @"pTexelBufferView" Vulkan.VK_NULL
+                    &* set @"pImageInfo" Vulkan.VK_NULL
+                    &* set @"pBufferInfo" bufferInfoPtr
+                    &* set @"descriptorCount" 1
+                    &* set @"dstArrayElement" 0
+                )
+            texWrite =
+              Vulkan.createVk
+                ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+                    &* set @"pNext" Vulkan.VK_NULL
+                    &* set @"dstSet" descriptorSet
+                    &* set @"dstBinding" 1
+                    &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+                    &* set @"pTexelBufferView" Vulkan.VK_NULL
+                    &* set @"pImageInfo" textureInfoPtr
+                    &* set @"pBufferInfo" Vulkan.VK_NULL
+                    &* set @"descriptorCount" 1
+                    &* set @"dstArrayElement" 0
+                )
+        Foreign.Marshal.Array.withArray [uboWrite, texWrite] $ \writePtr ->
+          Vulkan.vkUpdateDescriptorSets dev 2 writePtr 0 Vulkan.vkNullPtr
+
 cmdBindDescriptorSets ::
   (MonadIO m) =>
   Vulkan.VkCommandBuffer ->

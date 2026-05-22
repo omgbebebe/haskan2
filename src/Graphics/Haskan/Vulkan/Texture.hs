@@ -31,7 +31,7 @@ module Graphics.Haskan.Vulkan.Texture
 where
 
 import Codec.Picture
-import Control.Monad (when)
+import Control.Monad (forM, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits
@@ -48,6 +48,7 @@ import Graphics.Haskan.Assets.TexturePreprocessor
     defaultTextureConfig,
     loadTextureBytesCached,
     loadTextureCached,
+    resizeImage,
   )
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, showT)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
@@ -934,6 +935,43 @@ createTexture2DArray rm vc width height layers = do
 
   registerTexture rm resource
   pure texH
+
+-- | Create a Texture2DArray from a list of existing texture handles.
+-- All textures are resized to the target dimensions using bilinear sampling.
+createTexture2DArrayFromHandles ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  VulkanContext ->
+  -- | target width
+  Int ->
+  -- | target height
+  Int ->
+  -- | texture handles (will be resized to target size)
+  [TextureHandle] ->
+  m TextureHandle
+createTexture2DArrayFromHandles rm vc targetW targetH handles = do
+  let resizePixels w h srcW srcH srcPixels
+        | w == srcW && h == srcH = srcPixels
+        | otherwise =
+            let img :: Image PixelRGBA8
+                img = Image srcW srcH srcPixels
+                resized = resizeImage img w h
+             in imageData resized
+
+  layers <- forM handles $ \h -> do
+    mTex <- liftIO $ lookupTexture rm h
+    case mTex of
+      Nothing -> do
+        logDebugIO LogTexture $ "bindless: missing texture " <> showT h <> ", using checkerboard"
+        pure $ generateCheckerboardTexture targetW targetH 32
+      Just tex -> do
+        case trPixelData tex of
+          Just pixels -> pure $ resizePixels targetW targetH (trWidth tex) (trHeight tex) pixels
+          Nothing -> do
+            logDebugIO LogTexture $ "bindless: no CPU pixels for texture " <> showT h
+            pure $ generateCheckerboardTexture targetW targetH 32
+
+  createTexture2DArray rm vc targetW targetH layers
 
 -- | Create a cubemap texture from 6 RGBA8 face images.
 -- Faces must be square and all the same size.

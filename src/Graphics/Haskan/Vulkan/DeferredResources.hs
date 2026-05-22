@@ -91,6 +91,8 @@ data DeferredResources = DeferredResources
     drGBufferFramebuffers :: ![Vulkan.VkFramebuffer],
     drBindlessPipeline :: !Vulkan.VkPipeline,
     drBindlessPipelineLayout :: !Vulkan.VkPipelineLayout,
+    drBindlessDescriptorPool :: !Vulkan.VkDescriptorPool,
+    drBindlessDescriptorSets :: ![Vulkan.VkDescriptorSet],
     drLightingRenderPass :: !Vulkan.VkRenderPass,
     drLightingPipeline :: !Vulkan.VkPipeline,
     drLightingPipelineLayout :: !Vulkan.VkPipelineLayout,
@@ -593,6 +595,18 @@ createDeferredResources DeferredConfig {..} = do
       4
   logDebugIO LogRender "bindless pipeline created"
 
+  -- Bindless pass descriptor set layout
+  bindlessPassDescriptorSetLayout <- DescriptorSetLayout.managedBindlessPassDescriptorSetLayout device
+  logDebugIO LogRender "bindless pass descriptor set layout created"
+
+  -- Bindless descriptor pool and sets
+  bindlessDescriptorPool <- DescriptorPool.managedDescriptorPool device numSwapchainImages
+  logDebugIO LogRender "bindless descriptor pool created"
+
+  bindlessDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
+    DescriptorSet.allocateDescriptorSet device bindlessDescriptorPool [bindlessPassDescriptorSetLayout]
+  logDebugIO LogRender $ "bindless descriptor sets allocated: " <> showT (length bindlessDescriptorSets)
+
   pure
     DeferredResources
       { drGBufferRenderPass = gBufferRenderPass,
@@ -602,6 +616,8 @@ createDeferredResources DeferredConfig {..} = do
         drGBufferFramebuffers = gBufferFramebuffers,
         drBindlessPipeline = bindlessPipeline,
         drBindlessPipelineLayout = bindlessPipelineLayout,
+        drBindlessDescriptorPool = bindlessDescriptorPool,
+        drBindlessDescriptorSets = bindlessDescriptorSets,
         drLightingRenderPass = lightingRenderPass,
         drLightingPipeline = lightingPipeline,
         drLightingPipelineLayout = lightingPipelineLayout,
