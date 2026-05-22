@@ -18,6 +18,7 @@ module Graphics.Haskan.Engine.Types
     extractFrustumPlanes,
     filterVisible,
     EngineConfig (..),
+    UVCheckMode (..),
     FrameTime (..),
     FrameStats (..),
     emptyFrameStats,
@@ -474,6 +475,9 @@ filterVisible :: [DrawCall] -> IntMap Word32 -> [DrawCall]
 filterVisible drawList visibleFlags =
   [dc | (idx, dc) <- zip [0 ..] drawList, IntMap.findWithDefault 1 idx visibleFlags == 1]
 
+data UVCheckMode = UVCheckCube | UVCheckSphere | UVCheckPlane
+  deriving (Eq, Show)
+
 data EngineConfig = EngineConfig
   { targetRenderFPS :: !Integer,
     targetPhysicsFPS :: !Integer,
@@ -482,7 +486,7 @@ data EngineConfig = EngineConfig
     title :: !Text,
     debugSocketPath :: !(Maybe FilePath),
     timeoutSeconds :: !(Maybe Integer),
-    uvCheckMode :: !(Maybe String),
+    uvCheckMode :: !(Maybe UVCheckMode),
     envMapDir :: !String,
     lightCount :: !Int,
     initialTimeOfDay :: !Float,

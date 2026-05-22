@@ -1,3 +1,5 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Graphics.Haskan.Vulkan.DescriptorSet where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -11,6 +13,83 @@ import Graphics.Vulkan.Ext.VK_KHR_surface qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setListRef, setStrListRef, setVkRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+
+-- | Configuration for updating lighting descriptor sets.
+data LightingDescriptorUpdate = LightingDescriptorUpdate
+  { lduDevice :: !Vulkan.VkDevice,
+    lduDescriptorSet :: !Vulkan.VkDescriptorSet,
+    lduSampler :: !Vulkan.VkSampler,
+    lduImageViews :: ![Vulkan.VkImageView],
+    lduLightBuffer :: !(Maybe Vulkan.VkBuffer),
+    lduCloudResultView :: !(Maybe Vulkan.VkImageView),
+    lduAPVolumeView :: !(Maybe Vulkan.VkImageView)
+  }
+
+-- | Configuration for updating procedural sky lighting descriptor sets.
+data LightingProceduralDescriptorUpdate = LightingProceduralDescriptorUpdate
+  { lpduDevice :: !Vulkan.VkDevice,
+    lpduDescriptorSet :: !Vulkan.VkDescriptorSet,
+    lpduSampler :: !Vulkan.VkSampler,
+    lpduImageViews :: ![Vulkan.VkImageView],
+    lpduLightBuffer :: !(Maybe Vulkan.VkBuffer),
+    lpduCloudResultView :: !(Maybe Vulkan.VkImageView),
+    lpduGodRayView :: !(Maybe Vulkan.VkImageView),
+    lpduAPVolumeView :: !(Maybe Vulkan.VkImageView)
+  }
+
+-- | Configuration for updating cloud descriptor sets.
+data CloudDescriptorUpdate = CloudDescriptorUpdate
+  { clduDevice :: !Vulkan.VkDevice,
+    clduDescriptorSet :: !Vulkan.VkDescriptorSet,
+    clduSampler :: !Vulkan.VkSampler,
+    clduNoiseSampler :: !Vulkan.VkSampler,
+    clduEnvMapView :: !(Maybe Vulkan.VkImageView),
+    clduCloudNoiseView :: !(Maybe Vulkan.VkImageView),
+    clduCloudHistoryView :: !(Maybe Vulkan.VkImageView),
+    clduBlueNoiseView :: !(Maybe Vulkan.VkImageView),
+    clduWeatherMapView :: !(Maybe Vulkan.VkImageView),
+    clduBlueNoiseSampler :: !Vulkan.VkSampler
+  }
+
+-- | Configuration for updating god ray descriptor sets.
+data GodRayDescriptorUpdate = GodRayDescriptorUpdate
+  { grduDevice :: !Vulkan.VkDevice,
+    grduDescriptorSet :: !Vulkan.VkDescriptorSet,
+    grduSampler :: !Vulkan.VkSampler,
+    grduCloudResultView :: !Vulkan.VkImageView
+  }
+
+-- | Configuration for updating AP volume descriptor sets.
+data APVolumeDescriptorUpdate = APVolumeDescriptorUpdate
+  { apduDevice :: !Vulkan.VkDevice,
+    apduDescriptorSet :: !Vulkan.VkDescriptorSet,
+    apduAPImageView :: !Vulkan.VkImageView,
+    apduCloudNoiseView :: !(Maybe Vulkan.VkImageView),
+    apduCloudNoiseSampler :: !Vulkan.VkSampler,
+    apduWeatherMapView :: !(Maybe Vulkan.VkImageView),
+    apduWeatherMapSampler :: !Vulkan.VkSampler,
+    apduUniformBuffer :: !Vulkan.VkBuffer
+  }
+
+-- | Configuration for updating compute cull descriptor sets.
+data ComputeDescriptorUpdate = ComputeDescriptorUpdate
+  { cpduDevice :: !Vulkan.VkDevice,
+    cpduDescriptorSet :: !Vulkan.VkDescriptorSet,
+    cpduEntitiesBuffer :: !Vulkan.VkBuffer,
+    cpduDrawCommandsBuffer :: !Vulkan.VkBuffer,
+    cpduCullDataBuffer :: !Vulkan.VkBuffer
+  }
+
+-- | Configuration for updating bindless descriptor sets.
+data BindlessDescriptorUpdate = BindlessDescriptorUpdate
+  { bduDevice :: !Vulkan.VkDevice,
+    bduDescriptorSet :: !Vulkan.VkDescriptorSet,
+    bduBuffer :: !Vulkan.VkBuffer,
+    bduRange :: !Vulkan.VkDeviceSize,
+    bduSampler :: !Vulkan.VkSampler,
+    bduImageViews :: ![Vulkan.VkImageView],
+    bduEntityBuffer :: !Vulkan.VkBuffer
+  }
 
 allocateDescriptorSet ::
   (MonadIO m) =>
@@ -140,30 +219,20 @@ updateDescriptorSetsRange dev descriptorSet buffer range textureImageView textur
 
 updateLightingDescriptorSets ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkDescriptorSet ->
-  Vulkan.VkSampler ->
-  -- | 7 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive, env_cubemap, irradiance_cubemap, brdf_lut
-  [Vulkan.VkImageView] ->
-  -- | light SSBO (optional)
-  Maybe Vulkan.VkBuffer ->
-  -- | cloud result texture (optional)
-  Maybe Vulkan.VkImageView ->
-  -- | AP volume 3D texture (optional)
-  Maybe Vulkan.VkImageView ->
+  LightingDescriptorUpdate ->
   m ()
-updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer mCloudResultView mAPVolumeView = do
+updateLightingDescriptorSets LightingDescriptorUpdate {..} = do
   let mkTextureInfo imageView =
         Vulkan.createVk
           ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
               &* set @"imageView" imageView
-              &* set @"sampler" sampler
+              &* set @"sampler" lduSampler
           )
       mkWrite bindingIdx imageView =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
+              &* set @"dstSet" lduDescriptorSet
               &* set @"dstBinding" bindingIdx
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
               &* set @"pTexelBufferView" Vulkan.VK_NULL
@@ -172,8 +241,8 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer m
               &* set @"descriptorCount" 1
               &* set @"dstArrayElement" 0
           )
-      writes = zipWith mkWrite [0 ..] imageViews
-      lightWrite = case mLightBuffer of
+      writes = zipWith mkWrite [0 ..] lduImageViews
+      lightWrite = case lduLightBuffer of
         Nothing -> []
         Just lightBuffer ->
           let bufferInfo =
@@ -185,7 +254,7 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer m
            in [ Vulkan.createVk
                   ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
                       &* set @"pNext" Vulkan.VK_NULL
-                      &* set @"dstSet" descriptorSet
+                      &* set @"dstSet" lduDescriptorSet
                       &* set @"dstBinding" 7
                       &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
                       &* set @"pTexelBufferView" Vulkan.VK_NULL
@@ -195,24 +264,24 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer m
                       &* set @"dstArrayElement" 0
                   )
               ]
-      cloudResultWrite = case mCloudResultView of
+      cloudResultWrite = case lduCloudResultView of
         Nothing -> []
         Just cloudResultView ->
           [mkWrite 8 cloudResultView]
-      apVolumeWrite = case mAPVolumeView of
+      apVolumeWrite = case lduAPVolumeView of
         Nothing -> []
         Just apVolumeView ->
           let apVolumeInfo =
                 Vulkan.createVk
                   ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_GENERAL
                       &* set @"imageView" apVolumeView
-                      &* set @"sampler" sampler
+                      &* set @"sampler" lduSampler
                   )
               apVolumeWriteDescriptor =
                 Vulkan.createVk
                   ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
                       &* set @"pNext" Vulkan.VK_NULL
-                      &* set @"dstSet" descriptorSet
+                      &* set @"dstSet" lduDescriptorSet
                       &* set @"dstBinding" 9
                       &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
                       &* set @"pBufferInfo" Vulkan.VK_NULL
@@ -225,39 +294,27 @@ updateLightingDescriptorSets dev descriptorSet sampler imageViews mLightBuffer m
       allWrites = writes ++ lightWrite ++ cloudResultWrite ++ apVolumeWrite
   liftIO $
     Foreign.Marshal.Array.withArray allWrites $ \writeUpdatePtr ->
-      Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writeUpdatePtr 0 Vulkan.vkNullPtr
+      Vulkan.vkUpdateDescriptorSets lduDevice (fromIntegral (length allWrites)) writeUpdatePtr 0 Vulkan.vkNullPtr
 
 -- | Update lighting descriptor sets for procedural sky variant.
 -- Expects 7 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive,
 -- env_map, irradiance_map, brdf_lut (bindings 0-6).
 updateLightingProceduralDescriptorSets ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkDescriptorSet ->
-  Vulkan.VkSampler ->
-  -- | 7 image views: gbuf_position, gbuf_normal, gbuf_albedo, gbuf_emissive, env_map, irradiance_map, brdf_lut
-  [Vulkan.VkImageView] ->
-  -- | light SSBO (optional)
-  Maybe Vulkan.VkBuffer ->
-  -- | cloud result texture (optional)
-  Maybe Vulkan.VkImageView ->
-  -- | god ray texture (optional)
-  Maybe Vulkan.VkImageView ->
-  -- | AP volume 3D texture (optional)
-  Maybe Vulkan.VkImageView ->
+  LightingProceduralDescriptorUpdate ->
   m ()
-updateLightingProceduralDescriptorSets dev descriptorSet sampler imageViews mLightBuffer mCloudResultView mGodRayView mAPVolumeView = do
+updateLightingProceduralDescriptorSets LightingProceduralDescriptorUpdate {..} = do
   let mkTextureInfo imageView =
         Vulkan.createVk
           ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
               &* set @"imageView" imageView
-              &* set @"sampler" sampler
+              &* set @"sampler" lpduSampler
           )
       mkWrite bindingIdx imageView =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
+              &* set @"dstSet" lpduDescriptorSet
               &* set @"dstBinding" bindingIdx
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
               &* set @"pTexelBufferView" Vulkan.VK_NULL
@@ -267,8 +324,8 @@ updateLightingProceduralDescriptorSets dev descriptorSet sampler imageViews mLig
               &* set @"dstArrayElement" 0
           )
       -- Bindings 0-6 are the standard textures
-      standardWrites = zipWith mkWrite [0 .. 6] (take 7 imageViews)
-      lightWrite = case mLightBuffer of
+      standardWrites = zipWith mkWrite [0 .. 6] (take 7 lpduImageViews)
+      lightWrite = case lpduLightBuffer of
         Nothing -> []
         Just lightBuffer ->
           let bufferInfo =
@@ -280,7 +337,7 @@ updateLightingProceduralDescriptorSets dev descriptorSet sampler imageViews mLig
            in [ Vulkan.createVk
                   ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
                       &* set @"pNext" Vulkan.VK_NULL
-                      &* set @"dstSet" descriptorSet
+                      &* set @"dstSet" lpduDescriptorSet
                       &* set @"dstBinding" 7
                       &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
                       &* set @"pTexelBufferView" Vulkan.VK_NULL
@@ -290,28 +347,28 @@ updateLightingProceduralDescriptorSets dev descriptorSet sampler imageViews mLig
                       &* set @"dstArrayElement" 0
                   )
               ]
-      cloudResultWrite = case mCloudResultView of
+      cloudResultWrite = case lpduCloudResultView of
         Nothing -> []
         Just cloudResultView ->
           [mkWrite 8 cloudResultView]
-      godRayWrite = case mGodRayView of
+      godRayWrite = case lpduGodRayView of
         Nothing -> []
         Just godRayView ->
           [mkWrite 9 godRayView]
-      apVolumeWrite = case mAPVolumeView of
+      apVolumeWrite = case lpduAPVolumeView of
         Nothing -> []
         Just apVolumeView ->
           let apVolumeInfo =
                 Vulkan.createVk
                   ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_GENERAL
                       &* set @"imageView" apVolumeView
-                      &* set @"sampler" sampler
+                      &* set @"sampler" lpduSampler
                   )
               apVolumeWriteDescriptor =
                 Vulkan.createVk
                   ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
                       &* set @"pNext" Vulkan.VK_NULL
-                      &* set @"dstSet" descriptorSet
+                      &* set @"dstSet" lpduDescriptorSet
                       &* set @"dstBinding" 10
                       &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
                       &* set @"pBufferInfo" Vulkan.VK_NULL
@@ -324,7 +381,7 @@ updateLightingProceduralDescriptorSets dev descriptorSet sampler imageViews mLig
       allWrites = standardWrites ++ lightWrite ++ cloudResultWrite ++ godRayWrite ++ apVolumeWrite
   liftIO $
     Foreign.Marshal.Array.withArray allWrites $ \writeUpdatePtr ->
-      Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writeUpdatePtr 0 Vulkan.vkNullPtr
+      Vulkan.vkUpdateDescriptorSets lpduDevice (fromIntegral (length allWrites)) writeUpdatePtr 0 Vulkan.vkNullPtr
 
 -- | Update only the light SSBO binding (binding 7) in a lighting descriptor set.
 updateLightingLightBuffer ::
@@ -360,21 +417,15 @@ updateLightingLightBuffer dev descriptorSet lightBuffer = do
 -- | Update UBO, bindless texture array, and entity SSBO in a descriptor set.
 updateDescriptorSetsBindless ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkDescriptorSet ->
-  Vulkan.VkBuffer -> -- view+proj UBO
-  Vulkan.VkDeviceSize ->
-  Vulkan.VkSampler ->
-  [Vulkan.VkImageView] ->
-  Vulkan.VkBuffer -> -- entity SSBO
+  BindlessDescriptorUpdate ->
   m ()
-updateDescriptorSetsBindless dev descriptorSet buffer range sampler imageViews entityBuffer = do
+updateDescriptorSetsBindless BindlessDescriptorUpdate {..} = do
   let bufferInfo :: Vulkan.VkDescriptorBufferInfo
       bufferInfo =
         Vulkan.createVk
-          ( set @"buffer" buffer
+          ( set @"buffer" bduBuffer
               &* set @"offset" 0
-              &* set @"range" range
+              &* set @"range" bduRange
           )
       textureInfos =
         map
@@ -382,16 +433,16 @@ updateDescriptorSetsBindless dev descriptorSet buffer range sampler imageViews e
               Vulkan.createVk
                 ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                     &* set @"imageView" imageView
-                    &* set @"sampler" sampler
+                    &* set @"sampler" bduSampler
                 )
           )
-          imageViews
+          bduImageViews
       writeUpdate :: Vulkan.VkWriteDescriptorSet
       writeUpdate =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
+              &* set @"dstSet" bduDescriptorSet
               &* set @"dstBinding" 0
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
               &* set @"pTexelBufferView" Vulkan.VK_NULL
@@ -405,19 +456,19 @@ updateDescriptorSetsBindless dev descriptorSet buffer range sampler imageViews e
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
+              &* set @"dstSet" bduDescriptorSet
               &* set @"dstBinding" 1
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
               &* set @"pTexelBufferView" Vulkan.VK_NULL
               &* setListRef @"pImageInfo" textureInfos
               &* set @"pBufferInfo" Vulkan.VK_NULL
-              &* set @"descriptorCount" (fromIntegral (length imageViews))
+              &* set @"descriptorCount" (fromIntegral (length bduImageViews))
               &* set @"dstArrayElement" 0
           )
       entityBufferInfo :: Vulkan.VkDescriptorBufferInfo
       entityBufferInfo =
         Vulkan.createVk
-          ( set @"buffer" entityBuffer
+          ( set @"buffer" bduEntityBuffer
               &* set @"offset" 0
               &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
           )
@@ -426,7 +477,7 @@ updateDescriptorSetsBindless dev descriptorSet buffer range sampler imageViews e
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
+              &* set @"dstSet" bduDescriptorSet
               &* set @"dstBinding" 2
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
               &* set @"pTexelBufferView" Vulkan.VK_NULL
@@ -437,7 +488,7 @@ updateDescriptorSetsBindless dev descriptorSet buffer range sampler imageViews e
           )
   liftIO $
     Foreign.Marshal.Array.withArray [writeUpdate, writeUpdateTexture, writeEntity] $ \writeUpdatePtr ->
-      Vulkan.vkUpdateDescriptorSets dev 3 writeUpdatePtr 0 Vulkan.vkNullPtr
+      Vulkan.vkUpdateDescriptorSets bduDevice 3 writeUpdatePtr 0 Vulkan.vkNullPtr
 
 -- | Update a single combined image sampler binding in a descriptor set.
 updateTextureBinding ::
@@ -532,28 +583,24 @@ cmdBindDescriptorSets commandBuffer pipelineBindPoint layout firstSet descriptor
 -- | Update compute culling descriptor set with SSBOs and UBO.
 updateComputeDescriptorSets ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkDescriptorSet ->
-  Vulkan.VkBuffer -> -- entities SSBO
-  Vulkan.VkBuffer -> -- drawCommands SSBO
-  Vulkan.VkBuffer -> -- cullData UBO
+  ComputeDescriptorUpdate ->
   m ()
-updateComputeDescriptorSets dev descriptorSet entitiesBuffer drawCommandsBuffer cullDataBuffer = do
+updateComputeDescriptorSets ComputeDescriptorUpdate {..} = do
   let entitiesBufferInfo =
         Vulkan.createVk
-          ( set @"buffer" entitiesBuffer
+          ( set @"buffer" cpduEntitiesBuffer
               &* set @"offset" 0
               &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
           )
       drawCommandsBufferInfo =
         Vulkan.createVk
-          ( set @"buffer" drawCommandsBuffer
+          ( set @"buffer" cpduDrawCommandsBuffer
               &* set @"offset" 0
               &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
           )
       cullDataBufferInfo =
         Vulkan.createVk
-          ( set @"buffer" cullDataBuffer
+          ( set @"buffer" cpduCullDataBuffer
               &* set @"offset" 0
               &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
           )
@@ -561,7 +608,7 @@ updateComputeDescriptorSets dev descriptorSet entitiesBuffer drawCommandsBuffer 
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
+              &* set @"dstSet" cpduDescriptorSet
               &* set @"dstBinding" 0
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
               &* set @"pTexelBufferView" Vulkan.VK_NULL
@@ -574,7 +621,7 @@ updateComputeDescriptorSets dev descriptorSet entitiesBuffer drawCommandsBuffer 
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
+              &* set @"dstSet" cpduDescriptorSet
               &* set @"dstBinding" 1
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
               &* set @"pTexelBufferView" Vulkan.VK_NULL
@@ -587,7 +634,7 @@ updateComputeDescriptorSets dev descriptorSet entitiesBuffer drawCommandsBuffer 
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
+              &* set @"dstSet" cpduDescriptorSet
               &* set @"dstBinding" 2
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
               &* set @"pTexelBufferView" Vulkan.VK_NULL
@@ -598,31 +645,14 @@ updateComputeDescriptorSets dev descriptorSet entitiesBuffer drawCommandsBuffer 
           )
   liftIO $
     Foreign.Marshal.Array.withArray [writeEntities, writeDrawCommands, writeCullData] $ \writePtr ->
-      Vulkan.vkUpdateDescriptorSets dev 3 writePtr 0 Vulkan.vkNullPtr
+      Vulkan.vkUpdateDescriptorSets cpduDevice 3 writePtr 0 Vulkan.vkNullPtr
 
 -- | Update cloud descriptor set: env cubemap + 3D noise texture
 updateCloudDescriptorSets ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkDescriptorSet ->
-  -- | Linear sampler for env/history/weather
-  Vulkan.VkSampler ->
-  -- | Linear sampler with maxLod for 3D noise
-  Vulkan.VkSampler ->
-  -- | env cubemap view
-  Maybe Vulkan.VkImageView ->
-  -- | 3D cloud noise texture view
-  Maybe Vulkan.VkImageView ->
-  -- | history texture view
-  Maybe Vulkan.VkImageView ->
-  -- | blue noise texture view
-  Maybe Vulkan.VkImageView ->
-  -- | weather map texture view
-  Maybe Vulkan.VkImageView ->
-  -- | Nearest sampler for blue noise
-  Vulkan.VkSampler ->
+  CloudDescriptorUpdate ->
   m ()
-updateCloudDescriptorSets dev descriptorSet sampler noiseSampler mEnvMapView mCloudNoiseView mCloudHistoryView mBlueNoiseView mWeatherMapView blueNoiseSampler = do
+updateCloudDescriptorSets CloudDescriptorUpdate {..} = do
   let mkTextureInfo imageView s =
         Vulkan.createVk
           ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -633,7 +663,7 @@ updateCloudDescriptorSets dev descriptorSet sampler noiseSampler mEnvMapView mCl
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
+              &* set @"dstSet" clduDescriptorSet
               &* set @"dstBinding" bindingIdx
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
               &* set @"pBufferInfo" Vulkan.VK_NULL
@@ -642,25 +672,25 @@ updateCloudDescriptorSets dev descriptorSet sampler noiseSampler mEnvMapView mCl
               &* set @"descriptorCount" 1
               &* set @"dstArrayElement" 0
           )
-      envWrite = case mEnvMapView of
-        Just envView -> [mkWrite 0 envView sampler]
+      envWrite = case clduEnvMapView of
+        Just envView -> [mkWrite 0 envView clduSampler]
         Nothing -> []
-      noiseWrite = case mCloudNoiseView of
-        Just noiseView -> [mkWrite 1 noiseView noiseSampler]
+      noiseWrite = case clduCloudNoiseView of
+        Just noiseView -> [mkWrite 1 noiseView clduNoiseSampler]
         Nothing -> []
-      historyWrite = case mCloudHistoryView of
-        Just historyView -> [mkWrite 2 historyView sampler]
+      historyWrite = case clduCloudHistoryView of
+        Just historyView -> [mkWrite 2 historyView clduSampler]
         Nothing -> []
-      blueNoiseWrite = case mBlueNoiseView of
-        Just blueView -> [mkWrite 3 blueView blueNoiseSampler]
+      blueNoiseWrite = case clduBlueNoiseView of
+        Just blueView -> [mkWrite 3 blueView clduBlueNoiseSampler]
         Nothing -> []
-      weatherMapWrite = case mWeatherMapView of
-        Just weatherView -> [mkWrite 5 weatherView sampler]
+      weatherMapWrite = case clduWeatherMapView of
+        Just weatherView -> [mkWrite 5 weatherView clduSampler]
         Nothing -> []
       allWrites = envWrite ++ noiseWrite ++ historyWrite ++ blueNoiseWrite ++ weatherMapWrite
   liftIO $
     Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
-      Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr
+      Vulkan.vkUpdateDescriptorSets clduDevice (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr
 
 updateCloudFrameDataBuffer ::
   (MonadIO m) =>
@@ -694,23 +724,20 @@ updateCloudFrameDataBuffer dev descriptorSet buffer = do
 
 updateGodRayDescriptorSets ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkDescriptorSet ->
-  Vulkan.VkSampler ->
-  Vulkan.VkImageView ->
+  GodRayDescriptorUpdate ->
   m ()
-updateGodRayDescriptorSets dev descriptorSet sampler cloudResultView = do
+updateGodRayDescriptorSets GodRayDescriptorUpdate {..} = do
   let imageInfo =
         Vulkan.createVk
           ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-              &* set @"imageView" cloudResultView
-              &* set @"sampler" sampler
+              &* set @"imageView" grduCloudResultView
+              &* set @"sampler" grduSampler
           )
       write =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
               &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
+              &* set @"dstSet" grduDescriptorSet
               &* set @"dstBinding" 0
               &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
               &* set @"pBufferInfo" Vulkan.VK_NULL
@@ -721,30 +748,23 @@ updateGodRayDescriptorSets dev descriptorSet sampler cloudResultView = do
           )
   liftIO $
     Foreign.Marshal.Array.withArray [write] $ \writePtr ->
-      Vulkan.vkUpdateDescriptorSets dev 1 writePtr 0 Vulkan.vkNullPtr
+      Vulkan.vkUpdateDescriptorSets grduDevice 1 writePtr 0 Vulkan.vkNullPtr
 
 -- | Update AP volume compute descriptor set with storage image, cloud noise, and UBO.
 updateAPVolumeDescriptorSets ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkDescriptorSet ->
-  Vulkan.VkImageView -> -- AP volume 3D storage image
-  Maybe Vulkan.VkImageView -> -- cloud noise 3D texture
-  Vulkan.VkSampler -> -- sampler for cloud noise
-  Maybe Vulkan.VkImageView -> -- weather map 2D texture
-  Vulkan.VkSampler -> -- sampler for weather map
-  Vulkan.VkBuffer -> -- uniform buffer
+  APVolumeDescriptorUpdate ->
   m ()
-updateAPVolumeDescriptorSets dev descriptorSet apImageView mCloudNoiseView cloudNoiseSampler mWeatherMapView weatherMapSampler uniformBuffer = do
+updateAPVolumeDescriptorSets APVolumeDescriptorUpdate {..} = do
  let imageInfo =
        Vulkan.createVk
          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_GENERAL
-             &* set @"imageView" apImageView
+             &* set @"imageView" apduAPImageView
              &* set @"sampler" Vulkan.VK_NULL_HANDLE
          )
      bufferInfo =
        Vulkan.createVk
-         ( set @"buffer" uniformBuffer
+         ( set @"buffer" apduUniformBuffer
              &* set @"offset" 0
              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
          )
@@ -752,7 +772,7 @@ updateAPVolumeDescriptorSets dev descriptorSet apImageView mCloudNoiseView cloud
        Vulkan.createVk
          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
              &* set @"pNext" Vulkan.VK_NULL
-             &* set @"dstSet" descriptorSet
+             &* set @"dstSet" apduDescriptorSet
              &* set @"dstBinding" 0
              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
              &* set @"pBufferInfo" Vulkan.VK_NULL
@@ -765,7 +785,7 @@ updateAPVolumeDescriptorSets dev descriptorSet apImageView mCloudNoiseView cloud
        Vulkan.createVk
          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
              &* set @"pNext" Vulkan.VK_NULL
-             &* set @"dstSet" descriptorSet
+             &* set @"dstSet" apduDescriptorSet
              &* set @"dstBinding" 2
              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
              &* setVkRef @"pBufferInfo" bufferInfo
@@ -774,19 +794,19 @@ updateAPVolumeDescriptorSets dev descriptorSet apImageView mCloudNoiseView cloud
              &* set @"descriptorCount" 1
              &* set @"dstArrayElement" 0
           )
-     noiseWrite = case mCloudNoiseView of
+     noiseWrite = case apduCloudNoiseView of
         Just noiseView ->
           let noiseInfo =
                 Vulkan.createVk
                   ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                       &* set @"imageView" noiseView
-                      &* set @"sampler" cloudNoiseSampler
+                      &* set @"sampler" apduCloudNoiseSampler
                   )
               noiseWriteDescriptor =
                 Vulkan.createVk
                   ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
                       &* set @"pNext" Vulkan.VK_NULL
-                      &* set @"dstSet" descriptorSet
+                      &* set @"dstSet" apduDescriptorSet
                       &* set @"dstBinding" 1
                       &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
                       &* set @"pBufferInfo" Vulkan.VK_NULL
@@ -797,19 +817,19 @@ updateAPVolumeDescriptorSets dev descriptorSet apImageView mCloudNoiseView cloud
                   )
            in [noiseWriteDescriptor]
         Nothing -> []
-     weatherMapWrite = case mWeatherMapView of
+     weatherMapWrite = case apduWeatherMapView of
         Just weatherMapView ->
           let weatherMapInfo =
                 Vulkan.createVk
                   ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
                       &* set @"imageView" weatherMapView
-                      &* set @"sampler" weatherMapSampler
+                      &* set @"sampler" apduWeatherMapSampler
                   )
               weatherMapWriteDescriptor =
                 Vulkan.createVk
                   ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
                       &* set @"pNext" Vulkan.VK_NULL
-                      &* set @"dstSet" descriptorSet
+                      &* set @"dstSet" apduDescriptorSet
                       &* set @"dstBinding" 3
                       &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
                       &* set @"pBufferInfo" Vulkan.VK_NULL
@@ -823,7 +843,7 @@ updateAPVolumeDescriptorSets dev descriptorSet apImageView mCloudNoiseView cloud
      allWrites = [writeImage, writeUniform] ++ noiseWrite ++ weatherMapWrite
  liftIO $
    Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
-     Vulkan.vkUpdateDescriptorSets dev (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr
+     Vulkan.vkUpdateDescriptorSets apduDevice (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr
 
 -- | Update cubemap compute descriptor set with storage image and UBO.
 updateCubemapComputeDescriptorSets ::

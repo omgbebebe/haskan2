@@ -462,9 +462,28 @@ createDeferredResources DeferredConfig {..} = do
           _ -> views ++ replicate 3 Vulkan.VK_NULL_HANDLE
     if proceduralSkyEnabled
       then do
-        DescriptorSet.updateLightingProceduralDescriptorSets device ds sampler baseViews mLightBuffer (Just cloudView) (Just godRayView) (Just apImageView)
+        DescriptorSet.updateLightingProceduralDescriptorSets $
+          DescriptorSet.LightingProceduralDescriptorUpdate
+            { lpduDevice = device
+            , lpduDescriptorSet = ds
+            , lpduSampler = sampler
+            , lpduImageViews = baseViews
+            , lpduLightBuffer = mLightBuffer
+            , lpduCloudResultView = Just cloudView
+            , lpduGodRayView = Just godRayView
+            , lpduAPVolumeView = Just apImageView
+            }
       else do
-        DescriptorSet.updateLightingDescriptorSets device ds sampler baseViews mLightBuffer (Just cloudView) (Just apImageView)
+        DescriptorSet.updateLightingDescriptorSets $
+          DescriptorSet.LightingDescriptorUpdate
+            { lduDevice = device
+            , lduDescriptorSet = ds
+            , lduSampler = sampler
+            , lduImageViews = baseViews
+            , lduLightBuffer = mLightBuffer
+            , lduCloudResultView = Just cloudView
+            , lduAPVolumeView = Just apImageView
+            }
   logDebugIO LogRender "lighting descriptor sets updated"
 
   -- Create cloud frame data UBO (256 bytes, minimum UBO alignment)
@@ -483,7 +502,19 @@ createDeferredResources DeferredConfig {..} = do
 
   -- Update cloud descriptor sets
   liftIO $ for_ (zip cloudDescriptorSets cloudHistoryImageViews) $ \(ds, histView) -> do
-    DescriptorSet.updateCloudDescriptorSets device ds sampler noiseSampler mEnvMapView mCloudNoiseView (Just histView) mBlueNoiseView mWeatherMapView blueNoiseSampler
+    DescriptorSet.updateCloudDescriptorSets $
+      DescriptorSet.CloudDescriptorUpdate
+        { clduDevice = device
+        , clduDescriptorSet = ds
+        , clduSampler = sampler
+        , clduNoiseSampler = noiseSampler
+        , clduEnvMapView = mEnvMapView
+        , clduCloudNoiseView = mCloudNoiseView
+        , clduCloudHistoryView = Just histView
+        , clduBlueNoiseView = mBlueNoiseView
+        , clduWeatherMapView = mWeatherMapView
+        , clduBlueNoiseSampler = blueNoiseSampler
+        }
     DescriptorSet.updateCloudFrameDataBuffer device ds cloudFrameDataBuffer
   logDebugIO LogRender "cloud descriptor sets updated"
 
@@ -495,7 +526,13 @@ createDeferredResources DeferredConfig {..} = do
 
   -- Update god ray descriptor sets (only need cloud_result)
   liftIO $ for_ (zip godRayDescriptorSets cloudImageViews) $ \(ds, cloudView) -> do
-    DescriptorSet.updateGodRayDescriptorSets device ds sampler cloudView
+    DescriptorSet.updateGodRayDescriptorSets $
+      DescriptorSet.GodRayDescriptorUpdate
+        { grduDevice = device
+        , grduDescriptorSet = ds
+        , grduSampler = sampler
+        , grduCloudResultView = cloudView
+        }
   logDebugIO LogRender "god ray descriptor sets updated"
 
   -- AP volume compute pipeline
@@ -522,7 +559,17 @@ createDeferredResources DeferredConfig {..} = do
 
   -- Update AP volume descriptor sets
   liftIO $ for_ apVolumeDescriptorSets $ \ds -> do
-    DescriptorSet.updateAPVolumeDescriptorSets device ds apImageView mCloudNoiseView noiseSampler mWeatherMapView noiseSampler apUniformBuffer
+    DescriptorSet.updateAPVolumeDescriptorSets $
+      DescriptorSet.APVolumeDescriptorUpdate
+        { apduDevice = device
+        , apduDescriptorSet = ds
+        , apduAPImageView = apImageView
+        , apduCloudNoiseView = mCloudNoiseView
+        , apduCloudNoiseSampler = noiseSampler
+        , apduWeatherMapView = mWeatherMapView
+        , apduWeatherMapSampler = noiseSampler
+        , apduUniformBuffer = apUniformBuffer
+        }
   logDebugIO LogRender "AP volume descriptor sets updated"
 
   pure

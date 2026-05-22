@@ -152,17 +152,19 @@ main = do
     else do
       putStrLn ("Loading model: " ++ optModelName cli)
       Haskan.runHaskan
-        (optTitle cli)
-        (optModelName cli)
-        (optTimeout cli)
-        (optDebugSocket cli)
-         (optUVCheckCube cli)
-         (optUVCheckSphere cli)
-         (optUVCheckPlane cli)
-         (optEnvDir cli)
-         (optLights cli)
-         (optTimeOfDay cli)
-         (optTimeSpeed cli)
-         (optDayNight cli)
-         (optCloudTest cli)
-         (optProceduralSky cli)
+        Haskan.RunOptions
+          { Haskan.roTitle = optTitle cli,
+            Haskan.roMeshName = optModelName cli,
+            Haskan.roTimeout = optTimeout cli,
+            Haskan.roDebugSocket = optDebugSocket cli,
+            Haskan.roUVCheckCube = optUVCheckCube cli,
+            Haskan.roUVCheckSphere = optUVCheckSphere cli,
+            Haskan.roUVCheckPlane = optUVCheckPlane cli,
+            Haskan.roEnvDir = optEnvDir cli,
+            Haskan.roNumLights = optLights cli,
+            Haskan.roInitialTime = optTimeOfDay cli,
+            Haskan.roTimeSpeed = optTimeSpeed cli,
+            Haskan.roDayNight = optDayNight cli,
+            Haskan.roCloudTest = optCloudTest cli,
+            Haskan.roProceduralSky = optProceduralSky cli
+          }

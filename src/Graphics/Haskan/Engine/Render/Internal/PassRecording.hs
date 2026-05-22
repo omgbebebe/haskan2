@@ -1,9 +1,12 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Engine.Render.Internal.PassRecording
-  ( RecordContext (..),
+  ( CloudParams (..),
+    SkyParams (..),
+    FrameParams (..),
+    FrameRenderResources (..),
+    FrameRenderInput (..),
     buildRecordAction,
-    buildRecordContext,
   )
 where
 
@@ -24,7 +27,7 @@ import Graphics.Haskan.Camera.Types (ViewMatrix (..))
 import Graphics.Haskan.Engine.Render.Internal.FrameState (FrameState (..))
 import Graphics.Haskan.Engine.Types (ComputeCullResources (..), DrawIndexedIndirectCommand (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
-import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
+import Graphics.Haskan.Render.Deferred (CloudPassData (..), DeferredPassData (..), GBufferPassData (..), GodRayPassData (..), LightingPassData (..), buildDeferredGraph)
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
@@ -45,153 +48,118 @@ import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
 
 -- | All values pre-computed before creating the IO callback
-data RecordContext = RecordContext
-  { rcGraphicsCommandBuffers :: ![Vulkan.VkCommandBuffer],
-    rcFrameDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    rcTextureSampler :: !Vulkan.VkSampler,
-    rcLightSsboBuffer :: !Vulkan.VkBuffer,
-    rcDrawList :: ![DrawCall],
-    rcCameraPos :: !(V3 Float),
-    rcSkyboxRays :: !(V3 Float, V3 Float, V3 Float),
-    rcDebugMode :: !Word32,
-    rcAxisOverlay :: !Float,
-    rcGroundPlane :: !Float,
-    rcLightCount :: !Word32,
-    rcSkyTint :: !(V3 Float),
-    rcIBLIntensity :: !Float,
-    rcSunAzimuth :: !Float,
-    rcSunScreenX :: !Float,
-    rcSunScreenY :: !Float,
-    rcSunDir :: !(V3 Float),
-    rcCloudHeight :: !Float,
-    rcTime :: !Float,
-    rcPrevViewProjTVars :: ![STM.TVar (M44 CFloat)],
-    rcPrevTimeTVars :: ![STM.TVar Float],
-    rcCurrentCloudViewProj :: !(M44 CFloat),
-    rcWindDirX :: !Float,
-    rcWindDirZ :: !Float,
-    rcCloudCoverage :: !Float,
-    rcCloudDetail :: !Float,
-    rcCloudAbsorption :: !Float,
-    rcWeatherCoverageScale :: !Float,
-    rcWeatherTypeBias :: !Float,
-    rcStormIntensity :: !Float,
-    rcWeatherAnimSpeed :: !Float,
-    rcWireframeEnabled :: !Bool,
-    rcDeferred :: !DeferredResources,
-    rcCullResources :: !ComputeCullResources,
-    rcDevice :: !Vulkan.VkDevice,
-    rcPassSurfaceExtent :: !Vulkan.VkExtent2D,
-    rcImGuiRenderPass :: !Vulkan.VkRenderPass,
-    rcImGuiFramebuffers :: ![Vulkan.VkFramebuffer],
-    rcImGuiDrawData :: !(Maybe DearImGui.Raw.DrawData),
-    -- AP volume uniform data
-    rcInvViewProj :: !(M44 Float),
-    rcNearPlane :: !Float,
-    rcFarPlane :: !Float,
-    rcSunColor :: !(V3 Float),
-    rcCloudBase :: !Float,
-    rcCloudTop :: !Float
+-- | Cloud/weather parameters grouped together.
+data CloudParams = CloudParams
+  { clWindDirX :: !Float,
+    clWindDirZ :: !Float,
+    clCloudCoverage :: !Float,
+    clCloudDetail :: !Float,
+    clCloudAbsorption :: !Float,
+    clWeatherCoverageScale :: !Float,
+    clWeatherTypeBias :: !Float,
+    clStormIntensity :: !Float,
+    clWeatherAnimSpeed :: !Float
   }
 
-buildRecordContext ::
-  RenderContext ->
-  DeferredResources ->
-  ComputeCullResources ->
-  [Vulkan.VkDescriptorSet] ->
-  Vulkan.VkSampler ->
-  Vulkan.VkBuffer ->
-  FrameState ->
-  AnyCamera ->
-  [DrawCall] ->
-  Word32 ->
-  (V3 Float, V3 Float, V3 Float) ->
-  V3 Float ->
-  Float ->
-  Float ->
-  V3 Float ->
-  Float ->
-  [STM.TVar (M44 CFloat)] ->
-  [STM.TVar Float] ->
-  M44 CFloat ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  Float ->
-  M44 Float ->
-  Float ->
-  Float ->
-  V3 Float ->
-  Float ->
-  Float ->
-  Maybe DearImGui.Raw.DrawData ->
-  RecordContext
-buildRecordContext ctx dr ccr frameDescriptorSets textureSampler lightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir time prevViewProjTVars prevTimeTVars currentCloudViewProj windDirX windDirZ cloudCoverage cloudDetail cloudAbsorption weatherCoverageScale weatherTypeBias stormIntensity weatherAnimSpeed invViewProj nearPlane farPlane sunColor cloudBase cloudTop mDrawData =
-  let viewMat = fmap (fmap realToFrac) (unViewMatrix (Camera.toMatrix camera)) :: M44 Float
-      extent = rcSurfaceExtent ctx
-      width = realToFrac (Vulkan.getField @"width" extent) :: Float
-      height = realToFrac (Vulkan.getField @"height" extent) :: Float
+-- | Sky/lighting parameters grouped together.
+data SkyParams = SkyParams
+  { spSkyTint :: !(V3 Float),
+    spIBLIntensity :: !Float,
+    spSunAzimuth :: !Float,
+    spSunDir :: !(V3 Float)
+  }
+
+-- | Per-frame time and matrix parameters.
+data FrameParams = FrameParams
+  { fpTime :: !Float,
+    fpPrevViewProjTVars :: ![STM.TVar (M44 CFloat)],
+    fpPrevTimeTVars :: ![STM.TVar Float],
+    fpCurrentCloudViewProj :: !(M44 CFloat)
+  }
+
+-- | Static resources passed to every frame render.
+data FrameRenderResources = FrameRenderResources
+  { frrContext :: !RenderContext,
+    frrDeferred :: !DeferredResources,
+    frrCullResources :: !ComputeCullResources,
+    frrFrameDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    frrTextureSampler :: !Vulkan.VkSampler,
+    frrLightSsboBuffer :: !Vulkan.VkBuffer
+  }
+
+-- | Per-frame varying inputs to buildRecordContext.
+data FrameRenderInput = FrameRenderInput
+  { friFrameState :: !FrameState,
+    friCamera :: !AnyCamera,
+    friDrawList :: ![DrawCall],
+    friLightCount :: !Word32,
+    friSkyboxRays :: !(V3 Float, V3 Float, V3 Float),
+    friSkyParams :: !SkyParams,
+    friCloudParams :: !CloudParams,
+    friFrameParams :: !FrameParams,
+    friInvViewProj :: !(M44 Float),
+    friNearPlane :: !Float,
+    friFarPlane :: !Float,
+    friSunColor :: !(V3 Float),
+    friCloudBase :: !Float,
+    friCloudTop :: !Float,
+    friDrawData :: !(Maybe DearImGui.Raw.DrawData)
+  }
+
+buildRecordAction :: FrameRenderResources -> FrameRenderInput -> Vulkan.Word32 -> Int -> IO ()
+buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frameIdx = do
+  let rcGraphicsCommandBuffers = graphicsCommandBuffers frrContext
+      rcFrameDescriptorSets = frrFrameDescriptorSets
+      rcTextureSampler = frrTextureSampler
+      rcLightSsboBuffer = frrLightSsboBuffer
+      rcDrawList = friDrawList
+      rcCameraPos = realToFrac <$> Camera.cameraPosition friCamera
+      rcSkyboxRays = friSkyboxRays
+      rcDebugMode = fsDebugMode friFrameState
+      rcAxisOverlay = fsAxisOverlay friFrameState
+      rcGroundPlane = fsGroundPlane friFrameState
+      rcLightCount = friLightCount
+      rcSkyTint = spSkyTint friSkyParams
+      rcIBLIntensity = spIBLIntensity friSkyParams
+      rcSunDir = spSunDir friSkyParams
+      rcCloudHeight = fsCloudHeight friFrameState
+      rcTime = fpTime friFrameParams
+      rcPrevViewProjTVars = fpPrevViewProjTVars friFrameParams
+      rcPrevTimeTVars = fpPrevTimeTVars friFrameParams
+      rcCurrentCloudViewProj = fpCurrentCloudViewProj friFrameParams
+      rcWindDirX = clWindDirX friCloudParams
+      rcWindDirZ = clWindDirZ friCloudParams
+      rcCloudCoverage = clCloudCoverage friCloudParams
+      rcCloudDetail = clCloudDetail friCloudParams
+      rcCloudAbsorption = clCloudAbsorption friCloudParams
+      rcWeatherCoverageScale = clWeatherCoverageScale friCloudParams
+      rcWeatherTypeBias = clWeatherTypeBias friCloudParams
+      rcStormIntensity = clStormIntensity friCloudParams
+      rcWeatherAnimSpeed = clWeatherAnimSpeed friCloudParams
+      rcWireframeEnabled = fsWireframe friFrameState
+      rcDeferred = frrDeferred
+      rcCullResources = frrCullResources
+      rcDevice = device frrContext
+      rcPassSurfaceExtent = rcSurfaceExtent frrContext
+      rcImGuiRenderPass = drImGuiRenderPass frrDeferred
+      rcImGuiFramebuffers = drImGuiFramebuffers frrDeferred
+      rcImGuiDrawData = friDrawData
+      rcInvViewProj = friInvViewProj
+      rcNearPlane = friNearPlane
+      rcFarPlane = friFarPlane
+      rcSunColor = friSunColor
+      rcCloudBase = friCloudBase
+      rcCloudTop = friCloudTop
+      viewMat = fmap (fmap realToFrac) (unViewMatrix (Camera.toMatrix friCamera)) :: M44 Float
+      width = realToFrac (Vulkan.getField @"width" rcPassSurfaceExtent) :: Float
+      height = realToFrac (Vulkan.getField @"height" rcPassSurfaceExtent) :: Float
       projMat = perspective (pi / 3) (width / height) 1.0 50000.0
       viewProj = projMat !*! viewMat
-      sunWorld = sunDir ^* 10000.0
+      sunWorld = rcSunDir ^* 10000.0
       V4 cx cy cz cw = viewProj !* V4 (sunWorld ^. _x) (sunWorld ^. _y) (sunWorld ^. _z) 1.0
-      sunScreenX = if cw > 0 then cx / cw * 0.5 + 0.5 else (-1.0)
-      sunScreenY = if cw > 0 then -cy / cw * 0.5 + 0.5 else (-1.0)
-   in RecordContext
-        { rcGraphicsCommandBuffers = graphicsCommandBuffers ctx,
-          rcFrameDescriptorSets = frameDescriptorSets,
-          rcTextureSampler = textureSampler,
-          rcLightSsboBuffer = lightSsboBuffer,
-          rcDrawList = drawList,
-          rcCameraPos = realToFrac <$> Camera.cameraPosition camera,
-          rcSkyboxRays = skyboxRays,
-          rcDebugMode = fsDebugMode frameState,
-          rcAxisOverlay = fsAxisOverlay frameState,
-          rcGroundPlane = fsGroundPlane frameState,
-          rcLightCount = lightCount,
-          rcSkyTint = skyTint,
-          rcIBLIntensity = iblInt,
-          rcSunAzimuth = sunAzimuth,
-          rcSunScreenX = sunScreenX,
-          rcSunScreenY = sunScreenY,
-          rcSunDir = sunDir,
-          rcCloudHeight = fsCloudHeight frameState,
-          rcTime = time,
-          rcPrevViewProjTVars = prevViewProjTVars,
-          rcPrevTimeTVars = prevTimeTVars,
-          rcCurrentCloudViewProj = currentCloudViewProj,
-          rcWindDirX = windDirX,
-          rcWindDirZ = windDirZ,
-          rcCloudCoverage = cloudCoverage,
-          rcCloudDetail = cloudDetail,
-          rcCloudAbsorption = cloudAbsorption,
-          rcWeatherCoverageScale = weatherCoverageScale,
-          rcWeatherTypeBias = weatherTypeBias,
-          rcStormIntensity = stormIntensity,
-          rcWeatherAnimSpeed = weatherAnimSpeed,
-           rcWireframeEnabled = fsWireframe frameState,
-           rcDeferred = dr,
-           rcCullResources = ccr,
-           rcDevice = device ctx,
-           rcPassSurfaceExtent = rcSurfaceExtent ctx,
-           rcImGuiRenderPass = drImGuiRenderPass dr,
-           rcImGuiFramebuffers = drImGuiFramebuffers dr,
-           rcImGuiDrawData = mDrawData,
-           rcInvViewProj = invViewProj,
-           rcNearPlane = nearPlane,
-           rcFarPlane = farPlane,
-           rcSunColor = sunColor,
-           rcCloudBase = cloudBase,
-           rcCloudTop = cloudTop
-         }
-
-buildRecordAction :: RecordContext -> Vulkan.Word32 -> Int -> IO ()
-buildRecordAction RecordContext {..} imageIdx frameIdx = do
+      rcSunScreenX = if cw > 0 then cx / cw * 0.5 + 0.5 else (-1.0)
+      rcSunScreenY = if cw > 0 then -cy / cw * 0.5 + 0.5 else (-1.0)
+      rcSunAzimuth = rcSunScreenX
   prevViewProj <- STM.readTVarIO (rcPrevViewProjTVars !! fromIntegral imageIdx)
   prevTimeVal <- STM.readTVarIO (rcPrevTimeTVars !! fromIntegral imageIdx)
   STM.atomically $ do
@@ -244,69 +212,89 @@ buildRecordAction RecordContext {..} imageIdx frameIdx = do
           buildDeferredGraph
             DeferredPassData
               { dpdExtent = rcPassSurfaceExtent,
-                dpdGBufferRenderPass = drGBufferRenderPass rcDeferred,
-                dpdGBufferFramebuffer = gBufferFramebuffer,
-                 dpdGBufferPipeline = drGBufferPipeline rcDeferred,
-                 dpdGBufferDoubleSidedPipeline = drGBufferDoubleSidedPipeline rcDeferred,
-                 dpdGBufferLayout = drGBufferPipelineLayout rcDeferred,
-                dpdGBufferDescriptor = frameDescriptorSet,
-                dpdGBufferSampler = rcTextureSampler,
                 dpdDrawList = rcDrawList,
                 dpdDevice = rcDevice,
-                dpdDrawCommandsBuffer = ccrDrawCommandsBuffer rcCullResources,
-                dpdEntityCount = fromIntegral (length rcDrawList),
-                dpdLightingRenderPass = drLightingRenderPass rcDeferred,
-                dpdLightingFramebuffer = lightingFramebuffer,
-                dpdLightingPipeline = drLightingPipeline rcDeferred,
-                dpdLightingLayout = drLightingPipelineLayout rcDeferred,
-                dpdLightingDescriptor = lightingDescriptorSet,
-                dpdCameraPos = rcCameraPos,
-                dpdSkyboxRays = rcSkyboxRays,
-                dpdDebugMode = rcDebugMode,
-                dpdAxisOverlay = rcAxisOverlay,
-                dpdGroundPlane = rcGroundPlane,
-                dpdLightCount = rcLightCount,
-                dpdLightBuffer = rcLightSsboBuffer,
-                dpdSkyTint = rcSkyTint,
-                dpdIBLIntensity = rcIBLIntensity,
-                dpdSunAzimuth = rcSunAzimuth,
-                dpdSunScreenX = rcSunScreenX,
-                dpdSunScreenY = rcSunScreenY,
-                dpdSunDir = rcSunDir,
-                dpdCloudHeight = rcCloudHeight,
-                dpdTime = rcTime,
-                dpdPrevViewProj = prevViewProjF,
-                dpdBlendFactor = 0.3,
-                dpdWindDirX = rcWindDirX,
-                dpdWindDirZ = rcWindDirZ,
-                dpdPrevTime = prevTimeVal,
-                dpdCloudCoverage = rcCloudCoverage,
-                dpdCloudDetail = rcCloudDetail,
-                dpdCloudAbsorption = rcCloudAbsorption,
-                dpdWeatherCoverageScale = rcWeatherCoverageScale,
-                dpdWeatherTypeBias = rcWeatherTypeBias,
-                dpdStormIntensity = rcStormIntensity,
-                dpdWeatherAnimSpeed = rcWeatherAnimSpeed,
-                dpdFrameIndex = frameIdx,
-                dpdCloudFrameDataMemory = drCloudFrameDataMemory rcDeferred,
-                dpdCloudRenderPass = drCloudRenderPass rcDeferred,
-                dpdCloudFramebuffer = cloudFramebuffer,
-                dpdCloudPipeline = drCloudPipeline rcDeferred,
-                dpdCloudLayout = drCloudPipelineLayout rcDeferred,
-                dpdCloudDescriptor = cloudDescriptorSet,
-                dpdCloudExtent = drCloudExtent rcDeferred,
-                dpdCloudImage = cloudImage,
-                dpdCloudHistoryImage = cloudHistoryImage,
-                dpdGodRayRenderPass = drGodRayRenderPass rcDeferred,
-                dpdGodRayFramebuffer = drGodRayFramebuffers rcDeferred !! fromIntegral imageIdx,
-                dpdGodRayPipeline = drGodRayPipeline rcDeferred,
-                dpdGodRayLayout = drGodRayPipelineLayout rcDeferred,
-                dpdGodRayDescriptor = drGodRayDescriptorSets rcDeferred !! fromIntegral imageIdx,
-                dpdGodRayExtent = drCloudExtent rcDeferred,
-                dpdGBufferImages = gBufferImagesForFrame,
-                dpdWireframePipeline = drWireframePipeline rcDeferred,
-                dpdWireframeLayout = drWireframePipelineLayout rcDeferred,
-                dpdWireframeEnabled = rcWireframeEnabled
+                dpdGBuffer =
+                  GBufferPassData
+                    { gbpRenderPass = drGBufferRenderPass rcDeferred,
+                      gbpFramebuffer = gBufferFramebuffer,
+                      gbpPipeline = drGBufferPipeline rcDeferred,
+                      gbpDoubleSidedPipeline = drGBufferDoubleSidedPipeline rcDeferred,
+                      gbpLayout = drGBufferPipelineLayout rcDeferred,
+                      gbpDescriptor = frameDescriptorSet,
+                      gbpSampler = rcTextureSampler,
+                      gbpDrawCommandsBuffer = ccrDrawCommandsBuffer rcCullResources,
+                      gbpEntityCount = fromIntegral (length rcDrawList),
+                      gbpGBufferImages = gBufferImagesForFrame,
+                      gbpWireframePipeline = drWireframePipeline rcDeferred,
+                      gbpWireframeLayout = drWireframePipelineLayout rcDeferred,
+                      gbpWireframeEnabled = rcWireframeEnabled
+                    },
+                dpdCloud =
+                  CloudPassData
+                    { cpRenderPass = drCloudRenderPass rcDeferred,
+                      cpFramebuffer = cloudFramebuffer,
+                      cpPipeline = drCloudPipeline rcDeferred,
+                      cpLayout = drCloudPipelineLayout rcDeferred,
+                      cpDescriptor = cloudDescriptorSet,
+                      cpExtent = drCloudExtent rcDeferred,
+                      cpImage = cloudImage,
+                      cpHistoryImage = cloudHistoryImage,
+                      cpFrameDataMemory = drCloudFrameDataMemory rcDeferred,
+                      cpCameraPos = rcCameraPos,
+                      cpSkyboxRays = rcSkyboxRays,
+                      cpSunDir = rcSunDir,
+                      cpCloudHeight = rcCloudHeight,
+                      cpTime = rcTime,
+                      cpBlendFactor = 0.3,
+                      cpWindDirX = rcWindDirX,
+                      cpWindDirZ = rcWindDirZ,
+                      cpPrevTime = prevTimeVal,
+                      cpCloudCoverage = rcCloudCoverage,
+                      cpCloudDetail = rcCloudDetail,
+                      cpCloudAbsorption = rcCloudAbsorption,
+                      cpWeatherCoverageScale = rcWeatherCoverageScale,
+                      cpWeatherTypeBias = rcWeatherTypeBias,
+                      cpStormIntensity = rcStormIntensity,
+                      cpWeatherAnimSpeed = rcWeatherAnimSpeed,
+                      cpFrameIndex = frameIdx,
+                      cpDebugMode = rcDebugMode,
+                      cpPrevViewProj = prevViewProjF
+                    },
+                dpdGodRay =
+                  GodRayPassData
+                    { grpRenderPass = drGodRayRenderPass rcDeferred,
+                      grpFramebuffer = drGodRayFramebuffers rcDeferred !! fromIntegral imageIdx,
+                      grpPipeline = drGodRayPipeline rcDeferred,
+                      grpLayout = drGodRayPipelineLayout rcDeferred,
+                      grpDescriptor = drGodRayDescriptorSets rcDeferred !! fromIntegral imageIdx,
+                      grpExtent = drCloudExtent rcDeferred,
+                      grpSunScreenX = rcSunScreenX,
+                      grpSunScreenY = rcSunScreenY
+                    },
+                dpdLighting =
+                  LightingPassData
+                    { lpRenderPass = drLightingRenderPass rcDeferred,
+                      lpFramebuffer = lightingFramebuffer,
+                      lpPipeline = drLightingPipeline rcDeferred,
+                      lpLayout = drLightingPipelineLayout rcDeferred,
+                      lpDescriptor = lightingDescriptorSet,
+                      lpCameraPos = rcCameraPos,
+                      lpSkyboxRays = rcSkyboxRays,
+                      lpSkyTint = rcSkyTint,
+                      lpIBLIntensity = rcIBLIntensity,
+                      lpSunAzimuth = rcSunAzimuth,
+                      lpSunScreenX = rcSunScreenX,
+                      lpSunScreenY = rcSunScreenY,
+                      lpSunDir = rcSunDir,
+                      lpCloudHeight = rcCloudHeight,
+                      lpTime = rcTime,
+                      lpDebugMode = rcDebugMode,
+                      lpAxisOverlay = rcAxisOverlay,
+                      lpGroundPlane = rcGroundPlane,
+                      lpLightCount = rcLightCount,
+                      lpLightBuffer = rcLightSsboBuffer
+                    }
               }
   case Graph.compileGraph graphRes graphPasses of
     Left err -> logInfoIO LogRender $ "graph compilation failed: " <> Text.pack (show err)

@@ -10,7 +10,8 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        compiler = "ghc9141";
+        #compiler = "ghc9141";
+        compiler = "ghc912";
       in
       {
         devShells.default = import ./shell.flake.nix { inherit pkgs compiler; };

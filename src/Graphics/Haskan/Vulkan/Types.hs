@@ -5,6 +5,13 @@ module Graphics.Haskan.Vulkan.Types where
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 
+data VulkanContext = VulkanContext
+  { vcDevice :: !Vulkan.VkDevice,
+    vcPhysicalDevice :: !Vulkan.VkPhysicalDevice,
+    vcQueue :: !Vulkan.VkQueue,
+    vcCommandBuffer :: !Vulkan.VkCommandBuffer
+  }
+
 data StaticRenderContext = StaticRenderContext
   { surface :: Vulkan.VkSurfaceKHR,
     physicalDevice :: Vulkan.VkPhysicalDevice,

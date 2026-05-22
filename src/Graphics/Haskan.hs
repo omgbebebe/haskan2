@@ -1,44 +1,64 @@
-module Graphics.Haskan (runHaskan, runSimple) where
+{-# LANGUAGE RecordWildCards #-}
+
+module Graphics.Haskan (RunOptions (..), runHaskan, runSimple) where
 
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Graphics.Haskan.Engine (EngineConfig (..))
+import Graphics.Haskan.Engine (EngineConfig (..), UVCheckMode (..))
 import Graphics.Haskan.Engine qualified as Engine
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
 import Graphics.Haskan.Mesh (Mesh)
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 
-runHaskan :: Text -> String -> Maybe Integer -> Maybe FilePath -> Bool -> Bool -> Bool -> String -> Int -> Float -> Float -> Bool -> Bool -> Bool -> IO ()
-runHaskan title meshName mTimeout mDebugSocket uvCheckCube uvCheckSphere uvCheckPlane envDir numLights initialTime speed dayNight cloudTest proceduralSky = do
+-- | All runtime options for the full Haskan engine.
+data RunOptions = RunOptions
+  { roTitle :: !Text,
+    roMeshName :: !String,
+    roTimeout :: !(Maybe Integer),
+    roDebugSocket :: !(Maybe FilePath),
+    roUVCheckCube :: !Bool,
+    roUVCheckSphere :: !Bool,
+    roUVCheckPlane :: !Bool,
+    roEnvDir :: !String,
+    roNumLights :: !Int,
+    roInitialTime :: !Float,
+    roTimeSpeed :: !Float,
+    roDayNight :: !Bool,
+    roCloudTest :: !Bool,
+    roProceduralSky :: !Bool
+  }
+
+runHaskan :: RunOptions -> IO ()
+runHaskan RunOptions {..} = do
   logInfoIO LogGeneral "Initializing Haskan Engine"
   logInfoIO LogGeneral "Starting Engine main loop"
   Engine.mainLoop
-    meshName
+    roMeshName
     EngineConfig
       { targetRenderFPS = 120,
         targetPhysicsFPS = 60,
         targetNetworkFPS = 10,
         targetInputFPS = 60,
-        title = title,
-        debugSocketPath = mDebugSocket,
-        timeoutSeconds = mTimeout,
+        title = roTitle,
+        debugSocketPath = roDebugSocket,
+        timeoutSeconds = roTimeout,
         uvCheckMode =
-          if uvCheckCube
-            then Just "cube"
+          if roUVCheckCube
+            then Just UVCheckCube
             else
-              if uvCheckSphere
-                then Just "sphere"
+              if roUVCheckSphere
+                then Just UVCheckSphere
                 else
-                  if uvCheckPlane
-                    then Just "plane"
+                  if roUVCheckPlane
+                    then Just UVCheckPlane
                     else Nothing,
-        envMapDir = envDir,
-        lightCount = numLights,
-        initialTimeOfDay = initialTime,
-        timeSpeed = speed,
-        dayNightEnabled = dayNight,
-        cloudTestMode = cloudTest,
-        proceduralSkyEnabled = proceduralSky,
+        envMapDir = roEnvDir,
+        lightCount = roNumLights,
+        initialTimeOfDay = roInitialTime,
+        timeSpeed = roTimeSpeed,
+        dayNightEnabled = roDayNight,
+        cloudTestMode = roCloudTest,
+        proceduralSkyEnabled = roProceduralSky,
         simpleMesh = Nothing
       }
   logInfoIO LogGeneral "Shutting down Haskan"

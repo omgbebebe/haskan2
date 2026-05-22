@@ -3,6 +3,10 @@
 module Graphics.Haskan.Render.Deferred
   ( buildDeferredGraph,
     DeferredPassData (..),
+    GBufferPassData (..),
+    CloudPassData (..),
+    GodRayPassData (..),
+    LightingPassData (..),
   )
 where
 
@@ -32,88 +36,109 @@ import Linear.Matrix (M44)
 import Linear.V3 (V3 (..))
 import Linear.V4 (V4 (..))
 
+-- | G-buffer pass resources.
+data GBufferPassData = GBufferPassData
+  { gbpRenderPass :: !Vulkan.VkRenderPass,
+    gbpFramebuffer :: !Vulkan.VkFramebuffer,
+    gbpPipeline :: !Vulkan.VkPipeline,
+    gbpDoubleSidedPipeline :: !Vulkan.VkPipeline,
+    gbpLayout :: !Vulkan.VkPipelineLayout,
+    gbpDescriptor :: !Vulkan.VkDescriptorSet,
+    gbpSampler :: !Vulkan.VkSampler,
+    gbpDrawCommandsBuffer :: !Vulkan.VkBuffer,
+    gbpEntityCount :: !Word32,
+    gbpGBufferImages :: ![Vulkan.VkImage],
+    gbpWireframePipeline :: !Vulkan.VkPipeline,
+    gbpWireframeLayout :: !Vulkan.VkPipelineLayout,
+    gbpWireframeEnabled :: !Bool
+  }
+
+-- | Cloud pass resources and parameters.
+data CloudPassData = CloudPassData
+  { cpRenderPass :: !Vulkan.VkRenderPass,
+    cpFramebuffer :: !Vulkan.VkFramebuffer,
+    cpPipeline :: !Vulkan.VkPipeline,
+    cpLayout :: !Vulkan.VkPipelineLayout,
+    cpDescriptor :: !Vulkan.VkDescriptorSet,
+    cpExtent :: !Vulkan.VkExtent2D,
+    cpImage :: !Vulkan.VkImage,
+    cpHistoryImage :: !Vulkan.VkImage,
+    cpFrameDataMemory :: !Vulkan.VkDeviceMemory,
+    cpCameraPos :: !(V3 Float),
+    cpSkyboxRays :: !(V3 Float, V3 Float, V3 Float),
+    cpSunDir :: !(V3 Float),
+    cpCloudHeight :: !Float,
+    cpTime :: !Float,
+    cpBlendFactor :: !Float,
+    cpWindDirX :: !Float,
+    cpWindDirZ :: !Float,
+    cpPrevTime :: !Float,
+    cpCloudCoverage :: !Float,
+    cpCloudDetail :: !Float,
+    cpCloudAbsorption :: !Float,
+    cpWeatherCoverageScale :: !Float,
+    cpWeatherTypeBias :: !Float,
+    cpStormIntensity :: !Float,
+    cpWeatherAnimSpeed :: !Float,
+    cpFrameIndex :: !Int,
+    cpDebugMode :: !Word32,
+    cpPrevViewProj :: !(M44 Float)
+  }
+
+-- | God ray pass resources and parameters.
+data GodRayPassData = GodRayPassData
+  { grpRenderPass :: !Vulkan.VkRenderPass,
+    grpFramebuffer :: !Vulkan.VkFramebuffer,
+    grpPipeline :: !Vulkan.VkPipeline,
+    grpLayout :: !Vulkan.VkPipelineLayout,
+    grpDescriptor :: !Vulkan.VkDescriptorSet,
+    grpExtent :: !Vulkan.VkExtent2D,
+    grpSunScreenX :: !Float,
+    grpSunScreenY :: !Float
+  }
+
+-- | Lighting pass resources and parameters.
+data LightingPassData = LightingPassData
+  { lpRenderPass :: !Vulkan.VkRenderPass,
+    lpFramebuffer :: !Vulkan.VkFramebuffer,
+    lpPipeline :: !Vulkan.VkPipeline,
+    lpLayout :: !Vulkan.VkPipelineLayout,
+    lpDescriptor :: !Vulkan.VkDescriptorSet,
+    lpCameraPos :: !(V3 Float),
+    lpSkyboxRays :: !(V3 Float, V3 Float, V3 Float),
+    lpSkyTint :: !(V3 Float),
+    lpIBLIntensity :: !Float,
+    lpSunAzimuth :: !Float,
+    lpSunScreenX :: !Float,
+    lpSunScreenY :: !Float,
+    lpSunDir :: !(V3 Float),
+    lpCloudHeight :: !Float,
+    lpTime :: !Float,
+    lpDebugMode :: !Word32,
+    lpAxisOverlay :: !Float,
+    lpGroundPlane :: !Float,
+    lpLightCount :: !Word32,
+    lpLightBuffer :: !Vulkan.VkBuffer
+  }
+
 -- | Data needed to build a deferred rendering graph.
 data DeferredPassData = DeferredPassData
   { dpdExtent :: !Vulkan.VkExtent2D,
-    dpdGBufferRenderPass :: !Vulkan.VkRenderPass,
-    dpdGBufferFramebuffer :: !Vulkan.VkFramebuffer,
-    dpdGBufferPipeline :: !Vulkan.VkPipeline,
-    dpdGBufferDoubleSidedPipeline :: !Vulkan.VkPipeline,
-    dpdGBufferLayout :: !Vulkan.VkPipelineLayout,
-    dpdGBufferDescriptor :: !Vulkan.VkDescriptorSet,
-    dpdGBufferSampler :: !Vulkan.VkSampler,
     dpdDrawList :: ![DrawCall],
     dpdDevice :: !Vulkan.VkDevice,
-    dpdDrawCommandsBuffer :: !Vulkan.VkBuffer,
-    dpdEntityCount :: !Word32,
-    -- Lighting pass
-    dpdLightingRenderPass :: !Vulkan.VkRenderPass,
-    dpdLightingFramebuffer :: !Vulkan.VkFramebuffer,
-    dpdLightingPipeline :: !Vulkan.VkPipeline,
-    dpdLightingLayout :: !Vulkan.VkPipelineLayout,
-    dpdLightingDescriptor :: !Vulkan.VkDescriptorSet,
-    -- Camera position for lighting shader
-    dpdCameraPos :: !(V3 Float),
-    -- Skybox ray directions (one per fullscreen triangle vertex)
-    dpdSkyboxRays :: !(V3 Float, V3 Float, V3 Float),
-    -- Debug mode (0 = normal, 1-11 = debug views)
-    dpdDebugMode :: !Word32,
-    -- Overlay controls
-    dpdAxisOverlay :: !Float,
-    dpdGroundPlane :: !Float,
-    -- Light data
-    dpdLightCount :: !Word32,
-    dpdLightBuffer :: !Vulkan.VkBuffer,
-    -- Day/night cycle
-    dpdSkyTint :: !(V3 Float),
-    dpdIBLIntensity :: !Float,
-    dpdSunAzimuth :: !Float,
-    dpdSunScreenX :: !Float,
-    dpdSunScreenY :: !Float,
-    dpdSunDir :: !(V3 Float),
-    dpdCloudHeight :: !Float,
-    dpdTime :: !Float,
-    dpdPrevViewProj :: !(M44 Float),
-    dpdBlendFactor :: !Float,
-    dpdWindDirX :: !Float,
-    dpdWindDirZ :: !Float,
-    dpdPrevTime :: !Float,
-    dpdCloudCoverage :: !Float,
-    dpdCloudDetail :: !Float,
-    dpdCloudAbsorption :: !Float,
-    dpdWeatherCoverageScale :: !Float,
-    dpdWeatherTypeBias :: !Float,
-    dpdStormIntensity :: !Float,
-    dpdWeatherAnimSpeed :: !Float,
-    dpdFrameIndex :: !Int,
-    dpdCloudFrameDataMemory :: !Vulkan.VkDeviceMemory,
-    -- Cloud pass
-    dpdCloudRenderPass :: !Vulkan.VkRenderPass,
-    dpdCloudFramebuffer :: !Vulkan.VkFramebuffer,
-    dpdCloudPipeline :: !Vulkan.VkPipeline,
-    dpdCloudLayout :: !Vulkan.VkPipelineLayout,
-    dpdCloudDescriptor :: !Vulkan.VkDescriptorSet,
-    dpdCloudExtent :: !Vulkan.VkExtent2D,
-    dpdCloudImage :: !Vulkan.VkImage,
-    dpdCloudHistoryImage :: !Vulkan.VkImage,
-    -- God ray pass
-    dpdGodRayRenderPass :: !Vulkan.VkRenderPass,
-    dpdGodRayFramebuffer :: !Vulkan.VkFramebuffer,
-    dpdGodRayPipeline :: !Vulkan.VkPipeline,
-    dpdGodRayLayout :: !Vulkan.VkPipelineLayout,
-    dpdGodRayDescriptor :: !Vulkan.VkDescriptorSet,
-    dpdGodRayExtent :: !Vulkan.VkExtent2D,
-    -- G-buffer images for barrier
-    dpdGBufferImages :: ![Vulkan.VkImage],
-    -- Wireframe overlay
-    dpdWireframePipeline :: !Vulkan.VkPipeline,
-    dpdWireframeLayout :: !Vulkan.VkPipelineLayout,
-    dpdWireframeEnabled :: !Bool
+    dpdGBuffer :: !GBufferPassData,
+    dpdCloud :: !CloudPassData,
+    dpdGodRay :: !GodRayPassData,
+    dpdLighting :: !LightingPassData
   }
 
 buildDeferredGraph :: DeferredPassData -> RenderGraphBuilder ()
 buildDeferredGraph DeferredPassData {..} = do
-  let gbufPosOut = resourceId "gbuffer_position"
+  let GBufferPassData {..} = dpdGBuffer
+      CloudPassData {..} = dpdCloud
+      GodRayPassData {..} = dpdGodRay
+      LightingPassData {..} = dpdLighting
+      gbufPosOut = resourceId "gbuffer_position"
       gbufNormOut = resourceId "gbuffer_normal"
       gbufAlbedoOut = resourceId "gbuffer_albedo"
       gbufEmissiveOut = resourceId "gbuffer_emissive"
@@ -127,12 +152,12 @@ buildDeferredGraph DeferredPassData {..} = do
         rpOutputs = [gbufPosOut, gbufNormOut, gbufAlbedoOut, gbufEmissiveOut],
         rpRecord = PassRecordFunc $ \ctx -> do
           let commandBuffer = pcCommandBuffer ctx
-          RenderPass.withGBufferRenderPass commandBuffer dpdGBufferRenderPass dpdGBufferFramebuffer dpdExtent $ do
+          RenderPass.withGBufferRenderPass commandBuffer gbpRenderPass gbpFramebuffer dpdExtent $ do
             -- Solid geometry pass: split by doubleSided flag
             let (culledDraws, doubleSidedDraws) = span (not . dcDoubleSided) dpdDrawList
                 culledCount = fromIntegral (length culledDraws) :: Word32
                 dsCount = fromIntegral (length doubleSidedDraws) :: Word32
-            GraphicsPipeline.cmdBindPipeline commandBuffer dpdGBufferPipeline
+            GraphicsPipeline.cmdBindPipeline commandBuffer gbpPipeline
             -- Bind merged vertex/index buffers once (all entities share them)
             case dpdDrawList of
               [] -> pure ()
@@ -144,11 +169,11 @@ buildDeferredGraph DeferredPassData {..} = do
                   Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
                 Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
             -- Bind descriptor set once (no dynamic offsets)
-            Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
+            Foreign.Marshal.Array.withArray [gbpDescriptor] $ \dsPtr ->
               DescriptorSet.cmdBindDescriptorSets
                 commandBuffer
                 Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                dpdGBufferLayout
+                gbpLayout
                 0
                 1
                 dsPtr
@@ -156,14 +181,14 @@ buildDeferredGraph DeferredPassData {..} = do
                 Vulkan.vkNullPtr
             -- Draw culled entities (backface culling enabled)
             when (culledCount > 0) $
-              CommandBuffer.cmdDrawIndexedIndirect commandBuffer dpdDrawCommandsBuffer culledCount 20
+              CommandBuffer.cmdDrawIndexedIndirect commandBuffer gbpDrawCommandsBuffer culledCount 20
             -- Draw double-sided entities (no culling)
             when (dsCount > 0) $ do
-              GraphicsPipeline.cmdBindPipeline commandBuffer dpdGBufferDoubleSidedPipeline
-              CommandBuffer.cmdDrawIndexedIndirectOffset commandBuffer dpdDrawCommandsBuffer (fromIntegral culledCount * 20) dsCount 20
+              GraphicsPipeline.cmdBindPipeline commandBuffer gbpDoubleSidedPipeline
+              CommandBuffer.cmdDrawIndexedIndirectOffset commandBuffer gbpDrawCommandsBuffer (fromIntegral culledCount * 20) dsCount 20
             -- Wireframe overlay pass
-            when dpdWireframeEnabled $ do
-              GraphicsPipeline.cmdBindPipeline commandBuffer dpdWireframePipeline
+            when gbpWireframeEnabled $ do
+              GraphicsPipeline.cmdBindPipeline commandBuffer gbpWireframePipeline
               case dpdDrawList of
                 [] -> pure ()
                 (firstDc : _) -> do
@@ -174,19 +199,19 @@ buildDeferredGraph DeferredPassData {..} = do
                     Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
                   Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
               -- Bind descriptor set for wireframe (shares layout)
-              Foreign.Marshal.Array.withArray [dpdGBufferDescriptor] $ \dsPtr ->
+              Foreign.Marshal.Array.withArray [gbpDescriptor] $ \dsPtr ->
                 DescriptorSet.cmdBindDescriptorSets
                   commandBuffer
                   Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                  dpdWireframeLayout
+                  gbpWireframeLayout
                   0
                   1
                   dsPtr
                   0
                   Vulkan.vkNullPtr
               -- Single indirect draw for wireframe too
-              when (dpdEntityCount > 0) $
-                CommandBuffer.cmdDrawIndexedIndirect commandBuffer dpdDrawCommandsBuffer dpdEntityCount 20
+              when (gbpEntityCount > 0) $
+                CommandBuffer.cmdDrawIndexedIndirect commandBuffer gbpDrawCommandsBuffer gbpEntityCount 20
       }
 
   -- Cloud pass: fullscreen triangle ray marching
@@ -197,23 +222,23 @@ buildDeferredGraph DeferredPassData {..} = do
         rpOutputs = [cloudOut],
         rpRecord = PassRecordFunc $ \ctx -> do
           let commandBuffer = pcCommandBuffer ctx
-          RenderPass.withCloudRenderPass commandBuffer dpdCloudRenderPass dpdCloudFramebuffer dpdCloudExtent $ do
-            GraphicsPipeline.cmdBindPipeline commandBuffer dpdCloudPipeline
-            Foreign.Marshal.Array.withArray [dpdCloudDescriptor] $ \dsPtr ->
+          RenderPass.withCloudRenderPass commandBuffer cpRenderPass cpFramebuffer cpExtent $ do
+            GraphicsPipeline.cmdBindPipeline commandBuffer cpPipeline
+            Foreign.Marshal.Array.withArray [cpDescriptor] $ \dsPtr ->
               DescriptorSet.cmdBindDescriptorSets
                 commandBuffer
                 Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                dpdCloudLayout
+                cpLayout
                 0
                 1
                 dsPtr
                 0
                 Vulkan.vkNullPtr
             -- Write cloud frame data to UBO (std430 layout)
-            let (V3 camX camY camZ) = dpdCameraPos
-                (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = dpdSkyboxRays
-                (V3 sunDirX sunDirY sunDirZ) = dpdSunDir
-                (V4 col0 col1 col2 col3) = dpdPrevViewProj
+            let (V3 camX camY camZ) = cpCameraPos
+                (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = cpSkyboxRays
+                (V3 sunDirX sunDirY sunDirZ) = cpSunDir
+                (V4 col0 col1 col2 col3) = cpPrevViewProj
                 (V4 m00 m10 m20 m30) = col0
                 (V4 m01 m11 m21 m31) = col1
                 (V4 m02 m12 m22 m32) = col2
@@ -238,9 +263,9 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac sunDirX, -- 64
                     realToFrac sunDirY, -- 68
                     realToFrac sunDirZ, -- 72
-                    realToFrac dpdCloudHeight, -- 76
-                    realToFrac dpdTime, -- 80
-                    realToFrac dpdBlendFactor, -- 84
+                    realToFrac cpCloudHeight, -- 76
+                    realToFrac cpTime, -- 80
+                    realToFrac cpBlendFactor, -- 84
                     0,
                     0, -- 88-95: TWO pads for 16-align to 96
                     realToFrac m00, -- 96
@@ -259,29 +284,29 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac m13, -- 148
                     realToFrac m23, -- 152
                     realToFrac m33, -- 156
-                    realToFrac dpdWindDirX, -- 160
-                    realToFrac dpdWindDirZ, -- 164
-                    realToFrac dpdPrevTime, -- 168
-                    realToFrac dpdCloudCoverage, -- 172
-                    realToFrac dpdCloudDetail, -- 176
-                    realToFrac dpdCloudAbsorption, -- 180
-                    realToFrac dpdWeatherCoverageScale, -- 184
-                    realToFrac dpdWeatherTypeBias, -- 188
-                    realToFrac dpdStormIntensity, -- 192
-                    realToFrac dpdWeatherAnimSpeed, -- 196
-                    realToFrac dpdFrameIndex, -- 200
-                    realToFrac dpdDebugMode, -- 204
+                    realToFrac cpWindDirX, -- 160
+                    realToFrac cpWindDirZ, -- 164
+                    realToFrac cpPrevTime, -- 168
+                    realToFrac cpCloudCoverage, -- 172
+                    realToFrac cpCloudDetail, -- 176
+                    realToFrac cpCloudAbsorption, -- 180
+                    realToFrac cpWeatherCoverageScale, -- 184
+                    realToFrac cpWeatherTypeBias, -- 188
+                    realToFrac cpStormIntensity, -- 192
+                    realToFrac cpWeatherAnimSpeed, -- 196
+                    realToFrac cpFrameIndex, -- 200
+                    realToFrac cpDebugMode, -- 204
                     0 -- 208 pad to 208
                   ] ::
                     [CFloat]
-             in liftIO $ Buffer.copyDataToDeviceMemory dpdDevice dpdCloudFrameDataMemory cloudFrameData
+             in liftIO $ Buffer.copyDataToDeviceMemory dpdDevice cpFrameDataMemory cloudFrameData
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
           -- Copy current cloud result to history buffer for next frame (OUTSIDE render pass)
-          CommandBuffer.layerTransition commandBuffer dpdCloudImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-          CommandBuffer.layerTransition commandBuffer dpdCloudHistoryImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-          CommandBuffer.cmdCopyImage commandBuffer dpdCloudImage dpdCloudHistoryImage (Vulkan.getField @"width" dpdCloudExtent) (Vulkan.getField @"height" dpdCloudExtent)
-          CommandBuffer.layerTransition commandBuffer dpdCloudImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-          CommandBuffer.layerTransition commandBuffer dpdCloudHistoryImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          CommandBuffer.layerTransition commandBuffer cpImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+          CommandBuffer.layerTransition commandBuffer cpHistoryImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+          CommandBuffer.cmdCopyImage commandBuffer cpImage cpHistoryImage (Vulkan.getField @"width" cpExtent) (Vulkan.getField @"height" cpExtent)
+          CommandBuffer.layerTransition commandBuffer cpImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          CommandBuffer.layerTransition commandBuffer cpHistoryImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       }
 
   -- God ray pass: radial blur on cloud opacity
@@ -293,13 +318,13 @@ buildDeferredGraph DeferredPassData {..} = do
         rpOutputs = [godRayOut],
         rpRecord = PassRecordFunc $ \ctx -> do
           let commandBuffer = pcCommandBuffer ctx
-          RenderPass.withCloudRenderPass commandBuffer dpdGodRayRenderPass dpdGodRayFramebuffer dpdGodRayExtent $ do
-            GraphicsPipeline.cmdBindPipeline commandBuffer dpdGodRayPipeline
-            Foreign.Marshal.Array.withArray [dpdGodRayDescriptor] $ \dsPtr ->
+          RenderPass.withCloudRenderPass commandBuffer grpRenderPass grpFramebuffer grpExtent $ do
+            GraphicsPipeline.cmdBindPipeline commandBuffer grpPipeline
+            Foreign.Marshal.Array.withArray [grpDescriptor] $ \dsPtr ->
               DescriptorSet.cmdBindDescriptorSets
                 commandBuffer
                 Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                dpdGodRayLayout
+                grpLayout
                 0
                 1
                 dsPtr
@@ -307,8 +332,8 @@ buildDeferredGraph DeferredPassData {..} = do
                 Vulkan.vkNullPtr
             -- Push constants for god ray parameters
             let godRayData =
-                  [ realToFrac dpdSunScreenX,
-                    realToFrac dpdSunScreenY,
+                  [ realToFrac grpSunScreenX,
+                    realToFrac grpSunScreenY,
                     1.0, -- intensity
                     32.0, -- numSamples
                     0.97, -- decay
@@ -320,7 +345,7 @@ buildDeferredGraph DeferredPassData {..} = do
                     0 -- padding
                   ] ::
                     [CFloat]
-             in Foreign.Marshal.Array.withArray godRayData $ Vulkan.vkCmdPushConstants commandBuffer dpdGodRayLayout Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT 0 (fromIntegral (length godRayData * 4)) . Foreign.castPtr
+             in Foreign.Marshal.Array.withArray godRayData $ Vulkan.vkCmdPushConstants commandBuffer grpLayout Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT 0 (fromIntegral (length godRayData * 4)) . Foreign.castPtr
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
       }
 
@@ -332,23 +357,23 @@ buildDeferredGraph DeferredPassData {..} = do
         rpOutputs = [litOut],
         rpRecord = PassRecordFunc $ \ctx -> do
           let commandBuffer = pcCommandBuffer ctx
-          RenderPass.withLightingRenderPass commandBuffer dpdLightingRenderPass dpdLightingFramebuffer dpdExtent $ do
-            GraphicsPipeline.cmdBindPipeline commandBuffer dpdLightingPipeline
-            Foreign.Marshal.Array.withArray [dpdLightingDescriptor] $ \dsPtr ->
+          RenderPass.withLightingRenderPass commandBuffer lpRenderPass lpFramebuffer dpdExtent $ do
+            GraphicsPipeline.cmdBindPipeline commandBuffer lpPipeline
+            Foreign.Marshal.Array.withArray [lpDescriptor] $ \dsPtr ->
               DescriptorSet.cmdBindDescriptorSets
                 commandBuffer
                 Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                dpdLightingLayout
+                lpLayout
                 0
                 1
                 dsPtr
                 0
                 Vulkan.vkNullPtr
             -- Set camera position + debug mode + overlays + skybox rays + sun dir + cloud height push constant
-            let (V3 camX camY camZ) = dpdCameraPos
-                (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = dpdSkyboxRays
-                (V3 tintR tintG tintB) = dpdSkyTint
-                (V3 sunDirX sunDirY sunDirZ) = dpdSunDir
+            let (V3 camX camY camZ) = lpCameraPos
+                (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = lpSkyboxRays
+                (V3 tintR tintG tintB) = lpSkyTint
+                (V3 sunDirX sunDirY sunDirZ) = lpSunDir
                 -- std430: vec3 has size 12 (NOT padded to 16). Pad only for next vec3 alignment.
                 -- After ray2(76) → skyTintR at 76 (scalar, no pad needed)
                 -- After iblInt(92) → sunDir needs 16-align → pad 1 float → sunDir at 96
@@ -360,11 +385,11 @@ buildDeferredGraph DeferredPassData {..} = do
                   [ realToFrac camX,
                     realToFrac camY,
                     realToFrac camZ,
-                    realToFrac dpdDebugMode,
-                    realToFrac dpdAxisOverlay,
-                    realToFrac dpdGroundPlane,
-                    realToFrac dpdSunAzimuth,
-                    realToFrac dpdLightCount,
+                    realToFrac lpDebugMode,
+                    realToFrac lpAxisOverlay,
+                    realToFrac lpGroundPlane,
+                    realToFrac lpSunAzimuth,
+                    realToFrac lpLightCount,
                     realToFrac r0x,
                     realToFrac r0y,
                     realToFrac r0z,
@@ -379,18 +404,18 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac tintR,
                     realToFrac tintG,
                     realToFrac tintB,
-                    realToFrac dpdIBLIntensity,
+                    realToFrac lpIBLIntensity,
                     0,
                     realToFrac sunDirX,
                     realToFrac sunDirY,
                     realToFrac sunDirZ,
-                    realToFrac dpdCloudHeight,
-                    realToFrac dpdTime,
-                    realToFrac dpdSunScreenX,
-                    realToFrac dpdSunScreenY
+                    realToFrac lpCloudHeight,
+                    realToFrac lpTime,
+                    realToFrac lpSunScreenX,
+                    realToFrac lpSunScreenY
                   ] ::
                     [CFloat]
-             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer dpdLightingLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 124 . Foreign.castPtr
+             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer lpLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 124 . Foreign.castPtr
             -- Fullscreen triangle: 3 vertices, no indices
             Vulkan.vkCmdDraw commandBuffer 3 1 0 0
       }

@@ -5,6 +5,11 @@ module Graphics.Haskan.Engine.Render.Internal.Setup
   ( compileAllShaders,
     createShaderModules,
     ShaderModules (..),
+    ShaderPair (..),
+    WireframeShaders (..),
+    VulkanContext (..),
+    NoiseParams (..),
+    Cubemap (..),
     loadIBLTextures,
     IBLTextures (..),
     SceneLoadResult (..),
@@ -40,8 +45,8 @@ import Graphics.Haskan.DayNight (computeSunState, defaultDayNightConfig)
 import Graphics.Haskan.DayNight qualified as DayNight
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo)
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
-import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), NoiseGenUniforms (..), PhysicsBodySpec (..), RenderDebugInfo (..), SkyGenUniforms (..), WeatherMapUniforms (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
-import Graphics.Haskan.HosekWilkie (HWCoeffs (..), computeHWCoeffs, hwCoeffsToList)
+import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), NoiseGenUniforms (..), PhysicsBodySpec (..), RenderDebugInfo (..), SkyGenUniforms (..), UVCheckMode (..), WeatherMapUniforms (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
+import Graphics.Haskan.HosekWilkie (HWCoeffs (..), SkyConfig (..), computeHWCoeffs, hwCoeffsToList)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Mesh qualified as Mesh
@@ -100,7 +105,7 @@ import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as L
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
-import Graphics.Haskan.Vulkan.Types (RenderContext (..))
+import Graphics.Haskan.Vulkan.Types (RenderContext (..), VulkanContext (..))
 import Graphics.Haskan.Window qualified as Window
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -168,26 +173,44 @@ compileAllShaders = do
   liftIO $ FIR.compileTo "data/shaders/fir/ap_volume_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] APVolumeShaders.program
   logInfo LogGeneral "  ap_volume_comp.spv done"
 
+-- | A pair of vertex and fragment shader modules.
+data ShaderPair = ShaderPair
+  { shpVertex :: !Vulkan.VkShaderModule,
+    shpFragment :: !Vulkan.VkShaderModule
+  }
+
+-- | Wireframe shaders include an optional geometry shader.
+data WireframeShaders = WireframeShaders
+  { wsVertex :: !Vulkan.VkShaderModule,
+    wsGeometry :: !(Maybe Vulkan.VkShaderModule),
+    wsFragment :: !Vulkan.VkShaderModule
+  }
+
+-- | Parameters for cloud noise generation compute dispatch.
+data NoiseParams = NoiseParams
+  { npSeed :: !Float,
+    npFrequency :: !Float,
+    npPersistence :: !Float
+  }
+
+-- | Reusable cubemap texture + view pair.
+data Cubemap = Cubemap
+  { cmHandle :: !TextureHandle,
+    cmView :: !(Maybe Vulkan.VkImageView)
+  }
+
 -- | Create all shader modules from compiled SPIR-V
 data ShaderModules = ShaderModules
-  { smForwardVert :: !Vulkan.VkShaderModule,
-    smForwardFrag :: !Vulkan.VkShaderModule,
-    smGbufVert :: !Vulkan.VkShaderModule,
-    smGbufFrag :: !Vulkan.VkShaderModule,
-    smLightVert :: !Vulkan.VkShaderModule,
-    smLightFrag :: !Vulkan.VkShaderModule,
-    smLightProcFrag :: !Vulkan.VkShaderModule,
-    smWireVert :: !Vulkan.VkShaderModule,
-    smWireGeom :: !Vulkan.VkShaderModule,
-    smWireFrag :: !Vulkan.VkShaderModule,
+  { smForward :: !ShaderPair,
+    smGBuffer :: !ShaderPair,
+    smLighting :: !ShaderPair,
+    smLightingProcedural :: !Vulkan.VkShaderModule,
+    smWireframe :: !WireframeShaders,
     smCull :: !Vulkan.VkShaderModule,
-    smCloudVert :: !Vulkan.VkShaderModule,
-    smCloudFrag :: !Vulkan.VkShaderModule,
-    smGodrayVert :: !Vulkan.VkShaderModule,
-    smGodrayFrag :: !Vulkan.VkShaderModule,
+    smCloud :: !ShaderPair,
+    smGodRay :: !ShaderPair,
     smAPVolume :: !Vulkan.VkShaderModule,
-    smSimpleForwardVert :: !Vulkan.VkShaderModule,
-    smSimpleForwardFrag :: !Vulkan.VkShaderModule
+    smSimpleForward :: !ShaderPair
   }
 
 createShaderModules ::
@@ -195,35 +218,44 @@ createShaderModules ::
   Vulkan.VkDevice ->
   m ShaderModules
 createShaderModules device = do
-  smForwardVert <- ShaderModule.managedShaderModule device "data/shaders/fir/vert.spv"
-  smForwardFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/frag.spv"
-  smGbufVert <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_vert.spv"
-  smGbufFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_frag.spv"
-  smLightVert <- ShaderModule.managedShaderModule device "data/shaders/fir/light_vert.spv"
-  smLightFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/light_frag.spv"
-  smLightProcFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/light_procedural_frag.spv"
-  smWireVert <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_vert.spv"
-  smWireGeom <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_geom.spv"
-  smWireFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_frag.spv"
-  smCull <- ShaderModule.managedShaderModule device "data/shaders/fir/cull_comp.spv"
-  smCloudVert <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_vert.spv"
-  smCloudFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_frag.spv"
-  smGodrayVert <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_vert.spv"
-  smGodrayFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_frag.spv"
-  smAPVolume <- ShaderModule.managedShaderModule device "data/shaders/fir/ap_volume_comp.spv"
-  smSimpleForwardVert <- ShaderModule.managedShaderModule device "data/shaders/fir/simple_forward_vert.spv"
-  smSimpleForwardFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/simple_forward_frag.spv"
-  pure ShaderModules {..}
+  forwardVert <- ShaderModule.managedShaderModule device "data/shaders/fir/vert.spv"
+  forwardFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/frag.spv"
+  gbufVert <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_vert.spv"
+  gbufFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/gbuf_frag.spv"
+  lightVert <- ShaderModule.managedShaderModule device "data/shaders/fir/light_vert.spv"
+  lightFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/light_frag.spv"
+  lightProcFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/light_procedural_frag.spv"
+  wireVert <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_vert.spv"
+  wireGeom <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_geom.spv"
+  wireFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/wire_frag.spv"
+  cull <- ShaderModule.managedShaderModule device "data/shaders/fir/cull_comp.spv"
+  cloudVert <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_vert.spv"
+  cloudFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_frag.spv"
+  godrayVert <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_vert.spv"
+  godrayFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_frag.spv"
+  apVolume <- ShaderModule.managedShaderModule device "data/shaders/fir/ap_volume_comp.spv"
+  simpleForwardVert <- ShaderModule.managedShaderModule device "data/shaders/fir/simple_forward_vert.spv"
+  simpleForwardFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/simple_forward_frag.spv"
+  pure
+    ShaderModules
+      { smForward = ShaderPair forwardVert forwardFrag,
+        smGBuffer = ShaderPair gbufVert gbufFrag,
+        smLighting = ShaderPair lightVert lightFrag,
+        smLightingProcedural = lightProcFrag,
+        smWireframe = WireframeShaders wireVert (Just wireGeom) wireFrag,
+        smCull = cull,
+        smCloud = ShaderPair cloudVert cloudFrag,
+        smGodRay = ShaderPair godrayVert godrayFrag,
+        smAPVolume = apVolume,
+        smSimpleForward = ShaderPair simpleForwardVert simpleForwardFrag
+      }
 
 data IBLTextures = IBLTextures
-  { iblRadianceCubemap :: !TextureHandle,
-    iblIrradianceCubemap :: !TextureHandle,
-    iblRadianceView :: !(Maybe Vulkan.VkImageView),
-    iblIrradianceView :: !(Maybe Vulkan.VkImageView),
+  { iblRadiance :: !Cubemap,
+    iblIrradiance :: !Cubemap,
     iblSampler :: !Vulkan.VkSampler,
     iblBrdfView :: !(Maybe Vulkan.VkImageView),
-    iblCloudNoiseHandle :: !TextureHandle,
-    iblCloudNoiseView :: !(Maybe Vulkan.VkImageView),
+    iblCloudNoise :: !Cubemap,
     iblCloudDetailNoiseView :: !(Maybe Vulkan.VkImageView),
     iblBlueNoiseView :: !(Maybe Vulkan.VkImageView),
     iblBlueNoiseSampler :: !Vulkan.VkSampler,
@@ -234,24 +266,21 @@ data IBLTextures = IBLTextures
 -- | Load IBL cubemaps, BRDF LUT, and cloud noise texture
 loadIBLTextures ::
   (MonadManaged m, MonadIO m, MonadLog m) =>
+  VulkanContext ->
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   String ->
   Bool ->
   m IBLTextures
-loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuffer envMapDir proceduralSkyEnabled = do
-  lightingSampler <- Texture.createSamplerWithLod device 0
+loadIBLTextures vc@VulkanContext {..} rm envMapDir proceduralSkyEnabled = do
+  lightingSampler <- Texture.createSamplerWithLod vcDevice 0
   logInfo LogGeneral "lighting sampler created"
 
   if proceduralSkyEnabled
     then do
       logInfo LogGeneral "procedural sky enabled: creating storage images..."
       -- Create storage images for compute shader output
-      radianceHandle <- Texture.createStorageImageCube rm physicalDevice device 512 Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT graphicsQueueHandler textureCommandBuffer
-      irradianceHandle <- Texture.createStorageImageCube rm physicalDevice device 64 Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT graphicsQueueHandler textureCommandBuffer
+      radianceHandle <- Texture.createStorageImageCube rm vc 512 Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
+      irradianceHandle <- Texture.createStorageImageCube rm vc 64 Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
       mRadianceView <- Texture.textureImageView rm radianceHandle
       mIrradianceView <- Texture.textureImageView rm irradianceHandle
       logInfo LogGeneral "procedural sky storage images created"
@@ -260,45 +289,45 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       -- shaders can sample them before the first procedural sky compute dispatch
       mRadianceTex <- liftIO $ lookupTexture rm radianceHandle
       mIrradianceTex <- liftIO $ lookupTexture rm irradianceHandle
-      CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
+      CommandBuffer.withCommandBufferOneTime vcQueue vcCommandBuffer $ do
         case mRadianceTex of
-          Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 6
+          Just tex -> Texture.transitionStorageImageToShaderRead vcCommandBuffer (trImage tex) 6
           Nothing -> pure ()
         case mIrradianceTex of
-          Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 6
+          Just tex -> Texture.transitionStorageImageToShaderRead vcCommandBuffer (trImage tex) 6
           Nothing -> pure ()
 
       -- BRDF LUT (shared)
       let brdfPixels = BRDF.generateBRDFLUT 256 256
-      brdfTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 brdfPixels graphicsQueueHandler textureCommandBuffer
+      brdfTexHandle <- Texture.createTextureFromData rm vc 256 256 brdfPixels
       mBrdfView <- Texture.textureImageView rm brdfTexHandle
       logInfo LogGeneral "BRDF LUT generated"
 
       -- Cloud textures (shared)
       logInfo LogGeneral "creating 3D cloud noise storage image..."
-      cloudNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 256 256 256 5 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
-      dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudNoiseHandle 42.0 2.0 0.5
+      cloudNoiseHandle <- Texture.createStorageImage3D rm vc 256 256 256 5 Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      dispatchCloudNoiseGeneration vc rm cloudNoiseHandle (NoiseParams 42.0 2.0 0.5)
       cloudNoiseView <- Texture.textureImageView rm cloudNoiseHandle
       logInfo LogGeneral "3D cloud noise texture generated"
 
       logInfo LogGeneral "creating 3D cloud detail noise storage image..."
-      cloudDetailNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 64 64 64 1 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
-      dispatchCloudDetailNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudDetailNoiseHandle
+      cloudDetailNoiseHandle <- Texture.createStorageImage3D rm vc 64 64 64 1 Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      dispatchCloudDetailNoiseGeneration vc rm cloudDetailNoiseHandle
       cloudDetailNoiseView <- Texture.textureImageView rm cloudDetailNoiseHandle
       logInfo LogGeneral "3D cloud detail noise texture generated"
 
       logInfo LogGeneral "loading blue noise texture..."
       blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
       let blueNoisePixels = Data.Vector.Storable.fromList (BS.unpack blueNoiseRaw)
-      blueNoiseHandle <- Texture.createTextureFromData rm physicalDevice device 64 64 blueNoisePixels graphicsQueueHandler textureCommandBuffer
+      blueNoiseHandle <- Texture.createTextureFromData rm vc 64 64 blueNoisePixels
       mBlueNoiseView <- Texture.textureImageView rm blueNoiseHandle
-      blueNoiseSampler <- Texture.managedSamplerNearest device
-      noiseSampler <- Texture.managedSamplerWithLod device 4.0
+      blueNoiseSampler <- Texture.managedSamplerNearest vcDevice
+      noiseSampler <- Texture.managedSamplerWithLod vcDevice 4.0
       logInfo LogGeneral "blue noise texture loaded"
 
       logInfo LogGeneral "creating weather map storage image..."
-      weatherMapHandle <- Texture.createStorageImage2D rm physicalDevice device 512 512 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
-      dispatchWeatherMapGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm weatherMapHandle
+      weatherMapHandle <- Texture.createStorageImage2D rm vc 512 512 Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      dispatchWeatherMapGeneration vc rm weatherMapHandle
       weatherMapView <- Texture.textureImageView rm weatherMapHandle
       logInfo LogGeneral "weather map texture generated"
 
@@ -306,18 +335,15 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
       let V3 dirX dirY dirZ = V3 0.0 0.3 (-1.0)
           defaultSunElevation = pi / 6.0
           defaultSunIntensity = 50.0
-      dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm radianceHandle irradianceHandle (V3 dirX dirY dirZ) defaultSunElevation defaultSunIntensity
+      dispatchProceduralSkyGeneration vc rm radianceHandle irradianceHandle (V3 dirX dirY dirZ) defaultSunElevation defaultSunIntensity
 
       pure
         IBLTextures
-          { iblRadianceCubemap = radianceHandle,
-            iblIrradianceCubemap = irradianceHandle,
-            iblRadianceView = mRadianceView,
-            iblIrradianceView = mIrradianceView,
+          { iblRadiance = Cubemap radianceHandle mRadianceView,
+            iblIrradiance = Cubemap irradianceHandle mIrradianceView,
             iblSampler = lightingSampler,
             iblBrdfView = mBrdfView,
-            iblCloudNoiseHandle = cloudNoiseHandle,
-            iblCloudNoiseView = cloudNoiseView,
+            iblCloudNoise = Cubemap cloudNoiseHandle cloudNoiseView,
             iblCloudDetailNoiseView = cloudDetailNoiseView,
             iblBlueNoiseView = mBlueNoiseView,
             iblBlueNoiseSampler = blueNoiseSampler,
@@ -337,54 +363,51 @@ loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuff
           radSize = fromMaybe 0 (listToMaybe radWidths)
           irrSize = fromMaybe 0 (listToMaybe irrWidths)
           radMipLevels = floor (logBase 2 (fromIntegral radSize :: Double)) + 1
-      radianceCubemap <- Texture.createCubemapMips rm physicalDevice device radSize radDatas graphicsQueueHandler textureCommandBuffer
-      irradianceCubemap <- Texture.createCubemap rm physicalDevice device irrSize irrDatas graphicsQueueHandler textureCommandBuffer
+      radianceCubemap <- Texture.createCubemapMips rm vc radSize radDatas
+      irradianceCubemap <- Texture.createCubemap rm vc irrSize irrDatas
       mRadianceView <- Texture.textureImageView rm radianceCubemap
       mIrradianceView <- Texture.textureImageView rm irradianceCubemap
       logInfo LogGeneral $ "IBL cubemaps loaded: radiance=" <> showT radSize <> "px irradiance=" <> showT irrSize <> "px mipLevels=" <> showT radMipLevels
 
       let brdfPixels = BRDF.generateBRDFLUT 256 256
-      brdfTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 brdfPixels graphicsQueueHandler textureCommandBuffer
+      brdfTexHandle <- Texture.createTextureFromData rm vc 256 256 brdfPixels
       mBrdfView <- Texture.textureImageView rm brdfTexHandle
       logInfo LogGeneral "BRDF LUT generated"
 
       logInfo LogGeneral "creating 3D cloud noise storage image..."
-      cloudNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 256 256 256 5 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
-      dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudNoiseHandle 42.0 2.0 0.5
+      cloudNoiseHandle <- Texture.createStorageImage3D rm vc 256 256 256 5 Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      dispatchCloudNoiseGeneration vc rm cloudNoiseHandle (NoiseParams 42.0 2.0 0.5)
       cloudNoiseView <- Texture.textureImageView rm cloudNoiseHandle
       logInfo LogGeneral "3D cloud noise texture generated"
 
       logInfo LogGeneral "creating 3D cloud detail noise storage image..."
-      cloudDetailNoiseHandle <- Texture.createStorageImage3D rm physicalDevice device 64 64 64 1 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
-      dispatchCloudDetailNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm cloudDetailNoiseHandle
+      cloudDetailNoiseHandle <- Texture.createStorageImage3D rm vc 64 64 64 1 Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      dispatchCloudDetailNoiseGeneration vc rm cloudDetailNoiseHandle
       cloudDetailNoiseView <- Texture.textureImageView rm cloudDetailNoiseHandle
       logInfo LogGeneral "3D cloud detail noise texture generated"
 
       logInfo LogGeneral "loading blue noise texture..."
       blueNoiseRaw <- liftIO $ BS.readFile "data/textures/blue_noise/blue_noise_64.raw"
       let blueNoisePixels = Data.Vector.Storable.fromList (BS.unpack blueNoiseRaw)
-      blueNoiseHandle <- Texture.createTextureFromData rm physicalDevice device 64 64 blueNoisePixels graphicsQueueHandler textureCommandBuffer
+      blueNoiseHandle <- Texture.createTextureFromData rm vc 64 64 blueNoisePixels
       mBlueNoiseView <- Texture.textureImageView rm blueNoiseHandle
-      blueNoiseSampler <- Texture.managedSamplerNearest device
-      noiseSampler <- Texture.managedSamplerWithLod device 4.0
+      blueNoiseSampler <- Texture.managedSamplerNearest vcDevice
+      noiseSampler <- Texture.managedSamplerWithLod vcDevice 4.0
       logInfo LogGeneral "blue noise texture loaded"
 
       logInfo LogGeneral "creating weather map storage image..."
-      weatherMapHandle <- Texture.createStorageImage2D rm physicalDevice device 512 512 Vulkan.VK_FORMAT_R8G8B8A8_UNORM graphicsQueueHandler textureCommandBuffer
-      dispatchWeatherMapGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm weatherMapHandle
+      weatherMapHandle <- Texture.createStorageImage2D rm vc 512 512 Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      dispatchWeatherMapGeneration vc rm weatherMapHandle
       weatherMapView <- Texture.textureImageView rm weatherMapHandle
       logInfo LogGeneral "weather map texture generated"
 
       pure
         IBLTextures
-          { iblRadianceCubemap = radianceCubemap,
-            iblIrradianceCubemap = irradianceCubemap,
-            iblRadianceView = mRadianceView,
-            iblIrradianceView = mIrradianceView,
+          { iblRadiance = Cubemap radianceCubemap mRadianceView,
+            iblIrradiance = Cubemap irradianceCubemap mIrradianceView,
             iblSampler = lightingSampler,
             iblBrdfView = mBrdfView,
-            iblCloudNoiseHandle = cloudNoiseHandle,
-            iblCloudNoiseView = cloudNoiseView,
+            iblCloudNoise = Cubemap cloudNoiseHandle cloudNoiseView,
             iblCloudDetailNoiseView = cloudDetailNoiseView,
             iblBlueNoiseView = mBlueNoiseView,
             iblBlueNoiseSampler = blueNoiseSampler,
@@ -403,21 +426,18 @@ data SceneLoadResult = SceneLoadResult
 -- | Load scene based on mode (UV check, stress test, GLTF, or OBJ)
 loadScene ::
   (MonadManaged m, MonadIO m, MonadLog m) =>
+  VulkanContext ->
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   AssetCache ->
   String ->
-  Maybe String ->
+  Maybe UVCheckMode ->
   Maybe Mesh.Mesh ->
   m SceneLoadResult
-loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName uvCheckMode mSimpleMesh = do
+loadScene vc@VulkanContext {..} rm assetCache meshName uvCheckMode mSimpleMesh = do
   let isGLTF = ".gltf" `Text.isSuffixOf` Text.pack meshName || ".glb" `Text.isSuffixOf` Text.pack meshName
       isStressTest = meshName == "stress_test"
   case mSimpleMesh of
-    Just mesh -> loadSimpleMesh rm physicalDevice device graphicsQueueHandler textureCommandBuffer mesh
+    Just mesh -> loadSimpleMesh vc rm mesh
     Nothing ->
       case uvCheckMode of
         Just mode -> do
@@ -432,11 +452,11 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
                 let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
                 pure (256, 256, checkerTexData)
           let testMesh = case mode of
-                "cube" -> Mesh.unitCube
-                "sphere" -> Mesh.uvSphere 32 16 1.0
-                _ -> Mesh.uvPlane 1.0
-          uvTexHandle <- Texture.createTextureFromData rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
-          testMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices testMesh) (Mesh.indices testMesh)
+                UVCheckCube -> Mesh.unitCube
+                UVCheckSphere -> Mesh.uvSphere 32 16 1.0
+                UVCheckPlane -> Mesh.uvPlane 1.0
+          uvTexHandle <- Texture.createTextureFromData rm vc tw th pixelData
+          testMeshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices testMesh) (Mesh.indices testMesh)
           testEntity <- ECS.spawnEntity world
           ECS.setTransform world testEntity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
           ECS.setMesh world testEntity testMeshHandle
@@ -452,10 +472,10 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
             then do
           world <- ECS.createWorld
           let cubeMesh = Mesh.unitCube
-          meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices cubeMesh) (Mesh.indices cubeMesh)
+          meshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices cubeMesh) (Mesh.indices cubeMesh)
 
           let whiteTexData = Texture.generateGridTexture 2 2 1
-          whiteTexHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
+          whiteTexHandle <- Texture.createTextureFromData rm vc 2 2 whiteTexData
 
           logInfo LogGeneral "spawning 10000 stress test entities"
           forM_ [0 .. 9999] $ \i -> do
@@ -475,7 +495,7 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
         else
           if isGLTF
             then do
-              result <- importGLTF rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName
+              result <- importGLTF rm vcPhysicalDevice vcDevice vcQueue vcCommandBuffer assetCache meshName
               let world = girWorld result
                   textures = girTextures result
                   textureData = girTextureData result
@@ -490,7 +510,7 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
             else do
               world <- ECS.createWorld
               (mesh, _) <- Model.fromObj <$> ObjLoader.parseObj meshName
-              meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
+              meshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices mesh) (Mesh.indices mesh)
 
               let objBounds = computeMeshBounds mesh
               logInfo LogGeneral $ "OBJ mesh bounds: " <> showT objBounds
@@ -514,9 +534,9 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
               ECS.setRoughnessFactor world entity3 0.5
 
               let groundMesh = Mesh.groundPlaneMesh 50.0
-              groundMeshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
+              groundMeshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
               let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
-              checkerTexHandle <- Texture.createTextureFromData rm physicalDevice device 256 256 checkerTexData graphicsQueueHandler textureCommandBuffer
+              checkerTexHandle <- Texture.createTextureFromData rm vc 256 256 checkerTexData
               groundEntity <- ECS.spawnEntity world
               ECS.setTransform world groundEntity (Transform (V3 0 (-0.5) 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
               ECS.setMesh world groundEntity groundMeshHandle
@@ -533,18 +553,15 @@ loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer ass
 -- Used by the 'runSimple' API for minimal primitive rendering.
 loadSimpleMesh ::
   (MonadManaged m, MonadIO m, MonadLog m) =>
+  VulkanContext ->
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   Mesh.Mesh ->
   m SceneLoadResult
-loadSimpleMesh rm physicalDevice device graphicsQueueHandler textureCommandBuffer mesh = do
+loadSimpleMesh vc@VulkanContext {..} rm mesh = do
   world <- ECS.createWorld
   let whiteTexData = Texture.generateGridTexture 2 2 1
-  whiteTexHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
-  meshHandle <- Buffer.createMeshResource rm physicalDevice device (Mesh.vertices mesh) (Mesh.indices mesh)
+  whiteTexHandle <- Texture.createTextureFromData rm vc 2 2 whiteTexData
+  meshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices mesh) (Mesh.indices mesh)
   entity <- ECS.spawnEntity world
   ECS.setTransform world entity (Transform (V3 0 0 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
   ECS.setMesh world entity meshHandle
@@ -558,10 +575,7 @@ loadSimpleMesh rm physicalDevice device graphicsQueueHandler textureCommandBuffe
 -- Creates temporary pipelines, dispatches, transitions images, and cleans up.
 dispatchProceduralSkyGeneration ::
   (MonadManaged m, MonadIO m, MonadLog m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
+  VulkanContext ->
   ResourceManager ->
   TextureHandle -> -- radiance
   TextureHandle -> -- irradiance
@@ -569,32 +583,32 @@ dispatchProceduralSkyGeneration ::
   Float -> -- sun elevation (for HW coeffs)
   Float -> -- sun intensity
   m ()
-dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm radianceHandle irradianceHandle sunDir sunElevation sunIntensity = do
+dispatchProceduralSkyGeneration VulkanContext {..} rm radianceHandle irradianceHandle sunDir sunElevation sunIntensity = do
   logInfo LogGeneral "dispatching procedural sky compute shaders..."
 
   -- Load compute shader modules
-  radianceShader <- ShaderModule.managedShaderModule device "data/shaders/fir/radiance_comp.spv"
-  irradianceShader <- ShaderModule.managedShaderModule device "data/shaders/fir/irradiance_comp.spv"
+  radianceShader <- ShaderModule.managedShaderModule vcDevice "data/shaders/fir/radiance_comp.spv"
+  irradianceShader <- ShaderModule.managedShaderModule vcDevice "data/shaders/fir/irradiance_comp.spv"
 
   -- Create descriptor set layout
-  cubemapLayout <- DescriptorSetLayout.managedCubemapComputeDescriptorSetLayout device
+  cubemapLayout <- DescriptorSetLayout.managedCubemapComputeDescriptorSetLayout vcDevice
 
   -- Create pipeline layout
-  cubemapPipelineLayout <- PipelineLayout.managedPipelineLayout device [cubemapLayout]
+  cubemapPipelineLayout <- PipelineLayout.managedPipelineLayout vcDevice [cubemapLayout]
 
   -- Create pipelines
-  radiancePipeline <- ComputePipeline.managedComputePipeline device cubemapPipelineLayout radianceShader
-  irradiancePipeline <- ComputePipeline.managedComputePipeline device cubemapPipelineLayout irradianceShader
+  radiancePipeline <- ComputePipeline.managedComputePipeline vcDevice cubemapPipelineLayout radianceShader
+  irradiancePipeline <- ComputePipeline.managedComputePipeline vcDevice cubemapPipelineLayout irradianceShader
 
   -- Create descriptor pool
-  cubemapPool <- DescriptorPool.managedCubemapComputeDescriptorPool device
+  cubemapPool <- DescriptorPool.managedCubemapComputeDescriptorPool vcDevice
 
   -- Allocate descriptor sets
-  radianceDescriptorSet <- DescriptorSet.allocateDescriptorSet device cubemapPool [cubemapLayout]
-  irradianceDescriptorSet <- DescriptorSet.allocateDescriptorSet device cubemapPool [cubemapLayout]
+  radianceDescriptorSet <- DescriptorSet.allocateDescriptorSet vcDevice cubemapPool [cubemapLayout]
+  irradianceDescriptorSet <- DescriptorSet.allocateDescriptorSet vcDevice cubemapPool [cubemapLayout]
 
   -- Create UBO with dynamic sky params
-  let hwCoeffs = computeHWCoeffs 2.0 0.3 (max 0.0 sunElevation)
+  let hwCoeffs = computeHWCoeffs $ SkyConfig 2.0 0.3 (max 0.0 sunElevation)
       [ hwAR,
         hwAG,
         hwAB,
@@ -658,52 +672,52 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
             sgHwIG = hwIG,
             sgHwIB = hwIB
           }
-  (skyGenDataBuffer, skyGenDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [skyParams]
+  (skyParamsBuffer, _skyParamsMemory) <- Buffer.managedUniformBuffer vcPhysicalDevice vcDevice [skyParams]
 
   -- Get image views
   mRadianceView <- Texture.textureImageView rm radianceHandle
   mIrradianceView <- Texture.textureImageView rm irradianceHandle
 
   -- Update descriptor sets
-  case mRadianceView of
-    Just radianceView -> DescriptorSet.updateCubemapComputeDescriptorSets device radianceDescriptorSet radianceView skyGenDataBuffer
-    Nothing -> logInfo LogGeneral "warning: radiance view not found"
-  case mIrradianceView of
-    Just irradianceView -> DescriptorSet.updateCubemapComputeDescriptorSets device irradianceDescriptorSet irradianceView skyGenDataBuffer
-    Nothing -> logInfo LogGeneral "warning: irradiance view not found"
+  case (mRadianceView, mIrradianceView) of
+    (Just radianceView, Just irradianceView) -> do
+      DescriptorSet.updateCubemapComputeDescriptorSets vcDevice radianceDescriptorSet radianceView skyParamsBuffer
+      DescriptorSet.updateCubemapComputeDescriptorSets vcDevice irradianceDescriptorSet irradianceView skyParamsBuffer
+    _ -> logInfo LogGeneral "warning: cubemap views not found"
 
-  -- Get VkImage handles for transition
   mRadianceTex <- liftIO $ lookupTexture rm radianceHandle
   mIrradianceTex <- liftIO $ lookupTexture rm irradianceHandle
 
-  -- Dispatch compute shaders
-  CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
-    -- Transition cubemaps to GENERAL for compute writes
-    -- Using UNDEFINED as oldLayout is valid per spec regardless of actual layout
+  CommandBuffer.withCommandBufferOneTime vcQueue vcCommandBuffer $ do
+    -- Transition storage images to GENERAL for compute write
     case mRadianceTex of
       Just tex ->
-        CommandBuffer.layerTransitionAll
-          textureCommandBuffer
+        CommandBuffer.mipLayerTransition
+          vcCommandBuffer
           (trImage tex)
           Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
           Vulkan.VK_IMAGE_LAYOUT_GENERAL
+          0
+          1
           6
       Nothing -> pure ()
     case mIrradianceTex of
       Just tex ->
-        CommandBuffer.layerTransitionAll
-          textureCommandBuffer
+        CommandBuffer.mipLayerTransition
+          vcCommandBuffer
           (trImage tex)
           Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
           Vulkan.VK_IMAGE_LAYOUT_GENERAL
+          0
+          1
           6
       Nothing -> pure ()
 
     -- Radiance: 512x512x6 / 8x8 = 64x64x6 workgroups
-    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE radiancePipeline
+    liftIO $ Vulkan.vkCmdBindPipeline vcCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE radiancePipeline
     liftIO $ Foreign.Marshal.Array.withArray [radianceDescriptorSet] $ \dsPtr ->
       Vulkan.vkCmdBindDescriptorSets
-        textureCommandBuffer
+        vcCommandBuffer
         Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
         cubemapPipelineLayout
         0
@@ -711,13 +725,13 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
         dsPtr
         0
         Vulkan.vkNullPtr
-    CommandBuffer.cmdDispatch textureCommandBuffer 64 64 6
+    CommandBuffer.cmdDispatch vcCommandBuffer 64 64 6
 
     -- Irradiance: 64x64x6 / 8x8 = 8x8x6 workgroups
-    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE irradiancePipeline
+    liftIO $ Vulkan.vkCmdBindPipeline vcCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE irradiancePipeline
     liftIO $ Foreign.Marshal.Array.withArray [irradianceDescriptorSet] $ \dsPtr ->
       Vulkan.vkCmdBindDescriptorSets
-        textureCommandBuffer
+        vcCommandBuffer
         Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
         cubemapPipelineLayout
         0
@@ -725,14 +739,14 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
         dsPtr
         0
         Vulkan.vkNullPtr
-    CommandBuffer.cmdDispatch textureCommandBuffer 8 8 6
+    CommandBuffer.cmdDispatch vcCommandBuffer 8 8 6
 
     -- Transition storage images to SHADER_READ_ONLY_OPTIMAL
     case mRadianceTex of
-      Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 6
+      Just tex -> Texture.transitionStorageImageToShaderRead vcCommandBuffer (trImage tex) 6
       Nothing -> pure ()
     case mIrradianceTex of
-      Just tex -> Texture.transitionStorageImageToShaderRead textureCommandBuffer (trImage tex) 6
+      Just tex -> Texture.transitionStorageImageToShaderRead vcCommandBuffer (trImage tex) 6
       Nothing -> pure ()
 
   logInfo LogGeneral "procedural sky compute dispatch complete"
@@ -740,53 +754,48 @@ dispatchProceduralSkyGeneration device physicalDevice graphicsQueueHandler textu
 -- | Dispatch cloud noise generation compute shader to fill a 3D storage image.
 dispatchCloudNoiseGeneration ::
   (MonadManaged m, MonadIO m, MonadLog m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
+  VulkanContext ->
   ResourceManager ->
   TextureHandle -> -- 3D noise storage image
-  Float -> -- seed
-  Float -> -- frequency
-  Float -> -- persistence
+  NoiseParams ->
   m ()
-dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm noiseHandle seed freq persist = do
+dispatchCloudNoiseGeneration VulkanContext {..} rm noiseHandle NoiseParams {..} = do
   logInfo LogGeneral "dispatching cloud noise compute shader..."
 
   -- Load compute shader module
-  noiseShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_noise_comp.spv"
+  noiseShader <- ShaderModule.managedShaderModule vcDevice "data/shaders/fir/cloud_noise_comp.spv"
 
   -- Create descriptor set layout
-  noiseLayout <- DescriptorSetLayout.managedCloudNoiseComputeDescriptorSetLayout device
+  noiseLayout <- DescriptorSetLayout.managedCloudNoiseComputeDescriptorSetLayout vcDevice
 
   -- Create pipeline layout
-  noisePipelineLayout <- PipelineLayout.managedPipelineLayout device [noiseLayout]
+  noisePipelineLayout <- PipelineLayout.managedPipelineLayout vcDevice [noiseLayout]
 
   -- Create pipeline
-  noisePipeline <- ComputePipeline.managedComputePipeline device noisePipelineLayout noiseShader
+  noisePipeline <- ComputePipeline.managedComputePipeline vcDevice noisePipelineLayout noiseShader
 
   -- Create descriptor pool
-  noisePool <- DescriptorPool.managedCloudNoiseComputeDescriptorPool device
+  noisePool <- DescriptorPool.managedCloudNoiseComputeDescriptorPool vcDevice
 
   -- Allocate descriptor set
-  noiseDescriptorSet <- DescriptorSet.allocateDescriptorSet device noisePool [noiseLayout]
+  noiseDescriptorSet <- DescriptorSet.allocateDescriptorSet vcDevice noisePool [noiseLayout]
 
   -- Create UBO with noise params
   let noiseParams =
         NoiseGenUniforms
-          { ngSeed = seed,
-            ngFrequency = freq,
-            ngPersistence = persist,
+          { ngSeed = npSeed,
+            ngFrequency = npFrequency,
+            ngPersistence = npPersistence,
             ngZSlice = 0.0
           }
-  (noiseParamsBuffer, _noiseParamsMemory) <- Buffer.managedUniformBuffer physicalDevice device [noiseParams]
+  (noiseParamsBuffer, _noiseParamsMemory) <- Buffer.managedUniformBuffer vcPhysicalDevice vcDevice [noiseParams]
 
   -- Get image view
   mNoiseView <- Texture.textureImageView rm noiseHandle
 
   -- Update descriptor set
   case mNoiseView of
-    Just noiseView -> DescriptorSet.updateCloudNoiseComputeDescriptorSets device noiseDescriptorSet noiseView noiseParamsBuffer
+    Just noiseView -> DescriptorSet.updateCloudNoiseComputeDescriptorSets vcDevice noiseDescriptorSet noiseView noiseParamsBuffer
     Nothing -> logInfo LogGeneral "warning: cloud noise view not found"
 
   -- Get VkImage handle and dimensions for mipgen
@@ -798,19 +807,19 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
       mipLevels = 5
 
   -- Set up mipgen compute pipeline
-  mipgenShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_noise_mipgen_comp.spv"
-  mipgenLayout <- DescriptorSetLayout.managedCloudNoiseMipGenComputeDescriptorSetLayout device
-  mipgenPipelineLayout <- PipelineLayout.managedPipelineLayout device [mipgenLayout]
-  mipgenPipeline <- ComputePipeline.managedComputePipeline device mipgenPipelineLayout mipgenShader
-  mipgenPool <- DescriptorPool.managedCloudNoiseMipGenComputeDescriptorPool device
+  mipgenShader <- ShaderModule.managedShaderModule vcDevice "data/shaders/fir/cloud_noise_mipgen_comp.spv"
+  mipgenLayout <- DescriptorSetLayout.managedCloudNoiseMipGenComputeDescriptorSetLayout vcDevice
+  mipgenPipelineLayout <- PipelineLayout.managedPipelineLayout vcDevice [mipgenLayout]
+  mipgenPipeline <- ComputePipeline.managedComputePipeline vcDevice mipgenPipelineLayout mipgenShader
+  mipgenPool <- DescriptorPool.managedCloudNoiseMipGenComputeDescriptorPool vcDevice
   -- Allocate 4 descriptor sets (one per mip level)
-  mipgenDescriptorSets <- replicateM (mipLevels - 1) $ DescriptorSet.allocateDescriptorSet device mipgenPool [mipgenLayout]
+  mipgenDescriptorSets <- replicateM (mipLevels - 1) $ DescriptorSet.allocateDescriptorSet vcDevice mipgenPool [mipgenLayout]
 
   -- Create per-mip image views for the noise texture
   let noiseFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
   mipViews <- if noiseImage /= Vulkan.vkNullPtr
     then forM [0 .. mipLevels - 1] $ \mip -> do
-      liftIO $ ImageView.createImageView3DSingleMip device noiseFormat noiseImage (fromIntegral mip)
+      liftIO $ ImageView.createImageView3DSingleMip vcDevice noiseFormat noiseImage (fromIntegral mip)
     else pure (replicate mipLevels Vulkan.vkNullPtr)
 
   -- Create per-mip UBOs and pre-update all descriptor sets
@@ -818,17 +827,17 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
     let srcMip = mip - 1
         dstMip = mip
         srcSize = fromIntegral (noiseW `div` (2 ^ srcMip)) :: Foreign.C.CInt
-    (buf, mem) <- Buffer.managedUniformBuffer physicalDevice device [srcSize]
+    (buf, mem) <- Buffer.managedUniformBuffer vcPhysicalDevice vcDevice [srcSize]
     -- Update descriptor set with src/dst views
-    DescriptorSet.updateCloudNoiseMipGenComputeDescriptorSets device (mipgenDescriptorSets !! (mip - 1)) (mipViews !! srcMip) (mipViews !! dstMip) buf
+    DescriptorSet.updateCloudNoiseMipGenComputeDescriptorSets vcDevice (mipgenDescriptorSets !! (mip - 1)) (mipViews !! srcMip) (mipViews !! dstMip) buf
     pure (buf, mem)
 
   -- Dispatch compute shader + generate mipmaps
-  CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
+  CommandBuffer.withCommandBufferOneTime vcQueue vcCommandBuffer $ do
     -- Transition all mips to GENERAL for compute write (image may be in any layout from creation)
     when (noiseImage /= Vulkan.vkNullPtr) $
       CommandBuffer.mipLayerTransition
-        textureCommandBuffer
+        vcCommandBuffer
         noiseImage
         Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
         Vulkan.VK_IMAGE_LAYOUT_GENERAL
@@ -836,10 +845,10 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
         (fromIntegral mipLevels)
         1
     -- 256x256x256 / 8x8x4 = 32x32x64 workgroups
-    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE noisePipeline
+    liftIO $ Vulkan.vkCmdBindPipeline vcCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE noisePipeline
     liftIO $ Foreign.Marshal.Array.withArray [noiseDescriptorSet] $ \dsPtr ->
       Vulkan.vkCmdBindDescriptorSets
-        textureCommandBuffer
+        vcCommandBuffer
         Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
         noisePipelineLayout
         0
@@ -847,7 +856,7 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
         dsPtr
         0
         Vulkan.vkNullPtr
-    CommandBuffer.cmdDispatch textureCommandBuffer 32 32 64
+    CommandBuffer.cmdDispatch vcCommandBuffer 32 32 64
 
     -- Generate mipmaps 1..4 using REPEAT-aware compute shader
     when (noiseImage /= Vulkan.vkNullPtr) $ do
@@ -861,7 +870,7 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
 
         -- Transition dst mip to GENERAL for compute write
         CommandBuffer.mipLayerTransition
-          textureCommandBuffer
+          vcCommandBuffer
           noiseImage
           Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
           Vulkan.VK_IMAGE_LAYOUT_GENERAL
@@ -870,10 +879,10 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
           1
 
         -- Dispatch mipgen compute shader
-        liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE mipgenPipeline
+        liftIO $ Vulkan.vkCmdBindPipeline vcCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE mipgenPipeline
         liftIO $ Foreign.Marshal.Array.withArray [ds] $ \dsPtr ->
           Vulkan.vkCmdBindDescriptorSets
-            textureCommandBuffer
+            vcCommandBuffer
             Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
             mipgenPipelineLayout
             0
@@ -881,7 +890,7 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
             dsPtr
             0
             Vulkan.vkNullPtr
-        CommandBuffer.cmdDispatch textureCommandBuffer (fromIntegral (dstW `div` 8)) (fromIntegral (dstH `div` 8)) (fromIntegral (dstD `div` 4))
+        CommandBuffer.cmdDispatch vcCommandBuffer (fromIntegral (dstW `div` 8)) (fromIntegral (dstH `div` 8)) (fromIntegral (dstD `div` 4))
 
         -- Barrier: ensure compute writes are visible to next dispatch's reads
         let memoryBarrier =
@@ -893,7 +902,7 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
                 )
         liftIO $ Vulkan.withPtr memoryBarrier $ \bPtr ->
           Vulkan.vkCmdPipelineBarrier
-            textureCommandBuffer
+            vcCommandBuffer
             Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
             Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
             Vulkan.VK_ZERO_FLAGS
@@ -906,7 +915,7 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
 
       -- Transition all mips to SHADER_READ_ONLY_OPTIMAL
       CommandBuffer.mipLayerTransition
-        textureCommandBuffer
+        vcCommandBuffer
         noiseImage
         Vulkan.VK_IMAGE_LAYOUT_GENERAL
         Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -919,22 +928,19 @@ dispatchCloudNoiseGeneration device physicalDevice graphicsQueueHandler textureC
 -- | Dispatch cloud detail noise generation compute shader to fill a 64^3 3D storage image.
 dispatchCloudDetailNoiseGeneration ::
   (MonadManaged m, MonadIO m, MonadLog m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
+  VulkanContext ->
   ResourceManager ->
   TextureHandle -> -- 3D detail noise storage image
   m ()
-dispatchCloudDetailNoiseGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm noiseHandle = do
+dispatchCloudDetailNoiseGeneration VulkanContext {..} rm noiseHandle = do
   logInfo LogGeneral "dispatching cloud detail noise compute shader..."
 
-  noiseShader <- ShaderModule.managedShaderModule device "data/shaders/fir/cloud_detail_noise_comp.spv"
-  noiseLayout <- DescriptorSetLayout.managedCloudDetailNoiseComputeDescriptorSetLayout device
-  noisePipelineLayout <- PipelineLayout.managedPipelineLayout device [noiseLayout]
-  noisePipeline <- ComputePipeline.managedComputePipeline device noisePipelineLayout noiseShader
-  noisePool <- DescriptorPool.managedCloudDetailNoiseComputeDescriptorPool device
-  noiseDescriptorSet <- DescriptorSet.allocateDescriptorSet device noisePool [noiseLayout]
+  noiseShader <- ShaderModule.managedShaderModule vcDevice "data/shaders/fir/cloud_detail_noise_comp.spv"
+  noiseLayout <- DescriptorSetLayout.managedCloudDetailNoiseComputeDescriptorSetLayout vcDevice
+  noisePipelineLayout <- PipelineLayout.managedPipelineLayout vcDevice [noiseLayout]
+  noisePipeline <- ComputePipeline.managedComputePipeline vcDevice noisePipelineLayout noiseShader
+  noisePool <- DescriptorPool.managedCloudDetailNoiseComputeDescriptorPool vcDevice
+  noiseDescriptorSet <- DescriptorSet.allocateDescriptorSet vcDevice noisePool [noiseLayout]
 
   let noiseParams =
         NoiseGenUniforms
@@ -943,11 +949,11 @@ dispatchCloudDetailNoiseGeneration device physicalDevice graphicsQueueHandler te
             ngPersistence = 0.5,
             ngZSlice = 0.0
           }
-  (noiseParamsBuffer, _noiseParamsMemory) <- Buffer.managedUniformBuffer physicalDevice device [noiseParams]
+  (noiseParamsBuffer, _noiseParamsMemory) <- Buffer.managedUniformBuffer vcPhysicalDevice vcDevice [noiseParams]
 
   mNoiseView <- Texture.textureImageView rm noiseHandle
   case mNoiseView of
-    Just noiseView -> DescriptorSet.updateCloudDetailNoiseComputeDescriptorSets device noiseDescriptorSet noiseView noiseParamsBuffer
+    Just noiseView -> DescriptorSet.updateCloudDetailNoiseComputeDescriptorSets vcDevice noiseDescriptorSet noiseView noiseParamsBuffer
     Nothing -> logInfo LogGeneral "warning: cloud detail noise view not found"
 
   mNoiseTex <- liftIO $ lookupTexture rm noiseHandle
@@ -955,12 +961,12 @@ dispatchCloudDetailNoiseGeneration device physicalDevice graphicsQueueHandler te
         Just tex -> (trImage tex, trWidth tex)
         Nothing -> (Vulkan.vkNullPtr, 0)
 
-  CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
+  CommandBuffer.withCommandBufferOneTime vcQueue vcCommandBuffer $ do
     -- 64x64x64 / 8x8x8 = 8x8x8 workgroups
-    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE noisePipeline
+    liftIO $ Vulkan.vkCmdBindPipeline vcCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE noisePipeline
     liftIO $ Foreign.Marshal.Array.withArray [noiseDescriptorSet] $ \dsPtr ->
       Vulkan.vkCmdBindDescriptorSets
-        textureCommandBuffer
+        vcCommandBuffer
         Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
         noisePipelineLayout
         0
@@ -968,12 +974,12 @@ dispatchCloudDetailNoiseGeneration device physicalDevice graphicsQueueHandler te
         dsPtr
         0
         Vulkan.vkNullPtr
-    CommandBuffer.cmdDispatch textureCommandBuffer 8 8 8
+    CommandBuffer.cmdDispatch vcCommandBuffer 8 8 8
 
     -- Transition to SHADER_READ_ONLY_OPTIMAL
     when (noiseImage /= Vulkan.vkNullPtr) $ do
       CommandBuffer.mipLayerTransition
-        textureCommandBuffer
+        vcCommandBuffer
         noiseImage
         Vulkan.VK_IMAGE_LAYOUT_GENERAL
         Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
@@ -986,22 +992,19 @@ dispatchCloudDetailNoiseGeneration device physicalDevice graphicsQueueHandler te
 -- | Dispatch weather map generation compute shader to fill a 512^2 2D storage image.
 dispatchWeatherMapGeneration ::
   (MonadManaged m, MonadIO m, MonadLog m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
+  VulkanContext ->
   ResourceManager ->
   TextureHandle -> -- 2D weather map storage image
   m ()
-dispatchWeatherMapGeneration device physicalDevice graphicsQueueHandler textureCommandBuffer rm weatherHandle = do
+dispatchWeatherMapGeneration VulkanContext {..} rm weatherHandle = do
   logInfo LogGeneral "dispatching weather map compute shader..."
 
-  weatherShader <- ShaderModule.managedShaderModule device "data/shaders/fir/weather_map_comp.spv"
-  weatherLayout <- DescriptorSetLayout.managedWeatherMapComputeDescriptorSetLayout device
-  weatherPipelineLayout <- PipelineLayout.managedPipelineLayout device [weatherLayout]
-  weatherPipeline <- ComputePipeline.managedComputePipeline device weatherPipelineLayout weatherShader
-  weatherPool <- DescriptorPool.managedWeatherMapComputeDescriptorPool device
-  weatherDescriptorSet <- DescriptorSet.allocateDescriptorSet device weatherPool [weatherLayout]
+  weatherShader <- ShaderModule.managedShaderModule vcDevice "data/shaders/fir/weather_map_comp.spv"
+  weatherLayout <- DescriptorSetLayout.managedWeatherMapComputeDescriptorSetLayout vcDevice
+  weatherPipelineLayout <- PipelineLayout.managedPipelineLayout vcDevice [weatherLayout]
+  weatherPipeline <- ComputePipeline.managedComputePipeline vcDevice weatherPipelineLayout weatherShader
+  weatherPool <- DescriptorPool.managedWeatherMapComputeDescriptorPool vcDevice
+  weatherDescriptorSet <- DescriptorSet.allocateDescriptorSet vcDevice weatherPool [weatherLayout]
 
   let weatherParams =
         WeatherMapUniforms
@@ -1010,11 +1013,11 @@ dispatchWeatherMapGeneration device physicalDevice graphicsQueueHandler textureC
             wmTypeScale = 5.0,
             wmHeightScale = 2.0
           }
-  (weatherParamsBuffer, _weatherParamsMemory) <- Buffer.managedUniformBuffer physicalDevice device [weatherParams]
+  (weatherParamsBuffer, _weatherParamsMemory) <- Buffer.managedUniformBuffer vcPhysicalDevice vcDevice [weatherParams]
 
   mWeatherView <- Texture.textureImageView rm weatherHandle
   case mWeatherView of
-    Just weatherView -> DescriptorSet.updateWeatherMapComputeDescriptorSets device weatherDescriptorSet weatherView weatherParamsBuffer
+    Just weatherView -> DescriptorSet.updateWeatherMapComputeDescriptorSets vcDevice weatherDescriptorSet weatherView weatherParamsBuffer
     Nothing -> logInfo LogGeneral "warning: weather map view not found"
 
   mWeatherTex <- liftIO $ lookupTexture rm weatherHandle
@@ -1022,12 +1025,12 @@ dispatchWeatherMapGeneration device physicalDevice graphicsQueueHandler textureC
         Just tex -> (trImage tex, trWidth tex)
         Nothing -> (Vulkan.vkNullPtr, 0)
 
-  CommandBuffer.withCommandBufferOneTime graphicsQueueHandler textureCommandBuffer $ do
+  CommandBuffer.withCommandBufferOneTime vcQueue vcCommandBuffer $ do
     -- 512x512 / 8x8 = 64x64x1 workgroups
-    liftIO $ Vulkan.vkCmdBindPipeline textureCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE weatherPipeline
+    liftIO $ Vulkan.vkCmdBindPipeline vcCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE weatherPipeline
     liftIO $ Foreign.Marshal.Array.withArray [weatherDescriptorSet] $ \dsPtr ->
       Vulkan.vkCmdBindDescriptorSets
-        textureCommandBuffer
+        vcCommandBuffer
         Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE
         weatherPipelineLayout
         0
@@ -1035,12 +1038,12 @@ dispatchWeatherMapGeneration device physicalDevice graphicsQueueHandler textureC
         dsPtr
         0
         Vulkan.vkNullPtr
-    CommandBuffer.cmdDispatch textureCommandBuffer 64 64 1
+    CommandBuffer.cmdDispatch vcCommandBuffer 64 64 1
 
     -- Transition to SHADER_READ_ONLY_OPTIMAL
     when (weatherImage /= Vulkan.vkNullPtr) $ do
       CommandBuffer.mipLayerTransition
-        textureCommandBuffer
+        vcCommandBuffer
         weatherImage
         Vulkan.VK_IMAGE_LAYOUT_GENERAL
         Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL

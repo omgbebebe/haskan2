@@ -1,3 +1,5 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Graphics.Haskan.Scene.GLTF
   ( importGLTF,
     GLTFImportResult (..),
@@ -176,7 +178,13 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
   meshes <- loadMeshes rm pdev dev gltf
 
   -- Build scene graph from nodes
-  (rootEntity, physicsSpecs) <- buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures
+  (rootEntity, physicsSpecs) <- buildSceneGraph world gltf meshes MaterialTextures
+    { mtBaseColor = materialTextures
+    , mtMetallicRoughness = materialMRTextures
+    , mtNormal = materialNormalTextures
+    , mtOcclusion = materialOcclusionTextures
+    , mtEmissive = materialEmissiveTextures
+    }
 
   pure
     GLTFImportResult
@@ -444,19 +452,24 @@ primitiveToIndices prim =
       result = map fromIntegral (Vector.toList idxs)
    in result
 
+-- | Texture handle lookups per material index.
+data MaterialTextures = MaterialTextures
+  { mtBaseColor :: ![Maybe TextureHandle],
+    mtMetallicRoughness :: ![Maybe TextureHandle],
+    mtNormal :: ![Maybe TextureHandle],
+    mtOcclusion :: ![Maybe TextureHandle],
+    mtEmissive :: ![Maybe TextureHandle]
+  }
+
 -- | Build ECS scene graph from glTF nodes.
 buildSceneGraph ::
   (MonadIO m) =>
   World ->
   GLTFTypes.Gltf ->
   [MeshHandle] ->
-  [Maybe TextureHandle] -> -- material index -> base color texture handle
-  [Maybe TextureHandle] -> -- material index -> metallic-roughness texture handle
-  [Maybe TextureHandle] -> -- material index -> normal texture handle
-  [Maybe TextureHandle] -> -- material index -> occlusion texture handle
-  [Maybe TextureHandle] -> -- material index -> emissive texture handle
+  MaterialTextures ->
   m (EntityId, [PhysicsBodySpec])
-buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures = do
+buildSceneGraph world gltf meshes mt = do
   let nodes = gltfNodes gltf
       -- Find root nodes (nodes that are not children of any other node)
       allChildren = concatMap (Vector.toList . nodeChildren) (Vector.toList nodes)
@@ -468,7 +481,7 @@ buildSceneGraph world gltf meshes materialTextures materialMRTextures materialNo
 
   -- Process each root node
   specs <- fmap concat $ forM rootIndices $ \nodeIdx -> do
-    (_, nodeSpecs) <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures nodeIdx sceneRoot
+    (_, nodeSpecs) <- processNode world gltf meshes mt nodeIdx sceneRoot
     pure nodeSpecs
 
   pure (sceneRoot, specs)
@@ -479,15 +492,11 @@ processNode ::
   World ->
   GLTFTypes.Gltf ->
   [MeshHandle] ->
-  [Maybe TextureHandle] -> -- material index -> base color texture handle
-  [Maybe TextureHandle] -> -- material index -> metallic-roughness texture handle
-  [Maybe TextureHandle] -> -- material index -> normal texture handle
-  [Maybe TextureHandle] -> -- material index -> occlusion texture handle
-  [Maybe TextureHandle] -> -- material index -> emissive texture handle
+  MaterialTextures ->
   Int -> -- node index
   EntityId -> -- parent entity
   m (EntityId, [PhysicsBodySpec])
-processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures nodeIdx parentEntity = do
+processNode world gltf meshes MaterialTextures {..} nodeIdx parentEntity = do
   let nodes = gltfNodes gltf
       node = nodes Vector.! nodeIdx
 
@@ -515,8 +524,8 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
             (prim : _) -> do
               case meshPrimitiveMaterial prim of
                 Just matIdx -> do
-                  when (matIdx >= 0 && matIdx < length materialTextures) $ do
-                    case materialTextures !! matIdx of
+                  when (matIdx >= 0 && matIdx < length mtBaseColor) $ do
+                    case mtBaseColor !! matIdx of
                       Just texHandle -> do
                         logInfoIO LogGeneral $ "entity " <> showT entity <> " material " <> showT matIdx <> " -> texture assigned"
                         ECS.setMaterial world entity texHandle
@@ -539,22 +548,22 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
                       logInfoIO LogGeneral $ "entity " <> showT entity <> " material " <> showT matIdx <> " -> doubleSided=true"
                     ECS.setDoubleSided world entity ds
                   -- Set metallic-roughness texture if present
-                  when (matIdx >= 0 && matIdx < length materialMRTextures) $ do
-                    case materialMRTextures !! matIdx of
+                  when (matIdx >= 0 && matIdx < length mtMetallicRoughness) $ do
+                    case mtMetallicRoughness !! matIdx of
                       Just texHandle -> do
                         logInfoIO LogGeneral $ "entity " <> showT entity <> " MR texture assigned"
                         ECS.setMetallicRoughnessTexture world entity texHandle
                       Nothing -> pure ()
                   -- Set normal texture if present
-                  when (matIdx >= 0 && matIdx < length materialNormalTextures) $ do
-                    case materialNormalTextures !! matIdx of
+                  when (matIdx >= 0 && matIdx < length mtNormal) $ do
+                    case mtNormal !! matIdx of
                       Just texHandle -> do
                         logInfoIO LogGeneral $ "entity " <> showT entity <> " normal texture assigned"
                         ECS.setNormalTexture world entity texHandle
                       Nothing -> pure ()
                   -- Set occlusion texture and strength if present
-                  when (matIdx >= 0 && matIdx < length materialOcclusionTextures) $ do
-                    case materialOcclusionTextures !! matIdx of
+                  when (matIdx >= 0 && matIdx < length mtOcclusion) $ do
+                    case mtOcclusion !! matIdx of
                       Just texHandle -> do
                         logInfoIO LogGeneral $ "entity " <> showT entity <> " occlusion texture assigned"
                         ECS.setOcclusionTexture world entity texHandle
@@ -567,8 +576,8 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
                       logInfoIO LogGeneral $ "entity " <> showT entity <> " occlusion strength=" <> showT occStrength
                     ECS.setOcclusionStrength world entity occStrength
                   -- Set emissive texture if present
-                  when (matIdx >= 0 && matIdx < length materialEmissiveTextures) $ do
-                    case materialEmissiveTextures !! matIdx of
+                  when (matIdx >= 0 && matIdx < length mtEmissive) $ do
+                    case mtEmissive !! matIdx of
                       Just texHandle -> do
                         logInfoIO LogGeneral $ "entity " <> showT entity <> " emissive texture assigned"
                         ECS.setEmissiveTexture world entity texHandle
@@ -590,7 +599,7 @@ processNode world gltf meshes materialTextures materialMRTextures materialNormal
 
   -- Process children
   childSpecs <- fmap concat $ forM (Vector.toList (nodeChildren node)) $ \childIdx -> do
-    (_, cs) <- processNode world gltf meshes materialTextures materialMRTextures materialNormalTextures materialOcclusionTextures materialEmissiveTextures childIdx entity
+    (_, cs) <- processNode world gltf meshes MaterialTextures {..} childIdx entity
     pure cs
 
   pure (entity, maybeToList maybeSpec ++ childSpecs)

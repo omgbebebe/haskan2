@@ -4,7 +4,7 @@ with pkgs;
 
 let
   ghc = haskell.compiler.${compiler};
-  myHaskellPackages = pkgs.haskell.packages.ghc914.override {
+  myHaskellPackages = pkgs.haskell.packages.${compiler}.override {
     overrides = hself: hsuper: {
 #      ghc-trace-events = pkgs.haskell.lib.doJailbreak hsuper.ghc-trace-events;
 #      hie-compat = pkgs.haskell.lib.doJailbreak hsuper.hie-compat;
@@ -93,6 +93,7 @@ mkShell {
     gdb
     tree
     haskell-language-server
+    haskellPackages.hoogle
 #    ghc
     cabal-install
     pkg-config

@@ -3,6 +3,7 @@
 module Graphics.Haskan.Engine
   ( mainLoop,
     EngineConfig (..),
+    UVCheckMode (..),
     GameState,
     WorldState,
     ControlMessage (..),
@@ -46,7 +47,7 @@ import Graphics.Haskan.Debug.FrameInspector (defaultInspector)
 import Graphics.Haskan.Debug.Interface (DebugMessage (..), debugMessageToActionEvent)
 import Graphics.Haskan.Debug.Server (startDebugServer, stopDebugServer)
 import Graphics.Haskan.Engine.Physics (physicsLoop)
-import Graphics.Haskan.Engine.Render (renderLoop)
+import Graphics.Haskan.Engine.Render (RenderLoopConfig (..), renderLoop)
 import Graphics.Haskan.Engine.Scene (computeSkyboxRays, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types
   ( CameraMode (..),
@@ -57,6 +58,7 @@ import Graphics.Haskan.Engine.Types
     GameState (..),
     InputBuffer (..),
     LightData (..),
+    UVCheckMode (..),
     WorldState (..),
     emptyFrameStats,
     flushInputBuffer,
@@ -219,7 +221,24 @@ mainLoop meshName EngineConfig {..} = do
 
   renderLoopFinished <- liftIO newEmptyMVar
   renderLoopReady <- liftIO newEmptyMVar
-  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop window physicalDevice surface inst layers targetRenderFPS gameState renderLoopFinished renderLoopReady controlChannel meshName uvCheckMode envMapDir cloudTestMode proceduralSkyEnabled simpleMesh
+  liftIO $ forkIOWithHandler "renderLoop" renderLoopFinished $ runManaged $ renderLoop RenderLoopConfig
+    { rlcWindow = window
+    , rlcPhysicalDevice = physicalDevice
+    , rlcSurface = surface
+    , rlcInstance = inst
+    , rlcLayers = layers
+    , rlcTargetFPS = targetRenderFPS
+    , rlcGameState = gameState
+    , rlcFinishedSemaphore = renderLoopFinished
+    , rlcReadySemaphore = renderLoopReady
+    , rlcControlChannel = controlChannel
+    , rlcMeshName = meshName
+    , rlcUvCheckMode = uvCheckMode
+    , rlcEnvMapDir = envMapDir
+    , rlcCloudTestMode = cloudTestMode
+    , rlcProceduralSkyEnabled = proceduralSkyEnabled
+    , rlcSimpleMesh = simpleMesh
+    }
 
   -- Wait for render loop to finish initialization before starting timeout
   logInfoIO LogGeneral "waiting for render loop initialization..."

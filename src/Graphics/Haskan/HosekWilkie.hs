@@ -1,7 +1,10 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.HosekWilkie
   ( HWCoeffs (..),
+    SkyConfig (..),
+    BernsteinPoly5 (..),
     computeHWCoeffs,
     hwCoeffsToList,
     hwSkyRadiance,
@@ -3664,8 +3667,11 @@ datasetRGBRad3 =
     2.893432e+01
   ]
 
-bernstein5 :: Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float
-bernstein5 a0 a1 a2 a3 a4 a5 se =
+newtype BernsteinPoly5 = BernsteinPoly5 { bp5Coeffs :: (Float, Float, Float, Float, Float, Float) }
+  deriving (Eq, Show)
+
+evalBernstein5 :: BernsteinPoly5 -> Float -> Float
+evalBernstein5 (BernsteinPoly5 (a0, a1, a2, a3, a4, a5)) se =
   let o = 1.0 - se
    in o * o * o * o * o * a0
         + 5.0 * o * o * o * o * se * a1
@@ -3673,6 +3679,9 @@ bernstein5 a0 a1 a2 a3 a4 a5 se =
         + 10.0 * o * o * se * se * se * a3
         + 5.0 * o * se * se * se * se * a4
         + se * se * se * se * se * a5
+
+bernstein5 :: Float -> Float -> Float -> Float -> Float -> Float -> Float -> Float
+bernstein5 a0 a1 a2 a3 a4 a5 se = evalBernstein5 (BernsteinPoly5 (a0, a1, a2, a3, a4, a5)) se
 
 clampV :: Float -> Float -> Float -> Float
 clampV lo hi x = max lo (min hi x)
@@ -3732,11 +3741,17 @@ cookRadianceChannel dataset turbidity albedo solarElevation =
                 + (1.0 - albedo) * turbRem * bernstein5 (elevSample a0high 0) (elevSample a0high 1) (elevSample a0high 2) (elevSample a0high 3) (elevSample a0high 4) (elevSample a0high 5) se
                 + albedo * turbRem * bernstein5 (elevSample a1high 0) (elevSample a1high 1) (elevSample a1high 2) (elevSample a1high 3) (elevSample a1high 4) (elevSample a1high 5) se
 
-computeHWCoeffs :: Float -> Float -> Float -> HWCoeffs
-computeHWCoeffs turbidity albedo solarElevation =
-  let [r0, r1, r2, r3, r4, r5, r6, r7, r8] = cookChannel datasetRGB1 turbidity albedo solarElevation
-      [g0, g1, g2, g3, g4, g5, g6, g7, g8] = cookChannel datasetRGB2 turbidity albedo solarElevation
-      [b0, b1, b2, b3, b4, b5, b6, b7, b8] = cookChannel datasetRGB3 turbidity albedo solarElevation
+data SkyConfig = SkyConfig
+  { scTurbidity :: !Float
+  , scAlbedo :: !Float
+  , scSolarElevation :: !Float
+  }
+
+computeHWCoeffs :: SkyConfig -> HWCoeffs
+computeHWCoeffs SkyConfig {..} =
+  let [r0, r1, r2, r3, r4, r5, r6, r7, r8] = cookChannel datasetRGB1 scTurbidity scAlbedo scSolarElevation
+      [g0, g1, g2, g3, g4, g5, g6, g7, g8] = cookChannel datasetRGB2 scTurbidity scAlbedo scSolarElevation
+      [b0, b1, b2, b3, b4, b5, b6, b7, b8] = cookChannel datasetRGB3 scTurbidity scAlbedo scSolarElevation
    in HWCoeffs
         { hwA = V3 r0 g0 b0,
           hwB = V3 r1 g1 b1,

@@ -3,6 +3,7 @@
 module Graphics.Haskan.Engine.Render
   ( renderFrameLoop,
     renderLoop,
+    RenderLoopConfig (..),
   )
 where
 
@@ -68,19 +69,29 @@ import Graphics.Haskan.Engine.Render.Internal.FrameState
     readFrameState,
   )
 import Graphics.Haskan.Engine.Render.Internal.PassRecording
-  ( RecordContext (..),
+  ( CloudParams (..),
+    FrameParams (..),
+    FrameRenderInput (..),
+    FrameRenderResources (..),
+    SkyParams (..),
     buildRecordAction,
-    buildRecordContext,
   )
 import Graphics.Haskan.Engine.Render.Internal.Screenshot
-  ( handleScreenshotAllStages,
+  ( ScreenshotContext (..),
+    ScreenshotFlags (..),
+    handleScreenshotAllStages,
     handleScreenshotSingle,
     handleScreenshotSwapchain,
   )
 import Graphics.Haskan.Engine.Render.Internal.Setup
-  ( IBLTextures (..),
+  ( Cubemap (..),
+    IBLTextures (..),
+    NoiseParams (..),
     SceneLoadResult (..),
     ShaderModules (..),
+    ShaderPair (..),
+    WireframeShaders (..),
+    VulkanContext (..),
     compileAllShaders,
     createShaderModules,
     dispatchCloudNoiseGeneration,
@@ -89,7 +100,7 @@ import Graphics.Haskan.Engine.Render.Internal.Setup
     loadScene,
   )
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
-import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
+import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), UVCheckMode (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
 import Graphics.Haskan.Input (Action (..), ActionEvent, payloadToActionEvent)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Mesh qualified as Mesh
@@ -140,7 +151,7 @@ import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Swapchain qualified as Swapchain
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
-import Graphics.Haskan.Vulkan.Types (RenderContext (..))
+import Graphics.Haskan.Vulkan.Types (RenderContext (..), VulkanContext (..))
 import Graphics.Haskan.Window (isWindowVisible)
 import Graphics.Haskan.Window qualified as Window
 import Graphics.Vulkan qualified as Vulkan
@@ -161,6 +172,80 @@ import System.IO.Unsafe (unsafePerformIO)
 
 type RenderLoopM m = ReaderT RenderEnv m
 
+-- | Configuration passed to the render loop at startup.
+data RenderLoopConfig = RenderLoopConfig
+  { rlcWindow :: !SDL.Window,
+    rlcPhysicalDevice :: !Vulkan.VkPhysicalDevice,
+    rlcSurface :: !Vulkan.VkSurfaceKHR,
+    rlcInstance :: !Vulkan.VkInstance,
+    rlcLayers :: ![String],
+    rlcTargetFPS :: !Integer,
+    rlcGameState :: !(GameState AnyCamera),
+    rlcFinishedSemaphore :: !(MVar ()),
+    rlcReadySemaphore :: !(MVar ()),
+    rlcControlChannel :: !(TChan ControlMessage),
+    rlcMeshName :: !String,
+    rlcUvCheckMode :: !(Maybe UVCheckMode),
+    rlcEnvMapDir :: !String,
+    rlcCloudTestMode :: !Bool,
+    rlcProceduralSkyEnabled :: !Bool,
+    rlcSimpleMesh :: !(Maybe Mesh.Mesh)
+  }
+
+-- | Mutable game state variables accessed every frame.
+data GameStateTVars = GameStateTVars
+  { gstCamera :: !(TVar AnyCamera),
+    gstInspect :: !(STM.TVar Bool),
+    gstInsp :: !(STM.TVar (Maybe FrameInspector)),
+    gstRenderDebug :: !(STM.TVar (Maybe RenderDebugInfo)),
+    gstWireframe :: !(STM.TVar Bool),
+    gstDebugMode :: !(STM.TVar Word32),
+    gstAxisOverlay :: !(STM.TVar Float),
+    gstGroundPlane :: !(STM.TVar Float),
+    gstLights :: !(STM.TVar [LightData]),
+    gstTimeOfDay :: !(STM.TVar Float),
+    gstTimeSpeed :: !(STM.TVar Float),
+    gstDayNightEnabled :: !(STM.TVar Bool)
+  }
+
+-- | Mutable cloud and weather state variables.
+data CloudStateTVars = CloudStateTVars
+  { cstCloudHeight :: !(STM.TVar Float),
+    cstWindDirection :: !(STM.TVar Float),
+    cstWindSpeed :: !(STM.TVar Float),
+    cstCloudCoverage :: !(STM.TVar Float),
+    cstCloudDetail :: !(STM.TVar Float),
+    cstCloudAbsorption :: !(STM.TVar Float),
+    cstWeatherCoverageScale :: !(STM.TVar Float),
+    cstWeatherTypeBias :: !(STM.TVar Float),
+    cstStormIntensity :: !(STM.TVar Float),
+    cstWeatherAnimSpeed :: !(STM.TVar Float)
+  }
+
+-- | Mutable physics state variables.
+data PhysicsStateTVars = PhysicsStateTVars
+  { pstPhysicsBodies :: !(STM.TVar (IntMap BodyState)),
+    pstPhysicsBodyToEntity :: !(STM.TVar (IntMap EntityId)),
+    pstPhysicsAutoStep :: !(STM.TVar Bool),
+    pstPhysicsTimeScale :: !(STM.TVar Float)
+  }
+
+-- | Sky and noise generation state.
+data SkyNoiseState = SkyNoiseState
+  { snsIBLTextures :: !IBLTextures,
+    snsSkyNeedsRegeneration :: !(STM.TVar Bool),
+    snsNoiseNeedsRegeneration :: !(STM.TVar Bool),
+    snsNoiseSeed :: !(STM.TVar Float),
+    snsNoiseFrequency :: !(STM.TVar Float),
+    snsNoisePersistence :: !(STM.TVar Float)
+  }
+
+-- | Temporal reprojection state.
+data TemporalState = TemporalState
+  { tsPrevViewProj :: ![TVar (Linear.Matrix.M44 Foreign.C.CFloat)],
+    tsPrevTime :: ![TVar Float]
+  }
+
 data RenderEnv = RenderEnv
   { reWindow :: !SDL.Window,
     reContext :: !RenderContext,
@@ -169,53 +254,22 @@ data RenderEnv = RenderEnv
     reImageAvailableSemaphores :: ![Vulkan.VkSemaphore],
     reControl :: !(TChan ControlMessage),
     reFrameMvpMemories :: ![Vulkan.VkDeviceMemory],
-    reTvCamera :: !(TVar AnyCamera),
-    reTvInspect :: !(STM.TVar Bool),
-    reTvInsp :: !(STM.TVar (Maybe FrameInspector)),
-    reTvRenderDebug :: !(STM.TVar (Maybe RenderDebugInfo)),
-    reECSWorld :: !ECS.World,
-    reResourceManager :: !ResourceManager,
-    reTextureSampler :: !Vulkan.VkSampler,
     reFrameDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    reTextureSampler :: !Vulkan.VkSampler,
     reTextureIndexMap :: !(IntMap Word32),
-    reTvWireframe :: !(STM.TVar Bool),
     reFrameStatsRef :: !(IORef FrameStats),
     reCullResources :: ComputeCullResources,
-    reTvDebugMode :: !(STM.TVar Word32),
-    reTvAxisOverlay :: !(STM.TVar Float),
-    reTvGroundPlane :: !(STM.TVar Float),
-    reTvPendingScreenshot :: !(STM.TVar Bool),
-    reTvPendingAllStages :: !(STM.TVar Bool),
-    reTvPendingSwapchainScreenshot :: !(STM.TVar Bool),
     rePhysicalDevice :: !Vulkan.VkPhysicalDevice,
     reLightSsboBuffer :: Vulkan.VkBuffer,
     reLightSsboMemory :: Vulkan.VkDeviceMemory,
-    reTvLights :: !(STM.TVar [LightData]),
-    reTvTimeOfDay :: !(STM.TVar Float),
-    reTvTimeSpeed :: !(STM.TVar Float),
-    reTvDayNightEnabled :: !(STM.TVar Bool),
-    reTvCloudHeight :: !(STM.TVar Float),
-    reTvWindDirection :: !(STM.TVar Float),
-    reTvWindSpeed :: !(STM.TVar Float),
-    reTvCloudCoverage :: !(STM.TVar Float),
-    reTvCloudDetail :: !(STM.TVar Float),
-    reTvCloudAbsorption :: !(STM.TVar Float),
-    reTvWeatherCoverageScale :: !(STM.TVar Float),
-    reTvWeatherTypeBias :: !(STM.TVar Float),
-    reTvStormIntensity :: !(STM.TVar Float),
-    reTvWeatherAnimSpeed :: !(STM.TVar Float),
-    reIBLTextures :: !IBLTextures,
-    reTvSkyNeedsRegeneration :: !(STM.TVar Bool),
-    reTvNoiseNeedsRegeneration :: !(STM.TVar Bool),
-    reTvNoiseSeed :: !(STM.TVar Float),
-    reTvNoiseFrequency :: !(STM.TVar Float),
-    reTvNoisePersistence :: !(STM.TVar Float),
-    reTvPhysicsBodies :: !(STM.TVar (IntMap BodyState)),
-    reTvPhysicsBodyToEntity :: !(STM.TVar (IntMap EntityId)),
-    reTvPhysicsAutoStep :: !(STM.TVar Bool),
-    reTvPhysicsTimeScale :: !(STM.TVar Float),
-    rePrevViewProj :: ![TVar (Linear.Matrix.M44 Foreign.C.CFloat)],
-    rePrevTime :: ![TVar Float],
+    reECSWorld :: !ECS.World,
+    reResourceManager :: !ResourceManager,
+    reGameState :: !GameStateTVars,
+    reCloudState :: !CloudStateTVars,
+    rePhysicsState :: !PhysicsStateTVars,
+    reScreenshotFlags :: !ScreenshotFlags,
+    reSkyNoiseState :: !SkyNoiseState,
+    reTemporalState :: !TemporalState,
     reImGuiBackend :: !(Maybe Backend.ImGuiBackend),
     reSimpleMode :: !Bool
   }
@@ -235,21 +289,21 @@ instance (MonadIO m) => MonadTelemetry (ReaderT RenderEnv m) where
       pure mMsg
 
 instance (MonadIO m) => MonadStateReader (ReaderT RenderEnv m) where
-  readCamera = asks reTvCamera >>= readTVarIO
+  readCamera = asks (gstCamera . reGameState) >>= readTVarIO
   readControl = asks reControl >>= liftIO . STM.atomically . TChan.tryReadTChan
-  readWireframe = asks reTvWireframe >>= readTVarIO
-  readDebugMode = asks reTvDebugMode >>= readTVarIO
-  readAxisOverlay = asks reTvAxisOverlay >>= readTVarIO
-  readGroundPlane = asks reTvGroundPlane >>= readTVarIO
-  readTimeOfDay = asks reTvTimeOfDay >>= readTVarIO
-  readDayNightEnabled = asks reTvDayNightEnabled >>= readTVarIO
-  readCloudHeight = asks reTvCloudHeight >>= readTVarIO
-  readInspector = asks reTvInsp >>= readTVarIO
-  readLights = asks reTvLights >>= readTVarIO
-  consumeInspectFlag = asks reTvInspect >>= consumeTVar
-  consumeScreenshotFlag = asks reTvPendingScreenshot >>= consumeTVar
-  consumeAllStagesFlag = asks reTvPendingAllStages >>= consumeTVar
-  consumeSwapchainScreenshotFlag = asks reTvPendingSwapchainScreenshot >>= consumeTVar
+  readWireframe = asks (gstWireframe . reGameState) >>= readTVarIO
+  readDebugMode = asks (gstDebugMode . reGameState) >>= readTVarIO
+  readAxisOverlay = asks (gstAxisOverlay . reGameState) >>= readTVarIO
+  readGroundPlane = asks (gstGroundPlane . reGameState) >>= readTVarIO
+  readTimeOfDay = asks (gstTimeOfDay . reGameState) >>= readTVarIO
+  readDayNightEnabled = asks (gstDayNightEnabled . reGameState) >>= readTVarIO
+  readCloudHeight = asks (cstCloudHeight . reCloudState) >>= readTVarIO
+  readInspector = asks (gstInsp . reGameState) >>= readTVarIO
+  readLights = asks (gstLights . reGameState) >>= readTVarIO
+  consumeInspectFlag = asks (gstInspect . reGameState) >>= consumeTVar
+  consumeScreenshotFlag = asks (sfPendingScreenshot . reScreenshotFlags) >>= consumeTVar
+  consumeAllStagesFlag = asks (sfPendingAllStages . reScreenshotFlags) >>= consumeTVar
+  consumeSwapchainScreenshotFlag = asks (sfPendingSwapchainScreenshot . reScreenshotFlags) >>= consumeTVar
 
 instance (MonadIO m) => MonadGraphics (ReaderT RenderEnv m) where
   uploadStorageBuffer mem offset dat = do
@@ -311,8 +365,8 @@ runFrame frameNumber = do
         _ -> renderAndPresentSimple env frameNumber camera drawList mvpMemory imageAvailableSemaphore
     else do
       -- Sync physics bodies to ECS transforms
-      physicsBodies' <- liftIO $ STM.readTVarIO reTvPhysicsBodies
-      physicsBodyToEntity' <- liftIO $ STM.readTVarIO reTvPhysicsBodyToEntity
+      physicsBodies' <- liftIO $ STM.readTVarIO (pstPhysicsBodies rePhysicsState)
+      physicsBodyToEntity' <- liftIO $ STM.readTVarIO (pstPhysicsBodyToEntity rePhysicsState)
       liftIO $ forM_ (IntMap.toList physicsBodies') $ \(bid, bstate) ->
         case IntMap.lookup bid physicsBodyToEntity' of
           Just (EntityId eid) -> do
@@ -331,7 +385,7 @@ runFrame frameNumber = do
           viewMat = Linear.Matrix.transpose $ (realToFrac <$>) <$> Camera.unViewMatrix (Camera.toMatrix camera) :: M44 Float
           entityDebugInfos = computeEntityDebugInfos sortedDrawList projMat viewMat
           renderDebugInfo = buildRenderDebugInfo frameNumber camPos camTarget projMat entityDebugInfos
-      liftIO $ STM.atomically $ STM.writeTVar reTvRenderDebug $ Just renderDebugInfo
+      liftIO $ STM.atomically $ STM.writeTVar (gstRenderDebug reGameState) $ Just renderDebugInfo
       let entityData = buildAllEntityData sortedDrawList
           cullData = buildCullData w h camera sortedDrawList
       uploadStorageBuffer (ccrEntityMemory reCullResources) 0 entityData
@@ -339,7 +393,7 @@ runFrame frameNumber = do
       logDebug LogRender $ "compute culling data uploaded: " <> showT (length entityData) <> " entities"
 
       -- Check if procedural sky needs regeneration (day-night cycle)
-      needsSkyRegen <- liftIO $ STM.readTVarIO reTvSkyNeedsRegeneration
+      needsSkyRegen <- liftIO $ STM.readTVarIO (snsSkyNeedsRegeneration reSkyNoiseState)
       when needsSkyRegen $ do
         logInfo LogRender "sky regeneration requested (sun angle > 2°)"
         timeOfDay <- readTimeOfDay
@@ -347,50 +401,44 @@ runFrame frameNumber = do
             sunDir = DayNight.ssDirection sunState
             sunElevation = max 0.0 (sunDir ^. _y) -- elevation from Y component
             sunIntensity = DayNight.ssIntensity sunState * 50.0 -- scale to HW intensity range
-            IBLTextures {..} = reIBLTextures
+            IBLTextures {..} = snsIBLTextures reSkyNoiseState
             ctx = reContext
         -- Create a one-time command buffer and dispatch sky compute shaders
         regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
+        let vc = VulkanContext (device ctx) rePhysicalDevice (graphicsQueueHandler ctx) regenCmdBuf
         liftIO $
           runManaged $
             dispatchProceduralSkyGeneration
-              (device ctx)
-              rePhysicalDevice
-              (graphicsQueueHandler ctx)
-              regenCmdBuf
+              vc
               reResourceManager
-              iblRadianceCubemap
-              iblIrradianceCubemap
+              (cmHandle iblRadiance)
+              (cmHandle iblIrradiance)
               sunDir
               sunElevation
               sunIntensity
-        liftIO $ STM.atomically $ STM.writeTVar reTvSkyNeedsRegeneration False
+        liftIO $ STM.atomically $ STM.writeTVar (snsSkyNeedsRegeneration reSkyNoiseState) False
 
       -- Check if cloud noise needs regeneration (ImGui trigger)
-      needsNoiseRegen <- liftIO $ STM.readTVarIO reTvNoiseNeedsRegeneration
+      needsNoiseRegen <- liftIO $ STM.readTVarIO (snsNoiseNeedsRegeneration reSkyNoiseState)
       when needsNoiseRegen $ do
         logInfo LogRender "cloud noise regeneration requested"
-        noiseSeedVal <- liftIO $ STM.readTVarIO reTvNoiseSeed
-        noiseFreqVal <- liftIO $ STM.readTVarIO reTvNoiseFrequency
-        noisePersistVal <- liftIO $ STM.readTVarIO reTvNoisePersistence
-        let IBLTextures {..} = reIBLTextures
+        noiseSeedVal <- liftIO $ STM.readTVarIO (snsNoiseSeed reSkyNoiseState)
+        noiseFreqVal <- liftIO $ STM.readTVarIO (snsNoiseFrequency reSkyNoiseState)
+        noisePersistVal <- liftIO $ STM.readTVarIO (snsNoisePersistence reSkyNoiseState)
+        let IBLTextures {..} = snsIBLTextures reSkyNoiseState
             ctx = reContext
         -- Create a one-time command buffer and dispatch noise compute shaders
         regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
         liftIO $ Vulkan.vkDeviceWaitIdle (device ctx)
+        let vc = VulkanContext (device ctx) rePhysicalDevice (graphicsQueueHandler ctx) regenCmdBuf
         liftIO $
           runManaged $
             dispatchCloudNoiseGeneration
-              (device ctx)
-              rePhysicalDevice
-              (graphicsQueueHandler ctx)
-              regenCmdBuf
+              vc
               reResourceManager
-              iblCloudNoiseHandle
-              noiseSeedVal
-              noiseFreqVal
-              noisePersistVal
-        liftIO $ STM.atomically $ STM.writeTVar reTvNoiseNeedsRegeneration False
+              (cmHandle iblCloudNoise)
+              (NoiseParams noiseSeedVal noiseFreqVal noisePersistVal)
+        liftIO $ STM.atomically $ STM.writeTVar (snsNoiseNeedsRegeneration reSkyNoiseState) False
 
       lights' <- readLights
       let lightsToUpload = take 256 lights' ++ replicate (256 - length lights') (LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0)
@@ -434,18 +482,18 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       cloudBase = cloudHeight - 300.0
       cloudTop = cloudHeight + 300.0
 
-  windDirDeg <- liftIO $ STM.readTVarIO reTvWindDirection
-  windSpeedVal <- liftIO $ STM.readTVarIO reTvWindSpeed
+  windDirDeg <- liftIO $ STM.readTVarIO (cstWindDirection reCloudState)
+  windSpeedVal <- liftIO $ STM.readTVarIO (cstWindSpeed reCloudState)
   let windDirRad = windDirDeg * pi / 180.0
       windDirXVal = cos windDirRad * windSpeedVal / 10.0
       windDirZVal = sin windDirRad * windSpeedVal / 10.0
-  cloudCoverageVal <- liftIO $ STM.readTVarIO reTvCloudCoverage
-  cloudDetailVal <- liftIO $ STM.readTVarIO reTvCloudDetail
-  cloudAbsorptionVal <- liftIO $ STM.readTVarIO reTvCloudAbsorption
-  weatherCoverageScaleVal <- liftIO $ STM.readTVarIO reTvWeatherCoverageScale
-  weatherTypeBiasVal <- liftIO $ STM.readTVarIO reTvWeatherTypeBias
-  stormIntensityVal <- liftIO $ STM.readTVarIO reTvStormIntensity
-  weatherAnimSpeedVal <- liftIO $ STM.readTVarIO reTvWeatherAnimSpeed
+  cloudCoverageVal <- liftIO $ STM.readTVarIO (cstCloudCoverage reCloudState)
+  cloudDetailVal <- liftIO $ STM.readTVarIO (cstCloudDetail reCloudState)
+  cloudAbsorptionVal <- liftIO $ STM.readTVarIO (cstCloudAbsorption reCloudState)
+  weatherCoverageScaleVal <- liftIO $ STM.readTVarIO (cstWeatherCoverageScale reCloudState)
+  weatherTypeBiasVal <- liftIO $ STM.readTVarIO (cstWeatherTypeBias reCloudState)
+  stormIntensityVal <- liftIO $ STM.readTVarIO (cstStormIntensity reCloudState)
+  weatherAnimSpeedVal <- liftIO $ STM.readTVarIO (cstWeatherAnimSpeed reCloudState)
 
   currentTime <- getMonotonicTime
   let elapsedSeconds = fromIntegral (toNanoSecs currentTime) / 1e9
@@ -457,38 +505,42 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
             Backend.DebugPanelEnv
               { Backend.dpeCloud =
                   Backend.CloudPanel
-                    { Backend.cpHeight = reTvCloudHeight,
-                      Backend.cpWindDirection = reTvWindDirection,
-                      Backend.cpWindSpeed = reTvWindSpeed,
-                      Backend.cpDetail = reTvCloudDetail,
-                      Backend.cpAbsorption = reTvCloudAbsorption,
-                      Backend.cpNoiseSeed = reTvNoiseSeed,
-                      Backend.cpNoiseFrequency = reTvNoiseFrequency,
-                      Backend.cpNoisePersistence = reTvNoisePersistence
+                    { Backend.cpHeight = cstCloudHeight reCloudState,
+                      Backend.cpWindDirection = cstWindDirection reCloudState,
+                      Backend.cpWindSpeed = cstWindSpeed reCloudState,
+                      Backend.cpDetail = cstCloudDetail reCloudState,
+                      Backend.cpAbsorption = cstCloudAbsorption reCloudState,
+                      Backend.cpNoiseSeed = snsNoiseSeed reSkyNoiseState,
+                      Backend.cpNoiseFrequency = snsNoiseFrequency reSkyNoiseState,
+                      Backend.cpNoisePersistence = snsNoisePersistence reSkyNoiseState
                     },
                 Backend.dpeWeather =
                   Backend.WeatherPanel
-                    { Backend.wpCoverage = reTvCloudCoverage,
-                      Backend.wpCoverageScale = reTvWeatherCoverageScale,
-                      Backend.wpTypeBias = reTvWeatherTypeBias,
-                      Backend.wpStormIntensity = reTvStormIntensity,
-                      Backend.wpAnimSpeed = reTvWeatherAnimSpeed
+                    { Backend.wpCoverage = cstCloudCoverage reCloudState,
+                      Backend.wpCoverageScale = cstWeatherCoverageScale reCloudState,
+                      Backend.wpTypeBias = cstWeatherTypeBias reCloudState,
+                      Backend.wpStormIntensity = cstStormIntensity reCloudState,
+                      Backend.wpAnimSpeed = cstWeatherAnimSpeed reCloudState
                     },
-                Backend.dpeTimeOfDay = reTvTimeOfDay,
-                Backend.dpeTimeSpeed = reTvTimeSpeed,
+                Backend.dpeTimeOfDay = gstTimeOfDay reGameState,
+                Backend.dpeTimeSpeed = gstTimeSpeed reGameState,
                 Backend.dpeFrameStatsRef = reFrameStatsRef,
                 Backend.dpeCamera = camera,
-                Backend.dpeDebugMode = reTvDebugMode,
-                Backend.dpeWireframe = reTvWireframe,
-                Backend.dpePhysicsAutoStep = reTvPhysicsAutoStep,
-                Backend.dpePhysicsTimeScale = reTvPhysicsTimeScale,
-                Backend.dpeNoiseNeedsRegeneration = reTvNoiseNeedsRegeneration
+                Backend.dpeDebugMode = gstDebugMode reGameState,
+                Backend.dpeWireframe = gstWireframe reGameState,
+                Backend.dpePhysicsAutoStep = pstPhysicsAutoStep rePhysicsState,
+                Backend.dpePhysicsTimeScale = pstPhysicsTimeScale rePhysicsState,
+                Backend.dpeNoiseNeedsRegeneration = snsNoiseNeedsRegeneration reSkyNoiseState
               }
       Backend.buildImGuiFrame (runReaderT Backend.buildDebugPanel panelEnv)
     Nothing -> pure Nothing
 
-  let recordCtx = buildRecordContext ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer frameState camera drawList lightCount skyboxRays skyTint iblInt sunAzimuth sunDir elapsedSeconds rePrevViewProj rePrevTime cloudPrevViewProj windDirXVal windDirZVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal weatherCoverageScaleVal weatherTypeBiasVal stormIntensityVal weatherAnimSpeedVal invViewProj nearPlane farPlane sunColor cloudBase cloudTop mDrawData
-      recordAction = buildRecordAction recordCtx
+  let skyParams = SkyParams skyTint iblInt sunAzimuth sunDir
+      cloudParams = CloudParams windDirXVal windDirZVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal weatherCoverageScaleVal weatherTypeBiasVal stormIntensityVal weatherAnimSpeedVal
+      frameParams = FrameParams elapsedSeconds (tsPrevViewProj reTemporalState) (tsPrevTime reTemporalState) cloudPrevViewProj
+      resources = FrameRenderResources ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer
+      input = FrameRenderInput frameState camera drawList lightCount skyboxRays skyParams cloudParams frameParams invViewProj nearPlane farPlane sunColor cloudBase cloudTop mDrawData
+      recordAction = buildRecordAction resources input
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
   handleFrameResult env frameNumber camera drawList res
@@ -585,12 +637,19 @@ handlePresentResult env@RenderEnv {..} frameNumber camera drawList imageIndex = 
       shouldScreenshot <- consumeScreenshotFlag
       shouldAllStages <- consumeAllStagesFlag
       shouldSwapchain <- consumeSwapchainScreenshotFlag
+      let screenshotCtx =
+            ScreenshotContext
+              { scVulkanContext = VulkanContext (device reContext) rePhysicalDevice (graphicsQueueHandler reContext) undefined,
+                scCommandPool = rcGraphicsCommandPool reContext,
+                scExtent = rcSurfaceExtent reContext,
+                scImageIndex = imageIndex
+              }
       when shouldScreenshot $ do
-        handleScreenshotSingle reDeferred (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
+        handleScreenshotSingle reDeferred screenshotCtx
       when shouldAllStages $ do
-        handleScreenshotAllStages reDeferred (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
+        handleScreenshotAllStages reDeferred screenshotCtx
       when shouldSwapchain $ do
-        handleScreenshotSwapchain reContext (device reContext) rePhysicalDevice (rcGraphicsCommandPool reContext) (graphicsQueueHandler reContext) (rcSurfaceExtent reContext) imageIndex
+        handleScreenshotSwapchain reContext screenshotCtx
     pure (False, False)
   Vulkan.VK_SUBOPTIMAL_KHR ->
     pure (True, False)
@@ -651,29 +710,14 @@ renderFrameLoop' frameNumber = do
 
 renderLoop ::
   (MonadFail m, MonadManaged m, MonadIO m, MonadLog m, MonadClock m, MonadTelemetry m, MonadStateReader m, MonadGraphics m) =>
-  SDL.Window ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkSurfaceKHR ->
-  Vulkan.VkInstance ->
-  [String] ->
-  Integer ->
-  GameState AnyCamera ->
-  MVar () ->
-  MVar () ->
-  TChan ControlMessage ->
-  String ->
-  Maybe String ->
-  String ->
-  Bool ->
-  Bool ->
-  Maybe Mesh.Mesh ->
+  RenderLoopConfig ->
   m ()
-renderLoop window physicalDevice surface inst layers targetFPS gameState finishedSemaphore readySemaphore controlChannel meshName uvCheckMode envMapDir cloudTestMode proceduralSkyEnabled simpleMesh = do
-  control <- liftIO $ STM.atomically $ TChan.dupTChan controlChannel
+renderLoop RenderLoopConfig {..} = do
+  control <- liftIO $ STM.atomically $ TChan.dupTChan rlcControlChannel
 
   rm <- newResourceManager
 
-  (device, (graphicsQueueFamilyIndex, presentQueueFamilyIndex)) <- Device.managedRenderDevice physicalDevice surface layers
+  (device, (graphicsQueueFamilyIndex, presentQueueFamilyIndex)) <- Device.managedRenderDevice rlcPhysicalDevice rlcSurface rlcLayers
 
   graphicsQueueHandler <- Device.getDeviceQueueHandler device graphicsQueueFamilyIndex 0
   presentQueueHandler <- Device.getDeviceQueueHandler device presentQueueFamilyIndex 0
@@ -705,43 +749,45 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
     Just
       <$> alloc
         "ImGuiBackend"
-        (Backend.initImGuiBackend window inst physicalDevice device (fromIntegral graphicsQueueFamilyIndex) graphicsQueueHandler imGuiDescriptorPool imGuiRenderPass 2 3)
+        (Backend.initImGuiBackend rlcWindow rlcInstance rlcPhysicalDevice device (fromIntegral graphicsQueueFamilyIndex) graphicsQueueHandler imGuiDescriptorPool imGuiRenderPass 2 3)
         Backend.shutdownImGuiBackend
   logInfo LogGeneral "Dear ImGui initialized"
 
   textureCommandBuffer <- CommandBuffer.createCommandBuffer device graphicsCommandPool
   logDebug LogTexture "textureCommandBuffer created"
 
-  iblTextures <- loadIBLTextures rm physicalDevice device graphicsQueueHandler textureCommandBuffer envMapDir proceduralSkyEnabled
+  let vulkanContext = VulkanContext device rlcPhysicalDevice graphicsQueueHandler textureCommandBuffer
+
+  iblTextures <- loadIBLTextures vulkanContext rm rlcEnvMapDir rlcProceduralSkyEnabled
   let IBLTextures {..} = iblTextures
 
   assetCache <- initCache ".haskan2-cache"
 
-  sceneResult <- loadScene rm physicalDevice device graphicsQueueHandler textureCommandBuffer assetCache meshName uvCheckMode simpleMesh
+  sceneResult <- loadScene vulkanContext rm assetCache rlcMeshName rlcUvCheckMode rlcSimpleMesh
   let SceneLoadResult {..} = sceneResult
-      isStressTest = meshName == "stress_test"
+      isStressTest = rlcMeshName == "stress_test"
       ecsWorld = slrECSWorld
       sceneBounds = slrSceneBounds
       texturePixelMap = slrTexturePixelMap
 
   -- Write physics body specs from scene description
-  liftIO $ STM.atomically $ STM.writeTVar (physicsPendingSpecs gameState) slrPhysicsSpecs
+  liftIO $ STM.atomically $ STM.writeTVar (physicsPendingSpecs rlcGameState) slrPhysicsSpecs
 
-  worldState <- liftIO $ STM.readTVarIO (world gameState)
+  worldState <- liftIO $ STM.readTVarIO (world rlcGameState)
   let tvCamera = activeCamera worldState
   currentCam <- liftIO $ STM.readTVarIO tvCamera
-  unless cloudTestMode $ do
+  unless rlcCloudTestMode $ do
     let adjustedCam =
           if isStressTest
             then setDistance (setTarget currentCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) (150.0 :: Foreign.C.CFloat)
             else adjustCameraForScene sceneBounds currentCam
-        finalCam = case uvCheckMode of
+        finalCam = case rlcUvCheckMode of
           Just _ -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.0) 0.78 (realToFrac (pi / 6 :: Double))
           Nothing -> setAngles adjustedCam 0 (realToFrac (pi / 6 :: Double))
     liftIO $ STM.atomically $ STM.writeTVar tvCamera finalCam
     logInfo LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance finalCam)
 
-  when isStressTest $ liftIO $ STM.atomically $ STM.writeTVar (wireframeEnabled gameState) False
+  when isStressTest $ liftIO $ STM.atomically $ STM.writeTVar (wireframeEnabled rlcGameState) False
 
   initialDrawList <- extractDrawList ecsWorld rm IntMap.empty
   let numDrawEntities = length initialDrawList
@@ -750,7 +796,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
   liftIO $ do
     let meshHandles = nub (map (mrHandle . dcMesh) initialDrawList)
     unless (null meshHandles) $ do
-      (mergedMesh, offsets) <- Buffer.mergeMeshes rm physicalDevice device meshHandles
+      (mergedMesh, offsets) <- Buffer.mergeMeshes rm rlcPhysicalDevice device meshHandles
       let sharedVertBuf = (mrVertexBuffer mergedMesh) {brDestroy = pure ()}
           sharedIdxBuf = (mrIndexBuffer mergedMesh) {brDestroy = pure ()}
       forM_ (HashMap.toList offsets) $ \(mh, (fi, vo)) -> do
@@ -771,7 +817,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
   logDebug LogBuffer $ "initialViewProjData length=" <> showT (length initialViewProjData) <> " size=" <> showT (length initialViewProjData * sizeOf (undefined :: M44 Foreign.C.CFloat))
   frameMvpBuffers <-
     replicateM Render.maxFramesInFlight $
-      Buffer.managedUniformBuffer physicalDevice device initialViewProjData
+      Buffer.managedUniformBuffer rlcPhysicalDevice device initialViewProjData
   logDebug LogBuffer $ "frameMvpBuffers created, count=" <> showT (length frameMvpBuffers)
 
   let maxEntities = 16384 :: Int
@@ -804,18 +850,25 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
           }
       initialDrawCommands = replicate maxEntities (DrawIndexedIndirectCommand 0 0 0 0 0)
 
-  (entitySsboBuffer, entitySsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxEntities dummyEntityData) Vulkan.VK_ZERO_FLAGS
-  (drawCommandsBuffer, drawCommandsMemory) <- Buffer.managedStorageBuffer physicalDevice device initialDrawCommands Vulkan.VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
-  (cullDataBuffer, cullDataMemory) <- Buffer.managedUniformBuffer physicalDevice device [dummyCullData]
+  (entitySsboBuffer, entitySsboMemory) <- Buffer.managedStorageBuffer rlcPhysicalDevice device (replicate maxEntities dummyEntityData) Vulkan.VK_ZERO_FLAGS
+  (drawCommandsBuffer, drawCommandsMemory) <- Buffer.managedStorageBuffer rlcPhysicalDevice device initialDrawCommands Vulkan.VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
+  (cullDataBuffer, cullDataMemory) <- Buffer.managedUniformBuffer rlcPhysicalDevice device [dummyCullData]
 
   let maxLights = 256 :: Int
       dummyLightData = LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0
-  (lightSsboBuffer, lightSsboMemory) <- Buffer.managedStorageBuffer physicalDevice device (replicate maxLights dummyLightData) Vulkan.VK_ZERO_FLAGS
+  (lightSsboBuffer, lightSsboMemory) <- Buffer.managedStorageBuffer rlcPhysicalDevice device (replicate maxLights dummyLightData) Vulkan.VK_ZERO_FLAGS
   logDebug LogBuffer $ "light SSBO created: " <> showT (maxLights * sizeOf (undefined :: LightData)) <> " bytes"
 
   logDebug LogBuffer $ "compute buffers created: entitySSBO=" <> showT (maxEntities * sizeOf (undefined :: ComputeEntityData)) <> " drawCommands=" <> showT (maxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)) <> " cullData=" <> showT (sizeOf (undefined :: ComputeCullData))
 
-  DescriptorSet.updateComputeDescriptorSets device computeDescriptorSet entitySsboBuffer drawCommandsBuffer cullDataBuffer
+  DescriptorSet.updateComputeDescriptorSets $
+    DescriptorSet.ComputeDescriptorUpdate
+      { cpduDevice = device
+      , cpduDescriptorSet = computeDescriptorSet
+      , cpduEntitiesBuffer = entitySsboBuffer
+      , cpduDrawCommandsBuffer = drawCommandsBuffer
+      , cpduCullDataBuffer = cullDataBuffer
+      }
   logDebug LogRender "compute descriptor set updated"
 
   let computeCullResources =
@@ -877,7 +930,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
     if numUniqueTextures == 0
       then do
         let whiteTexData = Texture.generateGridTexture 2 2 1
-        whiteHandle <- Texture.createTextureFromData rm physicalDevice device 2 2 whiteTexData graphicsQueueHandler textureCommandBuffer
+        whiteHandle <- Texture.createTextureFromData rm (VulkanContext device rlcPhysicalDevice graphicsQueueHandler textureCommandBuffer) 2 2 whiteTexData
         mView <- Texture.textureImageView rm whiteHandle
         case mView of
           Just view -> pure [view]
@@ -894,7 +947,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                 Just texRes -> case trPixelData texRes of
                   Nothing -> pure (256, 256, Texture.generateCheckerboardTexture 256 256 32)
                   Just pixelData -> pure (trWidth texRes, trHeight texRes, pixelData)
-          texHandle' <- Texture.createTextureFromDataSRGB rm physicalDevice device tw th pixelData graphicsQueueHandler textureCommandBuffer
+          texHandle' <- Texture.createTextureFromDataSRGB rm (VulkanContext device rlcPhysicalDevice graphicsQueueHandler textureCommandBuffer) tw th pixelData
           mView <- Texture.textureImageView rm texHandle'
           case mView of
             Just view -> pure view
@@ -914,76 +967,82 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
   logInfo LogVulkan "updating frame descriptor sets"
   for_ (zip [0 ..] frameMvpBuffers) $ \(frameIdx, (buf, _)) -> do
     let ds = frameDescriptorSets !! frameIdx
-    DescriptorSet.updateDescriptorSetsBindless
-      device
-      ds
-      buf
-      (fromIntegral viewProjUniformSize)
-      textureSampler
-      bindlessTextureViews
-      entitySsboBuffer
+    DescriptorSet.updateDescriptorSetsBindless $
+      DescriptorSet.BindlessDescriptorUpdate
+        { bduDevice = device
+        , bduDescriptorSet = ds
+        , bduBuffer = buf
+        , bduRange = fromIntegral viewProjUniformSize
+        , bduSampler = textureSampler
+        , bduImageViews = bindlessTextureViews
+        , bduEntityBuffer = entitySsboBuffer
+        }
   logInfo LogVulkan "frame descriptor sets updated"
 
   logInfo LogRender "all resources created, entering render loop"
-  liftIO $ putMVar readySemaphore ()
+  liftIO $ putMVar rlcReadySemaphore ()
 
   let mkRenderContext =
         Render.createRenderContext
-          physicalDevice
-          device
-          surface
-          pipelineLayout
-          smForwardVert
-          smForwardFrag
-          []
-          graphicsCommandPool
-          graphicsQueueHandler
-          presentQueueHandler
-          renderFinishedFences
-          renderFinishedSemaphores
+          Render.RenderContextConfig
+            { Render.rccPhysicalDevice = rlcPhysicalDevice,
+              Render.rccDevice = device,
+              Render.rccSurface = rlcSurface,
+              Render.rccPipelineLayout = pipelineLayout,
+              Render.rccVertexShader = shpVertex smForward,
+              Render.rccFragmentShader = shpFragment smForward,
+              Render.rccDescriptorSets = [],
+              Render.rccCommandPool = graphicsCommandPool,
+              Render.rccGraphicsQueue = graphicsQueueHandler,
+              Render.rccPresentQueue = presentQueueHandler,
+              Render.rccRenderFinishedFences = renderFinishedFences,
+              Render.rccRenderFinishedSemaphores = renderFinishedSemaphores
+            }
       mkSimpleRenderContext =
         Render.createRenderContext
-          physicalDevice
-          device
-          surface
-          pipelineLayout
-          smSimpleForwardVert
-          smSimpleForwardFrag
-          []
-          graphicsCommandPool
-          graphicsQueueHandler
-          presentQueueHandler
-          renderFinishedFences
-          renderFinishedSemaphores
-      isSimple = isJust simpleMesh
+          Render.RenderContextConfig
+            { Render.rccPhysicalDevice = rlcPhysicalDevice,
+              Render.rccDevice = device,
+              Render.rccSurface = rlcSurface,
+              Render.rccPipelineLayout = pipelineLayout,
+              Render.rccVertexShader = shpVertex smSimpleForward,
+              Render.rccFragmentShader = shpFragment smSimpleForward,
+              Render.rccDescriptorSets = [],
+              Render.rccCommandPool = graphicsCommandPool,
+              Render.rccGraphicsQueue = graphicsQueueHandler,
+              Render.rccPresentQueue = presentQueueHandler,
+              Render.rccRenderFinishedFences = renderFinishedFences,
+              Render.rccRenderFinishedSemaphores = renderFinishedSemaphores
+            }
+      isSimple = isJust rlcSimpleMesh
 
-  worldState <- liftIO $ STM.readTVarIO (world gameState)
+  worldState <- liftIO $ STM.readTVarIO (world rlcGameState)
   frameStatsRef <- liftIO $ newIORef emptyFrameStats
   let tvCamera = activeCamera worldState
-      tvInspect = inspectFrame gameState
-      tvInsp = inspector gameState
-      tvRenderDebug = renderDebugState gameState
-      tvWireframe = wireframeEnabled gameState
-      tvDebugMode = debugMode gameState
-      tvAxisOverlay = axisOverlayEnabled gameState
-      tvGroundPlane = groundPlaneEnabled gameState
-      tvPendingScreenshot = pendingScreenshot gameState
-      tvPendingAllStages = pendingAllStages gameState
-      tvPendingSwapchainScreenshot = pendingSwapchainScreenshot gameState
-      tvLights = lights gameState
-      tvTimeOfDay = gameTimeOfDay gameState
-      tvTimeSpeed = gameTimeSpeed gameState
-      tvDayNightEnabled = gameDayNightEnabled gameState
-      tvCloudHeight = cloudHeight gameState
-      tvWindDirection = windDirection gameState
-      tvWindSpeed = windSpeed gameState
-      tvCloudCoverage = cloudCoverage gameState
-      tvCloudDetail = cloudDetail gameState
-      tvCloudAbsorption = cloudAbsorption gameState
-      tvWeatherCoverageScale = weatherCoverageScale gameState
-      tvWeatherTypeBias = weatherTypeBias gameState
-      tvStormIntensity = stormIntensity gameState
-      tvWeatherAnimSpeed = weatherAnimSpeed gameState
+      tvInspect = inspectFrame rlcGameState
+      tvInsp = inspector rlcGameState
+      tvRenderDebug = renderDebugState rlcGameState
+      tvWireframe = wireframeEnabled rlcGameState
+      tvDebugMode = debugMode rlcGameState
+      tvAxisOverlay = axisOverlayEnabled rlcGameState
+      tvGroundPlane = groundPlaneEnabled rlcGameState
+      tvPendingScreenshot = pendingScreenshot rlcGameState
+      tvPendingAllStages = pendingAllStages rlcGameState
+      tvPendingSwapchainScreenshot = pendingSwapchainScreenshot rlcGameState
+      tvLights = lights rlcGameState
+      tvTimeOfDay = gameTimeOfDay rlcGameState
+      tvTimeSpeed = gameTimeSpeed rlcGameState
+      tvDayNightEnabled = gameDayNightEnabled rlcGameState
+      tvCloudHeight = cloudHeight rlcGameState
+      tvWindDirection = windDirection rlcGameState
+      tvWindSpeed = windSpeed rlcGameState
+      tvCloudCoverage = cloudCoverage rlcGameState
+      tvCloudDetail = cloudDetail rlcGameState
+      tvCloudAbsorption = cloudAbsorption rlcGameState
+      tvWeatherCoverageScale = weatherCoverageScale rlcGameState
+      tvWeatherTypeBias = weatherTypeBias rlcGameState
+      tvStormIntensity = stormIntensity rlcGameState
+      tvWeatherAnimSpeed = weatherAnimSpeed rlcGameState
       frameMvpMemories = map snd frameMvpBuffers
       outerLoop :: (MonadFail m, MonadIO m) => Bool -> m ()
       outerLoop exit = do
@@ -991,91 +1050,105 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
           renderFrameLoopFinished <- liftIO $ if isSimple
             then with mkSimpleRenderContext $ \context -> do
               let renderEnv =
-                    RenderEnv
-                      { reWindow = window,
-                        reContext = context,
-                        reDeferred = undefined,
-                        reTargetFPS = targetFPS,
-                        reImageAvailableSemaphores = imageAvailableSemaphores,
-                        reControl = control,
-                        reFrameMvpMemories = frameMvpMemories,
-                        reTvCamera = tvCamera,
-                        reTvInspect = tvInspect,
-                        reTvInsp = tvInsp,
-                        reTvRenderDebug = tvRenderDebug,
-                        reECSWorld = ecsWorld,
-                        reResourceManager = rm,
-                        reTextureSampler = textureSampler,
-                        reFrameDescriptorSets = frameDescriptorSets,
-                        reTextureIndexMap = textureIndexMap,
-                        reTvWireframe = tvWireframe,
-                        reFrameStatsRef = frameStatsRef,
-                        reCullResources = undefined,
-                        reTvDebugMode = tvDebugMode,
-                        reTvAxisOverlay = tvAxisOverlay,
-                        reTvGroundPlane = tvGroundPlane,
-                        reTvPendingScreenshot = tvPendingScreenshot,
-                        reTvPendingAllStages = tvPendingAllStages,
-                        reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
-                        rePhysicalDevice = physicalDevice,
-                        reLightSsboBuffer = undefined,
-                        reLightSsboMemory = undefined,
-                        reTvLights = tvLights,
-                        reTvTimeOfDay = tvTimeOfDay,
-                        reTvTimeSpeed = tvTimeSpeed,
-                        reTvDayNightEnabled = tvDayNightEnabled,
-                        reTvCloudHeight = tvCloudHeight,
-                        reTvWindDirection = tvWindDirection,
-                        reTvWindSpeed = tvWindSpeed,
-                        reTvCloudCoverage = tvCloudCoverage,
-                        reTvCloudDetail = tvCloudDetail,
-                        reTvCloudAbsorption = tvCloudAbsorption,
-                        reTvWeatherCoverageScale = tvWeatherCoverageScale,
-                        reTvWeatherTypeBias = tvWeatherTypeBias,
-                        reTvStormIntensity = tvStormIntensity,
-                        reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
-                        reIBLTextures = iblTextures,
-                        reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
-                        reTvNoiseNeedsRegeneration = noiseNeedsRegeneration gameState,
-                        reTvNoiseSeed = noiseSeed gameState,
-                        reTvNoiseFrequency = noiseFrequency gameState,
-                        reTvNoisePersistence = noisePersistence gameState,
-                        reTvPhysicsBodies = physicsBodies gameState,
-                        reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,
-                        reTvPhysicsAutoStep = physicsAutoStep gameState,
-                        reTvPhysicsTimeScale = physicsTimeScale gameState,
-                        rePrevViewProj = [],
-                        rePrevTime = [],
-                        reImGuiBackend = Nothing,
-                        reSimpleMode = True
-                      }
+                      RenderEnv
+                        { reWindow = rlcWindow,
+                          reContext = context,
+                          reDeferred = undefined,
+                          reTargetFPS = rlcTargetFPS,
+                          reImageAvailableSemaphores = imageAvailableSemaphores,
+                          reControl = control,
+                          reFrameMvpMemories = frameMvpMemories,
+                          reGameState =
+                            GameStateTVars
+                              { gstCamera = tvCamera,
+                                gstInspect = tvInspect,
+                                gstInsp = tvInsp,
+                                gstRenderDebug = tvRenderDebug,
+                                gstWireframe = tvWireframe,
+                                gstDebugMode = tvDebugMode,
+                                gstAxisOverlay = tvAxisOverlay,
+                                gstGroundPlane = tvGroundPlane,
+                                gstLights = tvLights,
+                                gstTimeOfDay = tvTimeOfDay,
+                                gstTimeSpeed = tvTimeSpeed,
+                                gstDayNightEnabled = tvDayNightEnabled
+                              },
+                          reECSWorld = ecsWorld,
+                          reResourceManager = rm,
+                          reTextureSampler = textureSampler,
+                          reFrameDescriptorSets = frameDescriptorSets,
+                          reTextureIndexMap = textureIndexMap,
+                          reFrameStatsRef = frameStatsRef,
+                          reCullResources = undefined,
+                          rePhysicalDevice = rlcPhysicalDevice,
+                          reLightSsboBuffer = undefined,
+                          reLightSsboMemory = undefined,
+                          reCloudState =
+                            CloudStateTVars
+                              { cstCloudHeight = tvCloudHeight,
+                                cstWindDirection = tvWindDirection,
+                                cstWindSpeed = tvWindSpeed,
+                                cstCloudCoverage = tvCloudCoverage,
+                                cstCloudDetail = tvCloudDetail,
+                                cstCloudAbsorption = tvCloudAbsorption,
+                                cstWeatherCoverageScale = tvWeatherCoverageScale,
+                                cstWeatherTypeBias = tvWeatherTypeBias,
+                                cstStormIntensity = tvStormIntensity,
+                                cstWeatherAnimSpeed = tvWeatherAnimSpeed
+                              },
+                          reScreenshotFlags =
+                            ScreenshotFlags
+                              { sfPendingScreenshot = tvPendingScreenshot,
+                                sfPendingAllStages = tvPendingAllStages,
+                                sfPendingSwapchainScreenshot = tvPendingSwapchainScreenshot
+                              },
+                          reSkyNoiseState =
+                            SkyNoiseState
+                              { snsIBLTextures = iblTextures,
+                                snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
+                                snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
+                                snsNoiseSeed = noiseSeed rlcGameState,
+                                snsNoiseFrequency = noiseFrequency rlcGameState,
+                                snsNoisePersistence = noisePersistence rlcGameState
+                              },
+                          rePhysicsState =
+                            PhysicsStateTVars
+                              { pstPhysicsBodies = physicsBodies rlcGameState,
+                                pstPhysicsBodyToEntity = physicsBodyToEntity rlcGameState,
+                                pstPhysicsAutoStep = physicsAutoStep rlcGameState,
+                                pstPhysicsTimeScale = physicsTimeScale rlcGameState
+                              },
+                          reTemporalState = TemporalState {tsPrevViewProj = [], tsPrevTime = []},
+                          reImGuiBackend = Nothing,
+                          reSimpleMode = True
+                        }
               renderFrameLoop renderEnv 0
             else with mkRenderContext $ \context -> do
               let dcfg =
                     Deferred.DeferredConfig
-                      { Deferred.dcPhysicalDevice = physicalDevice,
+                      { Deferred.dcPhysicalDevice = rlcPhysicalDevice,
                         Deferred.dcDevice = device,
                         Deferred.dcRenderContext = context,
                         Deferred.dcBindlessDescSetLayout = descriptorSetLayout,
                         Deferred.dcShaders =
                           Deferred.DeferredShaders
-                            { Deferred.dsGBuffer = ShaderProgram smGbufVert Nothing Nothing Nothing smGbufFrag,
-                              Deferred.dsLighting = ShaderProgram smLightVert Nothing Nothing Nothing (if proceduralSkyEnabled then smLightProcFrag else smLightFrag),
-                              Deferred.dsWireframe = ShaderProgram smWireVert Nothing Nothing (Just smWireGeom) smWireFrag,
-                               Deferred.dsCloud = ShaderProgram smCloudVert Nothing Nothing Nothing smCloudFrag,
-                               Deferred.dsGodRay = ShaderProgram smGodrayVert Nothing Nothing Nothing smGodrayFrag,
-                               Deferred.dsAPVolume = smAPVolume
-                             },
+                            { Deferred.dsGBuffer = ShaderProgram (shpVertex smGBuffer) Nothing Nothing Nothing (shpFragment smGBuffer),
+                              Deferred.dsLighting = ShaderProgram (shpVertex smLighting) Nothing Nothing Nothing (if rlcProceduralSkyEnabled then smLightingProcedural else shpFragment smLighting),
+                              Deferred.dsWireframe = ShaderProgram (wsVertex smWireframe) Nothing Nothing (wsGeometry smWireframe) (wsFragment smWireframe),
+                              Deferred.dsCloud = ShaderProgram (shpVertex smCloud) Nothing Nothing Nothing (shpFragment smCloud),
+                              Deferred.dsGodRay = ShaderProgram (shpVertex smGodRay) Nothing Nothing Nothing (shpFragment smGodRay),
+                              Deferred.dsAPVolume = smAPVolume
+                            },
                         Deferred.dcIBL =
                           Deferred.IBLResources
-                            { Deferred.irRadianceView = iblRadianceView,
-                              Deferred.irIrradianceView = iblIrradianceView,
+                            { Deferred.irRadianceView = cmView iblRadiance,
+                              Deferred.irIrradianceView = cmView iblIrradiance,
                               Deferred.irBrdfView = iblBrdfView,
                               Deferred.irSampler = iblSampler
                             },
                         Deferred.dcCloudTextures =
                           Deferred.CloudTextures
-                            { Deferred.ctNoiseView = iblCloudNoiseView,
+                            { Deferred.ctNoiseView = cmView iblCloudNoise,
                               Deferred.ctBlueNoiseView = iblBlueNoiseView,
                               Deferred.ctWeatherMapView = iblWeatherMapView,
                               Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler,
@@ -1083,7 +1156,7 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                             },
                         Deferred.dcLightBuffer = Just lightSsboBuffer,
                         Deferred.dcImGuiRenderPass = imGuiRenderPass,
-                        Deferred.dcProceduralSky = proceduralSkyEnabled
+                        Deferred.dcProceduralSky = rlcProceduralSkyEnabled
                       }
               with (Deferred.createDeferredResources dcfg) $ \dr -> do
                 let numSwapchainImages = length (drCloudImages dr)
@@ -1091,60 +1164,74 @@ renderLoop window physicalDevice surface inst layers targetFPS gameState finishe
                 prevTimeTVars <- replicateM numSwapchainImages (STM.newTVarIO 0.0)
                 let renderEnv =
                       RenderEnv
-                        { reWindow = window,
+                        { reWindow = rlcWindow,
                           reContext = context,
                           reDeferred = dr,
-                          reTargetFPS = targetFPS,
+                          reTargetFPS = rlcTargetFPS,
                           reImageAvailableSemaphores = imageAvailableSemaphores,
                           reControl = control,
                           reFrameMvpMemories = frameMvpMemories,
-                          reTvCamera = tvCamera,
-                          reTvInspect = tvInspect,
-                          reTvInsp = tvInsp,
-                          reTvRenderDebug = tvRenderDebug,
+                          reGameState =
+                            GameStateTVars
+                              { gstCamera = tvCamera,
+                                gstInspect = tvInspect,
+                                gstInsp = tvInsp,
+                                gstRenderDebug = tvRenderDebug,
+                                gstWireframe = tvWireframe,
+                                gstDebugMode = tvDebugMode,
+                                gstAxisOverlay = tvAxisOverlay,
+                                gstGroundPlane = tvGroundPlane,
+                                gstLights = tvLights,
+                                gstTimeOfDay = tvTimeOfDay,
+                                gstTimeSpeed = tvTimeSpeed,
+                                gstDayNightEnabled = tvDayNightEnabled
+                              },
                           reECSWorld = ecsWorld,
                           reResourceManager = rm,
                           reTextureSampler = textureSampler,
                           reFrameDescriptorSets = frameDescriptorSets,
                           reTextureIndexMap = textureIndexMap,
-                          reTvWireframe = tvWireframe,
                           reFrameStatsRef = frameStatsRef,
                           reCullResources = computeCullResources,
-                          reTvDebugMode = tvDebugMode,
-                          reTvAxisOverlay = tvAxisOverlay,
-                          reTvGroundPlane = tvGroundPlane,
-                          reTvPendingScreenshot = tvPendingScreenshot,
-                          reTvPendingAllStages = tvPendingAllStages,
-                          reTvPendingSwapchainScreenshot = tvPendingSwapchainScreenshot,
-                          rePhysicalDevice = physicalDevice,
+                          rePhysicalDevice = rlcPhysicalDevice,
                           reLightSsboBuffer = lightSsboBuffer,
                           reLightSsboMemory = lightSsboMemory,
-                          reTvLights = tvLights,
-                          reTvTimeOfDay = tvTimeOfDay,
-                          reTvTimeSpeed = tvTimeSpeed,
-                          reTvDayNightEnabled = tvDayNightEnabled,
-                          reTvCloudHeight = tvCloudHeight,
-                          reTvWindDirection = tvWindDirection,
-                          reTvWindSpeed = tvWindSpeed,
-                          reTvCloudCoverage = tvCloudCoverage,
-                          reTvCloudDetail = tvCloudDetail,
-                          reTvCloudAbsorption = tvCloudAbsorption,
-                          reTvWeatherCoverageScale = tvWeatherCoverageScale,
-                          reTvWeatherTypeBias = tvWeatherTypeBias,
-                          reTvStormIntensity = tvStormIntensity,
-                          reTvWeatherAnimSpeed = tvWeatherAnimSpeed,
-                          reIBLTextures = iblTextures,
-                          reTvSkyNeedsRegeneration = skyNeedsRegeneration gameState,
-                          reTvNoiseNeedsRegeneration = noiseNeedsRegeneration gameState,
-                          reTvNoiseSeed = noiseSeed gameState,
-                          reTvNoiseFrequency = noiseFrequency gameState,
-                          reTvNoisePersistence = noisePersistence gameState,
-                          reTvPhysicsBodies = physicsBodies gameState,
-                          reTvPhysicsBodyToEntity = physicsBodyToEntity gameState,
-                          reTvPhysicsAutoStep = physicsAutoStep gameState,
-                          reTvPhysicsTimeScale = physicsTimeScale gameState,
-                          rePrevViewProj = prevViewProjTVars,
-                          rePrevTime = prevTimeTVars,
+                          reCloudState =
+                            CloudStateTVars
+                              { cstCloudHeight = tvCloudHeight,
+                                cstWindDirection = tvWindDirection,
+                                cstWindSpeed = tvWindSpeed,
+                                cstCloudCoverage = tvCloudCoverage,
+                                cstCloudDetail = tvCloudDetail,
+                                cstCloudAbsorption = tvCloudAbsorption,
+                                cstWeatherCoverageScale = tvWeatherCoverageScale,
+                                cstWeatherTypeBias = tvWeatherTypeBias,
+                                cstStormIntensity = tvStormIntensity,
+                                cstWeatherAnimSpeed = tvWeatherAnimSpeed
+                              },
+                          reScreenshotFlags =
+                            ScreenshotFlags
+                              { sfPendingScreenshot = tvPendingScreenshot,
+                                sfPendingAllStages = tvPendingAllStages,
+                                sfPendingSwapchainScreenshot = tvPendingSwapchainScreenshot
+                              },
+                          reSkyNoiseState =
+                            SkyNoiseState
+                              { snsIBLTextures = iblTextures,
+                                snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
+                                snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
+                                snsNoiseSeed = noiseSeed rlcGameState,
+                                snsNoiseFrequency = noiseFrequency rlcGameState,
+                                snsNoisePersistence = noisePersistence rlcGameState
+                              },
+                          rePhysicsState =
+                            PhysicsStateTVars
+                              { pstPhysicsBodies = physicsBodies rlcGameState,
+                                pstPhysicsBodyToEntity = physicsBodyToEntity rlcGameState,
+                                pstPhysicsAutoStep = physicsAutoStep rlcGameState,
+                                pstPhysicsTimeScale = physicsTimeScale rlcGameState
+                              },
+                          reTemporalState = TemporalState {tsPrevViewProj = prevViewProjTVars, tsPrevTime = prevTimeTVars},
                           reImGuiBackend = mImGuiBackend,
                           reSimpleMode = False
                         }

@@ -5,6 +5,7 @@ module Graphics.Haskan.Vulkan.Render
     drawFrame,
     presentFrame,
     createRenderContext,
+    RenderContextConfig (..),
     maxFramesInFlight,
     RenderM,
     runRenderM,
@@ -45,89 +46,81 @@ runRenderM ctx action = runReaderT action ctx
 maxFramesInFlight :: Int
 maxFramesInFlight = 2
 
+data RenderContextConfig = RenderContextConfig
+  { rccPhysicalDevice :: !Vulkan.VkPhysicalDevice,
+    rccDevice :: !Vulkan.VkDevice,
+    rccSurface :: !Vulkan.VkSurfaceKHR,
+    rccPipelineLayout :: !Vulkan.VkPipelineLayout,
+    rccVertexShader :: !Vulkan.VkShaderModule,
+    rccFragmentShader :: !Vulkan.VkShaderModule,
+    rccDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    rccCommandPool :: !Vulkan.VkCommandPool,
+    rccGraphicsQueue :: !Vulkan.VkQueue,
+    rccPresentQueue :: !Vulkan.VkQueue,
+    rccRenderFinishedFences :: ![Vulkan.VkFence],
+    rccRenderFinishedSemaphores :: ![Vulkan.VkSemaphore]
+  }
+
 createRenderContext ::
   (MonadIO m, MonadManaged m) =>
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
-  Vulkan.VkSurfaceKHR ->
-  Vulkan.VkPipelineLayout ->
-  Vulkan.VkShaderModule ->
-  Vulkan.VkShaderModule ->
-  [Vulkan.VkDescriptorSet] ->
-  Vulkan.VkCommandPool ->
-  Vulkan.VkQueue ->
-  Vulkan.VkQueue ->
-  [Vulkan.VkFence] ->
-  [Vulkan.VkSemaphore] ->
+  RenderContextConfig ->
   m RenderContext
-createRenderContext
-  pdev
-  device
-  surface
-  pipelineLayout
-  vertShader
-  fragShader
-  descriptorSets
-  graphicsCommandPool
-  graphicsQueueHandler
-  presentQueueHandler
-  renderFinishedFences
-  renderFinishedSemaphores = do
+createRenderContext RenderContextConfig {..} = do
     let -- depthFormat = Vulkan.VK_FORMAT_D32_SFLOAT
         depthFormat = Vulkan.VK_FORMAT_D16_UNORM
         format = Vulkan.getField @"format" Swapchain.surfaceFormat
-    surfaceExtent <- PhysicalDevice.surfaceExtent pdev surface
+    surfaceExtent <- PhysicalDevice.surfaceExtent rccPhysicalDevice rccSurface
     logDebugIO LogRender $ "createRenderContext extent=" <> showT (Vulkan.getField @"width" surfaceExtent) <> "x" <> showT (Vulkan.getField @"height" surfaceExtent)
-    swapchain <- Swapchain.managedSwapchain device pdev surface surfaceExtent
-    images <- Swapchain.getSwapchainImages device swapchain
+    swapchain <- Swapchain.managedSwapchain rccDevice rccPhysicalDevice rccSurface surfaceExtent
+    images <- Swapchain.getSwapchainImages rccDevice swapchain
     logDebugIO LogRender $ "createRenderContext swapchain images=" <> showT (length images)
-    imageViews <- for images (Haskan.managedImageView device format)
+    imageViews <- for images (Haskan.managedImageView rccDevice format)
 
-    renderPass <- RenderPass.managedRenderPass device Swapchain.surfaceFormat depthFormat
+    renderPass <- RenderPass.managedRenderPass rccDevice Swapchain.surfaceFormat depthFormat
     graphicsPipeline <-
       GraphicsPipeline.managedGraphicsPipeline
-        device
-        pipelineLayout
+        rccDevice
+        rccPipelineLayout
         renderPass
         ShaderProgram
-          { spVertex = vertShader,
+          { spVertex = rccVertexShader,
             spTessControl = Nothing,
             spTessEvaluation = Nothing,
             spGeometry = Nothing,
-            spFragment = fragShader
+            spFragment = rccFragmentShader
           }
         surfaceExtent
         Vertex.vertexFormat
         1
 
-    depthImage <- Swapchain.managedDepthImage pdev device surfaceExtent depthFormat
-    depthImageView <- Swapchain.managedDepthView device depthImage depthFormat
+    depthImage <- Swapchain.managedDepthImage rccPhysicalDevice rccDevice surfaceExtent depthFormat
+    depthImageView <- Swapchain.managedDepthView rccDevice depthImage depthFormat
     logDebugIO LogRender "createRenderContext depth image created"
 
     framebuffers <- for imageViews $ \imageView ->
-      Framebuffer.managedFramebuffer device renderPass surfaceExtent imageView depthImageView
+      Framebuffer.managedFramebuffer rccDevice renderPass surfaceExtent imageView depthImageView
     logDebugIO LogRender $ "createRenderContext framebuffers=" <> showT (length framebuffers)
 
-    graphicsCommandBuffers <- for framebuffers (\_ -> CommandBuffer.createCommandBuffer device graphicsCommandPool)
+    graphicsCommandBuffers <- for framebuffers (\_ -> CommandBuffer.createCommandBuffer rccDevice rccCommandPool)
     logDebugIO LogRender $ "createRenderContext commandBuffers=" <> showT (length graphicsCommandBuffers)
 
     pure
       RenderContext
-        { device = device,
+        { device = rccDevice,
           swapchain = swapchain,
           swapchainImages = images,
           graphicsCommandBuffers = graphicsCommandBuffers,
-          graphicsQueueHandler = graphicsQueueHandler,
-          presentQueueHandler = presentQueueHandler,
-          renderFinishedFences = renderFinishedFences,
-          renderFinishedSemaphores = renderFinishedSemaphores,
-          rcPipelineLayout = pipelineLayout,
+          graphicsQueueHandler = rccGraphicsQueue,
+          presentQueueHandler = rccPresentQueue,
+          renderFinishedFences = rccRenderFinishedFences,
+          renderFinishedSemaphores = rccRenderFinishedSemaphores,
+          rcPipelineLayout = rccPipelineLayout,
           rcGraphicsPipeline = graphicsPipeline,
           rcRenderPass = renderPass,
           rcFramebuffers = framebuffers,
-          rcDescriptorSets = descriptorSets,
+          rcDescriptorSets = rccDescriptorSets,
           rcSurfaceExtent = surfaceExtent,
-          rcGraphicsCommandPool = graphicsCommandPool
+          rcGraphicsCommandPool = rccCommandPool
         }
 
 drawFrame :: (MonadIO m) => Vulkan.VkSemaphore -> Int -> (Vulkan.Word32 -> Int -> IO ()) -> RenderM m RenderResult

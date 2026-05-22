@@ -56,6 +56,7 @@ import Graphics.Haskan.Vulkan.CommandBuffer qualified as Haskan
 import Graphics.Haskan.Vulkan.ImageView qualified as Haskan
 import Graphics.Haskan.Vulkan.Memory qualified as Haskan
 import Graphics.Haskan.Vulkan.Resources
+import Graphics.Haskan.Vulkan.Types (VulkanContext (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
@@ -92,13 +93,14 @@ decodeImageBytes bs = do
 
 managedTexture ::
   (MonadManaged m) =>
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
-  FilePath -> -- Data.Vector.Storable.Vector Word8
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
+  VulkanContext ->
+  FilePath ->
   m Vulkan.VkImageView
-managedTexture pdev dev filePath queue commandBuffer = do
+managedTexture vc filePath = do
+  let dev = vcDevice vc
+      pdev = vcPhysicalDevice vc
+      queue = vcQueue vc
+      commandBuffer = vcCommandBuffer vc
   (imgData, width, height) <- liftIO (readImageFromFile filePath)
   let dataList = Vector.toList imgData
 
@@ -180,8 +182,7 @@ managedTexture pdev dev filePath queue commandBuffer = do
 -- Dimensions are width x height x depth, each pixel is 4 bytes (RGBA).
 managedTexture3D ::
   (MonadManaged m) =>
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   -- | Path to raw binary file
   FilePath ->
   -- | Width
@@ -190,10 +191,12 @@ managedTexture3D ::
   Int ->
   -- | Depth
   Int ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m Vulkan.VkImageView
-managedTexture3D pdev dev filePath width height depth queue commandBuffer = do
+managedTexture3D vc filePath width height depth = do
+  let dev = vcDevice vc
+      pdev = vcPhysicalDevice vc
+      queue = vcQueue vc
+      commandBuffer = vcCommandBuffer vc
   imgData <- liftIO $ BS.readFile filePath
   let dataList = BS.unpack imgData
       expectedSize = width * height * depth * 4
@@ -279,8 +282,7 @@ managedTexture3D pdev dev filePath width height depth queue commandBuffer = do
 
 managedTexture3DWithMips ::
   (MonadManaged m) =>
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   -- | Path to raw binary file
   FilePath ->
   -- | Width
@@ -291,10 +293,12 @@ managedTexture3DWithMips ::
   Int ->
   -- | Mip level count
   Int ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m Vulkan.VkImageView
-managedTexture3DWithMips pdev dev filePath width height depth mipLevels queue commandBuffer = do
+managedTexture3DWithMips vc filePath width height depth mipLevels = do
+  let dev = vcDevice vc
+      pdev = vcPhysicalDevice vc
+      queue = vcQueue vc
+      commandBuffer = vcCommandBuffer vc
   imgData <- liftIO $ BS.readFile filePath
   let dataList = BS.unpack imgData
       expectedSize = width * height * depth * 4
@@ -568,17 +572,18 @@ createSamplerNearest dev =
 uploadTextureWithFormat ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   Int ->
   Int ->
   Data.Vector.Storable.Vector Word8 ->
   Vulkan.VkFormat ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-uploadTextureWithFormat rm pdev dev width height imgData format queue commandBuffer = do
+uploadTextureWithFormat rm vc width height imgData format = do
   let dataList = Vector.toList imgData
+      dev = vcDevice vc
+      pdev = vcPhysicalDevice vc
+      queue = vcQueue vc
+      commandBuffer = vcCommandBuffer vc
 
   (stagingBuffer, stagingMemoryRequirement) <-
     Haskan.managedBuffer dev dataList Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
@@ -675,87 +680,69 @@ uploadTextureWithFormat rm pdev dev width height imgData format queue commandBuf
 uploadTextureSRGB ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   Int ->
   Int ->
   Data.Vector.Storable.Vector Word8 ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-uploadTextureSRGB rm pdev dev width height imgData queue commandBuffer =
-  uploadTextureWithFormat rm pdev dev width height imgData Vulkan.VK_FORMAT_R8G8B8A8_SRGB queue commandBuffer
+uploadTextureSRGB rm vc width height imgData =
+  uploadTextureWithFormat rm vc width height imgData Vulkan.VK_FORMAT_R8G8B8A8_SRGB
 
 createTextureFromDataSRGB ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   Int ->
   Int ->
   Data.Vector.Storable.Vector Word8 ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
 createTextureFromDataSRGB = uploadTextureSRGB
 
 uploadTexture ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   Int ->
   Int ->
   Data.Vector.Storable.Vector Word8 ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-uploadTexture rm pdev dev width height imgData queue commandBuffer =
-  uploadTextureWithFormat rm pdev dev width height imgData Vulkan.VK_FORMAT_R8G8B8A8_UNORM queue commandBuffer
+uploadTexture rm vc width height imgData =
+  uploadTextureWithFormat rm vc width height imgData Vulkan.VK_FORMAT_R8G8B8A8_UNORM
 
 createTextureFromHalfFloatData ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   Int ->
   Int ->
   Data.Vector.Storable.Vector Word8 ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-createTextureFromHalfFloatData rm pdev dev width height imgData queue commandBuffer =
-  uploadTextureWithFormat rm pdev dev width height imgData Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT queue commandBuffer
+createTextureFromHalfFloatData rm vc width height imgData =
+  uploadTextureWithFormat rm vc width height imgData Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
 
 -- | Create and register a texture resource from file, using asset cache.
 createTextureResource ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   AssetCache ->
   FilePath ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-createTextureResource rm pdev dev cache filePath queue commandBuffer = do
+createTextureResource rm vc cache filePath = do
   result <- loadTextureCached cache filePath defaultTextureConfig
   case result of
     Left err -> error $ "createTextureResource: " <> err
     Right (InternalTexture meta imgData) ->
-      uploadTexture rm pdev dev (itmWidth meta) (itmHeight meta) imgData queue commandBuffer
+      uploadTexture rm vc (itmWidth meta) (itmHeight meta) imgData
 
 -- | Create and register a texture from raw RGBA8 pixel data.
 createTextureFromData ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   Int ->
   Int ->
   Data.Vector.Storable.Vector Word8 ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
 createTextureFromData = uploadTexture
 
@@ -763,19 +750,16 @@ createTextureFromData = uploadTexture
 createTextureFromBytesCached ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   AssetCache ->
   ByteString ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-createTextureFromBytesCached rm pdev dev cache rawBytes queue commandBuffer = do
+createTextureFromBytesCached rm vc cache rawBytes = do
   result <- loadTextureBytesCached cache rawBytes defaultTextureConfig
   case result of
     Left err -> error $ "createTextureFromBytesCached: " <> err
     Right (InternalTexture meta imgData) ->
-      uploadTexture rm pdev dev (itmWidth meta) (itmHeight meta) imgData queue commandBuffer
+      uploadTexture rm vc (itmWidth meta) (itmHeight meta) imgData
 
 -- | Decode texture bytes using asset cache, returning dimensions and pixel data.
 -- Does NOT upload to GPU.
@@ -834,19 +818,20 @@ generateGridTexture width height spacing =
 createTexture2DArray ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   -- | width
   Int ->
   -- | height
   Int ->
   -- | one per layer
   [Data.Vector.Storable.Vector Word8] ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-createTexture2DArray rm pdev dev width height layers queue commandBuffer = do
-  let numLayers = length layers
+createTexture2DArray rm vc width height layers = do
+  let dev = vcDevice vc
+      pdev = vcPhysicalDevice vc
+      queue = vcQueue vc
+      commandBuffer = vcCommandBuffer vc
+      numLayers = length layers
       layerSize = width * height * 4
       allData = Vector.toList $ mconcat layers
 
@@ -956,17 +941,18 @@ createTexture2DArray rm pdev dev width height layers queue commandBuffer = do
 createCubemap ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   -- | face width/height
   Int ->
   -- | 6 face pixel datas
   [Data.Vector.Storable.Vector Word8] ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-createCubemap rm pdev dev faceSize faces queue commandBuffer = do
-  let numFaces = length faces
+createCubemap rm vc faceSize faces = do
+  let dev = vcDevice vc
+      pdev = vcPhysicalDevice vc
+      queue = vcQueue vc
+      commandBuffer = vcCommandBuffer vc
+      numFaces = length faces
       facePixelCount = faceSize * faceSize * 4
       allData = Vector.toList $ mconcat faces
 
@@ -1083,17 +1069,18 @@ createCubemap rm pdev dev faceSize faces queue commandBuffer = do
 createCubemapMips ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   -- | face width/height
   Int ->
   -- | 6 face pixel datas
   [Data.Vector.Storable.Vector Word8] ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
-  let numFaces = length faces
+createCubemapMips rm vc faceSize faces = do
+  let dev = vcDevice vc
+      pdev = vcPhysicalDevice vc
+      queue = vcQueue vc
+      commandBuffer = vcCommandBuffer vc
+      numFaces = length faces
       facePixelCount = faceSize * faceSize * 4
       allData = Vector.toList $ mconcat faces
       mipLevels = floor (logBase 2 (fromIntegral faceSize :: Double)) + 1
@@ -1266,16 +1253,17 @@ createCubemapMips rm pdev dev faceSize faces queue commandBuffer = do
 createStorageImage2D ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   Int ->
   Int ->
   Vulkan.VkFormat ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-createStorageImage2D rm pdev dev width height format queue commandBuffer = do
-  let imageExtent =
+createStorageImage2D rm vc width height format = do
+  let dev = vcDevice vc
+      pdev = vcPhysicalDevice vc
+      queue = vcQueue vc
+      commandBuffer = vcCommandBuffer vc
+      imageExtent =
         Vulkan.createVk
           ( set @"width" (fromIntegral width)
               &* set @"height" (fromIntegral height)
@@ -1352,18 +1340,19 @@ createStorageImage2D rm pdev dev width height format queue commandBuffer = do
 createStorageImage3D ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   Int ->
   Int ->
   Int ->
   Int -> -- mip levels
   Vulkan.VkFormat ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-createStorageImage3D rm pdev dev width height depth mipLevels format queue commandBuffer = do
-  let imageExtent =
+createStorageImage3D rm vc width height depth mipLevels format = do
+  let dev = vcDevice vc
+      pdev = vcPhysicalDevice vc
+      queue = vcQueue vc
+      commandBuffer = vcCommandBuffer vc
+      imageExtent =
         Vulkan.createVk
           ( set @"width" (fromIntegral width)
               &* set @"height" (fromIntegral height)
@@ -1445,15 +1434,16 @@ createStorageImage3D rm pdev dev width height depth mipLevels format queue comma
 createStorageImageCube ::
   (MonadManaged m, MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  VulkanContext ->
   Int ->
   Vulkan.VkFormat ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
   m TextureHandle
-createStorageImageCube rm pdev dev faceSize format queue commandBuffer = do
-  let imageExtent =
+createStorageImageCube rm vc faceSize format = do
+  let dev = vcDevice vc
+      pdev = vcPhysicalDevice vc
+      queue = vcQueue vc
+      commandBuffer = vcCommandBuffer vc
+      imageExtent =
         Vulkan.createVk
           ( set @"width" (fromIntegral faceSize)
               &* set @"height" (fromIntegral faceSize)
