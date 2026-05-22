@@ -11,7 +11,7 @@ where
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as BS
 import Data.Word (Word32)
-import Foreign (Ptr, alloca, allocaArray, copyBytes, plusPtr, poke, sizeOf)
+import Foreign (Ptr, alloca, allocaArray, castPtr, copyBytes, plusPtr, poke, sizeOf)
 import Foreign.C.Types (CSize)
 import qualified Graphics.Vulkan.Core_1_0 as Vulkan
 import Graphics.Vulkan.Marshal.Create (set, (&*))
@@ -50,7 +50,7 @@ withSpecializationInfo SpecializationData {..} action = do
           go i offset (SpecEntry cid val : rest) = do
             let valLen = BS.length val
             poke (entriesPtr `plusPtr` (i * sizeOf (undefined :: Vulkan.VkSpecializationMapEntry))) $
-              Vulkan.createVk
+              Vulkan.createVk @(Vulkan.VkSpecializationMapEntry)
                 ( set @"constantID" cid
                     &* set @"offset" (fromIntegral offset)
                     &* set @"size" (fromIntegral valLen)
@@ -67,7 +67,7 @@ withSpecializationInfo SpecializationData {..} action = do
               ( set @"mapEntryCount" (fromIntegral entryCount)
                   &* set @"pMapEntries" entriesPtr
                   &* set @"dataSize" (fromIntegral totalSize)
-                  &* set @"pData" dataPtr
+                  &* set @"pData" (Foreign.castPtr dataPtr)
               )
       alloca $ \specInfoPtr -> do
         poke specInfoPtr specInfo

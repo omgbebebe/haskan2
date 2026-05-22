@@ -8,11 +8,15 @@ where
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.Word (Word32)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
+import Graphics.Haskan.Resources (allocaAndPeek)
 import qualified Graphics.Haskan.Vulkan.DescriptorPool as DescriptorPool
 import Graphics.Haskan.Vulkan.DescriptorSet (updateBindlessTexture)
 import qualified Graphics.Haskan.Vulkan.DescriptorSetLayout as DescriptorSetLayout
 import qualified Graphics.Vulkan as Vulkan
+import qualified Graphics.Vulkan.Core_1_0 as VulkanCore
+import Graphics.Vulkan.Marshal.Create (createVk, set, setListRef, (&*))
 
 -- | Handle to a bindless texture descriptor set.
 data BindlessSet = BindlessSet
@@ -73,14 +77,14 @@ allocateDescriptorSet ::
   m Vulkan.VkDescriptorSet
 allocateDescriptorSet dev descriptorPool setLayouts = do
   let allocateInfo =
-        Vulkan.createVk
-          ( Vulkan.set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
-              &* Vulkan.set @"pNext" Vulkan.VK_NULL
-              &* Vulkan.set @"descriptorPool" descriptorPool
-              &* Vulkan.set @"descriptorSetCount" (fromIntegral (length setLayouts))
-              &* Vulkan.setListRef @"pSetLayouts" setLayouts
+        createVk
+          ( set @"sType" VulkanCore.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"descriptorPool" descriptorPool
+              &* set @"descriptorSetCount" (fromIntegral (length setLayouts))
+              &* setListRef @"pSetLayouts" setLayouts
           )
    in liftIO $
         Vulkan.withPtr
           allocateInfo
-          (Graphics.Haskan.Resources.allocaAndPeek . Vulkan.vkAllocateDescriptorSets dev)
+          (allocaAndPeek . VulkanCore.vkAllocateDescriptorSets dev)
