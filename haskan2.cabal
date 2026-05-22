@@ -36,7 +36,6 @@ library
                          Graphics.Haskan.DayNight
                         Graphics.Haskan.HosekWilkie
                         Graphics.Haskan.Debug.Server
-                       Graphics.Haskan.Events
                         Graphics.Haskan.Engine
                          Graphics.Haskan.Engine.Capabilities.Clock
                          Graphics.Haskan.Engine.Capabilities.Graphics
