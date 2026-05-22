@@ -17,6 +17,7 @@ import Data.Foldable (for_)
 import Data.Traversable (for)
 import Data.Word (Word8)
 import Foreign.Marshal.Array qualified
+import Foreign.Ptr (Ptr, nullPtr)
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
 import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
@@ -49,7 +50,9 @@ data DeferredShaders = DeferredShaders
     dsWireframe :: !ShaderProgram,
     dsCloud :: !ShaderProgram,
     dsGodRay :: !ShaderProgram,
-    dsAPVolume :: !Vulkan.VkShaderModule
+    dsAPVolume :: !Vulkan.VkShaderModule,
+    dsAPVolumeSpecInfo :: !(Maybe (Ptr Vulkan.VkSpecializationInfo)),
+    dsBindless :: !ShaderProgram
   }
 
 data IBLResources = IBLResources
@@ -86,6 +89,8 @@ data DeferredResources = DeferredResources
     drGBufferDoubleSidedPipeline :: !Vulkan.VkPipeline,
     drGBufferPipelineLayout :: !Vulkan.VkPipelineLayout,
     drGBufferFramebuffers :: ![Vulkan.VkFramebuffer],
+    drBindlessPipeline :: !Vulkan.VkPipeline,
+    drBindlessPipelineLayout :: !Vulkan.VkPipelineLayout,
     drLightingRenderPass :: !Vulkan.VkRenderPass,
     drLightingPipeline :: !Vulkan.VkPipeline,
     drLightingPipelineLayout :: !Vulkan.VkPipelineLayout,
@@ -540,7 +545,7 @@ createDeferredResources DeferredConfig {..} = do
   logDebugIO LogRender "AP volume descriptor set layout created"
   apVolumePipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [apVolumeDescriptorSetLayout] []
   logDebugIO LogRender "AP volume pipeline layout created"
-  apVolumePipeline <- ComputePipeline.managedComputePipeline device apVolumePipelineLayout dsAPVolume
+  apVolumePipeline <- ComputePipeline.managedComputePipelineWithSpec device apVolumePipelineLayout dsAPVolume (maybe nullPtr id dsAPVolumeSpecInfo)
   logDebugIO LogRender "AP volume compute pipeline created"
 
   -- AP volume descriptor pool and sets
@@ -572,6 +577,22 @@ createDeferredResources DeferredConfig {..} = do
         }
   logDebugIO LogRender "AP volume descriptor sets updated"
 
+  -- Bindless pipeline layout (UBO + texture array, no push constants for now)
+  bindlessPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [descriptorSetLayout] []
+  logDebugIO LogRender "bindless pipeline layout created"
+
+  -- Bindless pipeline (reuses g-buffer render pass since same output format)
+  bindlessPipeline <-
+    GraphicsPipeline.managedGraphicsPipeline
+      device
+      bindlessPipelineLayout
+      gBufferRenderPass
+      dsBindless
+      extent
+      Vertex.vertexFormat
+      4
+  logDebugIO LogRender "bindless pipeline created"
+
   pure
     DeferredResources
       { drGBufferRenderPass = gBufferRenderPass,
@@ -579,6 +600,8 @@ createDeferredResources DeferredConfig {..} = do
         drGBufferDoubleSidedPipeline = gBufferDoubleSidedPipeline,
         drGBufferPipelineLayout = gBufferPipelineLayout,
         drGBufferFramebuffers = gBufferFramebuffers,
+        drBindlessPipeline = bindlessPipeline,
+        drBindlessPipelineLayout = bindlessPipelineLayout,
         drLightingRenderPass = lightingRenderPass,
         drLightingPipeline = lightingPipeline,
         drLightingPipelineLayout = lightingPipelineLayout,

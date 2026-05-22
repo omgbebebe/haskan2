@@ -107,8 +107,9 @@ library
                          Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural,
                          Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds,
                           Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays,
-                          Graphics.Haskan.Vulkan.Shaders.Forward.SimpleForward,
-                        Graphics.Haskan.Vulkan.Semaphore
+                         Graphics.Haskan.Vulkan.Shaders.Forward.SimpleForward,
+                         Graphics.Haskan.Vulkan.Shaders.Bindless,
+                         Graphics.Haskan.Vulkan.Semaphore
                         Graphics.Haskan.Vulkan.Specialization
                         Graphics.Haskan.Vulkan.Swapchain
                        Graphics.Haskan.Vulkan.Texture
@@ -123,9 +124,10 @@ library
                        Graphics.Haskan.Scene.GLTF
                         Graphics.Haskan.Render.RenderSystem
                         Graphics.Haskan.Render.Graph
-                        Graphics.Haskan.Render.Deferred
-                        Graphics.Haskan.Render.Forward
-                        Graphics.Haskan.Render.ShaderProgram
+                         Graphics.Haskan.Render.Deferred
+                         Graphics.Haskan.Render.Forward
+                         Graphics.Haskan.Render.Bindless
+                         Graphics.Haskan.Render.ShaderProgram
                         Graphics.Haskan.Physics.Jolt.FFI
                         Graphics.Haskan.Physics.Jolt.Types
                         Graphics.Haskan.Physics.Jolt.World

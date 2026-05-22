@@ -1,5 +1,6 @@
 module Graphics.Haskan.Vulkan.ComputePipeline
   ( managedComputePipeline,
+    managedComputePipelineWithSpec,
     createComputePipeline,
     createComputePipelineWithSpec,
   )
@@ -25,6 +26,19 @@ managedComputePipeline dev layout shaderModule =
   alloc
     "ComputePipeline"
     (createComputePipeline dev layout shaderModule)
+    (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
+
+managedComputePipelineWithSpec ::
+  (MonadManaged m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkPipelineLayout ->
+  Vulkan.VkShaderModule ->
+  Ptr Vulkan.VkSpecializationInfo ->
+  m Vulkan.VkPipeline
+managedComputePipelineWithSpec dev layout shaderModule specInfoPtr =
+  alloc
+    "ComputePipeline"
+    (createComputePipelineWithSpec dev layout shaderModule specInfoPtr)
     (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
 
 createComputePipeline ::

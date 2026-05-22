@@ -658,8 +658,8 @@ fragment = shader do
   -- Sample AP volume for aerial perspective
   let distToCam = sqrt ((posX - camX) * (posX - camX) + (posY - camY) * (posY - camY) + (posZ - camZ) * (posZ - camZ))
       -- Exponential depth mapping (match AP volume compute)
-      nearVal = 0.1 :: Code Float
-      farVal = 10000.0 :: Code Float
+      nearVal = specConstant @0 @Float 0.1
+      farVal = specConstant @1 @Float 10000.0
       depthT = clamp (log (distToCam / nearVal) / log (farVal / nearVal)) 0.0 1.0
   ~(Vec4 apR apG apB apA) <- use @(ImageTexel "ap_volume") NilOps (Vec3 uvX uvY depthT)
   let apTransmittance = 1.0 - apA

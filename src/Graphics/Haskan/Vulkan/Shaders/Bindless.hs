@@ -4,6 +4,7 @@
 {-# LANGUAGE RebindableSyntax #-}
 {-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeOperators #-}
+{-# OPTIONS_GHC -fno-warn-partial-type-signatures #-}
 
 module Graphics.Haskan.Vulkan.Shaders.Bindless
   ( vertex,
@@ -39,15 +40,13 @@ vertex :: ShaderModule "main" VertexShader VertexDefs _
 vertex = shader do
   ~(Vec3 x y z) <- get @"in_position"
   uv <- get @"in_uv"
-  normal <- get @"in_normal"
+  ~(Vec3 nx ny nz) <- get @"in_normal"
   projection <- use @(Name "ubo" :.: Name "projection")
   model <- use @(Name "ubo" :.: Name "model")
   view <- use @(Name "ubo" :.: Name "view")
-  let mvp = (projection !*! view) !*! model
-      worldPos = model !*^ Vec4 x y z 1
-      worldNormal = model !*^ Vec4 (view @(Index 0) normal) (view @(Index 1) normal) (view @(Index 2) normal) 0
+  let mvp = (projection !*! view) !*! model :: Code (M 4 4 Float)
   put @"out_uv" uv
-  put @"out_normal" (Vec3 (view @(Index 0) worldNormal) (view @(Index 1) worldNormal) (view @(Index 2) worldNormal))
+  put @"out_normal" (Vec3 nx ny nz)
   put @"gl_Position" (mvp !*^ Vec4 x y z 1)
 
 -- Fragment: sample from a Texture2DArray.

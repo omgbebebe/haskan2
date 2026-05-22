@@ -211,7 +211,8 @@ data ShaderModules = ShaderModules
     smCloud :: !ShaderPair,
     smGodRay :: !ShaderPair,
     smAPVolume :: !Vulkan.VkShaderModule,
-    smSimpleForward :: !ShaderPair
+    smSimpleForward :: !ShaderPair,
+    smBindless :: !ShaderPair
   }
 
 createShaderModules ::
@@ -237,6 +238,8 @@ createShaderModules device = do
   apVolume <- ShaderModule.managedShaderModule device "data/shaders/fir/ap_volume_comp.spv"
   simpleForwardVert <- ShaderModule.managedShaderModule device "data/shaders/fir/simple_forward_vert.spv"
   simpleForwardFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/simple_forward_frag.spv"
+  bindlessVert <- ShaderModule.managedShaderModule device "data/shaders/fir/bindless_vert.spv"
+  bindlessFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/bindless_frag.spv"
   pure
     ShaderModules
       { smForward = ShaderPair forwardVert forwardFrag,
@@ -248,7 +251,8 @@ createShaderModules device = do
         smCloud = ShaderPair cloudVert cloudFrag,
         smGodRay = ShaderPair godrayVert godrayFrag,
         smAPVolume = apVolume,
-        smSimpleForward = ShaderPair simpleForwardVert simpleForwardFrag
+        smSimpleForward = ShaderPair simpleForwardVert simpleForwardFrag,
+        smBindless = ShaderPair bindlessVert bindlessFrag
       }
 
 data IBLTextures = IBLTextures

@@ -331,7 +331,7 @@ cloudFragment = shader do
       maxStepSize = 300.0
       emptySkipFactor = 3.0 :: Code Float
       maxEmptySkip = 4.0 :: Code Float
-      stepCountF = 96.0 :: Code Float
+      stepCountF = specConstant @0 @Float 96.0
       -- Detail LOD: fade detail channels beyond distance
       detailFadeStart = 500.0
       detailFadeEnd = 2500.0

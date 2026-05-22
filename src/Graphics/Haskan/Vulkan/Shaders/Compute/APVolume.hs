@@ -128,7 +128,7 @@ program = Module $ entryPoint @"main" @Compute do
       heightProfile = (hPct ** baseCurve) * exp (-hPct * topDecay)
 
   -- Domain warping (matching Clouds shader)
-  let noiseScale = 0.0003
+  let noiseScale = specConstant @0 @Float 0.0003
       windSpeed = 0.05
       windOffsetX = time * windSpeed * windDirX
       windOffsetZ = time * windSpeed * windDirZ
@@ -199,7 +199,7 @@ program = Module $ entryPoint @"main" @Compute do
 
   -- Phase function (Henyey-Greenstein approximation)
   let cosTheta = rayDir ^.^ sunDir
-      g = 0.76
+      g = specConstant @1 @Float 0.76
       g2 = g * g
       hgDenom = (1.0 + g2 - 2.0 * g * cosTheta) ** 1.5
       phase = (1.0 - g2) / (4.0 * 3.14159265 * hgDenom)

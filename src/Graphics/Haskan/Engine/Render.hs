@@ -149,6 +149,7 @@ import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShade
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
+import Graphics.Haskan.Vulkan.Specialization (SpecEntry (..), SpecializationData (..), mallocSpecializationInfo, packFloat)
 import Graphics.Haskan.Vulkan.Swapchain qualified as Swapchain
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Graphics.Haskan.Vulkan.Types (RenderContext (..), VulkanContext (..))
@@ -1126,6 +1127,18 @@ renderLoop RenderLoopConfig {..} = do
                           }
                   renderFrameLoop renderEnv 0
                 else with mkRenderContext $ \context -> do
+                  cloudSpecInfo <- liftIO $ mallocSpecializationInfo $
+                    SpecializationData [SpecEntry 0 (packFloat 96.0)]
+                  apVolumeSpecInfo <- liftIO $ mallocSpecializationInfo $
+                    SpecializationData
+                      [ SpecEntry 0 (packFloat 0.0003)
+                      , SpecEntry 1 (packFloat 0.76)
+                      ]
+                  lightingSpecInfo <- liftIO $ mallocSpecializationInfo $
+                    SpecializationData
+                      [ SpecEntry 0 (packFloat 0.1)
+                      , SpecEntry 1 (packFloat 10000.0)
+                      ]
                   let dcfg =
                         Deferred.DeferredConfig
                           { Deferred.dcPhysicalDevice = rlcPhysicalDevice,
@@ -1134,12 +1147,14 @@ renderLoop RenderLoopConfig {..} = do
                             Deferred.dcBindlessDescSetLayout = descriptorSetLayout,
                             Deferred.dcShaders =
                               Deferred.DeferredShaders
-                                { Deferred.dsGBuffer = ShaderProgram (shpVertex smGBuffer) Nothing Nothing Nothing (shpFragment smGBuffer),
-                                  Deferred.dsLighting = ShaderProgram (shpVertex smLighting) Nothing Nothing Nothing (if rlcProceduralSkyEnabled then smLightingProcedural else shpFragment smLighting),
-                                  Deferred.dsWireframe = ShaderProgram (wsVertex smWireframe) Nothing Nothing (wsGeometry smWireframe) (wsFragment smWireframe),
-                                  Deferred.dsCloud = ShaderProgram (shpVertex smCloud) Nothing Nothing Nothing (shpFragment smCloud),
-                                  Deferred.dsGodRay = ShaderProgram (shpVertex smGodRay) Nothing Nothing Nothing (shpFragment smGodRay),
-                                  Deferred.dsAPVolume = smAPVolume
+                                { Deferred.dsGBuffer = ShaderProgram (shpVertex smGBuffer) Nothing Nothing Nothing (shpFragment smGBuffer) Nothing,
+                                  Deferred.dsLighting = ShaderProgram (shpVertex smLighting) Nothing Nothing Nothing (if rlcProceduralSkyEnabled then smLightingProcedural else shpFragment smLighting) (Just lightingSpecInfo),
+                                  Deferred.dsWireframe = ShaderProgram (wsVertex smWireframe) Nothing Nothing (wsGeometry smWireframe) (wsFragment smWireframe) Nothing,
+                                  Deferred.dsCloud = ShaderProgram (shpVertex smCloud) Nothing Nothing Nothing (shpFragment smCloud) (Just cloudSpecInfo),
+                                  Deferred.dsGodRay = ShaderProgram (shpVertex smGodRay) Nothing Nothing Nothing (shpFragment smGodRay) Nothing,
+                                  Deferred.dsAPVolume = smAPVolume,
+                                  Deferred.dsAPVolumeSpecInfo = Just apVolumeSpecInfo,
+                                  Deferred.dsBindless = ShaderProgram (shpVertex smBindless) Nothing Nothing Nothing (shpFragment smBindless) Nothing
                                 },
                             Deferred.dcIBL =
                               Deferred.IBLResources

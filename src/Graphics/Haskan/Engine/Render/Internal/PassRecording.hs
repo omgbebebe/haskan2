@@ -228,9 +228,10 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                       gbpGBufferImages = gBufferImagesForFrame,
                       gbpWireframePipeline = drWireframePipeline rcDeferred,
                       gbpWireframeLayout = drWireframePipelineLayout rcDeferred,
-                      gbpWireframeEnabled = rcWireframeEnabled
-                    },
-                dpdCloud =
+                     gbpWireframeEnabled = rcWireframeEnabled
+                   },
+                 dpdBindless = Nothing,
+                 dpdCloud =
                   CloudPassData
                     { cpRenderPass = drCloudRenderPass rcDeferred,
                       cpFramebuffer = cloudFramebuffer,

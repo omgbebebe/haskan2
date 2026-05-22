@@ -87,7 +87,8 @@ createRenderContext RenderContextConfig {..} = do
           spTessControl = Nothing,
           spTessEvaluation = Nothing,
           spGeometry = Nothing,
-          spFragment = rccFragmentShader
+          spFragment = rccFragmentShader,
+          spSpecializationInfo = Nothing
         }
       surfaceExtent
       Vertex.vertexFormat

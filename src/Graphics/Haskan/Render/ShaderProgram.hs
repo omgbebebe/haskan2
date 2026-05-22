@@ -30,7 +30,8 @@ data ShaderProgram = ShaderProgram
     spTessControl :: !(Maybe Vulkan.VkShaderModule),
     spTessEvaluation :: !(Maybe Vulkan.VkShaderModule),
     spGeometry :: !(Maybe Vulkan.VkShaderModule),
-    spFragment :: !Vulkan.VkShaderModule
+    spFragment :: !Vulkan.VkShaderModule,
+    spSpecializationInfo :: !(Maybe (Ptr Vulkan.VkSpecializationInfo))
   }
 
 -- | Mesh shader pipeline program (Vulkan 1.3+ / VK_EXT_mesh_shader).
@@ -42,7 +43,7 @@ data MeshShaderProgram = MeshShaderProgram
   }
 
 -- | Convert a ShaderProgram to a list of Vulkan pipeline stage create infos.
--- No specialization constants by default.
+-- Uses the specialization info from the ShaderProgram if present.
 toPipelineStages :: ShaderProgram -> [Vulkan.VkPipelineShaderStageCreateInfo]
 toPipelineStages ShaderProgram {..} =
   let mkStage stageFlag mod_ =
@@ -52,7 +53,7 @@ toPipelineStages ShaderProgram {..} =
               &* set @"stage" stageFlag
               &* set @"module" mod_
               &* setStrRef @"pName" "main"
-              &* set @"pSpecializationInfo" nullPtr
+              &* set @"pSpecializationInfo" (maybe nullPtr id spSpecializationInfo)
           )
    in catMaybes
         [ Just (mkStage Vulkan.VK_SHADER_STAGE_VERTEX_BIT spVertex),

@@ -21,6 +21,7 @@ import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as Cull
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.WeatherMapGen qualified as WeatherMapGen
+import Graphics.Haskan.Vulkan.Shaders.Bindless qualified as Bindless
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds qualified as Clouds
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBuffer
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays qualified as GodRays
@@ -79,3 +80,7 @@ $(compileShader "data/shaders/fir/ap_volume_comp.spv" [FIR.SPIRV (FIR.Version 1 
 $(compileShader "data/shaders/fir/simple_forward_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] SimpleForward.vertex)
 
 $(compileShader "data/shaders/fir/simple_forward_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] SimpleForward.fragment)
+
+$(compileShader "data/shaders/fir/bindless_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Bindless.vertex)
+
+$(compileShader "data/shaders/fir/bindless_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] Bindless.fragment)
