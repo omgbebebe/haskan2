@@ -784,7 +784,7 @@ renderLoop RenderLoopConfig {..} = do
             then setDistance (setTarget currentCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) (150.0 :: Foreign.C.CFloat)
             else adjustCameraForScene sceneBounds currentCam
         finalCam = case rlcUvCheckMode of
-          Just _ -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 2.0) 0.78 (realToFrac (pi / 6 :: Double))
+          Just _ -> setAngles (setDistance (setTarget adjustedCam (V3 0 0 0 :: V3 Foreign.C.CFloat)) 3.0) 0.78 (realToFrac (pi / 3 :: Double))
           Nothing -> setAngles adjustedCam 0 (realToFrac (pi / 6 :: Double))
     liftIO $ STM.atomically $ STM.writeTVar tvCamera finalCam
     logInfo LogGeneral $ "camera adjusted to distance=" <> showT (Camera.cameraDistance finalCam)

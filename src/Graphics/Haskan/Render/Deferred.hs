@@ -33,7 +33,7 @@ import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Resources (BufferResource (..), MeshResource (..), TextureResource (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Linear.Matrix (M44)
+import Linear.Matrix (M44, transpose)
 import Linear.V3 (V3 (..))
 import Linear.V4 (V4 (..))
 
@@ -274,7 +274,7 @@ buildDeferredGraph DeferredPassData {..} = do
                         (V4 (V4 m00 m01 m02 m03)
                             (V4 m10 m11 m12 m13)
                             (V4 m20 m21 m22 m23)
-                            (V4 m30 m31 m32 m33)) = dcWorldMatrix drawCall
+                            (V4 m30 m31 m32 m33)) = Linear.Matrix.transpose (dcWorldMatrix drawCall)
                         -- Push constant: model matrix (64 bytes) + material index (4 bytes)
                         pushData =
                           map realToFrac

@@ -603,7 +603,7 @@ createDeferredResources DeferredConfig {..} = do
 
   -- Bindless pipeline (reuses g-buffer render pass since same output format)
   bindlessPipeline <-
-    GraphicsPipeline.managedGraphicsPipeline
+    GraphicsPipeline.managedGraphicsPipelineWithCull
       device
       bindlessPipelineLayout
       bindlessRenderPass
@@ -611,6 +611,7 @@ createDeferredResources DeferredConfig {..} = do
       extent
       Vertex.vertexFormat
       4
+      Vulkan.VK_CULL_MODE_NONE
   logDebugIO LogRender "bindless pipeline created"
 
   -- Bindless descriptor pool and sets (one per frame-in-flight UBO)
