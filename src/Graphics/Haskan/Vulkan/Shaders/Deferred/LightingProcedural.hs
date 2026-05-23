@@ -641,10 +641,11 @@ fragment = shader do
       coly = lity + emissiveG + iblDiffy + iblSpecy
       colz = litz + emissiveB + iblDiffz + iblSpecz
 
-      -- Add god rays in linear HDR (atmospheric scattering affects everything)
-      hdrR = (if hasGeometry then colx else cloudSkyR) + godRayR
-      hdrG = (if hasGeometry then coly else cloudSkyG) + godRayG
-      hdrB = (if hasGeometry then colz else cloudSkyB) + godRayB
+      -- Add god rays in linear HDR, but ONLY for background (sky/cloud) pixels
+      -- God rays are atmospheric scattering effects that should not show through opaque geometry
+      hdrR = if hasGeometry then colx else cloudSkyR + godRayR
+      hdrG = if hasGeometry then coly else cloudSkyG + godRayG
+      hdrB = if hasGeometry then colz else cloudSkyB + godRayB
 
       -- Unified tone mapping + gamma for all pixels
       mapx = hdrR / (hdrR + 1.0)

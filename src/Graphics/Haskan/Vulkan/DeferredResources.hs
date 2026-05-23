@@ -606,7 +606,7 @@ createDeferredResources DeferredConfig {..} = do
     GraphicsPipeline.managedGraphicsPipeline
       device
       bindlessPipelineLayout
-      gBufferRenderPass
+      bindlessRenderPass
       dsBindless
       extent
       Vertex.vertexFormat

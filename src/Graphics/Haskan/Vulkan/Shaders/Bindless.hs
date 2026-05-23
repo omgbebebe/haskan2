@@ -54,8 +54,11 @@ vertex = shader do
   view <- use @(Name "ubo" :.: Name "view")
   let mvp = (projection !*! view) !*! model :: Code (M 4 4 Float)
       ~(Vec4 wpx wpy wpz _) = model !*^ Vec4 x y z 1
+      worldNorm = model !*^ Vec4 nx ny nz 0
+      ~(Vec4 wnx wny wnz _) = worldNorm
+      normLen = sqrt (wnx * wnx + wny * wny + wnz * wnz + 0.0001)
   put @"out_uv" uv
-  put @"out_normal" (Vec3 nx ny nz)
+  put @"out_normal" (Vec3 (wnx / normLen) (wny / normLen) (wnz / normLen))
   put @"out_worldPos" (Vec3 wpx wpy wpz)
   put @"gl_Position" (mvp !*^ Vec4 x y z 1)
 
