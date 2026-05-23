@@ -100,9 +100,9 @@ program = Module $ entryPoint @"main" @Compute do
       u = (fromIntegral gidX :: Code Float) / size * 2.0 - 1.0
       v = (fromIntegral gidY :: Code Float) / size * 2.0 - 1.0
 
-      nX = if faceIdx == 0 then 1.0 else (if faceIdx == 1 then (-1.0) else (if faceIdx == 4 then (-u) else u))
+      nX = if faceIdx == 0 then 1.0 else (if faceIdx == 1 then (-1.0) else (if faceIdx == 5 then (-u) else u))
       nY = if faceIdx == 2 then 1.0 else (if faceIdx == 3 then (-1.0) else (-v))
-      nZ = if faceIdx == 4 then 1.0 else (if faceIdx == 5 then (-1.0) else (if faceIdx == 0 then u else (if faceIdx == 1 then (-u) else (if faceIdx == 2 then (-v) else v))))
+      nZ = if faceIdx == 4 then 1.0 else (if faceIdx == 5 then (-1.0) else (if faceIdx == 0 then (-u) else (if faceIdx == 1 then u else (if faceIdx == 2 then v else (-v)))))
 
       normal = normalise (Vec3 nX nY nZ)
       sunDir = normalise (Vec3 sunDirX sunDirY sunDirZ)
@@ -172,11 +172,9 @@ program = Module $ entryPoint @"main" @Compute do
         radG = f1G * f2G
         radB = f1B * f2B
 
-        sunDisc = sunIntensity * smoothstep 0.999 1.0 cosGamma
-
-        resultR = max 0.0 (radR + sunDisc)
-        resultG = max 0.0 (radG + sunDisc)
-        resultB = max 0.0 (radB + sunDisc)
+        resultR = max 0.0 radR
+        resultG = max 0.0 radG
+        resultB = max 0.0 radB
 
         solidAngleWeight = cosTheta * sinTheta * pi * pi / 32.0
 

@@ -101,9 +101,9 @@ program = Module $ entryPoint @"main" @Compute do
       t = v * 2.0 - 1.0
 
       -- Compute direction based on face index (Vulkan cubemap layer mapping)
-      dirX = if faceIdx == 0 then 1.0 else (if faceIdx == 1 then (-1.0) else (if faceIdx == 4 then (-s) else s))
+      dirX = if faceIdx == 0 then 1.0 else (if faceIdx == 1 then (-1.0) else (if faceIdx == 5 then (-s) else s))
       dirY = if faceIdx == 2 then 1.0 else (if faceIdx == 3 then (-1.0) else (-t))
-      dirZ = if faceIdx == 4 then 1.0 else (if faceIdx == 5 then (-1.0) else (if faceIdx == 0 then s else (if faceIdx == 1 then (-s) else (if faceIdx == 2 then (-t) else t))))
+      dirZ = if faceIdx == 4 then 1.0 else (if faceIdx == 5 then (-1.0) else (if faceIdx == 0 then (-s) else (if faceIdx == 1 then s else (if faceIdx == 2 then t else (-t)))))
 
       viewDir = normalise (Vec3 dirX dirY dirZ)
       sunDir = normalise (Vec3 sunDirX sunDirY sunDirZ)

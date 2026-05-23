@@ -401,12 +401,13 @@ runFrame frameNumber = do
         timeOfDay <- readTimeOfDay
         let sunState = DayNight.computeSunState DayNight.defaultDayNightConfig timeOfDay
             sunDir = DayNight.ssDirection sunState
-            sunElevation = max 0.0 (sunDir ^. _y) -- elevation from Y component
+            sunElevation = max 0.0 (asin (sunDir ^. _y)) -- elevation angle in radians
             sunIntensity = DayNight.ssIntensity sunState * 50.0 -- scale to HW intensity range
             IBLTextures {..} = snsIBLTextures reSkyNoiseState
             ctx = reContext
         -- Create a one-time command buffer and dispatch sky compute shaders
         regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
+        liftIO $ Vulkan.vkDeviceWaitIdle (device ctx)
         let vc = VulkanContext (device ctx) rePhysicalDevice (graphicsQueueHandler ctx) regenCmdBuf
         liftIO $
           runManaged $

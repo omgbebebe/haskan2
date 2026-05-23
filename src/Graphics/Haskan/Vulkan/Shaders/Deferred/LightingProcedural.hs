@@ -614,14 +614,14 @@ fragment = shader do
   -- Sample BRDF LUT for split-sum approximation
   ~(Vec4 brdfScale brdfBias _ _) <- use @(ImageTexel "brdf_lut") NilOps (Vec2 nDotV roughness)
 
-  -- Sample irradiance (diffuse IBL) with rotated normal
-  ~(Vec4 irrR irrG irrB _) <- use @(ImageTexel "irradiance_map") NilOps (rotateY (Vec3 nx ny nz))
+  -- Sample irradiance (diffuse IBL) — no rotation needed, cubemap is regenerated dynamically
+  ~(Vec4 irrR irrG irrB _) <- use @(ImageTexel "irradiance_map") NilOps (Vec3 nx ny nz)
 
   -- Sample environment map (specular IBL) with rotated reflection vector
   -- Radiance cubemap is 512px with 10 mip levels (0..9)
   let maxMipF = 9.0 :: Code Float
       lod = roughness * maxMipF
-  ~(Vec4 envR envG envB _) <- use @(ImageTexel "env_map") (LOD lod NilOps) (rotateY (Vec3 rx ry rz))
+  ~(Vec4 envR envG envB _) <- use @(ImageTexel "env_map") (LOD lod NilOps) (Vec3 rx ry rz)
 
   let -- IBL intensity from push constant (day/night cycle)
       envIntensity = iblIntensity
