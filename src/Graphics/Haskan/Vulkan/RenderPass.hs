@@ -360,11 +360,11 @@ createBindlessRenderPass dev posFormat colorFormat depthFormat =
         Vulkan.createVk
           ( set @"format" depthFormat
               &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_LOAD
-              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
+              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_CLEAR
+              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
               &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
               &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
               &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
           )
       depthAttachmentRef =
