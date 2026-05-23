@@ -579,10 +579,11 @@ fragment = shader do
       l3lity = l3brdfy * l3nDotL * l3int * l3colG
       l3litz = l3brdfz * l3nDotL * l3int * l3colB
 
-      -- Accumulate all lights
-      litx = l0litx + l1litx + l2litx + l3litx
-      lity = l0lity + l1lity + l2lity + l3lity
-      litz = l0litz + l1litz + l2litz + l3litz
+      -- Accumulate all lights, but only up to lightCount
+      -- lightCount is a Float push constant; compare with float literals
+      litx = l0litx + if lightCount > 1.0 then l1litx else 0.0 + if lightCount > 2.0 then l2litx else 0.0 + if lightCount > 3.0 then l3litx else 0.0
+      lity = l0lity + if lightCount > 1.0 then l1lity else 0.0 + if lightCount > 2.0 then l2lity else 0.0 + if lightCount > 3.0 then l3lity else 0.0
+      litz = l0litz + if lightCount > 1.0 then l1litz else 0.0 + if lightCount > 2.0 then l2litz else 0.0 + if lightCount > 3.0 then l3litz else 0.0
 
       -- Reflection vector for IBL
       rDotN = 2 * (vx * nx + vy * ny + vz * nz)
