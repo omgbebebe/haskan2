@@ -37,7 +37,7 @@ program = Module $ entryPoint @"main" @Compute do
   typeScale <- use @(Name "weatherParams" :.: Name "typeScale")
   hScale <- use @(Name "weatherParams" :.: Name "heightScale")
 
-  let size = 511.0
+  let size = 1023.0
       x = (fromIntegral gidX :: Code Float) / size
       y = (fromIntegral gidY :: Code Float) / size
 

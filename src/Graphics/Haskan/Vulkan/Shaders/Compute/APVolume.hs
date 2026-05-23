@@ -109,7 +109,7 @@ program = Module $ entryPoint @"main" @Compute do
       h = (wy - cloudBase) / cloudThickness
 
   -- Sample weather map at world XZ (matching Clouds shader)
-  let weatherScale = 0.00005
+  let weatherScale = 0.00002
       weatherWindOffsetX = time * 0.002 * windDirX * weatherAnimSpeed
       weatherWindOffsetZ = time * 0.002 * windDirZ * weatherAnimSpeed
       weatherUV = Vec2 ((wx - weatherWindOffsetX) * weatherScale) ((wz - weatherWindOffsetZ) * weatherScale)
@@ -128,12 +128,12 @@ program = Module $ entryPoint @"main" @Compute do
       heightProfile = (hPct ** baseCurve) * exp (-hPct * topDecay)
 
   -- Domain warping (matching Clouds shader)
-  let noiseScale = specConstant @0 @Float 0.0003
+  let noiseScale = specConstant @0 @Float 0.00015
       windSpeed = 0.05
       windOffsetX = time * windSpeed * windDirX
       windOffsetZ = time * windSpeed * windDirZ
-      warpAmpUV1 = 500.0 * noiseScale
-      warpAmpUV2 = 250.0 * noiseScale
+      warpAmpUV1 = 0.15
+      warpAmpUV2 = 0.075
 
       bux = wx * noiseScale - windOffsetX
       buy = wy * noiseScale
@@ -144,12 +144,13 @@ program = Module $ entryPoint @"main" @Compute do
       fuy = fract buy
       fuz = fract buz
 
-      wx1 = sin (fuy * 6.2831853 * 3.0 + fuz * 6.2831853 * 2.0) * warpAmpUV1
-      wy1 = cos (fux * 6.2831853 * 3.0 + fuz * 6.2831853 * 1.0) * warpAmpUV1
-      wz1 = sin (fuz * 6.2831853 * 2.0 + fux * 6.2831853 * 3.0) * warpAmpUV1
-      wx2 = sin (fuy * 6.2831853 * 5.0 + fux * 6.2831853 * 4.0) * warpAmpUV2
-      wy2 = cos (fuz * 6.2831853 * 4.0 + fuy * 6.2831853 * 3.0) * warpAmpUV2
-      wz2 = sin (fux * 6.2831853 * 6.0 + fuy * 6.2831853 * 5.0) * warpAmpUV2
+      -- Domain warp with irrational frequencies to break vertical banding
+      wx1 = sin (fuy * 6.2831853 * 3.7 + fuz * 6.2831853 * 2.3) * warpAmpUV1
+      wy1 = cos (fux * 6.2831853 * 3.7 + fuz * 6.2831853 * 1.7) * warpAmpUV1
+      wz1 = sin (fuz * 6.2831853 * 2.3 + fux * 6.2831853 * 3.7) * warpAmpUV1
+      wx2 = sin (fuy * 6.2831853 * 4.7 + fux * 6.2831853 * 3.9) * warpAmpUV2
+      wy2 = cos (fuz * 6.2831853 * 3.9 + fuy * 6.2831853 * 3.7) * warpAmpUV2
+      wz2 = sin (fux * 6.2831853 * 5.3 + fuy * 6.2831853 * 4.7) * warpAmpUV2
 
       wx_warp = wx1 + wx2
       wy_warp = wy1 + wy2
@@ -181,9 +182,9 @@ program = Module $ entryPoint @"main" @Compute do
       lfux = fract lbux
       lfuy = fract lbuy
       lfuz = fract lbuz
-      lwx = sin (lfuy * 6.2831853 * 3.0 + lfuz * 6.2831853 * 2.0) * warpAmpUV1
-      lwy = cos (lfux * 6.2831853 * 3.0 + lfuz * 6.2831853 * 1.0) * warpAmpUV1
-      lwz = sin (lfuz * 6.2831853 * 2.0 + lfux * 6.2831853 * 3.0) * warpAmpUV1
+      lwx = sin (lfuy * 6.2831853 * 3.7 + lfuz * 6.2831853 * 2.3) * warpAmpUV1
+      lwy = cos (lfux * 6.2831853 * 3.7 + lfuz * 6.2831853 * 1.7) * warpAmpUV1
+      lwz = sin (lfuz * 6.2831853 * 2.3 + lfux * 6.2831853 * 3.7) * warpAmpUV1
       lsx = lbux + lwx
       lsy = lbuy + lwy
       lsz = lbuz + lwz

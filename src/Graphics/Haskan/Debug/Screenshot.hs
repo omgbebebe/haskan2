@@ -3,6 +3,8 @@
 module Graphics.Haskan.Debug.Screenshot
   ( saveSwapchainScreenshot,
     saveGBufferStage,
+    saveImageToPng,
+    saveImage3DSliceToPng,
     ensureScreenshotDir,
   )
 where
@@ -341,6 +343,194 @@ saveImageToPng' device pdev commandPool queue image extent format currentLayout 
       Vulkan.vkFreeMemory device stagingMemory Vulkan.vkNullPtr
 
       logInfoIO LogGeneral $ "screenshot saved: " <> Text.pack path
+
+-- | Save a single Z-slice of a 3D Vulkan image to PNG.
+-- The extent's width and height are used; depth is always 1 for the slice.
+saveImage3DSliceToPng ::
+  Vulkan.VkDevice ->
+  Vulkan.VkPhysicalDevice ->
+  Vulkan.VkCommandPool ->
+  Vulkan.VkQueue ->
+  Vulkan.VkImage ->
+  -- | slice dimensions (width, height)
+  (Int, Int) ->
+  Vulkan.VkFormat ->
+  -- | current layout
+  Vulkan.VkImageLayout ->
+  -- | Z slice index
+  Int ->
+  FilePath ->
+  IO ()
+saveImage3DSliceToPng device pdev commandPool queue image (width, height) format currentLayout zSlice path = do
+  let bytesPerPixel = if format == Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT then 8 else 4
+      imageSize = width * height * bytesPerPixel
+      needsSwizzle = format == Vulkan.VK_FORMAT_B8G8R8A8_SRGB || format == Vulkan.VK_FORMAT_B8G8R8A8_UNORM
+
+  if imageSize == 0
+    then logInfoIO LogGeneral $ "screenshot skipped: zero-sized image (" <> showT width <> "x" <> showT height <> ")"
+    else do
+      (stagingBuffer, stagingMemory) <- createReadbackBuffer pdev device imageSize
+
+      let allocInfo =
+            Vulkan.createVk $
+              set @"sType" Vulkan.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+                &* set @"pNext" Vulkan.VK_NULL
+                &* set @"commandPool" commandPool
+                &* set @"level" Vulkan.VK_COMMAND_BUFFER_LEVEL_PRIMARY
+                &* set @"commandBufferCount" 1
+      cmdBuf <- alloca $ \ptr -> do
+        withPtr allocInfo $ \aptr ->
+          Vulkan.vkAllocateCommandBuffers device aptr ptr >>= throwVkResult
+        peek ptr
+
+      let beginInfo =
+            Vulkan.createVk $
+              set @"sType" Vulkan.VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO
+                &* set @"pNext" Vulkan.VK_NULL
+                &* set @"flags" Vulkan.VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+                &* set @"pInheritanceInfo" Vulkan.VK_NULL
+      withPtr beginInfo $
+        ( Vulkan.vkBeginCommandBuffer cmdBuf
+            Control.Monad.>=> throwVkResult
+        )
+
+      let copyLayout = Vulkan.VK_IMAGE_LAYOUT_GENERAL
+
+      let barrier =
+            Vulkan.createVk $
+              set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                &* set @"pNext" Vulkan.VK_NULL
+                &* set @"srcAccessMask" Vulkan.VK_ACCESS_MEMORY_READ_BIT
+                &* set @"dstAccessMask" Vulkan.VK_ACCESS_TRANSFER_READ_BIT
+                &* set @"oldLayout" currentLayout
+                &* set @"newLayout" copyLayout
+                &* set @"srcQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+                &* set @"dstQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+                &* set @"image" image
+                &* set @"subresourceRange"
+                  ( Vulkan.createVk $
+                      set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+                        &* set @"baseMipLevel" 0
+                        &* set @"levelCount" 1
+                        &* set @"baseArrayLayer" 0
+                        &* set @"layerCount" 1
+                  )
+      withPtr barrier $
+        Vulkan.vkCmdPipelineBarrier
+          cmdBuf
+          Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT
+          Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT
+          Vulkan.VK_ZERO_FLAGS
+          0
+          Vulkan.vkNullPtr
+          0
+          Vulkan.vkNullPtr
+          1
+
+      let copy =
+            Vulkan.createVk $
+              set @"bufferOffset" 0
+                &* set @"bufferRowLength" 0
+                &* set @"bufferImageHeight" 0
+                &* set @"imageSubresource"
+                  ( Vulkan.createVk $
+                      set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+                        &* set @"mipLevel" 0
+                        &* set @"baseArrayLayer" 0
+                        &* set @"layerCount" 1
+                  )
+                &* set @"imageExtent"
+                  ( Vulkan.createVk $
+                      set @"width" (fromIntegral width)
+                        &* set @"height" (fromIntegral height)
+                        &* set @"depth" 1
+                  )
+                &* set @"imageOffset"
+                  ( Vulkan.createVk $
+                      set @"x" 0
+                        &* set @"y" 0
+                        &* set @"z" (fromIntegral zSlice)
+                  )
+      withPtr copy $
+        Vulkan.vkCmdCopyImageToBuffer
+          cmdBuf
+          image
+          copyLayout
+          stagingBuffer
+          1
+
+      let barrierBack =
+            Vulkan.createVk $
+              set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                &* set @"pNext" Vulkan.VK_NULL
+                &* set @"srcAccessMask" Vulkan.VK_ACCESS_TRANSFER_READ_BIT
+                &* set @"dstAccessMask" Vulkan.VK_ACCESS_MEMORY_READ_BIT
+                &* set @"oldLayout" copyLayout
+                &* set @"newLayout" currentLayout
+                &* set @"srcQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+                &* set @"dstQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+                &* set @"image" image
+                &* set @"subresourceRange"
+                  ( Vulkan.createVk $
+                      set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+                        &* set @"baseMipLevel" 0
+                        &* set @"levelCount" 1
+                        &* set @"baseArrayLayer" 0
+                        &* set @"layerCount" 1
+                  )
+      withPtr barrierBack $
+        Vulkan.vkCmdPipelineBarrier
+          cmdBuf
+          Vulkan.VK_PIPELINE_STAGE_TRANSFER_BIT
+          Vulkan.VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT
+          Vulkan.VK_ZERO_FLAGS
+          0
+          Vulkan.vkNullPtr
+          0
+          Vulkan.vkNullPtr
+          1
+
+      Vulkan.vkEndCommandBuffer cmdBuf >>= throwVkResult
+
+      let submitInfo =
+            Vulkan.createVk $
+              set @"sType" Vulkan.VK_STRUCTURE_TYPE_SUBMIT_INFO
+                &* set @"pNext" Vulkan.VK_NULL
+                &* set @"waitSemaphoreCount" 0
+                &* set @"pWaitSemaphores" Vulkan.VK_NULL
+                &* set @"pWaitDstStageMask" Vulkan.VK_NULL
+                &* set @"commandBufferCount" 1
+                &* setListRef @"pCommandBuffers" [cmdBuf]
+                &* set @"signalSemaphoreCount" 0
+                &* set @"pSignalSemaphores" Vulkan.VK_NULL
+
+      fenceInfo <- allocaAndPeek $ \fptr ->
+        withPtr (Vulkan.createVk $ set @"sType" Vulkan.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO &* set @"pNext" Vulkan.VK_NULL &* set @"flags" Vulkan.VK_ZERO_FLAGS) $ \fciPtr ->
+          Vulkan.vkCreateFence device fciPtr Vulkan.vkNullPtr fptr
+
+      withPtr submitInfo $ \siPtr ->
+        Vulkan.vkQueueSubmit queue 1 siPtr fenceInfo >>= throwVkResult
+
+      alloca $ \fencePtr -> do
+        poke fencePtr fenceInfo
+        Vulkan.vkWaitForFences device 1 fencePtr Vulkan.VK_TRUE 1000000000 >>= throwVkResult
+
+      Vulkan.vkDestroyFence device fenceInfo Vulkan.vkNullPtr
+      alloca $ \ptr -> do
+        poke ptr cmdBuf
+        Vulkan.vkFreeCommandBuffers device commandPool 1 ptr
+
+      pixelsPtr <- allocaAndPeek (Vulkan.vkMapMemory device stagingMemory 0 (fromIntegral imageSize) Vulkan.VK_ZERO_FLAGS)
+      let pixels = castPtr pixelsPtr :: Ptr Word8
+      pixelList <- readPixels pixels width height format needsSwizzle
+      let img = Image width height (Vector.fromList pixelList) :: Image PixelRGBA8
+      writePng path img
+      Vulkan.vkUnmapMemory device stagingMemory
+
+      Vulkan.vkDestroyBuffer device stagingBuffer Vulkan.vkNullPtr
+      Vulkan.vkFreeMemory device stagingMemory Vulkan.vkNullPtr
+
+      logInfoIO LogGeneral $ "3D slice screenshot saved: " <> Text.pack path
 
 -- | Save current swapchain image as screenshot.
 saveSwapchainScreenshot ::

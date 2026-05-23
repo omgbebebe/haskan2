@@ -88,6 +88,7 @@ import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..), TextureResource (..), lookupTexture)
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
+import Graphics.Haskan.Vulkan.Shaders.Constants qualified as Const
 import Graphics.Haskan.Vulkan.Shaders.Compile ()
 -- forces TH shader compilation at build time
 import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolumeShaders
@@ -331,7 +332,7 @@ loadIBLTextures vc@VulkanContext {..} rm envMapDir proceduralSkyEnabled = do
       logInfo LogGeneral "blue noise texture loaded"
 
       logInfo LogGeneral "creating weather map storage image..."
-      weatherMapHandle <- Texture.createStorageImage2D rm vc 512 512 Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      weatherMapHandle <- Texture.createStorageImage2D rm vc Const.weatherMapSize Const.weatherMapSize Vulkan.VK_FORMAT_R8G8B8A8_UNORM
       dispatchWeatherMapGeneration vc rm weatherMapHandle
       weatherMapView <- Texture.textureImageView rm weatherMapHandle
       logInfo LogGeneral "weather map texture generated"
@@ -401,7 +402,7 @@ loadIBLTextures vc@VulkanContext {..} rm envMapDir proceduralSkyEnabled = do
       logInfo LogGeneral "blue noise texture loaded"
 
       logInfo LogGeneral "creating weather map storage image..."
-      weatherMapHandle <- Texture.createStorageImage2D rm vc 512 512 Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      weatherMapHandle <- Texture.createStorageImage2D rm vc Const.weatherMapSize Const.weatherMapSize Vulkan.VK_FORMAT_R8G8B8A8_UNORM
       dispatchWeatherMapGeneration vc rm weatherMapHandle
       weatherMapView <- Texture.textureImageView rm weatherMapHandle
       logInfo LogGeneral "weather map texture generated"
@@ -1016,9 +1017,9 @@ dispatchWeatherMapGeneration VulkanContext {..} rm weatherHandle = do
   let weatherParams =
         WeatherMapUniforms
           { wmSeed = 42.0,
-            wmCoverageScale = 3.0,
-            wmTypeScale = 5.0,
-            wmHeightScale = 2.0
+            wmCoverageScale = 16.0,
+            wmTypeScale = 24.0,
+            wmHeightScale = 8.0
           }
   (weatherParamsBuffer, _weatherParamsMemory) <- Buffer.managedUniformBuffer vcPhysicalDevice vcDevice [weatherParams]
 
@@ -1033,7 +1034,7 @@ dispatchWeatherMapGeneration VulkanContext {..} rm weatherHandle = do
         Nothing -> (Vulkan.vkNullPtr, 0)
 
   CommandBuffer.withCommandBufferOneTime vcQueue vcCommandBuffer $ do
-    -- 512x512 / 8x8 = 64x64x1 workgroups
+    -- 1024x1024 / 8x8 = 128x128x1 workgroups
     liftIO $ Vulkan.vkCmdBindPipeline vcCommandBuffer Vulkan.VK_PIPELINE_BIND_POINT_COMPUTE weatherPipeline
     liftIO $ Foreign.Marshal.Array.withArray [weatherDescriptorSet] $ \dsPtr ->
       Vulkan.vkCmdBindDescriptorSets
@@ -1045,7 +1046,7 @@ dispatchWeatherMapGeneration VulkanContext {..} rm weatherHandle = do
         dsPtr
         0
         Vulkan.vkNullPtr
-    CommandBuffer.cmdDispatch vcCommandBuffer 64 64 1
+    CommandBuffer.cmdDispatch vcCommandBuffer 128 128 1
 
     -- Transition to SHADER_READ_ONLY_OPTIMAL
     when (weatherImage /= Vulkan.vkNullPtr) $ do

@@ -291,7 +291,9 @@ data DebugPanelEnv = DebugPanelEnv
     dpeWireframe :: !(STM.TVar Bool),
     dpePhysicsAutoStep :: !(STM.TVar Bool),
     dpePhysicsTimeScale :: !(STM.TVar Float),
-    dpeNoiseNeedsRegeneration :: !(STM.TVar Bool)
+    dpeNoiseNeedsRegeneration :: !(STM.TVar Bool),
+    dpeSaveCloudOutput :: !(STM.TVar (Maybe String)),
+    dpeSaveNoiseSlices :: !(STM.TVar Bool)
   }
 
 -- | Build the debug panel using ReaderT for clean parameter access.
@@ -307,6 +309,8 @@ buildDebugPanel = do
       tvPhysicsAutoStep = dpePhysicsAutoStep env
       tvPhysicsTimeScale = dpePhysicsTimeScale env
       tvNoiseNeedsRegeneration = dpeNoiseNeedsRegeneration env
+      tvSaveCloudOutput = dpeSaveCloudOutput env
+      tvSaveNoiseSlices = dpeSaveNoiseSlices env
       frameStatsRef = dpeFrameStatsRef env
       cam = dpeCamera env
   liftIO $ withCString "Debug Panels" $ \windowTitle -> do
@@ -387,12 +391,20 @@ buildDebugPanel = do
           withCString "Specular IBL" $ \label -> ImGui.Raw.radioButtonI label modePtr 10
           withCString "Fresnel" $ \label -> ImGui.Raw.radioButtonI label modePtr 11
           withCString "Skybox" $ \label -> ImGui.Raw.radioButtonI label modePtr 12
-          withCString "Cloud Density" $ \label -> ImGui.Raw.radioButtonI label modePtr 13
+          withCString "Weather##debug" $ \label -> ImGui.Raw.radioButtonI label modePtr 13
           withCString "Height Mask" $ \label -> ImGui.Raw.radioButtonI label modePtr 14
           withCString "Raw Noise" $ \label -> ImGui.Raw.radioButtonI label modePtr 15
+          withCString "Cloud Density" $ \label -> ImGui.Raw.radioButtonI label modePtr 16
           newMode <- Foreign.Storable.peek modePtr
           STM.atomically $ STM.writeTVar tvDebugMode (fromIntegral newMode)
         withCString "Wireframe" $ \label -> checkboxTVar label tvWireframe
+        ImGui.Raw.separator
+        withCString "Save Cloud Output" $ \label -> do
+          clicked <- ImGui.Raw.button label
+          when clicked $ liftIO $ STM.atomically $ STM.writeTVar tvSaveCloudOutput (Just "cloud_debug")
+        withCString "Save Noise Slices" $ \label -> do
+          clicked <- ImGui.Raw.button label
+          when clicked $ liftIO $ STM.atomically $ STM.writeTVar tvSaveNoiseSlices True
 
     -- Physics section
     withCString "Physics" $ \physicsLabel -> do

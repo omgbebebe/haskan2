@@ -47,6 +47,7 @@ import Graphics.Haskan.Camera (AnyCamera, Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.DayNight (computeSunState, defaultDayNightConfig)
 import Graphics.Haskan.DayNight qualified as DayNight
+import Graphics.Haskan.Debug.CloudExport qualified as CloudExport
 import Graphics.Haskan.Debug.FrameInspector (FrameInspector, RenderableSnapshot (..), buildFrameSnapshot, defaultInspector)
 import Graphics.Haskan.Debug.Interface (DebugCameraSnapshot (..), DebugCommand (..), DebugMessage (..), DebugResponse (..), GameStateSnapshot (..), debugMessageToActionEvent, encodeDebugResponse, parseDebugMessage)
 import Graphics.Haskan.Debug.Screenshot qualified as Screenshot
@@ -501,6 +502,10 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
   currentTime <- getMonotonicTime
   let elapsedSeconds = fromIntegral (toNanoSecs currentTime) / 1e9
 
+  -- Create TVars for cloud export triggers (local to this frame)
+  tvSaveCloudOutput <- liftIO $ STM.newTVarIO Nothing
+  tvSaveNoiseSlices <- liftIO $ STM.newTVarIO False
+
   -- Build Dear ImGui frame
   mDrawData <- liftIO $ case reImGuiBackend of
     Just _ -> do
@@ -533,7 +538,9 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
                 Backend.dpeWireframe = gstWireframe reGameState,
                 Backend.dpePhysicsAutoStep = pstPhysicsAutoStep rePhysicsState,
                 Backend.dpePhysicsTimeScale = pstPhysicsTimeScale rePhysicsState,
-                Backend.dpeNoiseNeedsRegeneration = snsNoiseNeedsRegeneration reSkyNoiseState
+                Backend.dpeNoiseNeedsRegeneration = snsNoiseNeedsRegeneration reSkyNoiseState,
+                Backend.dpeSaveCloudOutput = tvSaveCloudOutput,
+                Backend.dpeSaveNoiseSlices = tvSaveNoiseSlices
               }
       Backend.buildImGuiFrame (runReaderT Backend.buildDebugPanel panelEnv)
     Nothing -> pure Nothing
@@ -546,7 +553,55 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       recordAction = buildRecordAction resources input
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
-  handleFrameResult env frameNumber camera drawList res
+  (resizeNeeded, shouldQuit) <- handleFrameResult env frameNumber camera drawList res
+
+  -- Handle cloud texture save requests from ImGui
+  mSaveCloud <- liftIO $ STM.readTVarIO tvSaveCloudOutput
+  case mSaveCloud of
+    Just name -> do
+      let vkCtx =
+            VulkanContext
+              { vcDevice = device ctx,
+                vcPhysicalDevice = rePhysicalDevice,
+                vcQueue = graphicsQueueHandler ctx,
+                vcCommandBuffer = Vulkan.vkNullPtr
+              }
+          cloudExportCtx =
+            CloudExport.CloudExportContext
+              { CloudExport.cecVulkanContext = vkCtx,
+                CloudExport.cecCommandPool = rcGraphicsCommandPool ctx,
+                CloudExport.cecResourceManager = device ctx,
+                CloudExport.cecCloudExtent = drCloudExtent dr
+              }
+      _ <- CloudExport.saveCloudDebugOutput cloudExportCtx dr 0 name
+      pure ()
+    Nothing -> pure ()
+
+  saveNoise <- liftIO $ STM.readTVarIO tvSaveNoiseSlices
+  when saveNoise $ do
+    let vkCtx =
+          VulkanContext
+            { vcDevice = device ctx,
+              vcPhysicalDevice = rePhysicalDevice,
+              vcQueue = graphicsQueueHandler ctx,
+              vcCommandBuffer = Vulkan.vkNullPtr
+            }
+        cloudExportCtx =
+          CloudExport.CloudExportContext
+            { CloudExport.cecVulkanContext = vkCtx,
+              CloudExport.cecCommandPool = rcGraphicsCommandPool ctx,
+              CloudExport.cecResourceManager = device ctx,
+              CloudExport.cecCloudExtent = drCloudExtent dr
+            }
+        IBLTextures {..} = snsIBLTextures reSkyNoiseState
+    mNoiseTex <- lookupTexture reResourceManager (cmHandle iblCloudNoise)
+    case mNoiseTex of
+      Just tex -> do
+        _ <- CloudExport.saveCloudNoiseSlices cloudExportCtx tex [0, 64, 128, 192, 255]
+        pure ()
+      Nothing -> logInfo LogGeneral "cloud noise texture not found for export"
+
+  pure (resizeNeeded, shouldQuit)
 
 -- | Simple forward rendering for runSimple: single pass directly to swapchain.
 renderAndPresentSimple ::

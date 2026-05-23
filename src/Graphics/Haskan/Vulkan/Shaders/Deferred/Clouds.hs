@@ -339,8 +339,8 @@ cloudFragment = shader do
       lodScale = 400.0
       maxNoiseLod = 2.0
       -- Light march: fixed small steps toward sun
-      lightStepCount = if totalRayLength > 2500.0 then 2.0 else if totalRayLength > 1200.0 then 3.0 else 4.0
-      lightStepSize = min 120.0 (cloudThickness / lightStepCount)
+      lightStepCount = if totalRayLength > 2500.0 then (2.0 :: Code Float) else if totalRayLength > 1200.0 then (3.0 :: Code Float) else (4.0 :: Code Float)
+      lightStepSize = min (120.0 :: Code Float) (cloudThickness / lightStepCount)
   -- Sample blue noise for dithered ray entry
   ~(Vec4 blueR _ _ _) <- use @(ImageTexel "blue_noise") NilOps (Vec2 uvX uvY)
   let ditherScale = min 1.0 (totalRayLength / 2000.0)
@@ -354,30 +354,33 @@ cloudFragment = shader do
   let skyAmbientCubemap = Vec3 zenithR zenithG zenithB
       groundAmbientCubemap = Vec3 nadirR nadirG nadirB
 
-  -- Hoist weather map sample (varies slowly, sample once at entry point)
-  let ~(Vec3 epx epy epz) = entryPos
-      eWeatherScale = 0.00005
+  -- Hoist weather map sample with distance clamping to avoid horizon stretching
+  let weatherSampleDist = min tNear 5000.0
+      weatherSamplePos = Vec3 (camX + dirX * weatherSampleDist) (camY + dirY * weatherSampleDist) (camZ + dirZ * weatherSampleDist)
+      ~(Vec3 wspx wspy wspz) = weatherSamplePos
+      eWeatherScale = 0.00002
       eWeatherWindOffsetX = time * 0.002 * windDirX * weatherAnimSpeed
       eWeatherWindOffsetZ = time * 0.002 * windDirZ * weatherAnimSpeed
-      eWeatherUV = Vec2 ((epx - eWeatherWindOffsetX) * eWeatherScale) ((epz - eWeatherWindOffsetZ) * eWeatherScale)
+      eWeatherUV = Vec2 ((wspx - eWeatherWindOffsetX) * eWeatherScale) ((wspz - eWeatherWindOffsetZ) * eWeatherScale)
   ~(Vec4 eWeatherR eWeatherG eWeatherB _eWeatherA) <- use @(ImageTexel "weather_map") NilOps eWeatherUV
   let entryCoverage = clamp (eWeatherR * cloudCoverage * weatherCoverageScale) 0.0 1.0
       entryCloudType = clamp (eWeatherG + weatherTypeBias) 0.0 1.0
       entryStormDarkness = eWeatherB * stormIntensity
 
-      noiseScale = 0.0003
+      noiseScale = 0.00015
       windSpeed = 0.05
       windOffsetX = time * windSpeed * windDirX
       windOffsetZ = time * windSpeed * windDirZ
       -- Domain warp: operates in noise-UV space for seamless tiling.
-      -- Using fract(baseUV) ensures warp is periodic with noise tile.
-      -- warpAmp in UV units (not world units): 500 world units * noiseScale ≈ 0.15 UV
-      warpAmpUV1 = 500.0 * noiseScale
-      warpAmpUV2 = 250.0 * noiseScale
+      -- warpAmp in UV units (not world units): fixed regardless of noiseScale
+      warpAmpUV1 = 0.15
+      warpAmpUV2 = 0.075
 
-      -- Debug: compute at un-dithered entry point for consistent visualization
+      -- Debug: compute at fixed height in cloud layer for consistent visualization
+      -- regardless of camera position or ray direction
+      dbg_sampleY = cloudBottom + cloudThickness * 0.5
       dbg_epx = camX + dirX * tNear
-      dbg_epy = camY + dirY * tNear
+      dbg_epy = if totalRayLength > 0.0 then dbg_sampleY else dbg_sampleY
       dbg_epz = camZ + dirZ * tNear
       dbg_bux = dbg_epx * noiseScale - windOffsetX
       dbg_buy = dbg_epy * noiseScale
@@ -385,12 +388,12 @@ cloudFragment = shader do
       dbg_fux = fract dbg_bux
       dbg_fuy = fract dbg_buy
       dbg_fuz = fract dbg_buz
-      dbg_wx1 = sin (dbg_fuy * 6.2831853 * 3.0 + dbg_fuz * 6.2831853 * 2.0) * warpAmpUV1
-      dbg_wy1 = cos (dbg_fux * 6.2831853 * 3.0 + dbg_fuz * 6.2831853 * 1.0) * warpAmpUV1
-      dbg_wz1 = sin (dbg_fuz * 6.2831853 * 2.0 + dbg_fux * 6.2831853 * 3.0) * warpAmpUV1
-      dbg_wx2 = sin (dbg_fuy * 6.2831853 * 5.0 + dbg_fux * 6.2831853 * 4.0) * warpAmpUV2
-      dbg_wy2 = cos (dbg_fuz * 6.2831853 * 4.0 + dbg_fuy * 6.2831853 * 3.0) * warpAmpUV2
-      dbg_wz2 = sin (dbg_fux * 6.2831853 * 6.0 + dbg_fuy * 6.2831853 * 5.0) * warpAmpUV2
+      dbg_wx1 = sin (dbg_fuy * 6.2831853 * 3.7 + dbg_fuz * 6.2831853 * 2.3) * warpAmpUV1
+      dbg_wy1 = cos (dbg_fux * 6.2831853 * 3.7 + dbg_fuz * 6.2831853 * 1.7) * warpAmpUV1
+      dbg_wz1 = sin (dbg_fuz * 6.2831853 * 2.3 + dbg_fux * 6.2831853 * 3.7) * warpAmpUV1
+      dbg_wx2 = sin (dbg_fuy * 6.2831853 * 4.7 + dbg_fux * 6.2831853 * 3.9) * warpAmpUV2
+      dbg_wy2 = cos (dbg_fuz * 6.2831853 * 3.9 + dbg_fuy * 6.2831853 * 3.7) * warpAmpUV2
+      dbg_wz2 = sin (dbg_fux * 6.2831853 * 5.3 + dbg_fuy * 6.2831853 * 4.7) * warpAmpUV2
       dbg_wx = dbg_wx1 + dbg_wx2
       dbg_wy = dbg_wy1 + dbg_wy2
       dbg_wz = dbg_wz1 + dbg_wz2
@@ -400,9 +403,8 @@ cloudFragment = shader do
 
   ~(Vec4 dbg_nr dbg_ng dbg_nb dbg_na) <- use @(ImageTexel "cloud_noise") NilOps (Vec3 dbg_sx dbg_sy dbg_sz)
 
-  let -- Debug: compute density/height/noise at entry point
-      dbg_cloudThickness = 800.0
-      dbg_h = (epy - cloudBottom) / dbg_cloudThickness
+  let -- Debug: compute density/height/noise at sample point
+      dbg_h = (wspy - cloudBottom) / cloudThickness
       dbg_heightScale = max 0.6 (entryCoverage ** 0.25)
       dbg_hPct = clamp (dbg_h / dbg_heightScale) 0.0 1.0
       dbg_baseCurve = mix 0.8 1.2 entryCloudType
@@ -465,17 +467,13 @@ cloudFragment = shader do
         bux = px * noiseScale - windOffsetX
         buy = py * noiseScale
         buz = pz * noiseScale - windOffsetZ
-        -- Tile-periodic UV for warp input: fract ensures seamless tiling
-        fux = fract bux
-        fuy = fract buy
-        fuz = fract buz
-        -- Domain warp in UV space: uses tile-periodic coords so warp tiles with noise
-        wx1 = sin (fuy * 6.2831853 * 3.0 + fuz * 6.2831853 * 2.0) * warpAmpUV1
-        wy1 = cos (fux * 6.2831853 * 3.0 + fuz * 6.2831853 * 1.0) * warpAmpUV1
-        wz1 = sin (fuz * 6.2831853 * 2.0 + fux * 6.2831853 * 3.0) * warpAmpUV1
-        wx2 = sin (fuy * 6.2831853 * 5.0 + fux * 6.2831853 * 4.0) * warpAmpUV2
-        wy2 = cos (fuz * 6.2831853 * 4.0 + fuy * 6.2831853 * 3.0) * warpAmpUV2
-        wz2 = sin (fux * 6.2831853 * 6.0 + fuy * 6.2831853 * 5.0) * warpAmpUV2
+        -- Domain warp from CONTINUOUS coordinates (smooth across tiles)
+        wx1 = sin (buy * 6.2831853 * 3.7 + buz * 6.2831853 * 2.3) * warpAmpUV1
+        wy1 = cos (bux * 6.2831853 * 3.7 + buz * 6.2831853 * 1.7) * warpAmpUV1
+        wz1 = sin (buz * 6.2831853 * 2.3 + bux * 6.2831853 * 3.7) * warpAmpUV1
+        wx2 = sin (buy * 6.2831853 * 4.7 + bux * 6.2831853 * 3.9) * warpAmpUV2
+        wy2 = cos (buz * 6.2831853 * 3.9 + buy * 6.2831853 * 3.7) * warpAmpUV2
+        wz2 = sin (bux * 6.2831853 * 5.3 + buy * 6.2831853 * 4.7) * warpAmpUV2
         wx = wx1 + wx2
         wy = wy1 + wy2
         wz = wz1 + wz2
@@ -525,9 +523,9 @@ cloudFragment = shader do
         lfux = fract lbux
         lfuy = fract lbuy
         lfuz = fract lbuz
-        lwx = sin (lfuy * 6.2831853 * 3.0 + lfuz * 6.2831853 * 2.0) * warpAmpUV1
-        lwy = cos (lfux * 6.2831853 * 3.0 + lfuz * 6.2831853 * 1.0) * warpAmpUV1
-        lwz = sin (lfuz * 6.2831853 * 2.0 + lfux * 6.2831853 * 3.0) * warpAmpUV1
+        lwx = sin (lfuy * 6.2831853 * 3.7 + lfuz * 6.2831853 * 2.3) * warpAmpUV1
+        lwy = cos (lfux * 6.2831853 * 3.7 + lfuz * 6.2831853 * 1.7) * warpAmpUV1
+        lwz = sin (lfuz * 6.2831853 * 2.3 + lfux * 6.2831853 * 3.7) * warpAmpUV1
         lsx = lbux + lwx
         lsy = lbuy + lwy
         lsz = lbuz + lwz
@@ -655,9 +653,12 @@ cloudFragment = shader do
       accG = reprojBlend * histG + (1.0 - reprojBlend) * cloudSkyG
       accB = reprojBlend * histB + (1.0 - reprojBlend) * cloudSkyB
 
-  let outR = if debugMode == 13.0 then entryCoverage else if debugMode == 14.0 then dbg_heightProfile else if debugMode == 15.0 then dbg_nr else accR
-      outG = if debugMode == 13.0 then entryCloudType else if debugMode == 14.0 then dbg_heightProfile else if debugMode == 15.0 then dbg_nr else accG
-      outB = if debugMode == 13.0 then entryStormDarkness else if debugMode == 14.0 then dbg_heightProfile else if debugMode == 15.0 then dbg_nr else accB
-      outA = if debugMode == 13.0 || debugMode == 14.0 || debugMode == 15.0 then 1.0 else cloudOpacity
+      dbgCloudType = entryCloudType
+      dbgStormDarkness = entryStormDarkness
+
+  let outR = if debugMode == 13.0 then entryCoverage else if debugMode == 14.0 then dbg_heightProfile else if debugMode == 15.0 then dbg_nr else if debugMode == 16.0 then dbg_density else accR
+      outG = if debugMode == 13.0 then dbgCloudType else if debugMode == 14.0 then dbg_heightProfile else if debugMode == 15.0 then dbg_nr else if debugMode == 16.0 then dbg_density else accG
+      outB = if debugMode == 13.0 then dbgStormDarkness else if debugMode == 14.0 then dbg_heightProfile else if debugMode == 15.0 then dbg_nr else if debugMode == 16.0 then dbg_density else accB
+      outA = if debugMode == 13.0 || debugMode == 14.0 || debugMode == 15.0 || debugMode == 16.0 then 1.0 else cloudOpacity
 
   put @"out_colour" (Vec4 outR outG outB outA)
