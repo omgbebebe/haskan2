@@ -377,8 +377,9 @@ runFrame frameNumber = do
 
       drawList <- extractDrawList reECSWorld reResourceManager reTextureIndexMap
       logDebug LogRender $ "draw list: " <> showT (length drawList) <> " entities"
-      -- Sort: culled entities first, then double-sided (matches pipeline split in gbuffer pass)
-      let sortedDrawList = sortOn dcDoubleSided drawList
+      -- Sort: untextured first (for g-buffer indirect), then textured (for bindless)
+      -- Within each group: culled first, then double-sided
+      let sortedDrawList = sortOn (\dc -> (isJust (dcMaterial dc), dcDoubleSided dc)) drawList
           camPos = realToFrac <$> Camera.cameraPosition camera
           camTarget = realToFrac <$> Camera.cameraTarget camera
           (w, h) = surfaceExtentWH (rcSurfaceExtent reContext)
@@ -1197,7 +1198,8 @@ renderLoop RenderLoopConfig {..} = do
                             Deferred.dcLightBuffer = Just lightSsboBuffer,
                              Deferred.dcImGuiRenderPass = imGuiRenderPass,
                              Deferred.dcProceduralSky = rlcProceduralSkyEnabled,
-                             Deferred.dcBindlessTextureArrayView = mBindlessTextureArray
+                             Deferred.dcBindlessTextureArrayView = mBindlessTextureArray,
+                             Deferred.dcBindlessUniformBuffers = map fst frameMvpBuffers
                            }
                   with (Deferred.createDeferredResources dcfg) $ \dr -> do
                     let numSwapchainImages = length (drCloudImages dr)

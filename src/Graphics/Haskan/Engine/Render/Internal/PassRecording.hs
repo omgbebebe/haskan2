@@ -15,6 +15,7 @@ import Control.Lens ((^.))
 import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
+import Data.Maybe (isJust, isNothing)
 import Data.Text qualified as Text
 import Data.Word (Word32)
 import DearImGui.Raw qualified
@@ -27,7 +28,7 @@ import Graphics.Haskan.Camera.Types (ViewMatrix (..))
 import Graphics.Haskan.Engine.Render.Internal.FrameState (FrameState (..))
 import Graphics.Haskan.Engine.Types (ComputeCullResources (..), DrawIndexedIndirectCommand (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
-import Graphics.Haskan.Render.Deferred (CloudPassData (..), DeferredPassData (..), GBufferPassData (..), GodRayPassData (..), LightingPassData (..), buildDeferredGraph)
+import Graphics.Haskan.Render.Deferred (BindlessPassData (..), CloudPassData (..), DeferredPassData (..), GBufferPassData (..), GodRayPassData (..), LightingPassData (..), buildDeferredGraph)
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
@@ -176,6 +177,7 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
       cloudDescriptorSet = drCloudDescriptorSets rcDeferred !! fromIntegral imageIdx
       cloudImage = drCloudImages rcDeferred !! fromIntegral imageIdx
       cloudHistoryImage = drCloudHistoryImages rcDeferred !! fromIntegral imageIdx
+      bindlessDescriptorSet = drBindlessDescriptorSets rcDeferred !! frameIdx
       gBufferPassCtx =
         PassContext
           { pcCommandBuffer = commandBuffer,
@@ -207,12 +209,14 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
             pcExtent = rcPassSurfaceExtent
           }
 
+      gbufferDraws = filter (isNothing . dcMaterial) rcDrawList
+      bindlessDraws = filter (isJust . dcMaterial) rcDrawList
       (graphRes, graphPasses) =
         Graph.execRenderGraphBuilder $
           buildDeferredGraph
             DeferredPassData
               { dpdExtent = rcPassSurfaceExtent,
-                dpdDrawList = rcDrawList,
+                dpdDrawList = gbufferDraws,
                 dpdDevice = rcDevice,
                 dpdGBuffer =
                   GBufferPassData
@@ -224,13 +228,24 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                       gbpDescriptor = frameDescriptorSet,
                       gbpSampler = rcTextureSampler,
                       gbpDrawCommandsBuffer = ccrDrawCommandsBuffer rcCullResources,
-                      gbpEntityCount = fromIntegral (length rcDrawList),
+                      gbpEntityCount = fromIntegral (length gbufferDraws),
                       gbpGBufferImages = gBufferImagesForFrame,
                       gbpWireframePipeline = drWireframePipeline rcDeferred,
                       gbpWireframeLayout = drWireframePipelineLayout rcDeferred,
                      gbpWireframeEnabled = rcWireframeEnabled
                    },
-                 dpdBindless = Nothing,
+                 dpdBindless =
+                   Just
+                     BindlessPassData
+                       { blpPipeline = drBindlessPipeline rcDeferred,
+                         blpLayout = drBindlessPipelineLayout rcDeferred,
+                         blpDescriptor = bindlessDescriptorSet,
+                         blpRenderPass = drBindlessRenderPass rcDeferred,
+                         blpFramebuffer = gBufferFramebuffer,
+                         blpDrawList = bindlessDraws,
+                         blpTextureArrayView = Nothing,
+                         blpSampler = rcTextureSampler
+                       },
                  dpdCloud =
                   CloudPassData
                     { cpRenderPass = drCloudRenderPass rcDeferred,
@@ -331,6 +346,7 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
               recordFn = unPassRecordFunc (Graph.rpRecord pass)
               passCtx = case Graph.rpName pass of
                 "gbuffer" -> gBufferPassCtx
+                "bindless" -> gBufferPassCtx
                 "clouds" -> cloudPassCtx
                 _ -> lightingPassCtx
           liftIO $ recordFn passCtx

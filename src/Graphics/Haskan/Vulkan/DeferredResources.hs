@@ -10,6 +10,7 @@ module Graphics.Haskan.Vulkan.DeferredResources
   )
 where
 
+import Control.Monad (replicateM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
@@ -81,7 +82,8 @@ data DeferredConfig = DeferredConfig
     dcLightBuffer :: !(Maybe Vulkan.VkBuffer),
     dcImGuiRenderPass :: !Vulkan.VkRenderPass,
     dcProceduralSky :: !Bool,
-    dcBindlessTextureArrayView :: !(Maybe Vulkan.VkImageView)
+    dcBindlessTextureArrayView :: !(Maybe Vulkan.VkImageView),
+    dcBindlessUniformBuffers :: ![Vulkan.VkBuffer]
   }
 
 data DeferredResources = DeferredResources
@@ -90,6 +92,7 @@ data DeferredResources = DeferredResources
     drGBufferDoubleSidedPipeline :: !Vulkan.VkPipeline,
     drGBufferPipelineLayout :: !Vulkan.VkPipelineLayout,
     drGBufferFramebuffers :: ![Vulkan.VkFramebuffer],
+    drBindlessRenderPass :: !Vulkan.VkRenderPass,
     drBindlessPipeline :: !Vulkan.VkPipeline,
     drBindlessPipelineLayout :: !Vulkan.VkPipelineLayout,
     drBindlessDescriptorPool :: !Vulkan.VkDescriptorPool,
@@ -177,6 +180,10 @@ createDeferredResources DeferredConfig {..} = do
   -- G-buffer render pass
   gBufferRenderPass <- RenderPass.managedGBufferRenderPassEx device gbufPosFormat gbufColorFormat depthFormat
   logDebugIO LogRender "g-buffer render pass created"
+
+  -- Bindless render pass (reuses g-buffer attachments with LOAD_OP_LOAD)
+  bindlessRenderPass <- RenderPass.managedBindlessRenderPass device gbufPosFormat gbufColorFormat depthFormat
+  logDebugIO LogRender "bindless render pass created"
 
   -- Lighting render pass
   let surfaceFormat = Swapchain.surfaceFormat
@@ -580,8 +587,18 @@ createDeferredResources DeferredConfig {..} = do
         }
   logDebugIO LogRender "AP volume descriptor sets updated"
 
-  -- Bindless pipeline layout (UBO + texture array, no push constants for now)
-  bindlessPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [descriptorSetLayout] []
+  -- Bindless pass descriptor set layout (must match shader bindings)
+  bindlessPassDescriptorSetLayout <- DescriptorSetLayout.managedBindlessPassDescriptorSetLayout device
+  logDebugIO LogRender "bindless pass descriptor set layout created"
+
+  -- Bindless pipeline layout (UBO + texture array + push constants)
+  let bindlessPushConstantRange =
+        Vulkan.createVk
+          ( set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
+              &* set @"offset" 0
+              &* set @"size" 68
+          )
+  bindlessPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [bindlessPassDescriptorSetLayout] [bindlessPushConstantRange]
   logDebugIO LogRender "bindless pipeline layout created"
 
   -- Bindless pipeline (reuses g-buffer render pass since same output format)
@@ -596,32 +613,27 @@ createDeferredResources DeferredConfig {..} = do
       4
   logDebugIO LogRender "bindless pipeline created"
 
-  -- Bindless pass descriptor set layout
-  bindlessPassDescriptorSetLayout <- DescriptorSetLayout.managedBindlessPassDescriptorSetLayout device
-  logDebugIO LogRender "bindless pass descriptor set layout created"
-
-  -- Bindless descriptor pool and sets
-  bindlessDescriptorPool <- DescriptorPool.managedDescriptorPool device numSwapchainImages
+  -- Bindless descriptor pool and sets (one per frame-in-flight UBO)
+  let numBindlessSets = length dcBindlessUniformBuffers
+  bindlessDescriptorPool <- DescriptorPool.managedDescriptorPool device numBindlessSets
   logDebugIO LogRender "bindless descriptor pool created"
 
-  bindlessDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
-    DescriptorSet.allocateDescriptorSet device bindlessDescriptorPool [bindlessPassDescriptorSetLayout]
+  bindlessDescriptorSets <- replicateM numBindlessSets (DescriptorSet.allocateDescriptorSet device bindlessDescriptorPool [bindlessPassDescriptorSetLayout])
   logDebugIO LogRender $ "bindless descriptor sets allocated: " <> showT (length bindlessDescriptorSets)
 
-  -- Update bindless descriptor sets with texture array (if provided)
+  -- Update bindless descriptor sets with texture array and UBO (if provided)
   case dcBindlessTextureArrayView of
     Nothing -> logDebugIO LogRender "no bindless texture array, skipping descriptor update"
     Just texArrayView -> do
-      for_ bindlessDescriptorSets $ \ds -> do
-        -- UBO will be updated per-frame; for now just bind a dummy buffer
+      for_ (zip bindlessDescriptorSets dcBindlessUniformBuffers) $ \(ds, uboBuf) -> do
         DescriptorSet.updateBindlessPassDescriptorSet
           device
           ds
-          Vulkan.VK_NULL_HANDLE
-          0
+          uboBuf
+          128
           texArrayView
           sampler
-      logDebugIO LogRender "bindless descriptor sets updated with texture array"
+      logDebugIO LogRender "bindless descriptor sets updated with texture array and UBO"
 
   pure
     DeferredResources
@@ -630,6 +642,7 @@ createDeferredResources DeferredConfig {..} = do
         drGBufferDoubleSidedPipeline = gBufferDoubleSidedPipeline,
         drGBufferPipelineLayout = gBufferPipelineLayout,
         drGBufferFramebuffers = gBufferFramebuffers,
+        drBindlessRenderPass = bindlessRenderPass,
         drBindlessPipeline = bindlessPipeline,
         drBindlessPipelineLayout = bindlessPipelineLayout,
         drBindlessDescriptorPool = bindlessDescriptorPool,
