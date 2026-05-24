@@ -255,7 +255,7 @@ createGodRayDescriptorSetLayout dev = do
           createInfo
           ( \ciPtr ->
               allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-           )
+          )
 
 managedTerrainDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 managedTerrainDescriptorSetLayout dev =
@@ -323,8 +323,8 @@ createBindlessDescriptorSetLayout dev = do
               &* setListRef @"pBindings" [textureBinding]
           )
    in liftIO $ withPtr bindingFlagsCreateInfo $ \_bfcPtr ->
-         withPtr createInfo $ \ciPtr ->
-           allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+        withPtr createInfo $ \ciPtr ->
+          allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
 
 -- | Bindless pass descriptor set layout: UBO (binding 0) + Texture2DArray (binding 1).
 -- Used by the Texture2DArray bindless g-buffer pass.

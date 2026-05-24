@@ -1189,16 +1189,16 @@ renderLoop RenderLoopConfig {..} = do
                                   sfPendingAllStages = tvPendingAllStages,
                                   sfPendingSwapchainScreenshot = tvPendingSwapchainScreenshot
                                 },
-                             reSkyNoiseState =
-                               SkyNoiseState
-                                 { snsIBLTextures = iblTextures,
-                                   snsTerrainTextures = terrainTextures,
-                                   snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
-                                   snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
-                                   snsNoiseSeed = noiseSeed rlcGameState,
-                                   snsNoiseFrequency = noiseFrequency rlcGameState,
-                                   snsNoisePersistence = noisePersistence rlcGameState
-                                 },
+                            reSkyNoiseState =
+                              SkyNoiseState
+                                { snsIBLTextures = iblTextures,
+                                  snsTerrainTextures = terrainTextures,
+                                  snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
+                                  snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
+                                  snsNoiseSeed = noiseSeed rlcGameState,
+                                  snsNoiseFrequency = noiseFrequency rlcGameState,
+                                  snsNoisePersistence = noisePersistence rlcGameState
+                                },
                             rePhysicsState =
                               PhysicsStateTVars
                                 { pstPhysicsBodies = physicsBodies rlcGameState,
@@ -1212,18 +1212,24 @@ renderLoop RenderLoopConfig {..} = do
                           }
                   renderFrameLoop renderEnv 0
                 else with mkRenderContext $ \context -> do
-                  cloudSpecInfo <- liftIO $ mallocSpecializationInfo $
-                    SpecializationData [SpecEntry 0 (packFloat 96.0)]
-                  apVolumeSpecInfo <- liftIO $ mallocSpecializationInfo $
-                    SpecializationData
-                      [ SpecEntry 0 (packFloat 0.0003)
-                      , SpecEntry 1 (packFloat 0.76)
-                      ]
-                  lightingSpecInfo <- liftIO $ mallocSpecializationInfo $
-                    SpecializationData
-                      [ SpecEntry 0 (packFloat 0.1)
-                      , SpecEntry 1 (packFloat 10000.0)
-                      ]
+                  cloudSpecInfo <-
+                    liftIO $
+                      mallocSpecializationInfo $
+                        SpecializationData [SpecEntry 0 (packFloat 96.0)]
+                  apVolumeSpecInfo <-
+                    liftIO $
+                      mallocSpecializationInfo $
+                        SpecializationData
+                          [ SpecEntry 0 (packFloat 0.0003),
+                            SpecEntry 1 (packFloat 0.76)
+                          ]
+                  lightingSpecInfo <-
+                    liftIO $
+                      mallocSpecializationInfo $
+                        SpecializationData
+                          [ SpecEntry 0 (packFloat 0.1),
+                            SpecEntry 1 (packFloat 10000.0)
+                          ]
                   let dcfg =
                         Deferred.DeferredConfig
                           { Deferred.dcPhysicalDevice = rlcPhysicalDevice,
@@ -1236,9 +1242,9 @@ renderLoop RenderLoopConfig {..} = do
                                   Deferred.dsLighting = ShaderProgram (shpVertex smLighting) Nothing Nothing Nothing (if rlcProceduralSkyEnabled then smLightingProcedural else shpFragment smLighting) (Just lightingSpecInfo),
                                   Deferred.dsWireframe = ShaderProgram (wsVertex smWireframe) Nothing Nothing (wsGeometry smWireframe) (wsFragment smWireframe) Nothing,
                                   Deferred.dsCloud = ShaderProgram (shpVertex smCloud) Nothing Nothing Nothing (shpFragment smCloud) (Just cloudSpecInfo),
-                                   Deferred.dsGodRay = ShaderProgram (shpVertex smGodRay) Nothing Nothing Nothing (shpFragment smGodRay) Nothing,
-                                   Deferred.dsTerrain = ShaderProgram (shpVertex smTerrain) Nothing Nothing Nothing (shpFragment smTerrain) Nothing,
-                                   Deferred.dsAPVolume = smAPVolume,
+                                  Deferred.dsGodRay = ShaderProgram (shpVertex smGodRay) Nothing Nothing Nothing (shpFragment smGodRay) Nothing,
+                                  Deferred.dsTerrain = ShaderProgram (shpVertex smTerrain) Nothing Nothing Nothing (shpFragment smTerrain) Nothing,
+                                  Deferred.dsAPVolume = smAPVolume,
                                   Deferred.dsAPVolumeSpecInfo = Just apVolumeSpecInfo,
                                   Deferred.dsBindless = ShaderProgram (shpVertex smBindless) Nothing Nothing Nothing (shpFragment smBindless) Nothing
                                 },
@@ -1249,26 +1255,26 @@ renderLoop RenderLoopConfig {..} = do
                                   Deferred.irBrdfView = iblBrdfView,
                                   Deferred.irSampler = iblSampler
                                 },
-                             Deferred.dcCloudTextures =
-                               Deferred.CloudTextures
-                                 { Deferred.ctNoiseView = cmView iblCloudNoise,
-                                   Deferred.ctBlueNoiseView = iblBlueNoiseView,
-                                   Deferred.ctWeatherMapView = iblWeatherMapView,
-                                   Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler,
-                                   Deferred.ctNoiseSampler = iblNoiseSampler
-                                 },
-                             Deferred.dcTerrainTextures =
-                               Deferred.TerrainTextures
-                                 { Deferred.ttElevationView = ttElevationView terrainTextures,
-                                   Deferred.ttClimateView = ttClimateView terrainTextures,
-                                   Deferred.ttSampler = iblSampler
-                                 },
-                             Deferred.dcLightBuffer = Just lightSsboBuffer,
-                             Deferred.dcImGuiRenderPass = imGuiRenderPass,
-                             Deferred.dcProceduralSky = rlcProceduralSkyEnabled,
-                             Deferred.dcBindlessTextureArrayView = mBindlessTextureArray,
-                             Deferred.dcBindlessUniformBuffers = map fst frameMvpBuffers
-                           }
+                            Deferred.dcCloudTextures =
+                              Deferred.CloudTextures
+                                { Deferred.ctNoiseView = cmView iblCloudNoise,
+                                  Deferred.ctBlueNoiseView = iblBlueNoiseView,
+                                  Deferred.ctWeatherMapView = iblWeatherMapView,
+                                  Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler,
+                                  Deferred.ctNoiseSampler = iblNoiseSampler
+                                },
+                            Deferred.dcTerrainTextures =
+                              Deferred.TerrainTextures
+                                { Deferred.ttElevationView = ttElevationView terrainTextures,
+                                  Deferred.ttClimateView = ttClimateView terrainTextures,
+                                  Deferred.ttSampler = iblSampler
+                                },
+                            Deferred.dcLightBuffer = Just lightSsboBuffer,
+                            Deferred.dcImGuiRenderPass = imGuiRenderPass,
+                            Deferred.dcProceduralSky = rlcProceduralSkyEnabled,
+                            Deferred.dcBindlessTextureArrayView = mBindlessTextureArray,
+                            Deferred.dcBindlessUniformBuffers = map fst frameMvpBuffers
+                          }
                   with (Deferred.createDeferredResources dcfg) $ \dr -> do
                     let numSwapchainImages = length (drCloudImages dr)
                     prevViewProjTVars <- replicateM numSwapchainImages (STM.newTVarIO (identity :: M44 Foreign.C.CFloat))
@@ -1326,16 +1332,16 @@ renderLoop RenderLoopConfig {..} = do
                                     sfPendingAllStages = tvPendingAllStages,
                                     sfPendingSwapchainScreenshot = tvPendingSwapchainScreenshot
                                   },
-                               reSkyNoiseState =
-                                 SkyNoiseState
-                                   { snsIBLTextures = iblTextures,
-                                     snsTerrainTextures = terrainTextures,
-                                     snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
-                                     snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
-                                     snsNoiseSeed = noiseSeed rlcGameState,
-                                     snsNoiseFrequency = noiseFrequency rlcGameState,
-                                     snsNoisePersistence = noisePersistence rlcGameState
-                                   },
+                              reSkyNoiseState =
+                                SkyNoiseState
+                                  { snsIBLTextures = iblTextures,
+                                    snsTerrainTextures = terrainTextures,
+                                    snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
+                                    snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
+                                    snsNoiseSeed = noiseSeed rlcGameState,
+                                    snsNoiseFrequency = noiseFrequency rlcGameState,
+                                    snsNoisePersistence = noisePersistence rlcGameState
+                                  },
                               rePhysicsState =
                                 PhysicsStateTVars
                                   { pstPhysicsBodies = physicsBodies rlcGameState,

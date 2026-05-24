@@ -13,6 +13,8 @@ module Graphics.Haskan.Vulkan.Shaders.Compile () where
 
 import FIR qualified
 -- Import all shader modules
+
+import Graphics.Haskan.Vulkan.Shaders.Bindless qualified as Bindless
 import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolume
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudNoiseGen qualified as CloudNoiseGen
@@ -21,7 +23,6 @@ import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as Cull
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGen
 import Graphics.Haskan.Vulkan.Shaders.Compute.WeatherMapGen qualified as WeatherMapGen
-import Graphics.Haskan.Vulkan.Shaders.Bindless qualified as Bindless
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds qualified as Clouds
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBuffer
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays qualified as GodRays

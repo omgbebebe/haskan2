@@ -105,7 +105,7 @@ fragment = shader do
       encNx = (nx + 1) * 0.5
       encNy = (ny + 1) * 0.5
       encNz = (nz + 1) * 0.5
-  put @"out_position" (Vec4 wpx wpy wpz 0.0)  -- metallic=0
-  put @"out_normal" (Vec4 encNx encNy encNz 0.5)  -- roughness=0.5
-  put @"out_albedo" (Vec4 texR texG texB 1.0)  -- ao=1
+  put @"out_position" (Vec4 wpx wpy wpz 0.0) -- metallic=0
+  put @"out_normal" (Vec4 encNx encNy encNz 0.5) -- roughness=0.5
+  put @"out_albedo" (Vec4 texR texG texB 1.0) -- ao=1
   put @"out_emissive" (Vec4 0 0 0 1)

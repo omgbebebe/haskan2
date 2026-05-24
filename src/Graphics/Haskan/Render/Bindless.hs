@@ -11,11 +11,11 @@ import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
 import Data.Word (Word32)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Resources (allocaAndPeek)
-import qualified Graphics.Haskan.Vulkan.DescriptorPool as DescriptorPool
+import Graphics.Haskan.Vulkan.DescriptorPool qualified as DescriptorPool
 import Graphics.Haskan.Vulkan.DescriptorSet (updateBindlessTexture)
-import qualified Graphics.Haskan.Vulkan.DescriptorSetLayout as DescriptorSetLayout
-import qualified Graphics.Vulkan as Vulkan
-import qualified Graphics.Vulkan.Core_1_0 as VulkanCore
+import Graphics.Haskan.Vulkan.DescriptorSetLayout qualified as DescriptorSetLayout
+import Graphics.Vulkan qualified as Vulkan
+import Graphics.Vulkan.Core_1_0 qualified as VulkanCore
 import Graphics.Vulkan.Marshal.Create (createVk, set, setListRef, (&*))
 
 -- | Handle to a bindless texture descriptor set.

@@ -12,14 +12,14 @@ module Graphics.Haskan.Vulkan.Specialization
 where
 
 import Data.ByteString (ByteString)
-import qualified Data.ByteString as BS
+import Data.ByteString qualified as BS
 import Data.Word (Word32)
 import Foreign (Ptr, alloca, allocaArray, castPtr, copyBytes, free, mallocBytes, peek, plusPtr, poke, sizeOf)
 import Foreign.C.Types (CSize)
-import System.IO.Unsafe (unsafePerformIO)
-import qualified Graphics.Vulkan.Core_1_0 as Vulkan
+import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Marshal.Create (set, (&*))
-import qualified Graphics.Vulkan.Marshal.Create as Vulkan
+import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import System.IO.Unsafe (unsafePerformIO)
 
 -- | A single specialization constant entry.
 data SpecEntry = SpecEntry

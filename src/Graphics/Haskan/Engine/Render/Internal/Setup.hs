@@ -55,7 +55,6 @@ import Graphics.Haskan.Mesh qualified as Mesh
 import Graphics.Haskan.Model qualified as Model
 import Graphics.Haskan.Physics.Jolt.Types (BodyType (..))
 import Graphics.Haskan.Render.Deferred (DeferredPassData (..), buildDeferredGraph)
-import Graphics.Haskan.Terrain.Texture qualified as Terrain
 import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), RenderPassNode (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
@@ -65,6 +64,7 @@ import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
 import Graphics.Haskan.Scene.Transform (Transform (..), defaultTransform, tPosition)
 import Graphics.Haskan.Scene.Transform qualified as Transform
+import Graphics.Haskan.Terrain.Texture qualified as Terrain
 import Graphics.Haskan.Utils.ObjLoader qualified as ObjLoader
 import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.BRDF qualified as BRDF
@@ -91,7 +91,6 @@ import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Resources (ResourceManager, TextureHandle (..), TextureResource (..), lookupTexture)
 import Graphics.Haskan.Vulkan.Semaphore qualified as Semaphore
 import Graphics.Haskan.Vulkan.ShaderModule qualified as ShaderModule
-import Graphics.Haskan.Vulkan.Shaders.Constants qualified as Const
 import Graphics.Haskan.Vulkan.Shaders.Compile ()
 -- forces TH shader compilation at build time
 import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolumeShaders
@@ -102,6 +101,7 @@ import Graphics.Haskan.Vulkan.Shaders.Compute.Cull qualified as CullShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.IrradianceGen qualified as IrradianceGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.RadianceGen qualified as RadianceGenShaders
 import Graphics.Haskan.Vulkan.Shaders.Compute.WeatherMapGen qualified as WeatherMapGenShaders
+import Graphics.Haskan.Vulkan.Shaders.Constants qualified as Const
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds qualified as CloudShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays qualified as GodRayShaders

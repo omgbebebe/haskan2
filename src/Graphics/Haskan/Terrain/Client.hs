@@ -50,7 +50,6 @@ readDimensions hdrs = do
       [(n, "")] -> Just n
       _ -> Nothing
 
-
 -- | Parse little-endian int16 from ByteString.
 parseInt16LE :: ByteString -> Vector Int16
 parseInt16LE bs = Vector.generate (BS.length bs `div` 2) $ \i ->
@@ -70,8 +69,8 @@ parseFloat32LE bs =
           fromIntegral b0
             + fromIntegral b1 `shiftL` 8
             + fromIntegral b2 `shiftL` 16
-            + fromIntegral b3 `shiftL` 24
-            :: Word32
+            + fromIntegral b3 `shiftL` 24 ::
+            Word32
      in wordToFloat word
   where
     wordToFloat :: Word32 -> Float
@@ -91,7 +90,7 @@ parseFloat32LE bs =
 -- | Fetch a terrain tile from the inference API.
 -- Returns raw binary: int16 elevation + float32 climate (4 channels).
 fetchTerrainTile ::
-  MonadIO m =>
+  (MonadIO m) =>
   -- | Base URL (e.g. "http://localhost:7777")
   String ->
   -- | Bounding box i1

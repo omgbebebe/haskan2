@@ -303,9 +303,9 @@ createGBufferRenderPassEx dev posFormat colorFormat depthFormat =
               &* set @"subpassCount" 1
               &* setListRef @"pSubpasses" [subpass]
               &* set @"dependencyCount" 2
-                           &* setListRef @"pDependencies" [dependency, dependencyToExternal]
-                       )
-                in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
+              &* setListRef @"pDependencies" [dependency, dependencyToExternal]
+          )
+   in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
 
 -- ---------------------------------------------------------------------------
 -- Bindless render pass: same attachments as g-buffer but with LOAD_OP_LOAD
@@ -412,7 +412,7 @@ createBindlessRenderPass dev posFormat colorFormat depthFormat =
               &* set @"dependencyCount" 2
               &* setListRef @"pDependencies" [dependency, dependencyToExternal]
           )
-    in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
+   in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
 
 -- ---------------------------------------------------------------------------
 -- Lighting render pass: single color attachment (swapchain)

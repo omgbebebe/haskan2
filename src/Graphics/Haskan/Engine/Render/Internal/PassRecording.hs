@@ -233,21 +233,21 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                       gbpGBufferImages = gBufferImagesForFrame,
                       gbpWireframePipeline = drWireframePipeline rcDeferred,
                       gbpWireframeLayout = drWireframePipelineLayout rcDeferred,
-                     gbpWireframeEnabled = rcWireframeEnabled
-                   },
-                 dpdBindless =
-                   Just
-                     BindlessPassData
-                       { blpPipeline = drBindlessPipeline rcDeferred,
-                         blpLayout = drBindlessPipelineLayout rcDeferred,
-                         blpDescriptor = bindlessDescriptorSet,
-                         blpRenderPass = drBindlessRenderPass rcDeferred,
-                         blpFramebuffer = gBufferFramebuffer,
-                         blpDrawList = bindlessDraws,
-                         blpTextureArrayView = Nothing,
-                         blpSampler = rcTextureSampler
-                       },
-                 dpdCloud =
+                      gbpWireframeEnabled = rcWireframeEnabled
+                    },
+                dpdBindless =
+                  Just
+                    BindlessPassData
+                      { blpPipeline = drBindlessPipeline rcDeferred,
+                        blpLayout = drBindlessPipelineLayout rcDeferred,
+                        blpDescriptor = bindlessDescriptorSet,
+                        blpRenderPass = drBindlessRenderPass rcDeferred,
+                        blpFramebuffer = gBufferFramebuffer,
+                        blpDrawList = bindlessDraws,
+                        blpTextureArrayView = Nothing,
+                        blpSampler = rcTextureSampler
+                      },
+                dpdCloud =
                   CloudPassData
                     { cpRenderPass = drCloudRenderPass rcDeferred,
                       cpFramebuffer = cloudFramebuffer,
@@ -444,8 +444,8 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                 bPtr
                 0
                 Vulkan.vkNullPtr
-                 0
-                 Vulkan.vkNullPtr
+                0
+                Vulkan.vkNullPtr
 
         -- Terrain overlay pass (blended over lighting result)
         let terrainFramebuffer = drTerrainFramebuffers rcDeferred !! fromIntegral imageIdx
@@ -467,13 +467,14 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                     &* set @"dstQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
                     &* set @"image" swapchainImage
                     &* set @"subresourceRange"
-                        (Vulkan.createVk
+                      ( Vulkan.createVk
                           ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
                               &* set @"baseMipLevel" 0
                               &* set @"levelCount" 1
                               &* set @"baseArrayLayer" 0
                               &* set @"layerCount" 1
-                          ))
+                          )
+                      )
                 )
         liftIO $ withPtr imageBarrier $ \bPtr ->
           Vulkan.vkCmdPipelineBarrier
@@ -481,9 +482,12 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
             Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
             Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
             Vulkan.VK_ZERO_FLAGS
-            0 Vulkan.vkNullPtr
-            0 Vulkan.vkNullPtr
-            1 bPtr
+            0
+            Vulkan.vkNullPtr
+            0
+            Vulkan.vkNullPtr
+            1
+            bPtr
         liftIO $ RenderPass.withRenderPass commandBuffer terrainRenderPass terrainFramebuffer rcPassSurfaceExtent [] $ do
           liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS terrainPipeline
           liftIO $ Foreign.Marshal.Array.withArray [terrainDescriptorSet] $ \dsPtr ->
@@ -516,9 +520,24 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                   realToFrac r2y,
                   realToFrac r2z,
                   0,
-                  0, 0, 0, 0, 0, 0, 0, 0,
-                  0, 0, 0, 0, 0, 0, 0, 0
-                ] :: [CFloat]
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0,
+                  0
+                ] ::
+                  [CFloat]
           liftIO $ Buffer.copyDataToDeviceMemory rcDevice (drTerrainFrameDataMemory rcDeferred) terrainFrameData
           liftIO $ Vulkan.vkCmdDraw commandBuffer 3 1 0 0
 

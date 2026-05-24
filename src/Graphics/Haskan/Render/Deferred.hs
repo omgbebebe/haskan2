@@ -162,75 +162,75 @@ buildDeferredGraph DeferredPassData {..} = do
   addPass
     RenderPassNode
       { rpName = "gbuffer",
-         rpInputs = [],
-         rpOutputs = [gbufPosOut, gbufNormOut, gbufAlbedoOut, gbufEmissiveOut],
-          rpRecord = PassRecordFunc $ \ctx -> do
-            let commandBuffer = pcCommandBuffer ctx
-            RenderPass.withGBufferRenderPass commandBuffer gbpRenderPass gbpFramebuffer dpdExtent $ do
-              -- Solid geometry pass: split by doubleSided flag
-             let (culledDraws, doubleSidedDraws) = span (not . dcDoubleSided) dpdDrawList
-                 culledCount = fromIntegral (length culledDraws) :: Word32
-                 dsCount = fromIntegral (length doubleSidedDraws) :: Word32
-             GraphicsPipeline.cmdBindPipeline commandBuffer gbpPipeline
-             -- Bind merged vertex/index buffers once (all entities share them)
-             case dpdDrawList of
-               [] -> pure ()
-               (firstDc : _) -> do
-                 let firstMesh = dcMesh firstDc
-                     vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
-                     idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
-                 Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-                   Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
-                 Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
-             -- Bind descriptor set once (no dynamic offsets)
-             Foreign.Marshal.Array.withArray [gbpDescriptor] $ \dsPtr ->
-               DescriptorSet.cmdBindDescriptorSets
-                 commandBuffer
-                 Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                 gbpLayout
-                 0
-                 1
-                 dsPtr
-                 0
-                 Vulkan.vkNullPtr
-             -- Draw culled entities (backface culling enabled)
-             when (culledCount > 0) $
-               CommandBuffer.cmdDrawIndexedIndirect commandBuffer gbpDrawCommandsBuffer culledCount 20
-             -- Draw double-sided entities (no culling)
-             when (dsCount > 0) $ do
-               GraphicsPipeline.cmdBindPipeline commandBuffer gbpDoubleSidedPipeline
-               CommandBuffer.cmdDrawIndexedIndirectOffset commandBuffer gbpDrawCommandsBuffer (fromIntegral culledCount * 20) dsCount 20
-             -- Wireframe overlay pass
-             when gbpWireframeEnabled $ do
-               GraphicsPipeline.cmdBindPipeline commandBuffer gbpWireframePipeline
-               case dpdDrawList of
-                 [] -> pure ()
-                 (firstDc : _) -> do
-                   let firstMesh = dcMesh firstDc
-                       vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
-                       idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
-                   Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-                     Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
-                   Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
-               -- Bind descriptor set for wireframe (shares layout)
-               Foreign.Marshal.Array.withArray [gbpDescriptor] $ \dsPtr ->
-                 DescriptorSet.cmdBindDescriptorSets
-                   commandBuffer
-                   Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                   gbpWireframeLayout
-                   0
-                   1
-                   dsPtr
-                   0
-                   Vulkan.vkNullPtr
-               case dpdDrawList of
-                 [] -> pure ()
-                 (firstDc : _) -> do
-                   let firstMesh = dcMesh firstDc
-                       idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
-                   Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
-               CommandBuffer.cmdDrawIndexedIndirect commandBuffer gbpDrawCommandsBuffer (fromIntegral $ length dpdDrawList) 20
-       }
+        rpInputs = [],
+        rpOutputs = [gbufPosOut, gbufNormOut, gbufAlbedoOut, gbufEmissiveOut],
+        rpRecord = PassRecordFunc $ \ctx -> do
+          let commandBuffer = pcCommandBuffer ctx
+          RenderPass.withGBufferRenderPass commandBuffer gbpRenderPass gbpFramebuffer dpdExtent $ do
+            -- Solid geometry pass: split by doubleSided flag
+            let (culledDraws, doubleSidedDraws) = span (not . dcDoubleSided) dpdDrawList
+                culledCount = fromIntegral (length culledDraws) :: Word32
+                dsCount = fromIntegral (length doubleSidedDraws) :: Word32
+            GraphicsPipeline.cmdBindPipeline commandBuffer gbpPipeline
+            -- Bind merged vertex/index buffers once (all entities share them)
+            case dpdDrawList of
+              [] -> pure ()
+              (firstDc : _) -> do
+                let firstMesh = dcMesh firstDc
+                    vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
+                    idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
+                Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
+                  Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
+                Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+            -- Bind descriptor set once (no dynamic offsets)
+            Foreign.Marshal.Array.withArray [gbpDescriptor] $ \dsPtr ->
+              DescriptorSet.cmdBindDescriptorSets
+                commandBuffer
+                Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+                gbpLayout
+                0
+                1
+                dsPtr
+                0
+                Vulkan.vkNullPtr
+            -- Draw culled entities (backface culling enabled)
+            when (culledCount > 0) $
+              CommandBuffer.cmdDrawIndexedIndirect commandBuffer gbpDrawCommandsBuffer culledCount 20
+            -- Draw double-sided entities (no culling)
+            when (dsCount > 0) $ do
+              GraphicsPipeline.cmdBindPipeline commandBuffer gbpDoubleSidedPipeline
+              CommandBuffer.cmdDrawIndexedIndirectOffset commandBuffer gbpDrawCommandsBuffer (fromIntegral culledCount * 20) dsCount 20
+            -- Wireframe overlay pass
+            when gbpWireframeEnabled $ do
+              GraphicsPipeline.cmdBindPipeline commandBuffer gbpWireframePipeline
+              case dpdDrawList of
+                [] -> pure ()
+                (firstDc : _) -> do
+                  let firstMesh = dcMesh firstDc
+                      vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
+                      idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
+                  Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
+                    Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
+                  Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+              -- Bind descriptor set for wireframe (shares layout)
+              Foreign.Marshal.Array.withArray [gbpDescriptor] $ \dsPtr ->
+                DescriptorSet.cmdBindDescriptorSets
+                  commandBuffer
+                  Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+                  gbpWireframeLayout
+                  0
+                  1
+                  dsPtr
+                  0
+                  Vulkan.vkNullPtr
+              case dpdDrawList of
+                [] -> pure ()
+                (firstDc : _) -> do
+                  let firstMesh = dcMesh firstDc
+                      idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
+                  Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+              CommandBuffer.cmdDrawIndexedIndirect commandBuffer gbpDrawCommandsBuffer (fromIntegral $ length dpdDrawList) 20
+      }
   -- Bindless pass: alternative g-buffer for texture-array materials
   case dpdBindless of
     Nothing -> pure ()
@@ -238,62 +238,78 @@ buildDeferredGraph DeferredPassData {..} = do
       addPass
         RenderPassNode
           { rpName = "bindless",
-             rpInputs = [gbufPosOut, gbufNormOut, gbufAlbedoOut, gbufEmissiveOut],
-             rpOutputs = [gbufPosOut, gbufNormOut, gbufAlbedoOut, gbufEmissiveOut],
-               rpRecord = PassRecordFunc $ \ctx -> do
-                 let commandBuffer = pcCommandBuffer ctx
-                 RenderPass.withGBufferRenderPass commandBuffer blpRenderPass blpFramebuffer dpdExtent $ do
-                  GraphicsPipeline.cmdBindPipeline commandBuffer blpPipeline
-                  case blpDrawList of
-                    [] -> pure ()
-                    (firstDc : _) -> do
-                      let firstMesh = dcMesh firstDc
-                          vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
-                          idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
-                      Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-                        Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
-                      Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
-                  -- Bind descriptor set
-                  Foreign.Marshal.Array.withArray [blpDescriptor] $ \dsPtr ->
-                    DescriptorSet.cmdBindDescriptorSets
-                      commandBuffer
-                      Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                      blpLayout
-                      0
-                      1
-                      dsPtr
-                      0
-                      Vulkan.vkNullPtr
-                  -- Draw all bindless meshes with push constants
-                  for_ blpDrawList $ \drawCall -> do
-                    let mesh = dcMesh drawCall
-                        indexCount = fromIntegral (mrIndexCount mesh)
-                        firstIndex = fromIntegral (mrFirstIndex mesh)
-                        vertexOffset = fromIntegral (mrVertexOffset mesh)
-                        matIdx = dcMaterialIndex drawCall
-                        (V4 (V4 m00 m01 m02 m03)
-                            (V4 m10 m11 m12 m13)
-                            (V4 m20 m21 m22 m23)
-                            (V4 m30 m31 m32 m33)) = Linear.Matrix.transpose (dcWorldMatrix drawCall)
-                        -- Push constant: model matrix (64 bytes) + material index (4 bytes)
-                        pushData =
-                          map realToFrac
-                            [ m00, m01, m02, m03
-                            , m10, m11, m12, m13
-                            , m20, m21, m22, m23
-                            , m30, m31, m32, m33
-                            , fromIntegral matIdx
-                            ] :: [Float]
-                    liftIO $ do
-                      Foreign.Marshal.Array.withArray pushData $ \(pushPtr :: Ptr Float) ->
-                        Vulkan.vkCmdPushConstants
-                          commandBuffer
-                          blpLayout
-                          (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
-                          0
-                          68
-                          (Foreign.castPtr pushPtr)
-                      Vulkan.vkCmdDrawIndexed commandBuffer indexCount 1 firstIndex vertexOffset 0
+            rpInputs = [gbufPosOut, gbufNormOut, gbufAlbedoOut, gbufEmissiveOut],
+            rpOutputs = [gbufPosOut, gbufNormOut, gbufAlbedoOut, gbufEmissiveOut],
+            rpRecord = PassRecordFunc $ \ctx -> do
+              let commandBuffer = pcCommandBuffer ctx
+              RenderPass.withGBufferRenderPass commandBuffer blpRenderPass blpFramebuffer dpdExtent $ do
+                GraphicsPipeline.cmdBindPipeline commandBuffer blpPipeline
+                case blpDrawList of
+                  [] -> pure ()
+                  (firstDc : _) -> do
+                    let firstMesh = dcMesh firstDc
+                        vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
+                        idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
+                    Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
+                      Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
+                    Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+                -- Bind descriptor set
+                Foreign.Marshal.Array.withArray [blpDescriptor] $ \dsPtr ->
+                  DescriptorSet.cmdBindDescriptorSets
+                    commandBuffer
+                    Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+                    blpLayout
+                    0
+                    1
+                    dsPtr
+                    0
+                    Vulkan.vkNullPtr
+                -- Draw all bindless meshes with push constants
+                for_ blpDrawList $ \drawCall -> do
+                  let mesh = dcMesh drawCall
+                      indexCount = fromIntegral (mrIndexCount mesh)
+                      firstIndex = fromIntegral (mrFirstIndex mesh)
+                      vertexOffset = fromIntegral (mrVertexOffset mesh)
+                      matIdx = dcMaterialIndex drawCall
+                      ( V4
+                          (V4 m00 m01 m02 m03)
+                          (V4 m10 m11 m12 m13)
+                          (V4 m20 m21 m22 m23)
+                          (V4 m30 m31 m32 m33)
+                        ) = Linear.Matrix.transpose (dcWorldMatrix drawCall)
+                      -- Push constant: model matrix (64 bytes) + material index (4 bytes)
+                      pushData =
+                        map
+                          realToFrac
+                          [ m00,
+                            m01,
+                            m02,
+                            m03,
+                            m10,
+                            m11,
+                            m12,
+                            m13,
+                            m20,
+                            m21,
+                            m22,
+                            m23,
+                            m30,
+                            m31,
+                            m32,
+                            m33,
+                            fromIntegral matIdx
+                          ] ::
+                          [Float]
+                  liftIO $ do
+                    Foreign.Marshal.Array.withArray pushData $ \(pushPtr :: Ptr Float) ->
+                      Vulkan.vkCmdPushConstants
+                        commandBuffer
+                        blpLayout
+                        (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
+                        0
+                        68
+                        (Foreign.castPtr pushPtr)
+                    Vulkan.vkCmdDrawIndexed commandBuffer indexCount 1 firstIndex vertexOffset 0
           }
 
   -- Cloud pass: fullscreen triangle ray marching
