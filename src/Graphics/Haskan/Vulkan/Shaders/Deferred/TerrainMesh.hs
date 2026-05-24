@@ -32,10 +32,10 @@ type TerrainNodeData =
      ]
 
 type MeshDefs =
-  '[ "out_position" ':-> Output '[Location 0] (V 4 Float)
-   , "out_normal"   ':-> Output '[Location 1] (V 4 Float)
-   , "out_uv"       ':-> Output '[Location 2] (V 2 Float)
-   , "out_climate"  ':-> Output '[Location 3] Word32
+  '[ "out_position" ':-> Output '[Location 0] (Array 64 (V 4 Float))
+   , "out_normal"   ':-> Output '[Location 256] (Array 64 (V 4 Float))
+   , "out_uv"       ':-> Output '[Location 512] (Array 64 (V 2 Float))
+   , "out_climate"  ':-> Output '[Location 768] (Array 64 Word32)
    , "nodes"
        ':-> StorageBuffer
             '[Binding 0, DescriptorSet 1]
@@ -94,10 +94,10 @@ terrainMesh = meshShader do
     localIdx pos
 
   -- Write per-vertex user outputs
-  put @"out_position" pos
-  put @"out_normal" normal
-  put @"out_uv" (Vec2 u v)
-  put @"out_climate" climateLayer
+  assign @(Name "out_position" :.: AnIndex Word32) localIdx pos
+  assign @(Name "out_normal" :.: AnIndex Word32) localIdx normal
+  assign @(Name "out_uv" :.: AnIndex Word32) localIdx (Vec2 u v)
+  assign @(Name "out_climate" :.: AnIndex Word32) localIdx climateLayer
 
 -- ---------------------------------------------------------------------------
 -- Fragment shader
@@ -105,9 +105,9 @@ terrainMesh = meshShader do
 
 type FragmentDefs =
   '[ "in_position" ':-> Input '[Location 0] (V 4 Float)
-   , "in_normal"   ':-> Input '[Location 1] (V 4 Float)
-   , "in_uv"       ':-> Input '[Location 2] (V 2 Float)
-   , "in_climate"  ':-> Input '[Location 3, Flat] Word32
+   , "in_normal"   ':-> Input '[Location 256] (V 4 Float)
+   , "in_uv"       ':-> Input '[Location 512] (V 2 Float)
+   , "in_climate"  ':-> Input '[Location 768, Flat] Word32
    , "out_color"   ':-> Output '[Location 0] (V 4 Float)
    , "climateTex"
        ':-> Texture2DArray

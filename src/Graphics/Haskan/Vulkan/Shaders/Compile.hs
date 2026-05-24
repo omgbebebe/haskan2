@@ -28,6 +28,7 @@ import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBuffer
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays qualified as GodRays
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as Lighting
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProcedural
+import Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainMesh qualified as TerrainMesh
 import Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainOverlay qualified as TerrainOverlay
 import Graphics.Haskan.Vulkan.Shaders.Forward.SimpleForward qualified as SimpleForward
 import Graphics.Haskan.Vulkan.Shaders.TH (compileShader)
@@ -80,6 +81,10 @@ $(compileShader "data/shaders/fir/godray_frag.spv" [FIR.SPIRV (FIR.Version 1 5),
 $(compileShader "data/shaders/fir/terrain_vert.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] TerrainOverlay.terrainVertex)
 
 $(compileShader "data/shaders/fir/terrain_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] TerrainOverlay.terrainFragment)
+
+$(compileShader "data/shaders/fir/terrain_mesh.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] TerrainMesh.terrainMesh)
+
+$(compileShader "data/shaders/fir/terrain_mesh_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] TerrainMesh.terrainFragment)
 
 $(compileShader "data/shaders/fir/ap_volume_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] APVolume.program)
 
