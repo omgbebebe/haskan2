@@ -91,6 +91,7 @@ import Graphics.Haskan.Engine.Render.Internal.Setup
     SceneLoadResult (..),
     ShaderModules (..),
     ShaderPair (..),
+    TerrainTextures (..),
     VulkanContext (..),
     WireframeShaders (..),
     compileAllShaders,
@@ -99,6 +100,7 @@ import Graphics.Haskan.Engine.Render.Internal.Setup
     dispatchProceduralSkyGeneration,
     loadIBLTextures,
     loadScene,
+    loadTerrainTextures,
   )
 import Graphics.Haskan.Engine.Scene (adjustCameraForScene, computeMeshBounds, computeSceneBounds, computeSkyboxRays, computeWorldSpaceBounds, drawCallToSnapshot, makeProjectionMatrix)
 import Graphics.Haskan.Engine.Types (ComputeCullData (..), ComputeCullResources (..), ComputeEntityData (..), ControlMessage (..), DrawIndexedIndirectCommand (..), EngineConfig (..), EntityDebugInfo (..), FrameStats (..), FrameTime (..), GameState (..), InputBuffer (..), LightData (..), RenderDebugInfo (..), UVCheckMode (..), WorldState (..), emptyFrameStats, extractFrustumPlanes, filterVisible, flushInputBuffer, forkIOWithHandler, newInputBuffer, toListOfV4, transformAABB, updateFrameStats, writeInputBuffer)
@@ -235,6 +237,7 @@ data PhysicsStateTVars = PhysicsStateTVars
 -- | Sky and noise generation state.
 data SkyNoiseState = SkyNoiseState
   { snsIBLTextures :: !IBLTextures,
+    snsTerrainTextures :: !TerrainTextures,
     snsSkyNeedsRegeneration :: !(STM.TVar Bool),
     snsNoiseNeedsRegeneration :: !(STM.TVar Bool),
     snsNoiseSeed :: !(STM.TVar Float),
@@ -817,6 +820,7 @@ renderLoop RenderLoopConfig {..} = do
   let vulkanContext = VulkanContext device rlcPhysicalDevice graphicsQueueHandler textureCommandBuffer
 
   iblTextures <- loadIBLTextures vulkanContext rm rlcEnvMapDir rlcProceduralSkyEnabled
+  terrainTextures <- loadTerrainTextures vulkanContext rm "http://localhost:7777"
   let IBLTextures {..} = iblTextures
 
   assetCache <- initCache ".haskan2-cache"
@@ -1185,15 +1189,16 @@ renderLoop RenderLoopConfig {..} = do
                                   sfPendingAllStages = tvPendingAllStages,
                                   sfPendingSwapchainScreenshot = tvPendingSwapchainScreenshot
                                 },
-                            reSkyNoiseState =
-                              SkyNoiseState
-                                { snsIBLTextures = iblTextures,
-                                  snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
-                                  snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
-                                  snsNoiseSeed = noiseSeed rlcGameState,
-                                  snsNoiseFrequency = noiseFrequency rlcGameState,
-                                  snsNoisePersistence = noisePersistence rlcGameState
-                                },
+                             reSkyNoiseState =
+                               SkyNoiseState
+                                 { snsIBLTextures = iblTextures,
+                                   snsTerrainTextures = terrainTextures,
+                                   snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
+                                   snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
+                                   snsNoiseSeed = noiseSeed rlcGameState,
+                                   snsNoiseFrequency = noiseFrequency rlcGameState,
+                                   snsNoisePersistence = noisePersistence rlcGameState
+                                 },
                             rePhysicsState =
                               PhysicsStateTVars
                                 { pstPhysicsBodies = physicsBodies rlcGameState,
@@ -1231,8 +1236,9 @@ renderLoop RenderLoopConfig {..} = do
                                   Deferred.dsLighting = ShaderProgram (shpVertex smLighting) Nothing Nothing Nothing (if rlcProceduralSkyEnabled then smLightingProcedural else shpFragment smLighting) (Just lightingSpecInfo),
                                   Deferred.dsWireframe = ShaderProgram (wsVertex smWireframe) Nothing Nothing (wsGeometry smWireframe) (wsFragment smWireframe) Nothing,
                                   Deferred.dsCloud = ShaderProgram (shpVertex smCloud) Nothing Nothing Nothing (shpFragment smCloud) (Just cloudSpecInfo),
-                                  Deferred.dsGodRay = ShaderProgram (shpVertex smGodRay) Nothing Nothing Nothing (shpFragment smGodRay) Nothing,
-                                  Deferred.dsAPVolume = smAPVolume,
+                                   Deferred.dsGodRay = ShaderProgram (shpVertex smGodRay) Nothing Nothing Nothing (shpFragment smGodRay) Nothing,
+                                   Deferred.dsTerrain = ShaderProgram (shpVertex smTerrain) Nothing Nothing Nothing (shpFragment smTerrain) Nothing,
+                                   Deferred.dsAPVolume = smAPVolume,
                                   Deferred.dsAPVolumeSpecInfo = Just apVolumeSpecInfo,
                                   Deferred.dsBindless = ShaderProgram (shpVertex smBindless) Nothing Nothing Nothing (shpFragment smBindless) Nothing
                                 },
@@ -1243,15 +1249,21 @@ renderLoop RenderLoopConfig {..} = do
                                   Deferred.irBrdfView = iblBrdfView,
                                   Deferred.irSampler = iblSampler
                                 },
-                            Deferred.dcCloudTextures =
-                              Deferred.CloudTextures
-                                { Deferred.ctNoiseView = cmView iblCloudNoise,
-                                  Deferred.ctBlueNoiseView = iblBlueNoiseView,
-                                  Deferred.ctWeatherMapView = iblWeatherMapView,
-                                  Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler,
-                                  Deferred.ctNoiseSampler = iblNoiseSampler
-                                },
-                            Deferred.dcLightBuffer = Just lightSsboBuffer,
+                             Deferred.dcCloudTextures =
+                               Deferred.CloudTextures
+                                 { Deferred.ctNoiseView = cmView iblCloudNoise,
+                                   Deferred.ctBlueNoiseView = iblBlueNoiseView,
+                                   Deferred.ctWeatherMapView = iblWeatherMapView,
+                                   Deferred.ctBlueNoiseSampler = iblBlueNoiseSampler,
+                                   Deferred.ctNoiseSampler = iblNoiseSampler
+                                 },
+                             Deferred.dcTerrainTextures =
+                               Deferred.TerrainTextures
+                                 { Deferred.ttElevationView = ttElevationView terrainTextures,
+                                   Deferred.ttClimateView = ttClimateView terrainTextures,
+                                   Deferred.ttSampler = iblSampler
+                                 },
+                             Deferred.dcLightBuffer = Just lightSsboBuffer,
                              Deferred.dcImGuiRenderPass = imGuiRenderPass,
                              Deferred.dcProceduralSky = rlcProceduralSkyEnabled,
                              Deferred.dcBindlessTextureArrayView = mBindlessTextureArray,
@@ -1314,15 +1326,16 @@ renderLoop RenderLoopConfig {..} = do
                                     sfPendingAllStages = tvPendingAllStages,
                                     sfPendingSwapchainScreenshot = tvPendingSwapchainScreenshot
                                   },
-                              reSkyNoiseState =
-                                SkyNoiseState
-                                  { snsIBLTextures = iblTextures,
-                                    snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
-                                    snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
-                                    snsNoiseSeed = noiseSeed rlcGameState,
-                                    snsNoiseFrequency = noiseFrequency rlcGameState,
-                                    snsNoisePersistence = noisePersistence rlcGameState
-                                  },
+                               reSkyNoiseState =
+                                 SkyNoiseState
+                                   { snsIBLTextures = iblTextures,
+                                     snsTerrainTextures = terrainTextures,
+                                     snsSkyNeedsRegeneration = skyNeedsRegeneration rlcGameState,
+                                     snsNoiseNeedsRegeneration = noiseNeedsRegeneration rlcGameState,
+                                     snsNoiseSeed = noiseSeed rlcGameState,
+                                     snsNoiseFrequency = noiseFrequency rlcGameState,
+                                     snsNoisePersistence = noisePersistence rlcGameState
+                                   },
                               rePhysicsState =
                                 PhysicsStateTVars
                                   { pstPhysicsBodies = physicsBodies rlcGameState,

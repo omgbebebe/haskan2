@@ -484,6 +484,72 @@ createLightingRenderPass dev surfaceFormat =
           )
    in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
 
+managedTerrainOverlayRenderPass ::
+  (MonadManaged m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkSurfaceFormatKHR ->
+  m Vulkan.VkRenderPass
+managedTerrainOverlayRenderPass dev surfaceFormat =
+  alloc
+    "TerrainOverlayRenderPass"
+    (createTerrainOverlayRenderPass dev surfaceFormat)
+    (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
+
+createTerrainOverlayRenderPass ::
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkSurfaceFormatKHR ->
+  m Vulkan.VkRenderPass
+createTerrainOverlayRenderPass dev surfaceFormat =
+  let imageFormat = Vulkan.getField @"format" surfaceFormat
+      colorAttachment =
+        Vulkan.createVk
+          ( set @"format" imageFormat
+              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_LOAD
+              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
+              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
+              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+          )
+      colorAttachmentRef =
+        Vulkan.createVk
+          ( set @"attachment" 0
+              &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+          )
+      subpass =
+        Vulkan.createVk
+          ( set @"pipelineBindPoint" Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+              &* set @"colorAttachmentCount" 1
+              &* setListRef @"pColorAttachments" [colorAttachmentRef]
+              &* set @"inputAttachmentCount" 0
+              &* setListRef @"pInputAttachments" []
+              &* set @"preserveAttachmentCount" 0
+              &* setListRef @"pPreserveAttachments" []
+          )
+      dependency =
+        Vulkan.createVk
+          ( set @"srcSubpass" Vulkan.VK_SUBPASS_EXTERNAL
+              &* set @"dstSubpass" 0
+              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+              &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+              &* set @"dstAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          )
+      renderPassCI =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"attachmentCount" 1
+              &* setListRef @"pAttachments" [colorAttachment]
+              &* set @"subpassCount" 1
+              &* setListRef @"pSubpasses" [subpass]
+              &* set @"dependencyCount" 1
+              &* setListRef @"pDependencies" [dependency]
+          )
+   in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
+
 withRenderPass ::
   (MonadIO m) =>
   Vulkan.VkCommandBuffer ->

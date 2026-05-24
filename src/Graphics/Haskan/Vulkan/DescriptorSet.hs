@@ -59,6 +59,15 @@ data GodRayDescriptorUpdate = GodRayDescriptorUpdate
     grduCloudResultView :: !Vulkan.VkImageView
   }
 
+-- | Configuration for updating terrain overlay descriptor sets.
+data TerrainDescriptorUpdate = TerrainDescriptorUpdate
+  { tduDevice :: !Vulkan.VkDevice,
+    tduDescriptorSet :: !Vulkan.VkDescriptorSet,
+    tduSampler :: !Vulkan.VkSampler,
+    tduElevationView :: !(Maybe Vulkan.VkImageView),
+    tduClimateView :: !(Maybe Vulkan.VkImageView)
+  }
+
 -- | Configuration for updating AP volume descriptor sets.
 data APVolumeDescriptorUpdate = APVolumeDescriptorUpdate
   { apduDevice :: !Vulkan.VkDevice,
@@ -808,6 +817,73 @@ updateGodRayDescriptorSets GodRayDescriptorUpdate {..} = do
   liftIO $
     Foreign.Marshal.Array.withArray [write] $ \writePtr ->
       Vulkan.vkUpdateDescriptorSets grduDevice 1 writePtr 0 Vulkan.vkNullPtr
+
+-- | Update terrain overlay descriptor set with elevation and climate textures.
+updateTerrainDescriptorSets ::
+  (MonadIO m) =>
+  TerrainDescriptorUpdate ->
+  m ()
+updateTerrainDescriptorSets TerrainDescriptorUpdate {..} = do
+  let mkTextureInfo imageView s =
+        Vulkan.createVk
+          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+              &* set @"imageView" imageView
+              &* set @"sampler" s
+          )
+      mkWrite bindingIdx imageView s =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" tduDescriptorSet
+              &* set @"dstBinding" bindingIdx
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"pBufferInfo" Vulkan.VK_NULL
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* setVkRef @"pImageInfo" (mkTextureInfo imageView s)
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+      elevWrite = case tduElevationView of
+        Just elevView -> [mkWrite 0 elevView tduSampler]
+        Nothing -> []
+      climateWrite = case tduClimateView of
+        Just climateView -> [mkWrite 1 climateView tduSampler]
+        Nothing -> []
+      allWrites = elevWrite ++ climateWrite
+  liftIO $
+    Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
+      Vulkan.vkUpdateDescriptorSets tduDevice (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr
+
+-- | Update terrain overlay frame data UBO binding (binding 2).
+updateTerrainFrameDataBuffer ::
+  (MonadIO m) =>
+  Vulkan.VkDevice ->
+  Vulkan.VkDescriptorSet ->
+  Vulkan.VkBuffer ->
+  m ()
+updateTerrainFrameDataBuffer dev descriptorSet buffer = do
+  let bufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" buffer
+              &* set @"offset" 0
+              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+          )
+      write =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" descriptorSet
+              &* set @"dstBinding" 2
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pImageInfo" Vulkan.VK_NULL
+              &* setVkRef @"pBufferInfo" bufferInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+  liftIO $
+    Foreign.Marshal.Array.withArray [write] $ \writeUpdatePtr ->
+      Vulkan.vkUpdateDescriptorSets dev 1 writeUpdatePtr 0 Vulkan.vkNullPtr
 
 -- | Update AP volume compute descriptor set with storage image, cloud noise, and UBO.
 updateAPVolumeDescriptorSets ::

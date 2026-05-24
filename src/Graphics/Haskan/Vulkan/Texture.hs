@@ -17,6 +17,8 @@ module Graphics.Haskan.Vulkan.Texture
     createTextureFromData,
     createTextureFromDataSRGB,
     createTextureFromHalfFloatData,
+    createTerrainElevationTexture,
+    createTerrainClimateTexture,
     createStorageImage2D,
     createStorageImage3D,
     createStorageImageCube,
@@ -39,9 +41,11 @@ import Data.Bits
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
+import Data.Int (Int16)
 import Data.Vector.Storable qualified
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word8)
+import Foreign.Storable (Storable)
 import Graphics.Haskan.Assets.Cache (AssetCache)
 import Graphics.Haskan.Assets.InternalFormat (InternalTexture (..), TextureMetadata (..))
 import Graphics.Haskan.Assets.TexturePreprocessor
@@ -721,6 +725,135 @@ createTextureFromHalfFloatData ::
   m TextureHandle
 createTextureFromHalfFloatData rm vc width height imgData =
   uploadTextureWithFormat rm vc width height imgData Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
+
+uploadTextureWithFormatVector ::
+  (MonadManaged m, MonadIO m, Storable a) =>
+  ResourceManager ->
+  VulkanContext ->
+  Int ->
+  Int ->
+  Vector.Vector a ->
+  Vulkan.VkFormat ->
+  m TextureHandle
+uploadTextureWithFormatVector rm vc width height imgData format = do
+  let dataList = Vector.toList imgData
+      dev = vcDevice vc
+      pdev = vcPhysicalDevice vc
+      queue = vcQueue vc
+      commandBuffer = vcCommandBuffer vc
+
+  (stagingBuffer, stagingMemoryRequirement) <-
+    Haskan.managedBuffer dev dataList Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+
+  stagingMemory <-
+    Haskan.managedBufferMemory pdev dev stagingMemoryRequirement
+
+  liftIO $ do
+    Haskan.bindBufferMemory dev stagingBuffer stagingMemory dataList
+    Haskan.copyDataToDeviceMemory dev stagingMemory dataList
+
+  let imageExtent =
+        Vulkan.createVk
+          ( set @"width" (fromIntegral width)
+              &* set @"height" (fromIntegral height)
+              &* set @"depth" 1
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
+              &* set @"extent" imageExtent
+              &* set @"mipLevels" 1
+              &* set @"arrayLayers" 1
+              &* set @"format" format
+              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
+              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
+              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
+              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"queueFamilyIndexCount" 0
+              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
+          )
+
+  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+
+  imageMemoryRequirements <-
+    allocaAndPeek_
+      (Vulkan.vkGetImageMemoryRequirements dev image)
+
+  imageMemory <-
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+
+  liftIO $ bindImageMemory dev image imageMemory 0
+
+  Haskan.withCommandBufferOneTime queue commandBuffer $ do
+    Haskan.layerTransition
+      commandBuffer
+      image
+      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
+      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+
+    Haskan.copyBufferToImage
+      commandBuffer
+      stagingBuffer
+      image
+      (fromIntegral width)
+      (fromIntegral height)
+
+    Haskan.layerTransition
+      commandBuffer
+      image
+      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+
+  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+  imageView <- Haskan.createImageView dev format image
+
+  texH <- TextureHandle <$> allocHandle (rmNextId rm)
+
+  let destroy = do
+        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
+        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
+        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+
+      resource =
+        TextureResource
+          { trHandle = texH,
+            trImage = image,
+            trImageView = imageView,
+            trMemory = imageMemory,
+            trWidth = width,
+            trHeight = height,
+            trPixelData = Nothing,
+            trDestroy = destroy
+          }
+
+  registerTexture rm resource
+  pure texH
+
+createTerrainElevationTexture ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  VulkanContext ->
+  Int ->
+  Int ->
+  Vector.Vector Int16 ->
+  m TextureHandle
+createTerrainElevationTexture rm vc width height vec =
+  uploadTextureWithFormatVector rm vc width height vec Vulkan.VK_FORMAT_R16_SNORM
+
+createTerrainClimateTexture ::
+  (MonadManaged m, MonadIO m) =>
+  ResourceManager ->
+  VulkanContext ->
+  Int ->
+  Int ->
+  Vector.Vector Float ->
+  m TextureHandle
+createTerrainClimateTexture rm vc width height vec =
+  uploadTextureWithFormatVector rm vc width height vec Vulkan.VK_FORMAT_R32G32B32A32_SFLOAT
 
 -- | Create and register a texture resource from file, using asset cache.
 createTextureResource ::

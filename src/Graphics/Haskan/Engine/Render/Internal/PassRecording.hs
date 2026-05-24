@@ -36,6 +36,7 @@ import Graphics.Haskan.UI.Backend qualified as Backend
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
+import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
@@ -443,8 +444,83 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                 bPtr
                 0
                 Vulkan.vkNullPtr
-                0
-                Vulkan.vkNullPtr
+                 0
+                 Vulkan.vkNullPtr
+
+        -- Terrain overlay pass (blended over lighting result)
+        let terrainFramebuffer = drTerrainFramebuffers rcDeferred !! fromIntegral imageIdx
+            terrainDescriptorSet = drTerrainDescriptorSets rcDeferred !! fromIntegral imageIdx
+            terrainPipeline = drTerrainPipeline rcDeferred
+            terrainPipelineLayout = drTerrainPipelineLayout rcDeferred
+            terrainRenderPass = drTerrainRenderPass rcDeferred
+            swapchainImage = drSwapchainImages rcDeferred !! fromIntegral imageIdx
+        -- Transition swapchain image from PRESENT_SRC_KHR to COLOR_ATTACHMENT_OPTIMAL
+        let imageBarrier =
+              Vulkan.createVk
+                ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+                    &* set @"pNext" Vulkan.VK_NULL
+                    &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                    &* set @"dstAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+                    &* set @"oldLayout" (Vulkan.VkImageLayout 1000001002) -- VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+                    &* set @"newLayout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+                    &* set @"srcQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+                    &* set @"dstQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
+                    &* set @"image" swapchainImage
+                    &* set @"subresourceRange"
+                        (Vulkan.createVk
+                          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
+                              &* set @"baseMipLevel" 0
+                              &* set @"levelCount" 1
+                              &* set @"baseArrayLayer" 0
+                              &* set @"layerCount" 1
+                          ))
+                )
+        liftIO $ withPtr imageBarrier $ \bPtr ->
+          Vulkan.vkCmdPipelineBarrier
+            commandBuffer
+            Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            Vulkan.VK_ZERO_FLAGS
+            0 Vulkan.vkNullPtr
+            0 Vulkan.vkNullPtr
+            1 bPtr
+        liftIO $ RenderPass.withRenderPass commandBuffer terrainRenderPass terrainFramebuffer rcPassSurfaceExtent [] $ do
+          liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS terrainPipeline
+          liftIO $ Foreign.Marshal.Array.withArray [terrainDescriptorSet] $ \dsPtr ->
+            Vulkan.vkCmdBindDescriptorSets
+              commandBuffer
+              Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+              terrainPipelineLayout
+              0
+              1
+              dsPtr
+              0
+              Vulkan.vkNullPtr
+          -- Write terrain frame data (same layout as cloud frame data start)
+          let (V3 camX camY camZ) = rcCameraPos
+              (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = rcSkyboxRays
+              terrainFrameData =
+                [ realToFrac camX,
+                  realToFrac camY,
+                  realToFrac camZ,
+                  0,
+                  realToFrac r0x,
+                  realToFrac r0y,
+                  realToFrac r0z,
+                  0,
+                  realToFrac r1x,
+                  realToFrac r1y,
+                  realToFrac r1z,
+                  0,
+                  realToFrac r2x,
+                  realToFrac r2y,
+                  realToFrac r2z,
+                  0,
+                  0, 0, 0, 0, 0, 0, 0, 0,
+                  0, 0, 0, 0, 0, 0, 0, 0
+                ] :: [CFloat]
+          liftIO $ Buffer.copyDataToDeviceMemory rcDevice (drTerrainFrameDataMemory rcDeferred) terrainFrameData
+          liftIO $ Vulkan.vkCmdDraw commandBuffer 3 1 0 0
 
         -- Dear ImGui overlay pass
         for_ rcImGuiDrawData $ \drawData -> liftIO $ do

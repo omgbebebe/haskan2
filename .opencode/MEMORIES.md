@@ -282,3 +282,31 @@
 - **OS**: NixOS, **GPU**: NVIDIA RTX 4090, **Vulkan**: 1.4.312
 - **Descriptor indexing**: nonUniform=True, updateAfterBind=True, partiallyBound=True, runtimeArray=True
 - **LD_LIBRARY_PATH**: Must include `3rdparty/jolt-wrapper/` for `libjolt_wrapper.so`
+
+### 2026-05-24: Terrain Sidecar API Integration (Phase 1)
+- **HTTP client**: `Graphics.Haskan.Terrain.Client` — fetches binary tiles from `localhost:7777/terrain?i1=&j1=&i2=&j2=&scale=`
+  - Response: `X-Height`/`X-Width` headers + body = H×W int16 LE elevation + H×W×4 float32 LE climate
+  - `TerrainTile { ttWidth, ttHeight, ttElevation :: Vector Int16, ttClimate :: Vector Float }`
+  - Uses `http-client` Hackage dependency (already in cabal), NOT local package
+- **GPU texture upload**: `Graphics.Haskan.Vulkan.Texture`
+  - `createTerrainElevationTexture` — `Vector Int16` → `VK_FORMAT_R16_SNORM` 2D texture
+  - `createTerrainClimateTexture` — `Vector Float` → `VK_FORMAT_R32G32B32A32_SFLOAT` 2D texture
+  - Generic `uploadTextureWithFormatVector :: Storable a => ...` for any storable vector type
+- **Render state**: `TerrainTextures` in `SkyNoiseState`, loaded at init via `loadTerrainTextures`
+- **FIR shaders**: `Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainOverlay`
+  - Vertex: fullscreen triangle, reads camera/frustum rays from UBO
+  - Fragment: ray-plane intersection (Y=0), samples elevation + climate, outputs RGBA with alpha
+  - Tile scale: 2560×2560 world units (10× texture resolution), centered at origin
+  - Elevation-based procedural color (green→brown→grey→white) outside valid climate data
+- **Vulkan pipeline integration**:
+  - `RenderPass.hs`: `createTerrainOverlayRenderPass` with `LOAD_OP_LOAD` (preserves lighting output)
+  - `GraphicsPipeline.hs`: `createFullscreenPipelineWithBlending` — `src_alpha / one_minus_src_alpha`
+  - `DescriptorSetLayout.hs`: TH-generated from `TerrainFragmentDefs`, binding 2 is `VK_VERTEX_FRAGMENT_BITS`
+  - `DescriptorPool.hs`/`DescriptorSet.hs`: terrain pool + update functions + frame data UBO binding
+  - `DeferredResources.hs`: terrain pipeline, framebuffers (swapchain images), UBO, descriptor sets
+  - `PassRecording.hs`: terrain pass after lighting, before ImGui; writes camera+frustum to UBO; pipeline barrier `PRESENT_SRC_KHR` → `COLOR_ATTACHMENT_OPTIMAL`
+- **Validation fixes**:
+  - Descriptor stage flags: terrain UBO binding 2 accessible to both vertex and fragment stages
+  - Image layout barrier: explicit transition from `PRESENT_SRC_KHR` before terrain render pass
+- **Build**: all 114 modules compile, SPIR-V shaders validated at build time
+- **Status**: Green flat plane visible at ground level; API data fetches successfully. Climate/elevation sampling verified working.

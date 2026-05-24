@@ -6,6 +6,7 @@ module Graphics.Haskan.Vulkan.DeferredResources
     DeferredShaders (..),
     IBLResources (..),
     CloudTextures (..),
+    TerrainTextures (..),
     createDeferredResources,
   )
 where
@@ -51,6 +52,7 @@ data DeferredShaders = DeferredShaders
     dsWireframe :: !ShaderProgram,
     dsCloud :: !ShaderProgram,
     dsGodRay :: !ShaderProgram,
+    dsTerrain :: !ShaderProgram,
     dsAPVolume :: !Vulkan.VkShaderModule,
     dsAPVolumeSpecInfo :: !(Maybe (Ptr Vulkan.VkSpecializationInfo)),
     dsBindless :: !ShaderProgram
@@ -71,6 +73,12 @@ data CloudTextures = CloudTextures
     ctNoiseSampler :: !Vulkan.VkSampler
   }
 
+data TerrainTextures = TerrainTextures
+  { ttElevationView :: !(Maybe Vulkan.VkImageView),
+    ttClimateView :: !(Maybe Vulkan.VkImageView),
+    ttSampler :: !Vulkan.VkSampler
+  }
+
 data DeferredConfig = DeferredConfig
   { dcPhysicalDevice :: !Vulkan.VkPhysicalDevice,
     dcDevice :: !Vulkan.VkDevice,
@@ -79,6 +87,7 @@ data DeferredConfig = DeferredConfig
     dcShaders :: !DeferredShaders,
     dcIBL :: !IBLResources,
     dcCloudTextures :: !CloudTextures,
+    dcTerrainTextures :: !TerrainTextures,
     dcLightBuffer :: !(Maybe Vulkan.VkBuffer),
     dcImGuiRenderPass :: !Vulkan.VkRenderPass,
     dcProceduralSky :: !Bool,
@@ -121,6 +130,14 @@ data DeferredResources = DeferredResources
     drGodRayPipelineLayout :: !Vulkan.VkPipelineLayout,
     drGodRayFramebuffers :: ![Vulkan.VkFramebuffer],
     drGodRayDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    drTerrainRenderPass :: !Vulkan.VkRenderPass,
+    drTerrainPipeline :: !Vulkan.VkPipeline,
+    drTerrainPipelineLayout :: !Vulkan.VkPipelineLayout,
+    drTerrainFramebuffers :: ![Vulkan.VkFramebuffer],
+    drTerrainDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    drTerrainFrameDataBuffer :: !Vulkan.VkBuffer,
+    drTerrainFrameDataMemory :: !Vulkan.VkDeviceMemory,
+    drSwapchainImages :: ![Vulkan.VkImage],
     drAPVolumeImage :: !Vulkan.VkImage,
     drAPVolumeImageView :: !Vulkan.VkImageView,
     drAPVolumeMemory :: !Vulkan.VkDeviceMemory,
@@ -150,6 +167,7 @@ createDeferredResources DeferredConfig {..} = do
       DeferredShaders {..} = dcShaders
       IBLResources {..} = dcIBL
       CloudTextures {..} = dcCloudTextures
+      TerrainTextures {..} = dcTerrainTextures
       mEnvMapView = irRadianceView
       mIrradianceView = irIrradianceView
       mBrdfView = irBrdfView
@@ -550,6 +568,60 @@ createDeferredResources DeferredConfig {..} = do
         }
   logDebugIO LogRender "god ray descriptor sets updated"
 
+  -- Terrain overlay render pass (loads existing framebuffer content)
+  terrainOverlayRenderPass <- RenderPass.managedTerrainOverlayRenderPass device surfaceFormat
+  logDebugIO LogRender "terrain overlay render pass created"
+
+  -- Terrain descriptor set layout
+  terrainDescriptorSetLayout <- DescriptorSetLayout.managedTerrainDescriptorSetLayout device
+  logDebugIO LogRender "terrain descriptor set layout created"
+
+  -- Terrain pipeline layout (no push constants — all data in UBO)
+  terrainPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [terrainDescriptorSetLayout] []
+  logDebugIO LogRender "terrain pipeline layout created"
+
+  -- Terrain pipeline with alpha blending
+  terrainPipeline <-
+    GraphicsPipeline.managedFullscreenPipelineWithBlending
+      device
+      terrainPipelineLayout
+      terrainOverlayRenderPass
+      dsTerrain
+      extent
+  logDebugIO LogRender "terrain pipeline with blending created"
+
+  -- Terrain framebuffers (one per swapchain image)
+  terrainFramebuffers <- for swapchainImageViews $ \view ->
+    Framebuffer.managedLightingFramebuffer device terrainOverlayRenderPass extent view
+  logDebugIO LogRender $ "terrain framebuffers created: " <> showT (length terrainFramebuffers)
+
+  -- Terrain frame data UBO (128 bytes)
+  let terrainFrameDataSize = 128
+  (terrainFrameDataBuffer, terrainFrameDataMemoryRequirement) <-
+    Buffer.managedBuffer device (replicate terrainFrameDataSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+  terrainFrameDataMemory <- Buffer.managedBufferMemory pdev device terrainFrameDataMemoryRequirement
+  liftIO $ Buffer.bindBufferMemory device terrainFrameDataBuffer terrainFrameDataMemory (replicate terrainFrameDataSize (0 :: Word8))
+  logDebugIO LogRender "terrain frame data UBO created"
+
+  -- Terrain descriptor pool and sets
+  terrainDescriptorPool <- DescriptorPool.managedTerrainDescriptorPool device numSwapchainImages
+  terrainDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
+    DescriptorSet.allocateDescriptorSet device terrainDescriptorPool [terrainDescriptorSetLayout]
+  logDebugIO LogRender $ "terrain descriptor sets allocated: " <> showT (length terrainDescriptorSets)
+
+  -- Update terrain descriptor sets
+  liftIO $ for_ terrainDescriptorSets $ \ds -> do
+    DescriptorSet.updateTerrainDescriptorSets $
+      DescriptorSet.TerrainDescriptorUpdate
+        { tduDevice = device,
+          tduDescriptorSet = ds,
+          tduSampler = ttSampler,
+          tduElevationView = ttElevationView,
+          tduClimateView = ttClimateView
+        }
+    DescriptorSet.updateTerrainFrameDataBuffer device ds terrainFrameDataBuffer
+  logDebugIO LogRender "terrain descriptor sets updated"
+
   -- AP volume compute pipeline
   apVolumeDescriptorSetLayout <- DescriptorSetLayout.managedAPVolumeComputeDescriptorSetLayout device
   logDebugIO LogRender "AP volume descriptor set layout created"
@@ -672,6 +744,14 @@ createDeferredResources DeferredConfig {..} = do
         drGodRayPipelineLayout = godRayPipelineLayout,
         drGodRayFramebuffers = godRayFramebuffers,
         drGodRayDescriptorSets = godRayDescriptorSets,
+        drTerrainRenderPass = terrainOverlayRenderPass,
+        drTerrainPipeline = terrainPipeline,
+        drTerrainPipelineLayout = terrainPipelineLayout,
+        drTerrainFramebuffers = terrainFramebuffers,
+        drTerrainDescriptorSets = terrainDescriptorSets,
+        drTerrainFrameDataBuffer = terrainFrameDataBuffer,
+        drTerrainFrameDataMemory = terrainFrameDataMemory,
+        drSwapchainImages = swapchainImages,
         drAPVolumeImage = apImage,
         drAPVolumeImageView = apImageView,
         drAPVolumeMemory = apMemory,

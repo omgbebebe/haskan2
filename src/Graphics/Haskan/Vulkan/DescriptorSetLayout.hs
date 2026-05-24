@@ -11,6 +11,8 @@ module Graphics.Haskan.Vulkan.DescriptorSetLayout
     createCloudDescriptorSetLayout,
     managedGodRayDescriptorSetLayout,
     createGodRayDescriptorSetLayout,
+    managedTerrainDescriptorSetLayout,
+    createTerrainDescriptorSetLayout,
     managedBindlessDescriptorSetLayout,
     createBindlessDescriptorSetLayout,
     managedBindlessPassDescriptorSetLayout,
@@ -52,6 +54,7 @@ import Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds (CloudFragmentDefs)
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays (GodRayFragmentDefs)
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as Lighting
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProcedural
+import Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainOverlay (TerrainFragmentDefs)
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Graphics.Vulkan.Core_1_2 qualified as Vulkan12
@@ -239,6 +242,31 @@ managedGodRayDescriptorSetLayout dev =
 createGodRayDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
 createGodRayDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_ -> pure (VarE (mkName "vkFragmentBit"))) Nothing ''GodRayFragmentDefs)
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"bindingCount" (fromIntegral (length bindings))
+              &* setListRef @"pBindings" bindings
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+           )
+
+managedTerrainDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedTerrainDescriptorSetLayout dev =
+  alloc
+    "TerrainDescriptorSetLayout"
+    (createTerrainDescriptorSetLayout dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+
+createTerrainDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createTerrainDescriptorSetLayout dev = do
+  let bindings = $(descriptorSetLayoutBindings (\b -> if b == 2 then pure (VarE (mkName "vkVertexFragmentBits")) else pure (VarE (mkName "vkFragmentBit"))) Nothing ''TerrainFragmentDefs)
       createInfo =
         Vulkan.createVk
           ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO

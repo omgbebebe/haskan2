@@ -7,6 +7,8 @@ module Graphics.Haskan.Vulkan.DescriptorPool
     createCloudDescriptorPool,
     managedGodRayDescriptorPool,
     createGodRayDescriptorPool,
+    managedTerrainDescriptorPool,
+    createTerrainDescriptorPool,
     managedAPVolumeDescriptorPool,
     createAPVolumeDescriptorPool,
     managedBindlessDescriptorPool,
@@ -171,6 +173,41 @@ createGodRayDescriptorPool dev numSets = do
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
               &* set @"poolSizeCount" 1
               &* setListRef @"pPoolSizes" [samplerPoolSize]
+              &* set @"maxSets" (fromIntegral numSets)
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+              allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
+          )
+
+managedTerrainDescriptorPool :: (MonadManaged m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+managedTerrainDescriptorPool dev numSets =
+  alloc
+    "TerrainDescriptorPool"
+    (createTerrainDescriptorPool dev numSets)
+    (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
+
+createTerrainDescriptorPool :: (MonadIO m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+createTerrainDescriptorPool dev numSets = do
+  let samplerPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"descriptorCount" (fromIntegral (numSets * 2))
+          )
+      uboPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+              &* set @"descriptorCount" (fromIntegral numSets)
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"poolSizeCount" 2
+              &* setListRef @"pPoolSizes" [samplerPoolSize, uboPoolSize]
               &* set @"maxSets" (fromIntegral numSets)
           )
    in liftIO $

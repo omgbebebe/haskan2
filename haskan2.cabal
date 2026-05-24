@@ -103,12 +103,15 @@ library
                           Graphics.Haskan.Vulkan.Shaders.Compute.APVolume,
                           Graphics.Haskan.Vulkan.Shaders.Compute.APVolumeUniforms
                            Graphics.Haskan.Vulkan.Shaders.Constants,
+                           Graphics.Haskan.Terrain.Client,
+                           Graphics.Haskan.Terrain.Texture,
                           Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer,
                          Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting,
                          Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural,
-                         Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds,
-                          Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays,
-                         Graphics.Haskan.Vulkan.Shaders.Forward.SimpleForward,
+                          Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds,
+                           Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays,
+                           Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainOverlay,
+                          Graphics.Haskan.Vulkan.Shaders.Forward.SimpleForward,
                          Graphics.Haskan.Vulkan.Shaders.Bindless,
                          Graphics.Haskan.Vulkan.Semaphore
                         Graphics.Haskan.Vulkan.Specialization
@@ -166,7 +169,10 @@ library
                       , filepath >=1.4 && <1.6
                       , time >=1.11 && <1.16
                       , aeson >=2.0 && <2.3
-                      , network >=3.1 && <3.3
+                       , network >=3.1 && <3.3
+                       , process >=1.6 && <1.7
+                       , http-client >=0.7 && <0.8
+                       , http-types
                        , half >=0.3 && <0.4
                        , optparse-applicative >=0.18 && <0.20
                         , mtl >=2.3 && <2.4
