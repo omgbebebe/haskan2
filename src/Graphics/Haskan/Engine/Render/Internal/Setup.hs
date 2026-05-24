@@ -59,6 +59,7 @@ import Graphics.Haskan.Render.Forward (ForwardPassData (..), buildForwardGraph)
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..), RenderPassNode (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..), extractDrawList)
+import Graphics.Haskan.Render.ShaderProgram (MeshShaderProgram (..))
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Haskan.Scene.ECS qualified as ECS
 import Graphics.Haskan.Scene.GLTF (GLTFImportResult (..), importGLTF)
@@ -107,6 +108,7 @@ import Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer qualified as GBufferShade
 import Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays qualified as GodRayShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as LightingShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProceduralShaders
+import Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainMesh qualified as TerrainMeshShaders
 import Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainOverlay qualified as TerrainOverlayShaders
 import Graphics.Haskan.Vulkan.Shaders.Texture qualified as Shaders
 import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
@@ -180,6 +182,10 @@ compileAllShaders = do
   logInfo LogGeneral "  terrain_vert.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/terrain_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] TerrainOverlayShaders.terrainFragment
   logInfo LogGeneral "  terrain_frag.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/terrain_mesh.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] TerrainMeshShaders.terrainMesh
+  logInfo LogGeneral "  terrain_mesh.spv done"
+  liftIO $ FIR.compileTo "data/shaders/fir/terrain_mesh_frag.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] TerrainMeshShaders.terrainFragment
+  logInfo LogGeneral "  terrain_mesh_frag.spv done"
   liftIO $ FIR.compileTo "data/shaders/fir/ap_volume_comp.spv" [FIR.SPIRV (FIR.Version 1 5), FIR.Optimize] APVolumeShaders.program
   logInfo LogGeneral "  ap_volume_comp.spv done"
 
@@ -220,6 +226,7 @@ data ShaderModules = ShaderModules
     smCloud :: !ShaderPair,
     smGodRay :: !ShaderPair,
     smTerrain :: !ShaderPair,
+    smTerrainMesh :: !MeshShaderProgram,
     smAPVolume :: !Vulkan.VkShaderModule,
     smSimpleForward :: !ShaderPair,
     smBindless :: !ShaderPair
@@ -247,6 +254,8 @@ createShaderModules device = do
   godrayFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/godray_frag.spv"
   terrainVert <- ShaderModule.managedShaderModule device "data/shaders/fir/terrain_vert.spv"
   terrainFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/terrain_frag.spv"
+  terrainMesh <- ShaderModule.managedShaderModule device "data/shaders/fir/terrain_mesh.spv"
+  terrainMeshFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/terrain_mesh_frag.spv"
   apVolume <- ShaderModule.managedShaderModule device "data/shaders/fir/ap_volume_comp.spv"
   simpleForwardVert <- ShaderModule.managedShaderModule device "data/shaders/fir/simple_forward_vert.spv"
   simpleForwardFrag <- ShaderModule.managedShaderModule device "data/shaders/fir/simple_forward_frag.spv"
@@ -263,6 +272,7 @@ createShaderModules device = do
         smCloud = ShaderPair cloudVert cloudFrag,
         smGodRay = ShaderPair godrayVert godrayFrag,
         smTerrain = ShaderPair terrainVert terrainFrag,
+        smTerrainMesh = MeshShaderProgram Nothing terrainMesh terrainMeshFrag,
         smAPVolume = apVolume,
         smSimpleForward = ShaderPair simpleForwardVert simpleForwardFrag,
         smBindless = ShaderPair bindlessVert bindlessFrag
