@@ -314,9 +314,10 @@
   - `meshTerrainEnabled` flag added to `EngineConfig` — skips old ground plane ECS entity when true
   - `DeferredResources` extended with mesh terrain fields: `drTerrainMeshPipeline`, `drTerrainMeshPipelineLayout`, `drTerrainMeshDescriptorSets`, `drTerrainMeshNodeBuffer`/`NodeMemory`
   - `managedTerrainMeshDescriptorSetLayout` — SSBO (binding 0, mesh stage) + heightmap texture (binding 1, mesh stage) + climate texture (binding 2, fragment stage)
-  - `managedMeshPipelineWithBlending` — alpha-blended mesh pipeline using `vulkan` package `createGraphicsPipelines`
+  - `managedMeshPipelineWithBlending` — alpha-blended mesh pipeline using `vulkan-api` (not `vulkan` package)
+  - `vkCmdDrawMeshTasksEXT` dynamically loaded via `vkGetDeviceProcAddr` (cached in `IORef`)
   - Per-frame CDLOD: `buildCDLODTree` → `extractFrustumPlanes` → `selectVisibleNodes` → `packNodesToSSBO` → upload to SSBO → `cmdDrawMeshTasksEXT`
-  - `vkMeshBit` workaround: `vulkan-api` lacks `VK_SHADER_STAGE_MESH_BIT_EXT`, using `coerce (0x00000080 :: Word32)`
+  - `vkMeshBit` workaround: `vulkan-api` lacks `VK_SHADER_STAGE_MESH_BIT_EXT`, using `VkShaderStageFlagBits 0x00000080`
   - **Heightmap sampling in mesh shader**: Samples `R16 SNorm` elevation texture at world position, displaces Y by `elevRaw * 32767.0 * heightScale`
   - **Fragment shader**: Samples `RGBA32 F` climate texture at world position, applies simple diffuse+ambient lighting
   - TODO: Geomorphing, enable mesh terrain by default, test on actual hardware

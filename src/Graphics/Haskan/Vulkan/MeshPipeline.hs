@@ -16,40 +16,41 @@ module Graphics.Haskan.Vulkan.MeshPipeline
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
+import Data.IORef (IORef, newIORef, readIORef, writeIORef)
 import Data.Maybe (catMaybes)
-import Data.Vector qualified as Vector
 import Data.Word (Word32)
+import Foreign (FunPtr, Ptr, castFunPtr, nullFunPtr, nullPtr)
+import Foreign.C (CInt (..), CUInt (..))
+import Foreign.C.String (withCString)
+import Foreign.Marshal.Array (withArray)
+import Foreign.Storable (peek)
+import System.IO.Unsafe (unsafePerformIO)
 
--- vulkan-api (existing project style)
+import Graphics.Haskan.Resources (alloc, allocaAndPeek, throwVkResult)
+import Graphics.Haskan.Render.ShaderProgram (MeshShaderProgram (..))
 import Graphics.Vulkan qualified as Vulkan
 import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-
--- vulkan package (for mesh shader API)
-import Vulkan.Core10.APIConstants qualified as Vk
-import Vulkan.Core10.Enums.BlendFactor qualified as Vk
-import Vulkan.Core10.Enums.BlendOp qualified as Vk
-import Vulkan.Core10.Enums.ColorComponentFlagBits qualified as Vk
-import Vulkan.Core10.Enums.CompareOp qualified as Vk
-import Vulkan.Core10.Enums.CullModeFlagBits qualified as Vk
-import Vulkan.Core10.Enums.FrontFace qualified as Vk
-import Vulkan.Core10.Enums.LogicOp qualified as Vk
-import Vulkan.Core10.Enums.PolygonMode qualified as Vk
-import Vulkan.Core10.Enums.SampleCountFlagBits qualified as Vk
-import Vulkan.Core10.Enums.ShaderStageFlagBits qualified as Vk
-import Vulkan.Core10.Enums.StencilOp qualified as Vk
-import Vulkan.Core10.FundamentalTypes qualified as Vk
-import Vulkan.Core10.Pipeline qualified as Vk
-import Vulkan.Core10.Handles qualified as Vk
-import Vulkan.CStruct.Extends qualified as Vk
-import Vulkan.Extensions.VK_EXT_mesh_shader qualified as Vk
-import Vulkan.Zero qualified as Vk
-
-import Graphics.Haskan.Resources (alloc)
-import Graphics.Haskan.Vulkan.Interop
-import Graphics.Haskan.Render.ShaderProgram (MeshShaderProgram(..))
+import Graphics.Vulkan.Marshal (withPtr)
+import Graphics.Vulkan.Marshal.Create (set, setAt, setStrRef, setVkRef, setListRef, (&*))
+import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 -- ---------------------------------------------------------------------------
--- Mesh pipeline creation
+-- Mesh shader stage flag
+-- vulkan-api lacks VK_SHADER_STAGE_MESH_BIT_EXT, so we hardcode the value.
+-- ---------------------------------------------------------------------------
+
+vkShaderStageMeshBitEXT :: Vulkan.VkShaderStageFlagBits
+vkShaderStageMeshBitEXT =
+  -- VK_SHADER_STAGE_MESH_BIT_EXT = 0x00000080
+  Vulkan.VkShaderStageFlagBits 0x00000080
+
+vkShaderStageTaskBitEXT :: Vulkan.VkShaderStageFlagBits
+vkShaderStageTaskBitEXT =
+  -- VK_SHADER_STAGE_TASK_BIT_EXT = 0x00000040
+  Vulkan.VkShaderStageFlagBits 0x00000040
+
+-- ---------------------------------------------------------------------------
+-- Mesh pipeline creation (vulkan-api, no "vulkan" package dependency)
 -- ---------------------------------------------------------------------------
 
 managedMeshPipeline
@@ -78,160 +79,186 @@ createMeshPipeline
   -> m Vulkan.VkPipeline
 createMeshPipeline dev layout renderPass MeshShaderProgram{..} swapchainExtent colorAttachmentCount = do
   let
-    device = toVulkanDevice dev
-    pipelineLayout = toVulkanPipelineLayout layout
-    renderPass_ = toVulkanRenderPass renderPass
+    mkStage stageBit mod_ =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"stage" stageBit
+            &* set @"module" mod_
+            &* setStrRef @"pName" "main"
+            &* set @"pSpecializationInfo" nullPtr
+        )
 
-    -- Build shader stages: [task?] + mesh + fragment
-    stages = Vector.fromList $ catMaybes
-      [ mkStage Vk.SHADER_STAGE_TASK_BIT_EXT <$> mspTask
-      , Just $ mkStage Vk.SHADER_STAGE_MESH_BIT_EXT mspMesh
-      , Just $ mkStage Vk.SHADER_STAGE_FRAGMENT_BIT mspFragment
+    stages = catMaybes
+      [ mkStage vkShaderStageTaskBitEXT <$> mspTask
+      , Just $ mkStage vkShaderStageMeshBitEXT mspMesh
+      , Just $ mkStage Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT mspFragment
       ]
 
-    mkStage stageBit mod_ =
-      Vk.SomeStruct $ Vk.zero
-        { Vk.stage = stageBit
-        , Vk.module' = toVulkanShaderModule mod_
-        , Vk.name = "main"
-        }
+    numStages = length stages
 
     -- Viewport (inverted Y for Vulkan)
-    viewport = Vk.Viewport
-      { Vk.x = 0
-      , Vk.y = fromIntegral (Vulkan.getField @"height" swapchainExtent)
-      , Vk.width = fromIntegral (Vulkan.getField @"width" swapchainExtent)
-      , Vk.height = - (fromIntegral (Vulkan.getField @"height" swapchainExtent))
-      , Vk.minDepth = 0.0
-      , Vk.maxDepth = 1.0
-      }
+    viewport =
+      Vulkan.createVk
+        ( set @"x" 0
+            &* set @"y" (fromIntegral $ Vulkan.getField @"height" swapchainExtent)
+            &* set @"width" (fromIntegral $ Vulkan.getField @"width" swapchainExtent)
+            &* set @"height" (- (fromIntegral $ Vulkan.getField @"height" swapchainExtent))
+            &* set @"minDepth" (0.0 :: Float)
+            &* set @"maxDepth" (1.0 :: Float)
+        )
 
-    scissor = Vk.Rect2D
-      { Vk.offset = Vk.Offset2D 0 0
-      , Vk.extent = Vk.Extent2D
-          (fromIntegral $ Vulkan.getField @"width" swapchainExtent)
-          (fromIntegral $ Vulkan.getField @"height" swapchainExtent)
-      }
+    scissor =
+      Vulkan.createVk
+        ( set @"offset"
+            (Vulkan.createVk
+              ( set @"x" 0
+                  &* set @"y" 0
+              ))
+            &* set @"extent"
+            (Vulkan.createVk
+              ( set @"width" (fromIntegral $ Vulkan.getField @"width" swapchainExtent)
+                  &* set @"height" (fromIntegral $ Vulkan.getField @"height" swapchainExtent)
+              ))
+        )
 
-    viewportState = Vk.PipelineViewportStateCreateInfo
-      { Vk.next = ()
-      , Vk.flags = Vk.zero
-      , Vk.viewportCount = 1
-      , Vk.viewports = Vector.fromList [viewport]
-      , Vk.scissorCount = 1
-      , Vk.scissors = Vector.fromList [scissor]
-      }
+    viewportState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"viewportCount" 1
+            &* setListRef @"pViewports" [viewport]
+            &* set @"scissorCount" 1
+            &* setListRef @"pScissors" [scissor]
+        )
 
-    rasterizationState = Vk.PipelineRasterizationStateCreateInfo
-      { Vk.next = ()
-      , Vk.flags = Vk.zero
-      , Vk.depthClampEnable = False
-      , Vk.rasterizerDiscardEnable = False
-      , Vk.polygonMode = Vk.POLYGON_MODE_FILL
-      , Vk.lineWidth = 1.0
-      , Vk.cullMode = Vk.CULL_MODE_BACK_BIT
-      , Vk.frontFace = Vk.FRONT_FACE_COUNTER_CLOCKWISE
-      , Vk.depthBiasEnable = False
-      , Vk.depthBiasConstantFactor = 0.0
-      , Vk.depthBiasClamp = 0.0
-      , Vk.depthBiasSlopeFactor = 0.0
-      }
+    rasterizationState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"depthClampEnable" Vulkan.VK_FALSE
+            &* set @"rasterizerDiscardEnable" Vulkan.VK_FALSE
+            &* set @"polygonMode" Vulkan.VK_POLYGON_MODE_FILL
+            &* set @"lineWidth" (1.0 :: Float)
+            &* set @"cullMode" Vulkan.VK_CULL_MODE_BACK_BIT
+            &* set @"frontFace" Vulkan.VK_FRONT_FACE_COUNTER_CLOCKWISE
+            &* set @"depthBiasEnable" Vulkan.VK_FALSE
+            &* set @"depthBiasConstantFactor" (0.0 :: Float)
+            &* set @"depthBiasClamp" (0.0 :: Float)
+            &* set @"depthBiasSlopeFactor" (0.0 :: Float)
+        )
 
-    multisampleState = Vk.PipelineMultisampleStateCreateInfo
-      { Vk.next = ()
-      , Vk.flags = Vk.zero
-      , Vk.sampleShadingEnable = False
-      , Vk.rasterizationSamples = Vk.SAMPLE_COUNT_1_BIT
-      , Vk.minSampleShading = 1.0
-      , Vk.sampleMask = Vector.fromList []
-      , Vk.alphaToCoverageEnable = False
-      , Vk.alphaToOneEnable = False
-      }
+    multisampleState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"sampleShadingEnable" Vulkan.VK_FALSE
+            &* set @"rasterizationSamples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+            &* set @"minSampleShading" (1.0 :: Float)
+            &* setListRef @"pSampleMask" ([] :: [Vulkan.VkSampleMask])
+            &* set @"alphaToCoverageEnable" Vulkan.VK_FALSE
+            &* set @"alphaToOneEnable" Vulkan.VK_FALSE
+        )
 
-    nullStencilOp = Vk.StencilOpState
-      { Vk.failOp = Vk.STENCIL_OP_KEEP
-      , Vk.passOp = Vk.STENCIL_OP_KEEP
-      , Vk.depthFailOp = Vk.STENCIL_OP_KEEP
-      , Vk.compareOp = Vk.COMPARE_OP_ALWAYS
-      , Vk.compareMask = 0
-      , Vk.writeMask = 0
-      , Vk.reference = 0
-      }
+    nullStencilOp =
+      Vulkan.createVk
+        ( set @"failOp" Vulkan.VK_STENCIL_OP_KEEP
+            &* set @"passOp" Vulkan.VK_STENCIL_OP_KEEP
+            &* set @"depthFailOp" Vulkan.VK_STENCIL_OP_KEEP
+            &* set @"compareOp" Vulkan.VK_COMPARE_OP_ALWAYS
+            &* set @"compareMask" 0
+            &* set @"writeMask" 0
+            &* set @"reference" 0
+        )
 
-    depthStencilState = Vk.PipelineDepthStencilStateCreateInfo
-      { Vk.flags = Vk.zero
-      , Vk.depthTestEnable = True
-      , Vk.depthWriteEnable = True
-      , Vk.depthCompareOp = Vk.COMPARE_OP_LESS_OR_EQUAL
-      , Vk.depthBoundsTestEnable = False
-      , Vk.stencilTestEnable = False
-      , Vk.front = nullStencilOp
-      , Vk.back = nullStencilOp
-      , Vk.minDepthBounds = 0
-      , Vk.maxDepthBounds = 1
-      }
+    depthStencilState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"depthTestEnable" Vulkan.VK_TRUE
+            &* set @"depthWriteEnable" Vulkan.VK_TRUE
+            &* set @"depthCompareOp" Vulkan.VK_COMPARE_OP_LESS_OR_EQUAL
+            &* set @"depthBoundsTestEnable" Vulkan.VK_FALSE
+            &* set @"stencilTestEnable" Vulkan.VK_FALSE
+            &* set @"front" nullStencilOp
+            &* set @"back" nullStencilOp
+            &* set @"minDepthBounds" (0.0 :: Float)
+            &* set @"maxDepthBounds" (1.0 :: Float)
+        )
 
-    colorBlendAttachment = Vk.PipelineColorBlendAttachmentState
-      { Vk.colorWriteMask =
-          Vk.COLOR_COMPONENT_R_BIT
-            .|. Vk.COLOR_COMPONENT_G_BIT
-            .|. Vk.COLOR_COMPONENT_B_BIT
-            .|. Vk.COLOR_COMPONENT_A_BIT
-      , Vk.blendEnable = False
-      , Vk.srcColorBlendFactor = Vk.BLEND_FACTOR_ONE
-      , Vk.dstColorBlendFactor = Vk.BLEND_FACTOR_ZERO
-      , Vk.colorBlendOp = Vk.BLEND_OP_ADD
-      , Vk.srcAlphaBlendFactor = Vk.BLEND_FACTOR_ONE
-      , Vk.dstAlphaBlendFactor = Vk.BLEND_FACTOR_ZERO
-      , Vk.alphaBlendOp = Vk.BLEND_OP_ADD
-      }
+    colorBlendAttachment =
+      Vulkan.createVk
+        ( set @"colorWriteMask"
+            ( Vulkan.VK_COLOR_COMPONENT_R_BIT
+                .|. Vulkan.VK_COLOR_COMPONENT_G_BIT
+                .|. Vulkan.VK_COLOR_COMPONENT_B_BIT
+                .|. Vulkan.VK_COLOR_COMPONENT_A_BIT
+            )
+            &* set @"blendEnable" Vulkan.VK_FALSE
+            &* set @"srcColorBlendFactor" Vulkan.VK_BLEND_FACTOR_ONE
+            &* set @"dstColorBlendFactor" Vulkan.VK_BLEND_FACTOR_ZERO
+            &* set @"colorBlendOp" Vulkan.VK_BLEND_OP_ADD
+            &* set @"srcAlphaBlendFactor" Vulkan.VK_BLEND_FACTOR_ONE
+            &* set @"dstAlphaBlendFactor" Vulkan.VK_BLEND_FACTOR_ZERO
+            &* set @"alphaBlendOp" Vulkan.VK_BLEND_OP_ADD
+        )
 
-    colorBlendState = Vk.PipelineColorBlendStateCreateInfo
-      { Vk.next = ()
-      , Vk.flags = Vk.zero
-      , Vk.logicOpEnable = False
-      , Vk.logicOp = Vk.LOGIC_OP_COPY
-      , Vk.attachmentCount = fromIntegral colorAttachmentCount
-      , Vk.attachments = Vector.fromList $ replicate colorAttachmentCount colorBlendAttachment
-      , Vk.blendConstants = (0, 0, 0, 0)
-      }
+    colorBlendState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"logicOpEnable" Vulkan.VK_FALSE
+            &* set @"logicOp" Vulkan.VK_LOGIC_OP_COPY
+            &* set @"attachmentCount" (fromIntegral colorAttachmentCount)
+            &* setListRef @"pAttachments" (replicate colorAttachmentCount colorBlendAttachment)
+            &* setAt @"blendConstants" @0 (0.0 :: Float)
+            &* setAt @"blendConstants" @1 (0.0 :: Float)
+            &* setAt @"blendConstants" @2 (0.0 :: Float)
+            &* setAt @"blendConstants" @3 (0.0 :: Float)
+        )
 
-    dynamicState = Vk.PipelineDynamicStateCreateInfo
-      { Vk.flags = Vk.zero
-      , Vk.dynamicStates = Vector.fromList []
-      }
+    dynamicState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"dynamicStateCount" 0
+            &* setListRef @"pDynamicStates" ([] :: [Vulkan.VkDynamicState])
+        )
 
-    -- Mesh pipeline: no vertex input, no input assembly, no tessellation
-    createInfo = Vk.GraphicsPipelineCreateInfo
-      { Vk.next = ()
-      , Vk.flags = Vk.zero
-      , Vk.stageCount = fromIntegral (Vector.length stages)
-      , Vk.stages = stages
-      , Vk.vertexInputState = Nothing
-      , Vk.inputAssemblyState = Nothing
-      , Vk.tessellationState = Nothing
-      , Vk.viewportState = Just $ Vk.SomeStruct viewportState
-      , Vk.rasterizationState = Just $ Vk.SomeStruct rasterizationState
-      , Vk.multisampleState = Just $ Vk.SomeStruct multisampleState
-      , Vk.depthStencilState = Just depthStencilState
-      , Vk.colorBlendState = Just $ Vk.SomeStruct colorBlendState
-      , Vk.dynamicState = Just dynamicState
-      , Vk.layout = pipelineLayout
-      , Vk.renderPass = renderPass_
-      , Vk.subpass = 0
-      , Vk.basePipelineHandle = Vk.zero
-      , Vk.basePipelineIndex = -1
-      }
+    pipelineCI =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"stageCount" (fromIntegral numStages)
+            &* setListRef @"pStages" stages
+            &* set @"pVertexInputState" nullPtr
+            &* set @"pInputAssemblyState" nullPtr
+            &* set @"pTessellationState" nullPtr
+            &* setVkRef @"pViewportState" viewportState
+            &* setVkRef @"pRasterizationState" rasterizationState
+            &* setVkRef @"pMultisampleState" multisampleState
+            &* setVkRef @"pDepthStencilState" depthStencilState
+            &* setVkRef @"pColorBlendState" colorBlendState
+            &* setVkRef @"pDynamicState" dynamicState
+            &* set @"layout" layout
+            &* set @"renderPass" renderPass
+            &* set @"subpass" (0 :: Word32)
+            &* set @"basePipelineHandle" Vulkan.VK_NULL_HANDLE
+            &* set @"basePipelineIndex" (-1)
+        )
 
-  (result, pipelines) <- liftIO $ Vk.createGraphicsPipelines
-    device
-    Vk.NULL_HANDLE
-    (Vector.fromList [Vk.SomeStruct createInfo])
-    Nothing
+  pipeline <- liftIO $
+    withPtr pipelineCI $ \pciPtr ->
+      allocaAndPeek $ Vulkan.vkCreateGraphicsPipelines dev Vulkan.VK_NULL 1 pciPtr Vulkan.VK_NULL
 
-  case pipelines Vector.!? 0 of
-    Nothing -> error "createMeshPipeline: no pipeline returned"
-    Just pipeline -> pure $ fromVulkanPipeline pipeline
+  pure pipeline
 
 managedMeshPipelineWithBlending
   :: (MonadManaged m)
@@ -259,168 +286,222 @@ createMeshPipelineWithBlending
   -> m Vulkan.VkPipeline
 createMeshPipelineWithBlending dev layout renderPass program swapchainExtent colorAttachmentCount = do
   let
-    device = toVulkanDevice dev
-    pipelineLayout = toVulkanPipelineLayout layout
-    renderPass_ = toVulkanRenderPass renderPass
+    mkStage stageBit mod_ =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"stage" stageBit
+            &* set @"module" mod_
+            &* setStrRef @"pName" "main"
+            &* set @"pSpecializationInfo" nullPtr
+        )
 
-    stages = Vector.fromList $ catMaybes
-      [ mkStage Vk.SHADER_STAGE_TASK_BIT_EXT <$> mspTask program
-      , Just $ mkStage Vk.SHADER_STAGE_MESH_BIT_EXT (mspMesh program)
-      , Just $ mkStage Vk.SHADER_STAGE_FRAGMENT_BIT (mspFragment program)
+    stages = catMaybes
+      [ mkStage vkShaderStageTaskBitEXT <$> mspTask program
+      , Just $ mkStage vkShaderStageMeshBitEXT (mspMesh program)
+      , Just $ mkStage Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT (mspFragment program)
       ]
 
-    mkStage stageBit mod_ =
-      Vk.SomeStruct $ Vk.zero
-        { Vk.stage = stageBit
-        , Vk.module' = toVulkanShaderModule mod_
-        , Vk.name = "main"
-        }
+    numStages = length stages
 
-    viewport = Vk.Viewport
-      { Vk.x = 0
-      , Vk.y = fromIntegral (Vulkan.getField @"height" swapchainExtent)
-      , Vk.width = fromIntegral (Vulkan.getField @"width" swapchainExtent)
-      , Vk.height = - (fromIntegral (Vulkan.getField @"height" swapchainExtent))
-      , Vk.minDepth = 0.0
-      , Vk.maxDepth = 1.0
-      }
+    viewport =
+      Vulkan.createVk
+        ( set @"x" 0
+            &* set @"y" (fromIntegral $ Vulkan.getField @"height" swapchainExtent)
+            &* set @"width" (fromIntegral $ Vulkan.getField @"width" swapchainExtent)
+            &* set @"height" (- (fromIntegral $ Vulkan.getField @"height" swapchainExtent))
+            &* set @"minDepth" (0.0 :: Float)
+            &* set @"maxDepth" (1.0 :: Float)
+        )
 
-    scissor = Vk.Rect2D
-      { Vk.offset = Vk.Offset2D 0 0
-      , Vk.extent = Vk.Extent2D
-          (fromIntegral $ Vulkan.getField @"width" swapchainExtent)
-          (fromIntegral $ Vulkan.getField @"height" swapchainExtent)
-      }
+    scissor =
+      Vulkan.createVk
+        ( set @"offset"
+            (Vulkan.createVk
+              ( set @"x" 0
+                  &* set @"y" 0
+              ))
+            &* set @"extent"
+            (Vulkan.createVk
+              ( set @"width" (fromIntegral $ Vulkan.getField @"width" swapchainExtent)
+                  &* set @"height" (fromIntegral $ Vulkan.getField @"height" swapchainExtent)
+              ))
+        )
 
-    viewportState = Vk.PipelineViewportStateCreateInfo
-      { Vk.next = ()
-      , Vk.flags = Vk.zero
-      , Vk.viewportCount = 1
-      , Vk.viewports = Vector.fromList [viewport]
-      , Vk.scissorCount = 1
-      , Vk.scissors = Vector.fromList [scissor]
-      }
+    viewportState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"viewportCount" 1
+            &* setListRef @"pViewports" [viewport]
+            &* set @"scissorCount" 1
+            &* setListRef @"pScissors" [scissor]
+        )
 
-    rasterizationState = Vk.PipelineRasterizationStateCreateInfo
-      { Vk.next = ()
-      , Vk.flags = Vk.zero
-      , Vk.depthClampEnable = False
-      , Vk.rasterizerDiscardEnable = False
-      , Vk.polygonMode = Vk.POLYGON_MODE_FILL
-      , Vk.lineWidth = 1.0
-      , Vk.cullMode = Vk.CULL_MODE_BACK_BIT
-      , Vk.frontFace = Vk.FRONT_FACE_COUNTER_CLOCKWISE
-      , Vk.depthBiasEnable = False
-      , Vk.depthBiasConstantFactor = 0.0
-      , Vk.depthBiasClamp = 0.0
-      , Vk.depthBiasSlopeFactor = 0.0
-      }
+    rasterizationState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"depthClampEnable" Vulkan.VK_FALSE
+            &* set @"rasterizerDiscardEnable" Vulkan.VK_FALSE
+            &* set @"polygonMode" Vulkan.VK_POLYGON_MODE_FILL
+            &* set @"lineWidth" (1.0 :: Float)
+            &* set @"cullMode" Vulkan.VK_CULL_MODE_BACK_BIT
+            &* set @"frontFace" Vulkan.VK_FRONT_FACE_COUNTER_CLOCKWISE
+            &* set @"depthBiasEnable" Vulkan.VK_FALSE
+            &* set @"depthBiasConstantFactor" (0.0 :: Float)
+            &* set @"depthBiasClamp" (0.0 :: Float)
+            &* set @"depthBiasSlopeFactor" (0.0 :: Float)
+        )
 
-    multisampleState = Vk.PipelineMultisampleStateCreateInfo
-      { Vk.next = ()
-      , Vk.flags = Vk.zero
-      , Vk.sampleShadingEnable = False
-      , Vk.rasterizationSamples = Vk.SAMPLE_COUNT_1_BIT
-      , Vk.minSampleShading = 1.0
-      , Vk.sampleMask = Vector.fromList []
-      , Vk.alphaToCoverageEnable = False
-      , Vk.alphaToOneEnable = False
-      }
+    multisampleState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"sampleShadingEnable" Vulkan.VK_FALSE
+            &* set @"rasterizationSamples" Vulkan.VK_SAMPLE_COUNT_1_BIT
+            &* set @"minSampleShading" (1.0 :: Float)
+            &* setListRef @"pSampleMask" ([] :: [Vulkan.VkSampleMask])
+            &* set @"alphaToCoverageEnable" Vulkan.VK_FALSE
+            &* set @"alphaToOneEnable" Vulkan.VK_FALSE
+        )
 
-    nullStencilOp = Vk.StencilOpState
-      { Vk.failOp = Vk.STENCIL_OP_KEEP
-      , Vk.passOp = Vk.STENCIL_OP_KEEP
-      , Vk.depthFailOp = Vk.STENCIL_OP_KEEP
-      , Vk.compareOp = Vk.COMPARE_OP_ALWAYS
-      , Vk.compareMask = 0
-      , Vk.writeMask = 0
-      , Vk.reference = 0
-      }
+    nullStencilOp =
+      Vulkan.createVk
+        ( set @"failOp" Vulkan.VK_STENCIL_OP_KEEP
+            &* set @"passOp" Vulkan.VK_STENCIL_OP_KEEP
+            &* set @"depthFailOp" Vulkan.VK_STENCIL_OP_KEEP
+            &* set @"compareOp" Vulkan.VK_COMPARE_OP_ALWAYS
+            &* set @"compareMask" 0
+            &* set @"writeMask" 0
+            &* set @"reference" 0
+        )
 
-    depthStencilState = Vk.PipelineDepthStencilStateCreateInfo
-      { Vk.flags = Vk.zero
-      , Vk.depthTestEnable = True
-      , Vk.depthWriteEnable = True
-      , Vk.depthCompareOp = Vk.COMPARE_OP_LESS_OR_EQUAL
-      , Vk.depthBoundsTestEnable = False
-      , Vk.stencilTestEnable = False
-      , Vk.front = nullStencilOp
-      , Vk.back = nullStencilOp
-      , Vk.minDepthBounds = 0
-      , Vk.maxDepthBounds = 1
-      }
+    depthStencilState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"depthTestEnable" Vulkan.VK_TRUE
+            &* set @"depthWriteEnable" Vulkan.VK_TRUE
+            &* set @"depthCompareOp" Vulkan.VK_COMPARE_OP_LESS_OR_EQUAL
+            &* set @"depthBoundsTestEnable" Vulkan.VK_FALSE
+            &* set @"stencilTestEnable" Vulkan.VK_FALSE
+            &* set @"front" nullStencilOp
+            &* set @"back" nullStencilOp
+            &* set @"minDepthBounds" (0.0 :: Float)
+            &* set @"maxDepthBounds" (1.0 :: Float)
+        )
 
-    colorBlendAttachment = Vk.PipelineColorBlendAttachmentState
-      { Vk.colorWriteMask =
-          Vk.COLOR_COMPONENT_R_BIT
-            .|. Vk.COLOR_COMPONENT_G_BIT
-            .|. Vk.COLOR_COMPONENT_B_BIT
-            .|. Vk.COLOR_COMPONENT_A_BIT
-      , Vk.blendEnable = True
-      , Vk.srcColorBlendFactor = Vk.BLEND_FACTOR_SRC_ALPHA
-      , Vk.dstColorBlendFactor = Vk.BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
-      , Vk.colorBlendOp = Vk.BLEND_OP_ADD
-      , Vk.srcAlphaBlendFactor = Vk.BLEND_FACTOR_ONE
-      , Vk.dstAlphaBlendFactor = Vk.BLEND_FACTOR_ZERO
-      , Vk.alphaBlendOp = Vk.BLEND_OP_ADD
-      }
+    colorBlendAttachment =
+      Vulkan.createVk
+        ( set @"colorWriteMask"
+            ( Vulkan.VK_COLOR_COMPONENT_R_BIT
+                .|. Vulkan.VK_COLOR_COMPONENT_G_BIT
+                .|. Vulkan.VK_COLOR_COMPONENT_B_BIT
+                .|. Vulkan.VK_COLOR_COMPONENT_A_BIT
+            )
+            &* set @"blendEnable" Vulkan.VK_TRUE
+            &* set @"srcColorBlendFactor" Vulkan.VK_BLEND_FACTOR_SRC_ALPHA
+            &* set @"dstColorBlendFactor" Vulkan.VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+            &* set @"colorBlendOp" Vulkan.VK_BLEND_OP_ADD
+            &* set @"srcAlphaBlendFactor" Vulkan.VK_BLEND_FACTOR_ONE
+            &* set @"dstAlphaBlendFactor" Vulkan.VK_BLEND_FACTOR_ZERO
+            &* set @"alphaBlendOp" Vulkan.VK_BLEND_OP_ADD
+        )
 
-    colorBlendState = Vk.PipelineColorBlendStateCreateInfo
-      { Vk.next = ()
-      , Vk.flags = Vk.zero
-      , Vk.logicOpEnable = False
-      , Vk.logicOp = Vk.LOGIC_OP_COPY
-      , Vk.attachmentCount = fromIntegral colorAttachmentCount
-      , Vk.attachments = Vector.fromList $ replicate colorAttachmentCount colorBlendAttachment
-      , Vk.blendConstants = (0, 0, 0, 0)
-      }
+    colorBlendState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"logicOpEnable" Vulkan.VK_FALSE
+            &* set @"logicOp" Vulkan.VK_LOGIC_OP_COPY
+            &* set @"attachmentCount" (fromIntegral colorAttachmentCount)
+            &* setListRef @"pAttachments" (replicate colorAttachmentCount colorBlendAttachment)
+            &* setAt @"blendConstants" @0 (0.0 :: Float)
+            &* setAt @"blendConstants" @1 (0.0 :: Float)
+            &* setAt @"blendConstants" @2 (0.0 :: Float)
+            &* setAt @"blendConstants" @3 (0.0 :: Float)
+        )
 
-    dynamicState = Vk.PipelineDynamicStateCreateInfo
-      { Vk.flags = Vk.zero
-      , Vk.dynamicStates = Vector.fromList []
-      }
+    dynamicState =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"dynamicStateCount" 0
+            &* setListRef @"pDynamicStates" ([] :: [Vulkan.VkDynamicState])
+        )
 
-    createInfo = Vk.GraphicsPipelineCreateInfo
-      { Vk.next = ()
-      , Vk.flags = Vk.zero
-      , Vk.stageCount = fromIntegral (Vector.length stages)
-      , Vk.stages = stages
-      , Vk.vertexInputState = Nothing
-      , Vk.inputAssemblyState = Nothing
-      , Vk.tessellationState = Nothing
-      , Vk.viewportState = Just $ Vk.SomeStruct viewportState
-      , Vk.rasterizationState = Just $ Vk.SomeStruct rasterizationState
-      , Vk.multisampleState = Just $ Vk.SomeStruct multisampleState
-      , Vk.depthStencilState = Just depthStencilState
-      , Vk.colorBlendState = Just $ Vk.SomeStruct colorBlendState
-      , Vk.dynamicState = Just dynamicState
-      , Vk.layout = pipelineLayout
-      , Vk.renderPass = renderPass_
-      , Vk.subpass = 0
-      , Vk.basePipelineHandle = Vk.zero
-      , Vk.basePipelineIndex = -1
-      }
+    pipelineCI =
+      Vulkan.createVk
+        ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO
+            &* set @"pNext" Vulkan.VK_NULL
+            &* set @"flags" Vulkan.VK_ZERO_FLAGS
+            &* set @"stageCount" (fromIntegral numStages)
+            &* setListRef @"pStages" stages
+            &* set @"pVertexInputState" nullPtr
+            &* set @"pInputAssemblyState" nullPtr
+            &* set @"pTessellationState" nullPtr
+            &* setVkRef @"pViewportState" viewportState
+            &* setVkRef @"pRasterizationState" rasterizationState
+            &* setVkRef @"pMultisampleState" multisampleState
+            &* setVkRef @"pDepthStencilState" depthStencilState
+            &* setVkRef @"pColorBlendState" colorBlendState
+            &* setVkRef @"pDynamicState" dynamicState
+            &* set @"layout" layout
+            &* set @"renderPass" renderPass
+            &* set @"subpass" (0 :: Word32)
+            &* set @"basePipelineHandle" Vulkan.VK_NULL_HANDLE
+            &* set @"basePipelineIndex" (-1)
+        )
 
-  (result, pipelines) <- liftIO $ Vk.createGraphicsPipelines
-    device
-    Vk.NULL_HANDLE
-    (Vector.fromList [Vk.SomeStruct createInfo])
-    Nothing
+  pipeline <- liftIO $
+    withPtr pipelineCI $ \pciPtr ->
+      allocaAndPeek $ Vulkan.vkCreateGraphicsPipelines dev Vulkan.VK_NULL 1 pciPtr Vulkan.VK_NULL
 
-  case pipelines Vector.!? 0 of
-    Nothing -> error "createMeshPipelineWithBlending: no pipeline returned"
-    Just pipeline -> pure $ fromVulkanPipeline pipeline
+  pure pipeline
 
 -- ---------------------------------------------------------------------------
--- Mesh shader draw command wrapper
+-- Dynamic loading of vkCmdDrawMeshTasksEXT (vulkan-api lacks this extension)
 -- ---------------------------------------------------------------------------
+
+type PFN_vkCmdDrawMeshTasksEXT = Ptr Vulkan.VkCommandBuffer_T -> Word32 -> Word32 -> Word32 -> IO ()
+
+foreign import ccall "dynamic"
+  mkCmdDrawMeshTasksEXT :: FunPtr PFN_vkCmdDrawMeshTasksEXT -> PFN_vkCmdDrawMeshTasksEXT
+
+{-# NOINLINE drawMeshTasksEXTPtr #-}
+drawMeshTasksEXTPtr :: IORef (Maybe (FunPtr PFN_vkCmdDrawMeshTasksEXT))
+drawMeshTasksEXTPtr = unsafePerformIO $ newIORef Nothing
+
+loadCmdDrawMeshTasksEXT :: Vulkan.VkDevice -> IO PFN_vkCmdDrawMeshTasksEXT
+loadCmdDrawMeshTasksEXT device = do
+  cached <- readIORef drawMeshTasksEXTPtr
+  case cached of
+    Just fnPtr -> pure (mkCmdDrawMeshTasksEXT fnPtr)
+    Nothing -> do
+      withCString "vkCmdDrawMeshTasksEXT" $ \namePtr -> do
+        procAddr <- Vulkan.vkGetDeviceProcAddr device namePtr
+        if procAddr == nullFunPtr
+          then error "vkCmdDrawMeshTasksEXT not available - VK_EXT_mesh_shader not enabled?"
+          else do
+            let fnPtr = castFunPtr procAddr
+            writeIORef drawMeshTasksEXTPtr (Just fnPtr)
+            pure (mkCmdDrawMeshTasksEXT fnPtr)
 
 cmdDrawMeshTasksEXT
   :: (MonadIO m)
-  => Vulkan.VkCommandBuffer
+  => Vulkan.VkDevice
+  -> Vulkan.VkCommandBuffer
   -> Word32  -- ^ groupCountX
   -> Word32  -- ^ groupCountY
   -> Word32  -- ^ groupCountZ
   -> m ()
-cmdDrawMeshTasksEXT cmdBuf x y z =
-  liftIO $ Vk.cmdDrawMeshTasksEXT (toVulkanCommandBuffer cmdBuf) x y z
+cmdDrawMeshTasksEXT device cmdBuf x y z = liftIO $ do
+  fn <- loadCmdDrawMeshTasksEXT device
+  fn cmdBuf x y z

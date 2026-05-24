@@ -107,7 +107,8 @@ data NodeSelection = NodeSelection
   deriving (Show)
 
 -- | Select visible nodes given camera position and frustum planes.
--- Returns nodes sorted by LOD (coarsest first) for ordered rendering.
+-- Top-down: starts from coarsest LOD, recurses to finer LOD for nodes
+-- near the camera. At max LOD, keeps all visible nodes.
 selectVisibleNodes
   :: CDLODTree
   -> V3 Float       -- ^ Camera position
@@ -116,17 +117,19 @@ selectVisibleNodes
 selectVisibleNodes CDLODTree{..} cameraPos frustumPlanes =
   let cfg = ctConfig
       maxLod = ccMaxLOD cfg
-      -- Start from coarsest LOD, recurse to finer if camera is close
-      selected = go maxLod
-      go (-1) = []
-      go lod =
-        let nodes = ctNodes !! lod
-            visible = filter (nodeInFrustum frustumPlanes) nodes
-            -- For each visible node, check if it needs finer detail
-            (fine, keep) = partition (needsFinerLOD cfg cameraPos) visible
-        in if null fine || lod == 0
-             then keep
-             else keep ++ go (lod - 1)
+      selected = go 0
+      go lod
+        | lod > maxLod = []
+        | otherwise =
+            let nodes = ctNodes !! lod
+                visible = filter (nodeInFrustum frustumPlanes) nodes
+            in if lod == maxLod
+                 then visible
+                 else
+                   let (fine, keep) = partition (needsFinerLOD cfg cameraPos) visible
+                   in keep ++ if null fine
+                        then []
+                        else go (lod + 1)
   in NodeSelection
        { nsNodes = sortOn (Down . tnLOD) selected
        , nsMaxLOD = if null selected then 0 else maximum (map tnLOD selected)

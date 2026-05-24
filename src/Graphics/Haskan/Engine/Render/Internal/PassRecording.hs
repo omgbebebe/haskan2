@@ -516,7 +516,7 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                 dsPtr
                 0
                 Vulkan.vkNullPtr
-            MeshPipeline.cmdDrawMeshTasksEXT commandBuffer (fromIntegral nodeCount) 1 1
+            MeshPipeline.cmdDrawMeshTasksEXT rcDevice commandBuffer (fromIntegral nodeCount) 1 1
 
         -- Dear ImGui overlay pass
         for_ rcImGuiDrawData $ \drawData -> liftIO $ do

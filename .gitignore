@@ -39,3 +39,16 @@ glTF-Sample-Assets/
 3rdparty/jolt-wrapper/test_wrapper
 
 reference_sources/
+
+# Hoogle index files
+.haskell-local-hoogle.*
+.hoogle-local.*
+
+# Core dumps
+core.*
+
+# Placeholder artifacts
+EOF
+
+# Local test scripts (not part of main project)
+scripts/test_*.hs
