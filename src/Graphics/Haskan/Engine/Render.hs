@@ -778,7 +778,7 @@ renderLoop RenderLoopConfig {..} = do
 
   rm <- newResourceManager
 
-  (device, (graphicsQueueFamilyIndex, presentQueueFamilyIndex)) <- Device.managedRenderDevice rlcPhysicalDevice rlcSurface rlcLayers
+  (device, (graphicsQueueFamilyIndex, presentQueueFamilyIndex)) <- Device.managedRenderDevice rlcPhysicalDevice rlcSurface rlcLayers False
 
   graphicsQueueHandler <- Device.getDeviceQueueHandler device graphicsQueueFamilyIndex 0
   presentQueueHandler <- Device.getDeviceQueueHandler device presentQueueFamilyIndex 0

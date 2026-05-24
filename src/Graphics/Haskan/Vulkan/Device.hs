@@ -4,11 +4,14 @@ import Control.Monad (filterM, when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits (shiftR, (.&.))
+import Data.ByteString.Char8 qualified as BS8
+import Data.ByteString.Unsafe (unsafeUseAsCString)
 import Data.List (nub)
 import Data.Text (Text)
 import Data.Text qualified as Text
 import Data.Word (Word32)
 import Foreign (castPtr, nullPtr)
+import Foreign.C.String (CString)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, peekVkList_)
 import Graphics.Vulkan qualified as Vulkan
@@ -20,16 +23,21 @@ import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setListRef, setStrListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Numeric (showHex)
+import System.IO.Unsafe (unsafePerformIO)
 
-managedRenderDevice :: (MonadManaged m) => Vulkan.VkPhysicalDevice -> Vulkan.VkSurfaceKHR -> [String] -> m (Vulkan.VkDevice, (Int, Int))
-managedRenderDevice pdev surface layers =
+vkExtMeshShaderExtensionName :: CString
+vkExtMeshShaderExtensionName = unsafePerformIO $ BS8.useAsCString (BS8.pack "VK_EXT_mesh_shader") pure
+{-# NOINLINE vkExtMeshShaderExtensionName #-}
+
+managedRenderDevice :: (MonadManaged m) => Vulkan.VkPhysicalDevice -> Vulkan.VkSurfaceKHR -> [String] -> Bool -> m (Vulkan.VkDevice, (Int, Int))
+managedRenderDevice pdev surface layers enableMeshShader =
   alloc
     "Vulkan Render Device"
-    (createRenderDevice pdev surface layers)
+    (createRenderDevice pdev surface layers enableMeshShader)
     (\(ptr, _) -> Vulkan.vkDestroyDevice ptr Vulkan.vkNullPtr)
 
-createRenderDevice :: (MonadIO m) => Vulkan.VkPhysicalDevice -> Vulkan.VkSurfaceKHR -> [String] -> m (Vulkan.VkDevice, (Int, Int))
-createRenderDevice pdev surface layers = do
+createRenderDevice :: (MonadIO m) => Vulkan.VkPhysicalDevice -> Vulkan.VkSurfaceKHR -> [String] -> Bool -> m (Vulkan.VkDevice, (Int, Int))
+createRenderDevice pdev surface layers enableMeshShader = do
   queueFamilies <- liftIO $ zip [0 ..] <$> peekVkList_ (Vulkan.vkGetPhysicalDeviceQueueFamilyProperties pdev)
 
   presentQueueFamilies <-
@@ -49,7 +57,7 @@ createRenderDevice pdev surface layers = do
         ([], _) -> fail "Cannot find Graphics queue family"
         (_, []) -> fail "Cannot find queue family with Presentation support"
         (g : _, p : _) -> nub [fst g, fst p]
-  device <- createDevice pdev queueFamilyIndices layers
+  device <- createDevice pdev queueFamilyIndices layers enableMeshShader
   let (graphicsQueueFamilyIndex, presentQueueFamilyIndex) = case queueFamilyIndices of
         [g] -> (g, g)
         [g, p] -> (g, p)
@@ -57,8 +65,8 @@ createRenderDevice pdev surface layers = do
         [] -> error "unreachable: queueFamilyIndices is non-empty"
   pure (device, (graphicsQueueFamilyIndex, presentQueueFamilyIndex))
 
-createDevice :: (MonadIO m) => Vulkan.VkPhysicalDevice -> [Int] -> [String] -> m Vulkan.VkDevice
-createDevice dev queueFamilyIndices enabledLayers = do
+createDevice :: (MonadIO m) => Vulkan.VkPhysicalDevice -> [Int] -> [String] -> Bool -> m Vulkan.VkDevice
+createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
   -- Query physical device properties to check Vulkan version
   props <- liftIO $ allocaAndPeek_ (Vulkan.vkGetPhysicalDeviceProperties dev)
   let apiVersion = Vulkan.getField @"apiVersion" props
@@ -115,7 +123,8 @@ createDevice dev queueFamilyIndices enabledLayers = do
 
   let deviceFlags = Vulkan.VK_ZERO_FLAGS
       queueFlags = Vulkan.VK_ZERO_FLAGS
-      enabledExtensions = [Vulkan.VK_KHR_SWAPCHAIN_EXTENSION_NAME]
+      meshShaderExtension = if enableMeshShader then [vkExtMeshShaderExtensionName] else []
+      enabledExtensions = Vulkan.VK_KHR_SWAPCHAIN_EXTENSION_NAME : meshShaderExtension
       enabledBasicFeatures =
         Vulkan.createVk
           ( set @"geometryShader" (if geometrySupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)

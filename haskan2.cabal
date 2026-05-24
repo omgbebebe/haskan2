@@ -77,10 +77,12 @@ library
                        Graphics.Haskan.Vulkan.DeviceCapabilities
                        Graphics.Haskan.Vulkan.Fence
                        Graphics.Haskan.Vulkan.Framebuffer
-                       Graphics.Haskan.Vulkan.GraphicsPipeline
-                       Graphics.Haskan.Vulkan.ImageView
-                       Graphics.Haskan.Vulkan.Instance
-                       Graphics.Haskan.Vulkan.Memory
+                        Graphics.Haskan.Vulkan.GraphicsPipeline
+                        Graphics.Haskan.Vulkan.ImageView
+                        Graphics.Haskan.Vulkan.Instance
+                        Graphics.Haskan.Vulkan.Interop
+                        Graphics.Haskan.Vulkan.MeshPipeline
+                        Graphics.Haskan.Vulkan.Memory
                        Graphics.Haskan.Vulkan.PipelineLayout
                        Graphics.Haskan.Vulkan.PhysicalDevice
                        Graphics.Haskan.Vulkan.RenderPass
