@@ -114,6 +114,7 @@ library
                          Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural,
                           Graphics.Haskan.Vulkan.Shaders.Deferred.Clouds,
                            Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays,
+                           Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainMesh,
                            Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainOverlay,
                           Graphics.Haskan.Vulkan.Shaders.Forward.SimpleForward,
                          Graphics.Haskan.Vulkan.Shaders.Bindless,
