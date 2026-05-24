@@ -41,9 +41,9 @@ type MeshDefs =
             '[Binding 0, DescriptorSet 1]
             (Struct '[ "data" ':-> Array 1024 TerrainNodeData ])
    , "heightmap"
-       ':-> Texture2DArray
+       ':-> Texture2D
             '[Binding 1, DescriptorSet 1]
-            (R32 F)
+            (R16 SNorm)
    , "main"
        ':-> EntryPoint '[ LocalSize 64 1 1
                         , OutputVertices 64
@@ -64,6 +64,7 @@ terrainMesh = meshShader do
   nodeOffset <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "worldOffset") wxId
   nodeSize   <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "worldSize") wxId
   _nodeLOD   <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "lodLevel") wxId
+  heightScale <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "heightScale") wxId
   _hmapLayer <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "heightmapLayer") wxId
   climateLayer <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "climateLayer") wxId
 
@@ -77,10 +78,16 @@ terrainMesh = meshShader do
       wx = (fromIntegral gx) * (nodeSize / 7.0) - (nodeSize / 2.0)
       wz = (fromIntegral gy) * (nodeSize / 7.0) - (nodeSize / 2.0)
 
-  -- Sample heightmap (placeholder)
+  -- World position for heightmap sampling
   let worldX = (view @(Index 0) nodeOffset) + wx
       worldZ = (view @(Index 1) nodeOffset) + wz
-      height = 0.0 :: Code Float
+      -- Map world position to heightmap UV (single 2560x2560 tile centered at origin)
+      texU = worldX / 2560.0 + 0.5
+      texV = worldZ / 2560.0 + 0.5
+
+  -- Sample heightmap
+  elevRaw <- use @(ImageTexel "heightmap") NilOps (Vec2 texU texV)
+  let height = elevRaw * 32767.0 * heightScale
 
   let pos = Vec4 worldX height worldZ 1 :: Code (V 4 Float)
       normal = Vec4 0 1 0 0 :: Code (V 4 Float)
@@ -110,21 +117,34 @@ type FragmentDefs =
    , "in_climate"  ':-> Input '[Location 768, Flat] Word32
    , "out_color"   ':-> Output '[Location 0] (V 4 Float)
    , "climateTex"
-       ':-> Texture2DArray
+       ':-> Texture2D
             '[Binding 2, DescriptorSet 1]
-            (RGBA8 UNorm)
+            (RGBA32 F)
    , "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
 
 terrainFragment :: ShaderModule "main" FragmentShader FragmentDefs _
 terrainFragment = shader do
-  _pos   <- get @"in_position"
+  pos    <- get @"in_position"
   normal <- get @"in_normal"
-  uv    <- get @"in_uv"
+  uv     <- get @"in_uv"
   _climateLayer <- get @"in_climate"
 
-  -- Simple color based on UV and normal
-  let Vec4 _ hy _ _ = normal
-      color = Vec4 (view @(Index 0) uv) (view @(Index 1) uv) (hy * 0.5 + 0.5) 1
+  let Vec4 worldX _ worldZ _ = pos
+      -- Map world position to climate texture UV (single 2560x2560 tile centered at origin)
+      texU = worldX / 2560.0 + 0.5
+      texV = worldZ / 2560.0 + 0.5
 
-  put @"out_color" color
+  climateCol <- use @(ImageTexel "climateTex") NilOps (Vec2 texU texV)
+
+  -- Simple lighting based on normal
+  let Vec4 nx ny nz _ = normal
+      lightDir = normalise (Vec3 0.5 1.0 0.3)
+      n = normalise (Vec3 nx ny nz)
+      diffuse = max 0.0 (dot n lightDir)
+      ambient = 0.3
+      intensity = diffuse + ambient
+      Vec4 cr cg cb ca = climateCol
+      lit = Vec4 (cr * intensity) (cg * intensity) (cb * intensity) ca
+
+  put @"out_color" lit

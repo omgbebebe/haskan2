@@ -317,7 +317,9 @@
   - `managedMeshPipelineWithBlending` — alpha-blended mesh pipeline using `vulkan` package `createGraphicsPipelines`
   - Per-frame CDLOD: `buildCDLODTree` → `extractFrustumPlanes` → `selectVisibleNodes` → `packNodesToSSBO` → upload to SSBO → `cmdDrawMeshTasksEXT`
   - `vkMeshBit` workaround: `vulkan-api` lacks `VK_SHADER_STAGE_MESH_BIT_EXT`, using `coerce (0x00000080 :: Word32)`
-  - TODO: Heightmap sampling in mesh shader (currently flat grid), geomorphing, mesh terrain enabled by default
+  - **Heightmap sampling in mesh shader**: Samples `R16 SNorm` elevation texture at world position, displaces Y by `elevRaw * 32767.0 * heightScale`
+  - **Fragment shader**: Samples `RGBA32 F` climate texture at world position, applies simple diffuse+ambient lighting
+  - TODO: Geomorphing, enable mesh terrain by default, test on actual hardware
 
 ### 2026-05-24: Terrain Sidecar API Integration (Phase 1)
 - **HTTP client**: `Graphics.Haskan.Terrain.Client` — fetches binary tiles from `localhost:7777/terrain?i1=&j1=&i2=&j2=&scale=`

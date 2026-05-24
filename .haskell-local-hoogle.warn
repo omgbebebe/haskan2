@@ -1,0 +1,291 @@
+dear-imgui.cabal: Import of non-existant package GLFW-b
+generic-lens.cabal: Import of non-existant package HUnit
+haskan2.cabal: Import of non-existant package JuicyPixels, also imported by 2 others
+sdl2.cabal: Import of non-existant package OpenGL
+sdl2.cabal: Import of non-existant package StateVar, also imported by 1 others
+dear-imgui.cabal: Import of non-existant package VulkanMemoryAllocator
+julia-top-n.cabal: Import of non-existant package aeson, also imported by 2 others
+effectful.cabal: Import of non-existant package async
+fir.cabal: Import of non-existant package atomic-file-ops
+vulkan.cabal: Import of non-existant package base, also imported by 14 others
+gltf-loader.cabal: Import of non-existant package base64
+gltf-codec.cabal: Import of non-existant package base64-bytestring
+fir-examples.cabal: Import of non-existant package bezier-shaders
+fir-examples.cabal: Import of non-existant package bifunctors
+gltf-loader.cabal: Import of non-existant package binary, also imported by 2 others
+dear-imgui.cabal: Import of non-existant package bindings-GLFW
+vulkan.cabal: Import of non-existant package bytestring, also imported by 10 others
+effectful.cabal: Import of non-existant package cleff
+haskan2.cabal: Import of non-existant package clock
+fir-examples.cabal: Import of non-existant package constraints-extras
+vulkan.cabal: Import of non-existant package containers, also imported by 6 others
+haskan2.cabal: Import of non-existant package contravariant
+dear-imgui.cabal: Import of non-existant package dear-imgui-generator
+sdl2.cabal: Import of non-existant package deepseq
+fir-examples.cabal: Import of non-existant package dependent-map
+optparse-simple.cabal: Import of non-existant package directory, also imported by 6 others
+fir.cabal: Import of non-existant package distributive
+fir-examples.cabal: Import of non-existant package dlist
+generic-lens.cabal: Import of non-existant package doctest
+generic-lens.cabal: Import of non-existant package dump-core
+effectful.cabal: Import of non-existant package effectful-core
+sdl2.cabal: Import of non-existant package exceptions, also imported by 1 others
+haskan2.cabal: Import of non-existant package fast-logger
+julia-top-n.cabal: Import of non-existant package filepath, also imported by 5 others
+fir-examples.cabal: Import of non-existant package finite-typelits, also imported by 1 others
+fir-examples.cabal: Import of non-existant package fir-examples-dear-imgui
+fir-examples.cabal: Import of non-existant package fir-examples-paths
+effectful.cabal: Import of non-existant package freer-simple
+fir-examples.cabal: Import of non-existant package fsnotify
+fir-examples.cabal: Import of non-existant package fullpipeline-shaders
+effectful.cabal: Import of non-existant package fused-effects
+fir.cabal: Import of non-existant package generic-monoid
+fir.cabal: Import of non-existant package generics-sop
+fir.cabal: Import of non-existant package ghc-typelits-knownnat
+fir.cabal: Import of non-existant package ghc-typelits-natnormalise
+optparse-simple.cabal: Import of non-existant package githash
+dear-imgui.cabal: Import of non-existant package gl
+haskan2.cabal: Import of non-existant package half, also imported by 1 others
+haskan2.cabal: Import of non-existant package hashable
+fir-examples.cabal: Import of non-existant package haskeline
+fir-examples.cabal: Import of non-existant package hopf-shaders
+gltf-loader.cabal: Import of non-existant package hspec
+vulkan.cabal: Import of non-existant package inline-c, also imported by 1 others
+dear-imgui.cabal: Import of non-existant package inline-c-cpp
+generic-lens.cabal: Import of non-existant package inspection-testing
+fir-examples.cabal: Import of non-existant package ising-shaders
+fir-examples.cabal: Import of non-existant package juliaset-shaders
+fir-examples.cabal: Import of non-existant package kerr-shaders
+fir-examples.cabal: Import of non-existant package klein-shaders
+haskan2.cabal: Import of non-existant package lens, also imported by 3 others
+effectful.cabal: Import of non-existant package lifted-base
+sdl2.cabal: Import of non-existant package linear, also imported by 2 others
+fir-examples.cabal: Import of non-existant package logging-effect, also imported by 1 others
+fir-examples.cabal: Import of non-existant package logo-shaders
+haskan2.cabal: Import of non-existant package managed, also imported by 1 others
+haskan2.cabal: Import of non-existant package megaparsec, also imported by 1 others
+gltf-loader.cabal: Import of non-existant package microlens
+gltf-loader.cabal: Import of non-existant package microlens-platform
+haskan2.cabal: Import of non-existant package mtl, also imported by 3 others
+haskan2.cabal: Import of non-existant package network
+fir-examples.cabal: Import of non-existant package offscreen-shaders
+optparse-simple.cabal: Import of non-existant package optparse-applicative, also imported by 2 others
+dear-imgui.cabal: Import of non-existant package parser-combinators
+effectful.cabal: Import of non-existant package polysemy
+effectful.cabal: Import of non-existant package primitive
+fir.cabal: Import of non-existant package process, also imported by 1 others
+generic-lens.cabal: Import of non-existant package profunctors
+haskan2.cabal: Import of non-existant package random, also imported by 1 others
+fir-examples.cabal: Import of non-existant package raytracing-shaders
+fir-examples.cabal: Import of non-existant package resourcet, also imported by 1 others
+gltf-loader.cabal: Import of non-existant package rio
+effectful.cabal: Import of non-existant package safe-exceptions
+julia-top-n.cabal: Import of non-existant package sandwich
+haskan2.cabal: Import of non-existant package scientific, also imported by 2 others
+optparse-simple.cabal: Import of non-existant package semigroups
+gltf-codec.cabal: Import of non-existant package shower
+fir-examples.cabal: Import of non-existant package some
+fir.cabal: Import of non-existant package sop-core
+fir.cabal: Import of non-existant package split
+haskan2.cabal: Import of non-existant package stm, also imported by 2 others
+effectful.cabal: Import of non-existant package strict-mutable-base
+julia-top-n.cabal: Import of non-existant package string-interpolate
+dear-imgui.cabal: Import of non-existant package system-cxx-std-lib
+generic-lens.cabal: Import of non-existant package tagged
+vulkan.cabal: Import of non-existant package tasty, also imported by 3 others
+effectful.cabal: Import of non-existant package tasty-bench
+fir.cabal: Import of non-existant package tasty-golden
+vulkan.cabal: Import of non-existant package tasty-hunit, also imported by 3 others
+vulkan.cabal: Import of non-existant package template-haskell, also imported by 5 others
+sdl2.cabal: Import of non-existant package text, also imported by 8 others
+haskan2.cabal: Import of non-existant package text-short, also imported by 2 others
+fir-examples.cabal: Import of non-existant package texture-shaders
+optparse-simple.cabal: Import of non-existant package th-compat
+dear-imgui.cabal: Import of non-existant package th-lift
+haskan2.cabal: Import of non-existant package time, also imported by 1 others
+fir-examples.cabal: Import of non-existant package toy-shaders
+vulkan.cabal: Import of non-existant package transformers, also imported by 5 others
+fir.cabal: Import of non-existant package tree-view
+fir.cabal: Import of non-existant package typelits-witnesses
+effectful.cabal: Import of non-existant package unix
+julia-top-n.cabal: Import of non-existant package unliftio, also imported by 2 others
+fir-examples.cabal: Import of non-existant package unliftio-core, also imported by 1 others
+haskan2.cabal: Import of non-existant package unordered-containers, also imported by 4 others
+fir.cabal: Import of non-existant package variant
+vulkan.cabal: Import of non-existant package vector, also imported by 7 others
+fir-examples.cabal: Import of non-existant package vector-builder
+fir-examples.cabal: Import of non-existant package vector-sized, also imported by 1 others
+haskan2.cabal: Import of non-existant package vulkan-api
+fir-examples.cabal: Import of non-existant package vulkan-utils, also imported by 1 others
+sdl2.cabal: Import of non-existant package weigh
+julia-top-n.cabal: Import of non-existant package yaml
+vanity-manual-equalities:1:failed to parse: viric	viriketo@gmail.com
+vanity-manual-equalities:2:failed to parse: Pjotr Prins	pjotr.public01@thebird.nl
+vanity-manual-equalities:3:failed to parse: Pjotr Prins	pjotr.public05@thebird.nl
+vanity-manual-equalities:4:failed to parse: Wouter den Breejen	wbreejen
+vanity-manual-equalities:5:failed to parse: Ricardo Correia	Ricardo M. Correia
+vanity-manual-equalities:6:failed to parse: ertesx@gmx.de	ertes
+index:1:failed to parse: We are all good!
+README:1:failed to parse: Usage see vim-utils.nix in nixpkgs
+README:3:failed to parse: This code depends on vim-addon-manager
+version:1:failed to parse: 0.3.2803
+hello:1:failed to parse: Hello there!
+apath:1:failed to parse: Just some text
+data:1:failed to parse: hello from a file
+expected-output:1:failed to parse: simple-tb.vhd:71:5:@700ms:(report note): 32
+expected-output:2:failed to parse: simple-tb.vhd:71:5:@900ms:(report note): 78
+expected-output:3:failed to parse: simple-tb.vhd:71:5:@1100ms:(report note): 105
+expected-output:4:failed to parse: simple-tb.vhd:71:5:@1300ms:(report note): 120
+expected-output:5:failed to parse: simple-tb.vhd:71:5:@1500ms:(report note): 79
+expected-output:6:failed to parse: simple-tb.vhd:71:5:@1700ms:(report note): 83
+expected-output:7:failed to parse: simple-tb.vhd:71:5:@1900ms:(report note): 32
+expected-output:8:failed to parse: simple-tb.vhd:75:1:@2100ms:(report note): All tests passed.
+debian-patches:1:failed to parse: gpsbabel/1.8.0+ds-4
+debian-patches:2:failed to parse: gpsbabelfe_disable_version_check
+debian-patches:3:failed to parse: gpsbabelfe_opt-in-for-usage-data-reporting
+debian-patches:4:failed to parse: gpsbabelfe_do-not-check-for-newer-version
+debian-patches:5:failed to parse: htmldoc-location
+debian-patches:6:failed to parse: Disable-donation-nagging
+CMakeLists:1:failed to parse: cmake_minimum_required(VERSION 3.10)
+CMakeLists:2:failed to parse: project(hello-cpp)
+CMakeLists:4:failed to parse: add_executable(hello-cpp main.cpp)
+CMakeLists:6:failed to parse: install(TARGETS hello-cpp)
+CMakeLists:1:failed to parse: cmake_minimum_required(VERSION 2.6)
+CMakeLists:3:failed to parse: project(ilbc)
+CMakeLists:5:failed to parse: file(GLOB ilbc_SRCS *.c)
+CMakeLists:6:failed to parse: file(GLOB ilbc_HDRS *.h)
+CMakeLists:8:failed to parse: add_library(ilbc SHARED ${ilbc_SRCS})
+CMakeLists:10:failed to parse: install(TARGETS ilbc DESTINATION lib)
+CMakeLists:11:failed to parse: install(FILES ${ilbc_HDRS} DESTINATION include/ilbc)
+CMakeLists:1:failed to parse: project(ImguiDemo LANGUAGES CXX)
+CMakeLists:2:failed to parse: cmake_minimum_required(VERSION 3.20)
+CMakeLists:4:failed to parse: add_executable(demo ./main.cpp)
+CMakeLists:6:failed to parse: find_package(imgui REQUIRED)
+CMakeLists:7:failed to parse: find_package(glfw3 REQUIRED)
+CMakeLists:8:failed to parse: find_package(OpenGL REQUIRED)
+CMakeLists:9:failed to parse: target_link_libraries(demo PRIVATE imgui glfw OpenGL::GL)
+CMakeLists:11:failed to parse: install(TARGETS demo RUNTIME DESTINATION bin)
+CMakeLists:1:failed to parse: project(inja-simple-cmake-test LANGUAGES CXX)
+CMakeLists:2:failed to parse: find_package(inja REQUIRED)
+CMakeLists:3:failed to parse: add_executable(simple-cmake-test main.cpp)
+CMakeLists:4:failed to parse: target_link_libraries(simple-cmake-test PRIVATE pantor::inja)
+CMakeLists:5:failed to parse: install(TARGETS simple-cmake-test DESTINATION bin)
+debian-patches:1:failed to parse: libcryptui/3.12.2-8
+debian-patches:2:failed to parse: build-use-pkg-config-to-detect-gpgme.patch
+debian-patches:3:failed to parse: daemon-fix-conflicting-return-types.patch
+debian-patches:4:failed to parse: daemon-port-to-gcr-3.patch
+debian-patches:5:failed to parse: git_allow-gpg2-2.1.patch
+debian-patches:6:failed to parse: libcryptui-fix-logic-flaw-in-the-prompt-recipients-d.patch
+debian-patches:1:failed to parse: nvi/1.81.6-24
+debian-patches:2:failed to parse: 01additional_upstream_data.patch
+debian-patches:3:failed to parse: 03db4.patch
+debian-patches:4:failed to parse: 04confdefs.patch
+debian-patches:5:failed to parse: 06default_value_escapetime.patch
+debian-patches:6:failed to parse: 07flush_cache.patch
+debian-patches:7:failed to parse: 08lfs.patch
+debian-patches:8:failed to parse: 08safe_printf.patch
+debian-patches:9:failed to parse: 08tempfile_umask.patch
+debian-patches:10:failed to parse: 09casting.patch
+debian-patches:11:failed to parse: 10no_one_line_visual.patch
+debian-patches:12:failed to parse: 11backward_sentence_moving.patch
+debian-patches:13:failed to parse: 12horiz_scroll_count.patch
+debian-patches:14:failed to parse: 14private_regex_fixes.patch
+debian-patches:15:failed to parse: 16manpage_errors.patch
+debian-patches:16:failed to parse: 17tutorial_typos.patch
+debian-patches:17:failed to parse: 18dbpagesize_binpower.patch
+debian-patches:18:failed to parse: 19include_term_h.patch
+debian-patches:19:failed to parse: 20glibc_has_grantpt.patch
+debian-patches:20:failed to parse: 21exrc_writability_check.patch
+debian-patches:21:failed to parse: 23debian_alternatives.patch
+debian-patches:22:failed to parse: 24fallback_to_dumb_term.patch
+debian-patches:23:failed to parse: 25manpage_note_dropped_F.patch
+debian-patches:24:failed to parse: 26trailing_tab_segv.patch
+debian-patches:25:failed to parse: 27support_C_locale.patch
+debian-patches:26:failed to parse: 29file_backup.patch
+debian-patches:27:failed to parse: 30make_recover_script_init_ready.patch
+debian-patches:28:failed to parse: 31regex_heap_overflow.patch
+debian-patches:29:failed to parse: 32allow_exec_of_nvi_opened_file.patch
+debian-patches:30:failed to parse: 33-fix-spelling-error.patch
+debian-patches:31:failed to parse: 34-fix-long-line.patch
+debian-patches:32:failed to parse: 35-fix-encoding.patch
+debian-patches:33:failed to parse: upstream/0032-ex-ex_display.c-ex_display-fix-argument-checking-in-.patch
+debian-patches:34:failed to parse: upstream/0033-vi-v_increment.c-v_increment-fix-support-for-wide-ch.patch
+debian-patches:35:failed to parse: upstream/0034-cut-fix-appending-to-unused-cut-buffer-and-support-f.patch
+debian-patches:36:failed to parse: upstream/0035-Word-search-ignored-word-end-boundaries.patch
+debian-patches:37:failed to parse: upstream/0036-Fix-how-keywords-are-picked-up.patch
+debian-patches:38:failed to parse: upstream/0037-New-macro-MEMPCPY.patch
+debian-patches:39:failed to parse: upstream/0038-Fix-A-word-search-for-keywords-starting-with-a-non-w.patch
+debian-patches:40:failed to parse: 0039-Add-function-prototypes-to-fix-implicit-function-dec.patch
+debian-patches:41:failed to parse: 0040-Add-more-function-prototypes-to-fix-Wimplicit-functi.patch
+debian-patches:42:failed to parse: 0041-Fix-FTBFS-because-of-incompatible-pointer-type-error.patch
+debian-patches:43:failed to parse: 0042-Fix-ftbfs-with-GCC-15.patch
+debian-patches:1:failed to parse: plotutils/2.6-15
+debian-patches:2:failed to parse: 01_AC_PROG_CXX.diff
+debian-patches:3:failed to parse: 10_repair_postscript
+debian-patches:4:failed to parse: 11_manpages_sb_macro
+debian-patches:5:failed to parse: 14_manpage_spline
+debian-patches:6:failed to parse: 20_svg_attribute_syntax
+debian-patches:7:failed to parse: 21_plot2svg_test.diff
+debian-patches:8:failed to parse: 25_libpng15
+debian-patches:9:failed to parse: 30_hershey_glyphs
+debian-patches:10:failed to parse: 35_spline.test.error.diff
+debian-patches:11:failed to parse: 42_plotutils-gcc15.patch
+debian-patches:1:failed to parse: schroot/1.6.13-5
+debian-patches:2:failed to parse: 1539621689.revert.schroot-1.6.10-48-g2600bcab.revert-environment-preserve-empty-values.patch
+debian-patches:3:failed to parse: 1448890714.schroot-1.7.2-72-gbf30a928.setup-d-20copyfiles-canonicalize-destination-path.patch
+debian-patches:4:failed to parse: 1453505583.schroot-1.7.2-72-g11587fd8.etc-setup-d-20copyfiles-replace-dangling-symlink-during-cp.patch
+debian-patches:5:failed to parse: 1496783678.schroot-1.7.2-127-ga5e5d8d9.fix-bash-completion.patch
+debian-patches:6:failed to parse: 1530433671.schroot-1.7.2-129-g00c0a972.cmake-use-soelim-r-option.patch
+debian-patches:7:failed to parse: 1487872945.schroot-1.7.2-137-g5c36362b.support-copyfiles-installation-into-non-existent-directories.patch
+debian-patches:8:failed to parse: 1487872999.schroot-1.7.2-138-g5a611c49.support-copyfiles-source-destination-specifications.patch
+debian-patches:9:failed to parse: 1662655911.reschroot-1.6.13-2-g779349dc.replace-usage-of-egrep-and-which.patch
+debian-patches:10:failed to parse: 1662656169.reschroot-1.6.13-3-ga9e100e5.clean-up-mess-created-in-the-portuguese-translations.patch
+debian-patches:11:failed to parse: 1664011392.reschroot-1.6.13-4-g93017cff.update-french-translation.patch
+debian-patches:12:failed to parse: 1665995770.reschroot-1.6.13-5-g81b88b45.document-a-login-shell-might-be-switched-to-a-regular-shell.patch
+debian-patches:13:failed to parse: 1692468301.reschroot-1.6.13-6-g271acf6e.subject-mount-a-new-instance-of-dev-pts-in-the-chroot.patch
+debian-patches:14:failed to parse: 1664222056.reschroot-1.6.13-9-g55af32cf.fix-localename-type.patch
+debian-patches:15:failed to parse: 1658716738.reschroot-1.6.12-2-g2045008e.fix-variable-usage-in-copyfiles-copy-file-function.patch
+debian-patches:16:failed to parse: fix-dupes-in-buildd-configuration.patch
+debian-patches:17:failed to parse: fix-example-configuration.patch
+CMakeLists:1:failed to parse: cmake_minimum_required(VERSION 3.14)
+CMakeLists:2:failed to parse: set(PROJECT_NAME "sqlite3_flutter_libs")
+CMakeLists:3:failed to parse: project(${PROJECT_NAME} LANGUAGES C CXX)
+CMakeLists:5:failed to parse: # This value is used when generating builds using this plugin, so it must
+CMakeLists:6:failed to parse: # not be changed
+CMakeLists:7:failed to parse: set(PLUGIN_NAME "sqlite3_flutter_libs_plugin")
+CMakeLists:9:failed to parse: find_package(PkgConfig REQUIRED)
+CMakeLists:10:failed to parse: pkg_check_modules(SQLITE REQUIRED sqlite3)
+CMakeLists:12:failed to parse: add_library(${PLUGIN_NAME} SHARED
+CMakeLists:13:failed to parse:   "sqlite3_flutter_libs_plugin.cc"
+CMakeLists:14:failed to parse: )
+CMakeLists:16:failed to parse: target_compile_features(${PLUGIN_NAME} PUBLIC cxx_std_14)
+CMakeLists:17:failed to parse: target_compile_options(${PLUGIN_NAME} PRIVATE "$<$<NOT:$<CONFIG:Debug>>:-O3>")
+CMakeLists:19:failed to parse: set_target_properties(${PLUGIN_NAME} PROPERTIES
+CMakeLists:20:failed to parse:   CXX_VISIBILITY_PRESET hidden)
+CMakeLists:21:failed to parse: target_compile_definitions(${PLUGIN_NAME} PRIVATE FLUTTER_PLUGIN_IMPL)
+CMakeLists:22:failed to parse: target_include_directories(${PLUGIN_NAME} INTERFACE
+CMakeLists:23:failed to parse:   "${CMAKE_CURRENT_SOURCE_DIR}/include")
+CMakeLists:24:failed to parse: target_link_libraries(${PLUGIN_NAME} PRIVATE flutter)
+CMakeLists:1:failed to parse: cmake_minimum_required(VERSION 3.25)
+CMakeLists:2:failed to parse: project(saxpy LANGUAGES CXX CUDA)
+CMakeLists:4:failed to parse: find_package(CUDAToolkit REQUIRED COMPONENTS cudart cublas)
+CMakeLists:6:failed to parse: add_executable(saxpy saxpy.cu)
+CMakeLists:7:failed to parse: target_link_libraries(saxpy PUBLIC CUDA::cublas CUDA::cudart m)
+CMakeLists:8:failed to parse: target_compile_features(saxpy PRIVATE cxx_std_14)
+CMakeLists:9:failed to parse: target_compile_options(saxpy PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+CMakeLists:10:failed to parse:                                      --expt-relaxed-constexpr>)
+CMakeLists:12:failed to parse: install(TARGETS saxpy)
+CMakeLists:1:failed to parse: cmake_minimum_required(VERSION 3.0)
+CMakeLists:2:failed to parse: find_package(Torch REQUIRED)
+CMakeLists:3:failed to parse: set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${TORCH_CXX_FLAGS}")
+CMakeLists:4:failed to parse: add_executable(test test.cpp)
+CMakeLists:5:failed to parse: target_link_libraries(test "${TORCH_LIBRARIES}")
+usage:1:failed to parse: /path/to/write-nix-expression.sh Group::Module::Submodule
+usage:3:failed to parse: It will output Nix assignment formatted for placing into
+usage:4:failed to parse: all-packages.nix amongst all the perl packages, like perlAlgorithmDiff.
+usage:5:failed to parse: Actually it will grab distribution unit Group-Module-Submodule via
+usage:6:failed to parse: search.cpan.org, and make some effort to write correct dependencies.
+usage:7:failed to parse: If among requirements there are some that have empty META.yml, or if
+usage:8:failed to parse: any of requirements acannot be installed by just getting distribution
+usage:9:failed to parse: unit whose name can be guessed by replacing :: with -, manual editing
+usage:10:failed to parse: will be needed.
