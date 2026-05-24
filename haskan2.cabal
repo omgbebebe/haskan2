@@ -105,8 +105,9 @@ library
                           Graphics.Haskan.Vulkan.Shaders.Compute.APVolume,
                           Graphics.Haskan.Vulkan.Shaders.Compute.APVolumeUniforms
                            Graphics.Haskan.Vulkan.Shaders.Constants,
-                           Graphics.Haskan.Terrain.Client,
-                           Graphics.Haskan.Terrain.Texture,
+                            Graphics.Haskan.Terrain.Client,
+                            Graphics.Haskan.Terrain.CDLOD,
+                            Graphics.Haskan.Terrain.Texture,
                           Graphics.Haskan.Vulkan.Shaders.Deferred.GBuffer,
                          Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting,
                          Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural,
