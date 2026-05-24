@@ -499,8 +499,9 @@ loadScene ::
   String ->
   Maybe UVCheckMode ->
   Maybe Mesh.Mesh ->
+  Bool -> -- ^ mesh terrain enabled
   m SceneLoadResult
-loadScene vc@VulkanContext {..} rm assetCache meshName uvCheckMode mSimpleMesh = do
+loadScene vc@VulkanContext {..} rm assetCache meshName uvCheckMode mSimpleMesh meshTerrainEnabled = do
   let isGLTF = ".gltf" `Text.isSuffixOf` Text.pack meshName || ".glb" `Text.isSuffixOf` Text.pack meshName
       isStressTest = meshName == "stress_test"
   case mSimpleMesh of
@@ -601,16 +602,17 @@ loadScene vc@VulkanContext {..} rm assetCache meshName uvCheckMode mSimpleMesh =
                   ECS.setMetallicFactor world entity3 0.0
                   ECS.setRoughnessFactor world entity3 0.5
 
-                  let groundMesh = Mesh.groundPlaneMesh 50.0
-                  groundMeshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
-                  let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
-                  checkerTexHandle <- Texture.createTextureFromData rm vc 256 256 checkerTexData
-                  groundEntity <- ECS.spawnEntity world
-                  ECS.setTransform world groundEntity (Transform (V3 0 (-0.5) 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
-                  ECS.setMesh world groundEntity groundMeshHandle
-                  ECS.setMaterial world groundEntity checkerTexHandle
-                  ECS.setMetallicFactor world groundEntity 0.0
-                  ECS.setRoughnessFactor world groundEntity 1.0
+                  unless meshTerrainEnabled $ do
+                    let groundMesh = Mesh.groundPlaneMesh 50.0
+                    groundMeshHandle <- Buffer.createMeshResource rm vcPhysicalDevice vcDevice (Mesh.vertices groundMesh) (Mesh.indices groundMesh)
+                    let checkerTexData = Texture.generateCheckerboardTexture 256 256 32
+                    checkerTexHandle <- Texture.createTextureFromData rm vc 256 256 checkerTexData
+                    groundEntity <- ECS.spawnEntity world
+                    ECS.setTransform world groundEntity (Transform (V3 0 (-0.5) 0) (Quaternion 1 (V3 0 0 0)) (V3 1 1 1))
+                    ECS.setMesh world groundEntity groundMeshHandle
+                    ECS.setMaterial world groundEntity checkerTexHandle
+                    ECS.setMetallicFactor world groundEntity 0.0
+                    ECS.setRoughnessFactor world groundEntity 1.0
 
                   sceneBbox <- liftIO $ computeWorldSpaceBounds world rm
                   logInfo LogGeneral $ "scene bounds: " <> showT sceneBbox

@@ -193,6 +193,7 @@ data RenderLoopConfig = RenderLoopConfig
     rlcEnvMapDir :: !String,
     rlcCloudTestMode :: !Bool,
     rlcProceduralSkyEnabled :: !Bool,
+    rlcMeshTerrainEnabled :: !Bool,
     rlcSimpleMesh :: !(Maybe Mesh.Mesh)
   }
 
@@ -475,6 +476,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       view = Linear.Matrix.transpose $ Camera.unViewMatrix (Camera.toMatrix camera)
       projection = Linear.Matrix.transpose $ makeProjectionMatrix w h
       viewProj = projection !*! view
+      viewProjFloat = (realToFrac <$>) <$> viewProj :: M44 Float
       skyboxRays = computeSkyboxRays ((realToFrac <$>) <$> view) ((realToFrac <$>) <$> projection)
       cloudPrevViewProj = view !*! projection
       invViewProj = (realToFrac <$>) <$> inv44 (view !*! projection) :: M44 Float
@@ -552,7 +554,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
       cloudParams = CloudParams windDirXVal windDirZVal cloudCoverageVal cloudDetailVal cloudAbsorptionVal weatherCoverageScaleVal weatherTypeBiasVal stormIntensityVal weatherAnimSpeedVal
       frameParams = FrameParams elapsedSeconds (tsPrevViewProj reTemporalState) (tsPrevTime reTemporalState) cloudPrevViewProj
       resources = FrameRenderResources ctx dr ccr reFrameDescriptorSets reTextureSampler reLightSsboBuffer
-      input = FrameRenderInput frameState camera drawList lightCount skyboxRays skyParams cloudParams frameParams invViewProj nearPlane farPlane sunColor cloudBase cloudTop mDrawData
+      input = FrameRenderInput frameState camera drawList lightCount skyboxRays skyParams cloudParams frameParams invViewProj viewProjFloat nearPlane farPlane sunColor cloudBase cloudTop mDrawData
       recordAction = buildRecordAction resources input
 
   res <- drawFrameGraphics imageAvailableSemaphore frameNumber recordAction
@@ -825,7 +827,7 @@ renderLoop RenderLoopConfig {..} = do
 
   assetCache <- initCache ".haskan2-cache"
 
-  sceneResult <- loadScene vulkanContext rm assetCache rlcMeshName rlcUvCheckMode rlcSimpleMesh
+  sceneResult <- loadScene vulkanContext rm assetCache rlcMeshName rlcUvCheckMode rlcSimpleMesh rlcMeshTerrainEnabled
   let SceneLoadResult {..} = sceneResult
       isStressTest = rlcMeshName == "stress_test"
       ecsWorld = slrECSWorld
@@ -1244,6 +1246,7 @@ renderLoop RenderLoopConfig {..} = do
                                   Deferred.dsCloud = ShaderProgram (shpVertex smCloud) Nothing Nothing Nothing (shpFragment smCloud) (Just cloudSpecInfo),
                                   Deferred.dsGodRay = ShaderProgram (shpVertex smGodRay) Nothing Nothing Nothing (shpFragment smGodRay) Nothing,
                                   Deferred.dsTerrain = ShaderProgram (shpVertex smTerrain) Nothing Nothing Nothing (shpFragment smTerrain) Nothing,
+                                  Deferred.dsTerrainMesh = smTerrainMesh,
                                   Deferred.dsAPVolume = smAPVolume,
                                   Deferred.dsAPVolumeSpecInfo = Just apVolumeSpecInfo,
                                   Deferred.dsBindless = ShaderProgram (shpVertex smBindless) Nothing Nothing Nothing (shpFragment smBindless) Nothing

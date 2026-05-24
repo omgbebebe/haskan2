@@ -17,6 +17,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Foldable (for_)
 import Data.Maybe (isJust, isNothing)
 import Data.Text qualified as Text
+import Data.Vector.Storable qualified as VS
 import Data.Word (Word32)
 import DearImGui.Raw qualified
 import Foreign.C (CFloat)
@@ -26,16 +27,20 @@ import Graphics.Haskan.Camera (AnyCamera, Camera (..))
 import Graphics.Haskan.Camera qualified as Camera
 import Graphics.Haskan.Camera.Types (ViewMatrix (..))
 import Graphics.Haskan.Engine.Render.Internal.FrameState (FrameState (..))
-import Graphics.Haskan.Engine.Types (ComputeCullResources (..), DrawIndexedIndirectCommand (..))
+import Graphics.Haskan.Engine.Types (ComputeCullResources (..), DrawIndexedIndirectCommand (..), extractFrustumPlanes)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO)
 import Graphics.Haskan.Render.Deferred (BindlessPassData (..), CloudPassData (..), DeferredPassData (..), GBufferPassData (..), GodRayPassData (..), LightingPassData (..), buildDeferredGraph)
 import Graphics.Haskan.Render.Graph (PassContext (..), PassRecordFunc (..))
 import Graphics.Haskan.Render.Graph qualified as Graph
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
+import Graphics.Haskan.Terrain.CDLOD (NodeSelection (..), buildCDLODTree, defaultCDLODConfig, selectVisibleNodes)
+import Graphics.Haskan.Terrain.NodeSSBO (packNodesToSSBO)
 import Graphics.Haskan.UI.Backend qualified as Backend
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
+import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
+import Graphics.Haskan.Vulkan.MeshPipeline qualified as MeshPipeline
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
 import Graphics.Vulkan qualified as Vulkan
@@ -100,6 +105,7 @@ data FrameRenderInput = FrameRenderInput
     friCloudParams :: !CloudParams,
     friFrameParams :: !FrameParams,
     friInvViewProj :: !(M44 Float),
+    friViewProj :: !(M44 Float),
     friNearPlane :: !Float,
     friFarPlane :: !Float,
     friSunColor :: !(V3 Float),
@@ -447,11 +453,8 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                 0
                 Vulkan.vkNullPtr
 
-        -- Terrain overlay pass (blended over lighting result)
+        -- Terrain pass (mesh terrain or legacy overlay)
         let terrainFramebuffer = drTerrainFramebuffers rcDeferred !! fromIntegral imageIdx
-            terrainDescriptorSet = drTerrainDescriptorSets rcDeferred !! fromIntegral imageIdx
-            terrainPipeline = drTerrainPipeline rcDeferred
-            terrainPipelineLayout = drTerrainPipelineLayout rcDeferred
             terrainRenderPass = drTerrainRenderPass rcDeferred
             swapchainImage = drSwapchainImages rcDeferred !! fromIntegral imageIdx
         -- Transition swapchain image from PRESENT_SRC_KHR to COLOR_ATTACHMENT_OPTIMAL
@@ -488,58 +491,32 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
             Vulkan.vkNullPtr
             1
             bPtr
-        liftIO $ RenderPass.withRenderPass commandBuffer terrainRenderPass terrainFramebuffer rcPassSurfaceExtent [] $ do
-          liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS terrainPipeline
-          liftIO $ Foreign.Marshal.Array.withArray [terrainDescriptorSet] $ \dsPtr ->
-            Vulkan.vkCmdBindDescriptorSets
-              commandBuffer
-              Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-              terrainPipelineLayout
-              0
-              1
-              dsPtr
-              0
-              Vulkan.vkNullPtr
-          -- Write terrain frame data (same layout as cloud frame data start)
-          let (V3 camX camY camZ) = rcCameraPos
-              (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = rcSkyboxRays
-              terrainFrameData =
-                [ realToFrac camX,
-                  realToFrac camY,
-                  realToFrac camZ,
-                  0,
-                  realToFrac r0x,
-                  realToFrac r0y,
-                  realToFrac r0z,
-                  0,
-                  realToFrac r1x,
-                  realToFrac r1y,
-                  realToFrac r1z,
-                  0,
-                  realToFrac r2x,
-                  realToFrac r2y,
-                  realToFrac r2z,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0,
-                  0
-                ] ::
-                  [CFloat]
-          liftIO $ Buffer.copyDataToDeviceMemory rcDevice (drTerrainFrameDataMemory rcDeferred) terrainFrameData
-          liftIO $ Vulkan.vkCmdDraw commandBuffer 3 1 0 0
+
+        -- Mesh terrain pass (when enabled)
+        let terrainMeshDescriptorSet = drTerrainMeshDescriptorSets rcDeferred !! fromIntegral imageIdx
+            terrainMeshPipeline = drTerrainMeshPipeline rcDeferred
+            terrainMeshPipelineLayout = drTerrainMeshPipelineLayout rcDeferred
+            cdlodTree = buildCDLODTree defaultCDLODConfig
+            frustumPlanes = extractFrustumPlanes friViewProj
+            visibleNodes = selectVisibleNodes cdlodTree rcCameraPos frustumPlanes
+            nodeList = nsNodes visibleNodes
+            nodeCount = length nodeList
+        when (nodeCount > 0) $ do
+          let nodeGPUData = packNodesToSSBO nodeList
+          liftIO $ Buffer.copyDataToDeviceMemory rcDevice (drTerrainMeshNodeMemory rcDeferred) (VS.toList nodeGPUData)
+          liftIO $ RenderPass.withRenderPass commandBuffer terrainRenderPass terrainFramebuffer rcPassSurfaceExtent [] $ do
+            liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS terrainMeshPipeline
+            liftIO $ Foreign.Marshal.Array.withArray [terrainMeshDescriptorSet] $ \dsPtr ->
+              Vulkan.vkCmdBindDescriptorSets
+                commandBuffer
+                Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
+                terrainMeshPipelineLayout
+                0
+                1
+                dsPtr
+                0
+                Vulkan.vkNullPtr
+            MeshPipeline.cmdDrawMeshTasksEXT commandBuffer (fromIntegral nodeCount) 1 1
 
         -- Dear ImGui overlay pass
         for_ rcImGuiDrawData $ \drawData -> liftIO $ do

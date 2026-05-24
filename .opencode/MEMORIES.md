@@ -310,6 +310,15 @@
   - Per-vertex outputs declared as `Array 64` to satisfy Vulkan validation
 - **Project structure**: Moved `vulkan-3.26.6/` to `reference_sources/` (available on Hackage), removed from `cabal.project`
 
+- **Mesh Terrain Pipeline Integration** (IN PROGRESS):
+  - `meshTerrainEnabled` flag added to `EngineConfig` — skips old ground plane ECS entity when true
+  - `DeferredResources` extended with mesh terrain fields: `drTerrainMeshPipeline`, `drTerrainMeshPipelineLayout`, `drTerrainMeshDescriptorSets`, `drTerrainMeshNodeBuffer`/`NodeMemory`
+  - `managedTerrainMeshDescriptorSetLayout` — SSBO (binding 0, mesh stage) + heightmap texture (binding 1, mesh stage) + climate texture (binding 2, fragment stage)
+  - `managedMeshPipelineWithBlending` — alpha-blended mesh pipeline using `vulkan` package `createGraphicsPipelines`
+  - Per-frame CDLOD: `buildCDLODTree` → `extractFrustumPlanes` → `selectVisibleNodes` → `packNodesToSSBO` → upload to SSBO → `cmdDrawMeshTasksEXT`
+  - `vkMeshBit` workaround: `vulkan-api` lacks `VK_SHADER_STAGE_MESH_BIT_EXT`, using `coerce (0x00000080 :: Word32)`
+  - TODO: Heightmap sampling in mesh shader (currently flat grid), geomorphing, mesh terrain enabled by default
+
 ### 2026-05-24: Terrain Sidecar API Integration (Phase 1)
 - **HTTP client**: `Graphics.Haskan.Terrain.Client` — fetches binary tiles from `localhost:7777/terrain?i1=&j1=&i2=&j2=&scale=`
   - Response: `X-Height`/`X-Width` headers + body = H×W int16 LE elevation + H×W×4 float32 LE climate

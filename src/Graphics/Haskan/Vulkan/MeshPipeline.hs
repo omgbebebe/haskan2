@@ -7,7 +7,9 @@
 
 module Graphics.Haskan.Vulkan.MeshPipeline
   ( createMeshPipeline
+  , createMeshPipelineWithBlending
   , managedMeshPipeline
+  , managedMeshPipelineWithBlending
   , cmdDrawMeshTasksEXT
   ) where
 
@@ -229,6 +231,184 @@ createMeshPipeline dev layout renderPass MeshShaderProgram{..} swapchainExtent c
 
   case pipelines Vector.!? 0 of
     Nothing -> error "createMeshPipeline: no pipeline returned"
+    Just pipeline -> pure $ fromVulkanPipeline pipeline
+
+managedMeshPipelineWithBlending
+  :: (MonadManaged m)
+  => Vulkan.VkDevice
+  -> Vulkan.VkPipelineLayout
+  -> Vulkan.VkRenderPass
+  -> MeshShaderProgram
+  -> Vulkan.VkExtent2D
+  -> Int  -- ^ color attachment count
+  -> m Vulkan.VkPipeline
+managedMeshPipelineWithBlending dev layout renderPass program extent colorCount =
+  alloc
+    "MeshPipelineWithBlending"
+    (createMeshPipelineWithBlending dev layout renderPass program extent colorCount)
+    (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
+
+createMeshPipelineWithBlending
+  :: (MonadIO m)
+  => Vulkan.VkDevice
+  -> Vulkan.VkPipelineLayout
+  -> Vulkan.VkRenderPass
+  -> MeshShaderProgram
+  -> Vulkan.VkExtent2D
+  -> Int  -- ^ color attachment count
+  -> m Vulkan.VkPipeline
+createMeshPipelineWithBlending dev layout renderPass program swapchainExtent colorAttachmentCount = do
+  let
+    device = toVulkanDevice dev
+    pipelineLayout = toVulkanPipelineLayout layout
+    renderPass_ = toVulkanRenderPass renderPass
+
+    stages = Vector.fromList $ catMaybes
+      [ mkStage Vk.SHADER_STAGE_TASK_BIT_EXT <$> mspTask program
+      , Just $ mkStage Vk.SHADER_STAGE_MESH_BIT_EXT (mspMesh program)
+      , Just $ mkStage Vk.SHADER_STAGE_FRAGMENT_BIT (mspFragment program)
+      ]
+
+    mkStage stageBit mod_ =
+      Vk.SomeStruct $ Vk.zero
+        { Vk.stage = stageBit
+        , Vk.module' = toVulkanShaderModule mod_
+        , Vk.name = "main"
+        }
+
+    viewport = Vk.Viewport
+      { Vk.x = 0
+      , Vk.y = fromIntegral (Vulkan.getField @"height" swapchainExtent)
+      , Vk.width = fromIntegral (Vulkan.getField @"width" swapchainExtent)
+      , Vk.height = - (fromIntegral (Vulkan.getField @"height" swapchainExtent))
+      , Vk.minDepth = 0.0
+      , Vk.maxDepth = 1.0
+      }
+
+    scissor = Vk.Rect2D
+      { Vk.offset = Vk.Offset2D 0 0
+      , Vk.extent = Vk.Extent2D
+          (fromIntegral $ Vulkan.getField @"width" swapchainExtent)
+          (fromIntegral $ Vulkan.getField @"height" swapchainExtent)
+      }
+
+    viewportState = Vk.PipelineViewportStateCreateInfo
+      { Vk.next = ()
+      , Vk.flags = Vk.zero
+      , Vk.viewportCount = 1
+      , Vk.viewports = Vector.fromList [viewport]
+      , Vk.scissorCount = 1
+      , Vk.scissors = Vector.fromList [scissor]
+      }
+
+    rasterizationState = Vk.PipelineRasterizationStateCreateInfo
+      { Vk.next = ()
+      , Vk.flags = Vk.zero
+      , Vk.depthClampEnable = False
+      , Vk.rasterizerDiscardEnable = False
+      , Vk.polygonMode = Vk.POLYGON_MODE_FILL
+      , Vk.lineWidth = 1.0
+      , Vk.cullMode = Vk.CULL_MODE_BACK_BIT
+      , Vk.frontFace = Vk.FRONT_FACE_COUNTER_CLOCKWISE
+      , Vk.depthBiasEnable = False
+      , Vk.depthBiasConstantFactor = 0.0
+      , Vk.depthBiasClamp = 0.0
+      , Vk.depthBiasSlopeFactor = 0.0
+      }
+
+    multisampleState = Vk.PipelineMultisampleStateCreateInfo
+      { Vk.next = ()
+      , Vk.flags = Vk.zero
+      , Vk.sampleShadingEnable = False
+      , Vk.rasterizationSamples = Vk.SAMPLE_COUNT_1_BIT
+      , Vk.minSampleShading = 1.0
+      , Vk.sampleMask = Vector.fromList []
+      , Vk.alphaToCoverageEnable = False
+      , Vk.alphaToOneEnable = False
+      }
+
+    nullStencilOp = Vk.StencilOpState
+      { Vk.failOp = Vk.STENCIL_OP_KEEP
+      , Vk.passOp = Vk.STENCIL_OP_KEEP
+      , Vk.depthFailOp = Vk.STENCIL_OP_KEEP
+      , Vk.compareOp = Vk.COMPARE_OP_ALWAYS
+      , Vk.compareMask = 0
+      , Vk.writeMask = 0
+      , Vk.reference = 0
+      }
+
+    depthStencilState = Vk.PipelineDepthStencilStateCreateInfo
+      { Vk.flags = Vk.zero
+      , Vk.depthTestEnable = True
+      , Vk.depthWriteEnable = True
+      , Vk.depthCompareOp = Vk.COMPARE_OP_LESS_OR_EQUAL
+      , Vk.depthBoundsTestEnable = False
+      , Vk.stencilTestEnable = False
+      , Vk.front = nullStencilOp
+      , Vk.back = nullStencilOp
+      , Vk.minDepthBounds = 0
+      , Vk.maxDepthBounds = 1
+      }
+
+    colorBlendAttachment = Vk.PipelineColorBlendAttachmentState
+      { Vk.colorWriteMask =
+          Vk.COLOR_COMPONENT_R_BIT
+            .|. Vk.COLOR_COMPONENT_G_BIT
+            .|. Vk.COLOR_COMPONENT_B_BIT
+            .|. Vk.COLOR_COMPONENT_A_BIT
+      , Vk.blendEnable = True
+      , Vk.srcColorBlendFactor = Vk.BLEND_FACTOR_SRC_ALPHA
+      , Vk.dstColorBlendFactor = Vk.BLEND_FACTOR_ONE_MINUS_SRC_ALPHA
+      , Vk.colorBlendOp = Vk.BLEND_OP_ADD
+      , Vk.srcAlphaBlendFactor = Vk.BLEND_FACTOR_ONE
+      , Vk.dstAlphaBlendFactor = Vk.BLEND_FACTOR_ZERO
+      , Vk.alphaBlendOp = Vk.BLEND_OP_ADD
+      }
+
+    colorBlendState = Vk.PipelineColorBlendStateCreateInfo
+      { Vk.next = ()
+      , Vk.flags = Vk.zero
+      , Vk.logicOpEnable = False
+      , Vk.logicOp = Vk.LOGIC_OP_COPY
+      , Vk.attachmentCount = fromIntegral colorAttachmentCount
+      , Vk.attachments = Vector.fromList $ replicate colorAttachmentCount colorBlendAttachment
+      , Vk.blendConstants = (0, 0, 0, 0)
+      }
+
+    dynamicState = Vk.PipelineDynamicStateCreateInfo
+      { Vk.flags = Vk.zero
+      , Vk.dynamicStates = Vector.fromList []
+      }
+
+    createInfo = Vk.GraphicsPipelineCreateInfo
+      { Vk.next = ()
+      , Vk.flags = Vk.zero
+      , Vk.stageCount = fromIntegral (Vector.length stages)
+      , Vk.stages = stages
+      , Vk.vertexInputState = Nothing
+      , Vk.inputAssemblyState = Nothing
+      , Vk.tessellationState = Nothing
+      , Vk.viewportState = Just $ Vk.SomeStruct viewportState
+      , Vk.rasterizationState = Just $ Vk.SomeStruct rasterizationState
+      , Vk.multisampleState = Just $ Vk.SomeStruct multisampleState
+      , Vk.depthStencilState = Just depthStencilState
+      , Vk.colorBlendState = Just $ Vk.SomeStruct colorBlendState
+      , Vk.dynamicState = Just dynamicState
+      , Vk.layout = pipelineLayout
+      , Vk.renderPass = renderPass_
+      , Vk.subpass = 0
+      , Vk.basePipelineHandle = Vk.zero
+      , Vk.basePipelineIndex = -1
+      }
+
+  (result, pipelines) <- liftIO $ Vk.createGraphicsPipelines
+    device
+    Vk.NULL_HANDLE
+    (Vector.fromList [Vk.SomeStruct createInfo])
+    Nothing
+
+  case pipelines Vector.!? 0 of
+    Nothing -> error "createMeshPipelineWithBlending: no pipeline returned"
     Just pipeline -> pure $ fromVulkanPipeline pipeline
 
 -- ---------------------------------------------------------------------------

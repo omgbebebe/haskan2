@@ -494,6 +494,7 @@ data EngineConfig = EngineConfig
     dayNightEnabled :: !Bool,
     cloudTestMode :: !Bool,
     proceduralSkyEnabled :: !Bool,
+    meshTerrainEnabled :: !Bool,
     simpleMesh :: !(Maybe Mesh)
   }
   deriving (Show)

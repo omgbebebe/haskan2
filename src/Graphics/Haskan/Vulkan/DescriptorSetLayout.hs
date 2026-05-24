@@ -13,6 +13,8 @@ module Graphics.Haskan.Vulkan.DescriptorSetLayout
     createGodRayDescriptorSetLayout,
     managedTerrainDescriptorSetLayout,
     createTerrainDescriptorSetLayout,
+    managedTerrainMeshDescriptorSetLayout,
+    createTerrainMeshDescriptorSetLayout,
     managedBindlessDescriptorSetLayout,
     createBindlessDescriptorSetLayout,
     managedBindlessPassDescriptorSetLayout,
@@ -39,6 +41,8 @@ where
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
+import Data.Coerce (coerce)
+import Data.Word (Word32)
 import Foreign (castPtr)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
 import Graphics.Haskan.Vulkan.DescriptorSetLayout.TH (descriptorSetLayoutBindings)
@@ -96,6 +100,9 @@ vkFragmentBit = Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
 
 vkVertexFragmentBits :: Vulkan.VkShaderStageFlags
 vkVertexFragmentBits = Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+
+vkMeshBit :: Vulkan.VkShaderStageFlags
+vkMeshBit = Data.Coerce.coerce (0x00000080 :: Word32)  -- VK_SHADER_STAGE_MESH_BIT_EXT
 
 vkComputeBit :: Vulkan.VkShaderStageFlags
 vkComputeBit = Vulkan.VK_SHADER_STAGE_COMPUTE_BIT
@@ -274,6 +281,58 @@ createTerrainDescriptorSetLayout dev = do
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
               &* set @"bindingCount" (fromIntegral (length bindings))
               &* setListRef @"pBindings" bindings
+          )
+   in liftIO $
+        withPtr
+          createInfo
+          ( \ciPtr ->
+           allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+           )
+
+-- | Mesh terrain descriptor set layout:
+-- binding 0 = node SSBO (mesh stage)
+-- binding 1 = heightmap texture array (mesh stage)
+-- binding 2 = climate texture array (fragment stage)
+managedTerrainMeshDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedTerrainMeshDescriptorSetLayout dev =
+  alloc
+    "TerrainMeshDescriptorSetLayout"
+    (createTerrainMeshDescriptorSetLayout dev)
+    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+
+createTerrainMeshDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createTerrainMeshDescriptorSetLayout dev = do
+  let nodeBinding =
+        Vulkan.createVk
+          ( set @"binding" 0
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"descriptorCount" 1
+              &* set @"stageFlags" vkMeshBit
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+          )
+      heightmapBinding =
+        Vulkan.createVk
+          ( set @"binding" 1
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"descriptorCount" 1
+              &* set @"stageFlags" vkMeshBit
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+          )
+      climateBinding =
+        Vulkan.createVk
+          ( set @"binding" 2
+              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"descriptorCount" 1
+              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+              &* set @"pImmutableSamplers" Vulkan.VK_NULL
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"bindingCount" 3
+              &* setListRef @"pBindings" [nodeBinding, heightmapBinding, climateBinding]
           )
    in liftIO $
         withPtr

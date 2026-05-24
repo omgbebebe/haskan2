@@ -9,6 +9,8 @@ module Graphics.Haskan.Vulkan.DescriptorPool
     createGodRayDescriptorPool,
     managedTerrainDescriptorPool,
     createTerrainDescriptorPool,
+    managedTerrainMeshDescriptorPool,
+    createTerrainMeshDescriptorPool,
     managedAPVolumeDescriptorPool,
     createAPVolumeDescriptorPool,
     managedBindlessDescriptorPool,
@@ -208,6 +210,41 @@ createTerrainDescriptorPool dev numSets = do
               &* set @"flags" Vulkan.VK_ZERO_FLAGS
               &* set @"poolSizeCount" 2
               &* setListRef @"pPoolSizes" [samplerPoolSize, uboPoolSize]
+              &* set @"maxSets" (fromIntegral numSets)
+          )
+   in liftIO $
+        withPtr
+           createInfo
+           ( \ciPtr ->
+               allocaAndPeek (Vulkan.vkCreateDescriptorPool dev ciPtr Vulkan.vkNullPtr)
+           )
+
+managedTerrainMeshDescriptorPool :: (MonadManaged m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+managedTerrainMeshDescriptorPool dev numSets =
+  alloc
+    "TerrainMeshDescriptorPool"
+    (createTerrainMeshDescriptorPool dev numSets)
+    (\ptr -> Vulkan.vkDestroyDescriptorPool dev ptr Vulkan.vkNullPtr)
+
+createTerrainMeshDescriptorPool :: (MonadIO m) => Vulkan.VkDevice -> Int -> m Vulkan.VkDescriptorPool
+createTerrainMeshDescriptorPool dev numSets = do
+  let ssboPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+              &* set @"descriptorCount" (fromIntegral (numSets * 1))
+          )
+      samplerPoolSize =
+        Vulkan.createVk
+          ( set @"type" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              &* set @"descriptorCount" (fromIntegral (numSets * 2))
+          )
+      createInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"flags" Vulkan.VK_ZERO_FLAGS
+              &* set @"poolSizeCount" 2
+              &* setListRef @"pPoolSizes" [ssboPoolSize, samplerPoolSize]
               &* set @"maxSets" (fromIntegral numSets)
           )
    in liftIO $

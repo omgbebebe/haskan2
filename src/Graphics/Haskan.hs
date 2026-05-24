@@ -59,6 +59,7 @@ runHaskan RunOptions {..} = do
         dayNightEnabled = roDayNight,
         cloudTestMode = roCloudTest,
         proceduralSkyEnabled = roProceduralSky,
+        meshTerrainEnabled = False,
         simpleMesh = Nothing
       }
   logInfoIO LogGeneral "Shutting down Haskan"
@@ -87,6 +88,7 @@ runSimple title mesh = do
         dayNightEnabled = False,
         cloudTestMode = False,
         proceduralSkyEnabled = False,
+        meshTerrainEnabled = False,
         simpleMesh = Just mesh
       }
   logInfoIO LogGeneral "Shutting down Haskan"

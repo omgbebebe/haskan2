@@ -21,7 +21,7 @@ import Data.Word (Word8)
 import Foreign.Marshal.Array qualified
 import Foreign.Ptr (Ptr, nullPtr)
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
-import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..))
+import Graphics.Haskan.Render.ShaderProgram (MeshShaderProgram (..), ShaderProgram (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
 import Graphics.Haskan.Vertex (Vertex)
 import Graphics.Haskan.Vertex qualified as Vertex
@@ -35,6 +35,7 @@ import Graphics.Haskan.Vulkan.Framebuffer qualified as Framebuffer
 import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.ImageView qualified as ImageView
 import Graphics.Haskan.Vulkan.Memory qualified as Memory
+import Graphics.Haskan.Vulkan.MeshPipeline qualified as MeshPipeline
 import Graphics.Haskan.Vulkan.PipelineLayout qualified as PipelineLayout
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Swapchain qualified as Swapchain
@@ -53,6 +54,7 @@ data DeferredShaders = DeferredShaders
     dsCloud :: !ShaderProgram,
     dsGodRay :: !ShaderProgram,
     dsTerrain :: !ShaderProgram,
+    dsTerrainMesh :: !MeshShaderProgram,
     dsAPVolume :: !Vulkan.VkShaderModule,
     dsAPVolumeSpecInfo :: !(Maybe (Ptr Vulkan.VkSpecializationInfo)),
     dsBindless :: !ShaderProgram
@@ -137,6 +139,11 @@ data DeferredResources = DeferredResources
     drTerrainDescriptorSets :: ![Vulkan.VkDescriptorSet],
     drTerrainFrameDataBuffer :: !Vulkan.VkBuffer,
     drTerrainFrameDataMemory :: !Vulkan.VkDeviceMemory,
+    drTerrainMeshPipeline :: !Vulkan.VkPipeline,
+    drTerrainMeshPipelineLayout :: !Vulkan.VkPipelineLayout,
+    drTerrainMeshDescriptorSets :: ![Vulkan.VkDescriptorSet],
+    drTerrainMeshNodeBuffer :: !Vulkan.VkBuffer,
+    drTerrainMeshNodeMemory :: !Vulkan.VkDeviceMemory,
     drSwapchainImages :: ![Vulkan.VkImage],
     drAPVolumeImage :: !Vulkan.VkImage,
     drAPVolumeImageView :: !Vulkan.VkImageView,
@@ -622,6 +629,58 @@ createDeferredResources DeferredConfig {..} = do
     DescriptorSet.updateTerrainFrameDataBuffer device ds terrainFrameDataBuffer
   logDebugIO LogRender "terrain descriptor sets updated"
 
+  -- Terrain mesh descriptor set layout
+  terrainMeshDescriptorSetLayout <- DescriptorSetLayout.managedTerrainMeshDescriptorSetLayout device
+  logDebugIO LogRender "terrain mesh descriptor set layout created"
+
+  -- Terrain mesh pipeline layout
+  terrainMeshPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [terrainMeshDescriptorSetLayout] []
+  logDebugIO LogRender "terrain mesh pipeline layout created"
+
+  -- Terrain mesh pipeline with alpha blending
+  terrainMeshPipeline <-
+    MeshPipeline.managedMeshPipelineWithBlending
+      device
+      terrainMeshPipelineLayout
+      terrainOverlayRenderPass
+      dsTerrainMesh
+      extent
+      1
+  logDebugIO LogRender "terrain mesh pipeline with blending created"
+
+  -- Terrain mesh descriptor pool and sets
+  terrainMeshDescriptorPool <- DescriptorPool.managedTerrainMeshDescriptorPool device numSwapchainImages
+  terrainMeshDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
+    DescriptorSet.allocateDescriptorSet device terrainMeshDescriptorPool [terrainMeshDescriptorSetLayout]
+  logDebugIO LogRender $ "terrain mesh descriptor sets allocated: " <> showT (length terrainMeshDescriptorSets)
+
+  -- Terrain mesh node SSBO (1024 nodes * 32 bytes = 32KB)
+  let terrainNodeSSBOSize = 1024 * 32
+  (terrainMeshNodeBuffer, terrainMeshNodeMemoryRequirement) <-
+    Buffer.managedBuffer device (replicate terrainNodeSSBOSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+  terrainMeshNodeMemory <- Buffer.managedBufferMemory pdev device terrainMeshNodeMemoryRequirement
+  liftIO $ Buffer.bindBufferMemory device terrainMeshNodeBuffer terrainMeshNodeMemory (replicate terrainNodeSSBOSize (0 :: Word8))
+  logDebugIO LogRender "terrain mesh node SSBO created"
+
+  -- Terrain mesh descriptor pool and sets
+  terrainMeshDescriptorPool <- DescriptorPool.managedTerrainMeshDescriptorPool device numSwapchainImages
+  terrainMeshDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
+    DescriptorSet.allocateDescriptorSet device terrainMeshDescriptorPool [terrainMeshDescriptorSetLayout]
+  logDebugIO LogRender $ "terrain mesh descriptor sets allocated: " <> showT (length terrainMeshDescriptorSets)
+
+  -- Update terrain mesh descriptor sets with textures (node buffer updated per-frame)
+  liftIO $ for_ terrainMeshDescriptorSets $ \ds -> do
+    DescriptorSet.updateTerrainMeshDescriptorSets $
+      DescriptorSet.TerrainMeshDescriptorUpdate
+        { tmduDevice = device,
+          tmduDescriptorSet = ds,
+          tmduNodeBuffer = terrainMeshNodeBuffer,
+          tmduSampler = ttSampler,
+          tmduElevationView = ttElevationView,
+          tmduClimateView = ttClimateView
+        }
+  logDebugIO LogRender "terrain mesh descriptor sets updated with textures"
+
   -- AP volume compute pipeline
   apVolumeDescriptorSetLayout <- DescriptorSetLayout.managedAPVolumeComputeDescriptorSetLayout device
   logDebugIO LogRender "AP volume descriptor set layout created"
@@ -751,6 +810,11 @@ createDeferredResources DeferredConfig {..} = do
         drTerrainDescriptorSets = terrainDescriptorSets,
         drTerrainFrameDataBuffer = terrainFrameDataBuffer,
         drTerrainFrameDataMemory = terrainFrameDataMemory,
+        drTerrainMeshPipeline = terrainMeshPipeline,
+        drTerrainMeshPipelineLayout = terrainMeshPipelineLayout,
+        drTerrainMeshDescriptorSets = terrainMeshDescriptorSets,
+        drTerrainMeshNodeBuffer = terrainMeshNodeBuffer,
+        drTerrainMeshNodeMemory = terrainMeshNodeMemory,
         drSwapchainImages = swapchainImages,
         drAPVolumeImage = apImage,
         drAPVolumeImageView = apImageView,

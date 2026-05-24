@@ -241,6 +241,7 @@ mainLoop meshName EngineConfig {..} = do
               rlcEnvMapDir = envMapDir,
               rlcCloudTestMode = cloudTestMode,
               rlcProceduralSkyEnabled = proceduralSkyEnabled,
+              rlcMeshTerrainEnabled = meshTerrainEnabled,
               rlcSimpleMesh = simpleMesh
             }
 

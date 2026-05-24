@@ -68,6 +68,16 @@ data TerrainDescriptorUpdate = TerrainDescriptorUpdate
     tduClimateView :: !(Maybe Vulkan.VkImageView)
   }
 
+-- | Configuration for updating terrain mesh descriptor sets.
+data TerrainMeshDescriptorUpdate = TerrainMeshDescriptorUpdate
+  { tmduDevice :: !Vulkan.VkDevice,
+    tmduDescriptorSet :: !Vulkan.VkDescriptorSet,
+    tmduNodeBuffer :: !Vulkan.VkBuffer,
+    tmduSampler :: !Vulkan.VkSampler,
+    tmduElevationView :: !(Maybe Vulkan.VkImageView),
+    tmduClimateView :: !(Maybe Vulkan.VkImageView)
+  }
+
 -- | Configuration for updating AP volume descriptor sets.
 data APVolumeDescriptorUpdate = APVolumeDescriptorUpdate
   { apduDevice :: !Vulkan.VkDevice,
@@ -884,6 +894,66 @@ updateTerrainFrameDataBuffer dev descriptorSet buffer = do
   liftIO $
     Foreign.Marshal.Array.withArray [write] $ \writeUpdatePtr ->
       Vulkan.vkUpdateDescriptorSets dev 1 writeUpdatePtr 0 Vulkan.vkNullPtr
+
+-- | Update terrain mesh descriptor set with node SSBO, heightmap, and climate textures.
+updateTerrainMeshDescriptorSets ::
+  (MonadIO m) =>
+  TerrainMeshDescriptorUpdate ->
+  m ()
+updateTerrainMeshDescriptorSets TerrainMeshDescriptorUpdate {..} = do
+  let nodeBufferInfo =
+        Vulkan.createVk
+          ( set @"buffer" tmduNodeBuffer
+              &* set @"offset" 0
+              &* set @"range" (Vulkan.VkDeviceSize Vulkan.VK_WHOLE_SIZE)
+          )
+      mkTextureInfo imageView s =
+        Vulkan.createVk
+          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+              &* set @"imageView" imageView
+              &* set @"sampler" s
+          )
+      mkWrite bindingIdx descriptorType pBufferInfo pImageInfo =
+        Vulkan.createVk
+          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
+              &* set @"pNext" Vulkan.VK_NULL
+              &* set @"dstSet" tmduDescriptorSet
+              &* set @"dstBinding" bindingIdx
+              &* set @"descriptorType" descriptorType
+              &* set @"pTexelBufferView" Vulkan.VK_NULL
+              &* set @"pBufferInfo" pBufferInfo
+              &* set @"pImageInfo" pImageInfo
+              &* set @"descriptorCount" 1
+              &* set @"dstArrayElement" 0
+          )
+      nodeWrite =
+        mkWrite
+          0
+          Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+          (Vulkan.unsafePtr nodeBufferInfo)
+          Vulkan.VK_NULL
+      elevWrite = case tmduElevationView of
+        Just elevView ->
+          [ mkWrite
+              1
+              Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              Vulkan.VK_NULL
+              (Vulkan.unsafePtr $ mkTextureInfo elevView tmduSampler)
+          ]
+        Nothing -> []
+      climateWrite = case tmduClimateView of
+        Just climateView ->
+          [ mkWrite
+              2
+              Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+              Vulkan.VK_NULL
+              (Vulkan.unsafePtr $ mkTextureInfo climateView tmduSampler)
+          ]
+        Nothing -> []
+      allWrites = nodeWrite : elevWrite ++ climateWrite
+  liftIO $
+    Foreign.Marshal.Array.withArray allWrites $ \writePtr ->
+      Vulkan.vkUpdateDescriptorSets tmduDevice (fromIntegral (length allWrites)) writePtr 0 Vulkan.vkNullPtr
 
 -- | Update AP volume compute descriptor set with storage image, cloud noise, and UBO.
 updateAPVolumeDescriptorSets ::
