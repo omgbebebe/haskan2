@@ -91,6 +91,7 @@
 | `MILESTONE_FIR_GAPS.md` | Open issues | Choose overlap, abs, type inference cascades |
 | `MILESTONE_FIR_MATH.md` | Complete | All 20 vector/matrix ops implemented |
 | **AP Volume** | **Phase 2 Complete** | 3D aerial perspective volume compute + lighting integration |
+| `MILESTONE_MESH_SHADER_CDLOD.md` | **Phases 1-4 Complete** | FIR mesh shader foundation, host pipeline, CDLOD data structures, terrain mesh+fragment shaders |
 
 ## Active Issues (See `.opencode/PROJECT_STATE.md` for full audit)
 
@@ -282,6 +283,32 @@
 - **OS**: NixOS, **GPU**: NVIDIA RTX 4090, **Vulkan**: 1.4.312
 - **Descriptor indexing**: nonUniform=True, updateAfterBind=True, partiallyBound=True, runtimeArray=True
 - **LD_LIBRARY_PATH**: Must include `3rdparty/jolt-wrapper/` for `libjolt_wrapper.so`
+
+### 2026-05-24: Mesh Shader + CDLOD Terrain (Phases 1-4)
+- **FIR Mesh Shader Foundation** (Phase 1):
+  - Fixed SPIR-V values: `MeshShadingEXT` = 5283, `OpSetMeshOutputsEXT` = 5295, `OutputPrimitivesEXT` = 5270, `OutputTrianglesEXT` = 5298
+  - Added `MeshShaderBuiltins` with flat arrays for per-primitive outputs (`gl_PrimitiveTriangleIndicesEXT`, `gl_CullPrimitiveEXT`)
+  - Added `setMeshOutputsEXT` and `meshShader` functions to `FIR.Syntax.Program`
+  - Made `ShaderModule` polymorphic in stage type
+  - `HelloMesh` example compiles and passes `spirv-val --target-env vulkan1.4`
+- **Host-Side Mesh Pipeline** (Phase 2):
+  - `Graphics.Haskan.Vulkan.Interop`: vulkan-api ↔ vulkan package handle conversions (`toVulkanDevice`, `fromVulkanPipeline`, etc.)
+  - `Graphics.Haskan.Vulkan.MeshPipeline`: `createMeshPipeline` using `vulkan` package, no vertex input, mesh+fragment stages
+  - `cmdDrawMeshTasksEXT` wrapper for dispatching mesh workgroups
+  - Device creation: optional `VK_EXT_mesh_shader` extension enable
+  - `DeviceCapabilities`: queries extension support via `enumerateDeviceExtensionProperties`
+- **CDLOD Data Structures** (Phase 3):
+  - `Graphics.Haskan.Terrain.CDLOD`: quadtree, node selection, frustum culling, morph factor computation
+  - `defaultCDLODConfig`: 8×8 patches, 4 LOD levels, 8192m world, 0.25 morph zone ratio
+  - `Graphics.Haskan.Terrain.NodeSSBO`: `TerrainNodeGPU` Storable struct (32 bytes, 16-byte aligned)
+- **Terrain Mesh Shaders** (Phase 4):
+  - `Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainMesh`: FIR mesh + fragment shaders
+  - Mesh shader: reads node SSBO via `gl_WorkgroupID`, emits 8×8 grid (64 vertices, 98 triangles) per workgroup
+  - Fragment shader: UV-based color output
+  - Build-time compilation via TH in `Graphics.Haskan.Vulkan.Shaders.Compile`
+  - Integrated into `ShaderModules` in render setup
+  - Per-vertex outputs declared as `Array 64` to satisfy Vulkan validation
+- **Project structure**: Moved `vulkan-3.26.6/` to `reference_sources/` (available on Hackage), removed from `cabal.project`
 
 ### 2026-05-24: Terrain Sidecar API Integration (Phase 1)
 - **HTTP client**: `Graphics.Haskan.Terrain.Client` — fetches binary tiles from `localhost:7777/terrain?i1=&j1=&i2=&j2=&scale=`

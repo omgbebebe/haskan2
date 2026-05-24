@@ -37,3 +37,5 @@ glTF-Sample-Assets/
 3rdparty/jolt-wrapper/*.a
 3rdparty/jolt-wrapper/*.so
 3rdparty/jolt-wrapper/test_wrapper
+
+reference_sources/

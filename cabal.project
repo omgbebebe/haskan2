@@ -3,7 +3,7 @@ packages:
   ./3rdparty/fir/
   ./3rdparty/gltf-loader/
   ./3rdparty/dear-imgui/
-  ./vulkan-3.26.6/
+--  ./vulkan-3.26.6/
 
 write-ghc-environment-files: always
 
