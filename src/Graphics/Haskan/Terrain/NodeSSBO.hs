@@ -9,7 +9,7 @@ module Graphics.Haskan.Terrain.NodeSSBO
 import Data.Vector.Storable (Vector)
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word32)
-import Foreign (Storable(..), castPtr, pokeByteOff)
+import Foreign (Storable(..), castPtr, pokeByteOff, peekByteOff)
 import Graphics.Haskan.Terrain.CDLOD (TerrainNode(..))
 import Linear (V2(..), V4(..))
 
@@ -42,7 +42,21 @@ data TerrainNodeGPU = TerrainNodeGPU
 instance Storable TerrainNodeGPU where
   sizeOf _ = 32
   alignment _ = 16
-  peek _ = error "TerrainNodeGPU peek not implemented"
+  peek ptr = do
+    V4 ox oy ws hs <- peek (castPtr ptr)
+    lod <- peekByteOff ptr 16
+    hml <- peekByteOff ptr 20
+    cl <- peekByteOff ptr 24
+    ms <- peekByteOff ptr 28
+    pure TerrainNodeGPU
+      { tngWorldOffset = V2 ox oy
+      , tngWorldSize = ws
+      , tngHeightScale = hs
+      , tngLODLevel = lod
+      , tngHeightmapLayer = hml
+      , tngClimateLayer = cl
+      , tngMorphStart = ms
+      }
   poke ptr TerrainNodeGPU{..} = do
     let V2 ox oy = tngWorldOffset
     poke (castPtr ptr) (V4 ox oy tngWorldSize tngHeightScale)

@@ -649,12 +649,6 @@ createDeferredResources DeferredConfig {..} = do
   liftIO $ Buffer.bindBufferMemory device terrainMeshNodeBuffer terrainMeshNodeMemory (replicate terrainNodeSSBOSize (0 :: Word8))
   logDebugIO LogRender "terrain mesh node SSBO created"
 
-  -- Terrain mesh descriptor pool and sets
-  terrainMeshDescriptorPool <- DescriptorPool.managedTerrainMeshDescriptorPool device numSwapchainImages
-  terrainMeshDescriptorSets <- for [0 .. numSwapchainImages - 1] $ \_ ->
-    DescriptorSet.allocateDescriptorSet device terrainMeshDescriptorPool [terrainMeshDescriptorSetLayout]
-  logDebugIO LogRender $ "terrain mesh descriptor sets allocated: " <> showT (length terrainMeshDescriptorSets)
-
   -- Update terrain mesh descriptor sets with textures (node buffer updated per-frame)
   liftIO $ for_ terrainMeshDescriptorSets $ \ds -> do
     DescriptorSet.updateTerrainMeshDescriptorSets $

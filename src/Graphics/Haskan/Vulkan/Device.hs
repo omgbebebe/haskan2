@@ -108,8 +108,13 @@ createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
         features2 <- Vk26.getPhysicalDeviceFeatures2 dev :: IO (Vk26.PhysicalDeviceFeatures2 '[PhysicalDeviceMeshShaderFeaturesEXT])
         let Vk26.PhysicalDeviceFeatures2 (msFeaturesQuery, ()) _ = features2
             meshSupported = meshShader msFeaturesQuery
+            -- Disable features that require additional extensions we don't enable
+            msFeaturesQuery' = msFeaturesQuery
+              { multiviewMeshShader = False
+              , primitiveFragmentShadingRateMeshShader = False
+              }
         logInfoIO LogVulkan $ "Mesh shader supported: " <> showT meshSupported
-        pure (Just msFeaturesQuery)
+        pure (Just msFeaturesQuery')
       else pure Nothing
 
   let deviceFlags = zero

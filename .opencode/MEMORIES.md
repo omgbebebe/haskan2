@@ -322,6 +322,31 @@
   - **Fragment shader**: Samples `RGBA32 F` climate texture at world position, applies simple diffuse+ambient lighting
   - TODO: Geomorphing, enable mesh terrain by default, test on actual hardware
 
+### 2026-05-25: Runtime Validation Fixes — Mesh Shader Descriptor Sets + Device Features
+- **TerrainMesh.hs descriptor set mismatch**: Shaders used `DescriptorSet 1` but pipeline layout only had one set at index 0.
+  - **Fix**: Changed all bindings in `MeshDefs` and `FragmentDefs` from `DescriptorSet 1` to `DescriptorSet 0`.
+  - **Root cause of stale SPIR-V**: `cabal` doesn't track SPIR-V files as build outputs. Deleted `.spv` files weren't regenerated because cabal thought everything was "up to date". Required `rm -rf dist-newstyle/build/.../haskan2-0.1.0.0` to force full rebuild.
+- **Mesh shader feature validation errors**: `multiviewMeshShader` and `primitiveFragmentShadingRateMeshShader` were enabled by default in `PhysicalDeviceMeshShaderFeaturesEXT` but their prerequisite features (`multiview`, `primitiveFragmentShadingRate`) were not enabled.
+  - **Fix**: `Device.hs:105-113` — explicitly set `multiviewMeshShader = False` and `primitiveFragmentShadingRateMeshShader = False` after querying device features.
+- **Remaining issues**:
+  - 3× `Undefined-Value-StorageImage-FormatMismatch-ImageView` warnings (pre-existing env_map format mismatch)
+  - 10× `VUID-vkDestroyDevice-device-05137` buffer/image leaks at shutdown (**pre-existing** — confirmed present in logs before mesh shader changes; `Managed` monad cleanup order issue with nested `with` blocks inside `liftIO`)
+  - `DeferredResources.hs:652-655` had duplicate terrain mesh descriptor pool/set allocation — removed
+
+### 2026-05-25: FIR Mesh Shader Arrayness + Fragment Location Fix
+- **Root cause**: `fir` library cached old `Arrayness.hs` — cabal didn't detect file changes in `3rdparty/fir/src/FIR/Validation/Arrayness.hs`. The `MeshShaderExecutionInfo` pattern WAS correct but wasn't compiled into the cached `fir` library.
+  - **Fix**: Forced rebuild with `touch` + `cabal build fir --ghc-options="-fforce-recomp"`. Confirmed debug `TypeError` pattern fires, proving cached build was stale.
+- **TerrainMesh.hs fragment shader locations**: Were still at old values `0, 256, 512, 768` instead of matching mesh shader outputs `0, 1, 2, 3`.
+  - **Fix**: Changed `FragmentDefs` locations to `0, 1, 2, 3` to match `MeshDefs` outputs.
+- **Validation**: All 30 SPIR-V shaders pass `spirv-val --target-env vulkan1.2`. `haskan2` library compiles clean (119 modules).
+- **FIR `Arrayness.hs` mesh shader pattern** (confirmed working):
+  ```haskell
+  Arrayness SPIRV.Output decs
+    ( SPIRV.MeshShaderExecutionInfo ( SPIRV.MeshShaderDetails maxVertices _ ) )
+      = 'ImplicitArrayness maxVertices
+  ```
+  - This strips the implicit `Array N` wrapper from mesh shader per-vertex outputs for location counting.
+
 ### 2026-05-24: Terrain Sidecar API Integration (Phase 1)
 - **HTTP client**: `Graphics.Haskan.Terrain.Client` — fetches binary tiles from `localhost:7777/terrain?i1=&j1=&i2=&j2=&scale=`
   - Response: `X-Height`/`X-Width` headers + body = H×W int16 LE elevation + H×W×4 float32 LE climate
