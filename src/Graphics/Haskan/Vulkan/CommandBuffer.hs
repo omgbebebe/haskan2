@@ -4,6 +4,8 @@ import Control.Monad ((>=>))
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Bits ((.|.))
 import Data.Int (Int32)
+import Data.Vector qualified as Vector
+import Vulkan qualified as Vk26
 import Data.Word (Word32)
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Vulkan qualified as Vulkan
@@ -14,19 +16,17 @@ import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 createCommandBuffer ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkCommandPool ->
-  m Vulkan.VkCommandBuffer
-createCommandBuffer dev commandPool =
-  let createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"commandPool" commandPool
-              &* set @"level" Vulkan.VK_COMMAND_BUFFER_LEVEL_PRIMARY
-              &* set @"commandBufferCount" 1
-          )
-   in liftIO $ withPtr createInfo (allocaAndPeek . Vulkan.vkAllocateCommandBuffers dev)
+  Vk26.Device ->
+  Vk26.CommandPool ->
+  m Vk26.CommandBuffer
+createCommandBuffer dev commandPool = do
+  let allocateInfo =
+        Vk26.CommandBufferAllocateInfo
+          commandPool
+          Vk26.COMMAND_BUFFER_LEVEL_PRIMARY
+          1
+  cbs <- liftIO $ Vk26.allocateCommandBuffers dev allocateInfo
+  pure (Vector.head cbs)
 
 withCommandBuffer ::
   (MonadIO m) =>

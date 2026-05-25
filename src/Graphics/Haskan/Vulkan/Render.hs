@@ -17,13 +17,13 @@ import Control.Monad.Managed (MonadManaged)
 import Control.Monad.Reader (MonadReader, ReaderT, ask, asks, runReaderT)
 import Data.Foldable (for_)
 import Data.Traversable (for)
-import Foreign.Marshal.Array qualified
+import Data.Vector qualified as Vector
+import Data.Word (Word32, Word64)
+import Foreign.Ptr (nullPtr)
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
 import Graphics.Haskan.Render.ShaderProgram (ShaderProgram (..))
-import Graphics.Haskan.Resources (allocaAndPeekVkResult, throwVkResult)
 import Graphics.Haskan.Vertex qualified as Vertex
 import Graphics.Haskan.Vulkan.CommandBuffer qualified as CommandBuffer
-import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.Framebuffer qualified as Framebuffer
 import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.ImageView qualified as Haskan
@@ -31,12 +31,9 @@ import Graphics.Haskan.Vulkan.PhysicalDevice qualified as PhysicalDevice
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Swapchain qualified as Swapchain
 import Graphics.Haskan.Vulkan.Types (RenderContext (..), RenderResult (..))
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Ext qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, setListRef, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Vulkan qualified as Vk26
+import Vulkan.CStruct.Extends (SomeStruct (..))
+import Vulkan.Zero (zero)
 
 type RenderM m = ReaderT RenderContext m
 
@@ -47,18 +44,18 @@ maxFramesInFlight :: Int
 maxFramesInFlight = 2
 
 data RenderContextConfig = RenderContextConfig
-  { rccPhysicalDevice :: !Vulkan.VkPhysicalDevice,
-    rccDevice :: !Vulkan.VkDevice,
-    rccSurface :: !Vulkan.VkSurfaceKHR,
-    rccPipelineLayout :: !Vulkan.VkPipelineLayout,
-    rccVertexShader :: !Vulkan.VkShaderModule,
-    rccFragmentShader :: !Vulkan.VkShaderModule,
-    rccDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    rccCommandPool :: !Vulkan.VkCommandPool,
-    rccGraphicsQueue :: !Vulkan.VkQueue,
-    rccPresentQueue :: !Vulkan.VkQueue,
-    rccRenderFinishedFences :: ![Vulkan.VkFence],
-    rccRenderFinishedSemaphores :: ![Vulkan.VkSemaphore]
+  { rccPhysicalDevice :: !Vk26.PhysicalDevice,
+    rccDevice :: !Vk26.Device,
+    rccSurface :: !Vk26.SurfaceKHR,
+    rccPipelineLayout :: !Vk26.PipelineLayout,
+    rccVertexShader :: !Vk26.ShaderModule,
+    rccFragmentShader :: !Vk26.ShaderModule,
+    rccDescriptorSets :: ![Vk26.DescriptorSet],
+    rccCommandPool :: !Vk26.CommandPool,
+    rccGraphicsQueue :: !Vk26.Queue,
+    rccPresentQueue :: !Vk26.Queue,
+    rccRenderFinishedFences :: ![Vk26.Fence],
+    rccRenderFinishedSemaphores :: ![Vk26.Semaphore]
   }
 
 createRenderContext ::
@@ -66,15 +63,15 @@ createRenderContext ::
   RenderContextConfig ->
   m RenderContext
 createRenderContext RenderContextConfig {..} = do
-  let -- depthFormat = Vulkan.VK_FORMAT_D32_SFLOAT
-      depthFormat = Vulkan.VK_FORMAT_D16_UNORM
-      format = Vulkan.getField @"format" Swapchain.surfaceFormat
+  let depthFormat = Vk26.FORMAT_D16_UNORM
+      Vk26.SurfaceFormatKHR fmt _ = Swapchain.surfaceFormat
   surfaceExtent <- PhysicalDevice.surfaceExtent rccPhysicalDevice rccSurface
-  logDebugIO LogRender $ "createRenderContext extent=" <> showT (Vulkan.getField @"width" surfaceExtent) <> "x" <> showT (Vulkan.getField @"height" surfaceExtent)
+  let Vk26.Extent2D w h = surfaceExtent
+  logDebugIO LogRender $ "createRenderContext extent=" <> showT w <> "x" <> showT h
   swapchain <- Swapchain.managedSwapchain rccDevice rccPhysicalDevice rccSurface surfaceExtent
   images <- Swapchain.getSwapchainImages rccDevice swapchain
   logDebugIO LogRender $ "createRenderContext swapchain images=" <> showT (length images)
-  imageViews <- for images (Haskan.managedImageView rccDevice format)
+  imageViews <- for images (Haskan.managedImageView rccDevice fmt)
 
   renderPass <- RenderPass.managedRenderPass rccDevice Swapchain.surfaceFormat depthFormat
   graphicsPipeline <-
@@ -124,93 +121,76 @@ createRenderContext RenderContextConfig {..} = do
         rcGraphicsCommandPool = rccCommandPool
       }
 
-drawFrame :: (MonadIO m) => Vulkan.VkSemaphore -> Int -> (Vulkan.Word32 -> Int -> IO ()) -> RenderM m RenderResult
+drawFrame :: (MonadIO m) => Vk26.Semaphore -> Int -> (Word32 -> Int -> IO ()) -> RenderM m RenderResult
 drawFrame imageAvailableSemaphore fenceIndex recordAction = do
   RenderContext {..} <- ask
   -- Wait for previous frame using this fence to complete before acquiring image
   liftIO $ do
     let renderFinishedFence = renderFinishedFences !! fenceIndex
-    Foreign.Marshal.Array.withArray [renderFinishedFence] $ \ptr -> do
-      Vulkan.vkWaitForFences device 1 ptr Vulkan.VK_TRUE maxBound >>= throwVkResult
-      Vulkan.vkResetFences device 1 ptr >>= throwVkResult
+    Vk26.waitForFences device (Vector.fromList [renderFinishedFence]) True (maxBound :: Word64)
+    Vk26.resetFences device (Vector.fromList [renderFinishedFence])
 
-  (imageIndex, vkResult) <-
+  (vkResult, imageIndex) <-
     liftIO $
-      allocaAndPeekVkResult $
-        Vulkan.vkAcquireNextImageKHR device swapchain 100000000 imageAvailableSemaphore Vulkan.VK_NULL_HANDLE
+      Vk26.acquireNextImageKHR device swapchain 100000000 imageAvailableSemaphore Vk26.NULL_HANDLE
 
   case vkResult of
-    Vulkan.VK_SUCCESS -> FrameOk <$> renderImage imageAvailableSemaphore fenceIndex imageIndex recordAction
-    Vulkan.VK_TIMEOUT -> pure FrameTimeout
-    Vulkan.VK_SUBOPTIMAL_KHR -> pure $ FrameSuboptimal imageIndex
-    Vulkan.VK_ERROR_OUT_OF_DATE_KHR -> do
+    Vk26.SUCCESS -> FrameOk <$> renderImage imageAvailableSemaphore fenceIndex imageIndex recordAction
+    Vk26.TIMEOUT -> pure FrameTimeout
+    Vk26.SUBOPTIMAL_KHR -> pure $ FrameSuboptimal imageIndex
+    Vk26.ERROR_OUT_OF_DATE_KHR -> do
       -- The acquire failed; the semaphore was never signaled.
       -- Signal the fence with a no-op submit so the next frame
       -- doesn't hang in vkWaitForFences.
       liftIO $ do
         let renderFinishedFence = renderFinishedFences !! fenceIndex
-            emptySubmitInfo =
-              Vulkan.createVk
-                ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SUBMIT_INFO
-                    &* set @"pNext" Vulkan.vkNullPtr
-                    &* set @"waitSemaphoreCount" 0
-                    &* set @"pWaitSemaphores" Vulkan.vkNullPtr
-                    &* set @"pWaitDstStageMask" Vulkan.vkNullPtr
-                    &* set @"commandBufferCount" 0
-                    &* set @"pCommandBuffers" Vulkan.vkNullPtr
-                    &* set @"signalSemaphoreCount" 0
-                    &* set @"pSignalSemaphores" Vulkan.vkNullPtr
-                )
-        withPtr emptySubmitInfo $ \siPtr ->
-          Vulkan.vkQueueSubmit graphicsQueueHandler 1 siPtr renderFinishedFence >>= throwVkResult
+            submitInfo =
+              Vk26.SubmitInfo
+                ()
+                Vector.empty
+                Vector.empty
+                Vector.empty
+                Vector.empty
+        Vk26.queueSubmit graphicsQueueHandler (Vector.fromList [SomeStruct submitInfo]) renderFinishedFence
       pure FrameOutOfDate
     _ -> pure $ FrameFailed (show vkResult)
 
 renderImage ::
   (MonadIO m) =>
-  Vulkan.VkSemaphore ->
+  Vk26.Semaphore ->
   Int ->
-  Vulkan.Word32 ->
-  (Vulkan.Word32 -> Int -> IO ()) ->
-  RenderM m Vulkan.Word32
+  Word32 ->
+  (Word32 -> Int -> IO ()) ->
+  RenderM m Word32
 renderImage imageAvailableSemaphore fenceIndex imageIndex recordAction = do
   RenderContext {..} <- ask
   let commandBuffer = graphicsCommandBuffers !! fromIntegral imageIndex
       renderFinishedSemaphore = renderFinishedSemaphores !! fromIntegral imageIndex
       renderFinishedFence = renderFinishedFences !! fenceIndex
+      Vk26.CommandBuffer cbHandle _ = commandBuffer
 
   liftIO $ do
     -- Now safe to record command buffer
     recordAction imageIndex fenceIndex
 
     let submitInfo =
-          Vulkan.createVk
-            ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SUBMIT_INFO
-                &* set @"pNext" Vulkan.vkNullPtr
-                &* set @"waitSemaphoreCount" 1
-                &* setListRef @"pWaitSemaphores" [imageAvailableSemaphore]
-                &* setListRef @"pWaitDstStageMask" [Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT]
-                &* set @"commandBufferCount" 1
-                &* setListRef @"pCommandBuffers" [commandBuffer]
-                &* set @"signalSemaphoreCount" 1
-                &* setListRef @"pSignalSemaphores" [renderFinishedSemaphore]
-            )
-    withPtr submitInfo $ \siPtr ->
-      Vulkan.vkQueueSubmit graphicsQueueHandler 1 siPtr renderFinishedFence >>= throwVkResult
+          Vk26.SubmitInfo
+            ()
+            (Vector.fromList [imageAvailableSemaphore])
+            (Vector.fromList [Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT])
+            (Vector.fromList [cbHandle])
+            (Vector.fromList [renderFinishedSemaphore])
+    Vk26.queueSubmit graphicsQueueHandler (Vector.fromList [SomeStruct submitInfo]) renderFinishedFence
   pure imageIndex
 
-presentFrame :: (MonadIO m) => Vulkan.Word32 -> Vulkan.VkSemaphore -> RenderM m Vulkan.VkResult
+presentFrame :: (MonadIO m) => Word32 -> Vk26.Semaphore -> RenderM m Vk26.Result
 presentFrame imageIndex renderFinishedSem = do
   RenderContext {..} <- ask
   let presentInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PRESENT_INFO_KHR
-              &* set @"pNext" Vulkan.vkNullPtr
-              &* set @"waitSemaphoreCount" 1
-              &* setListRef @"pWaitSemaphores" [renderFinishedSem]
-              &* set @"swapchainCount" 1
-              &* setListRef @"pSwapchains" [swapchain]
-              &* setListRef @"pImageIndices" [imageIndex]
-              &* set @"pResults" Vulkan.vkNullPtr
-          )
-  liftIO $ withPtr presentInfo (Vulkan.vkQueuePresentKHR presentQueueHandler)
+        Vk26.PresentInfoKHR
+          ()
+          (Vector.fromList [renderFinishedSem])
+          (Vector.fromList [swapchain])
+          (Vector.fromList [imageIndex])
+          nullPtr
+  liftIO $ Vk26.queuePresentKHR presentQueueHandler presentInfo

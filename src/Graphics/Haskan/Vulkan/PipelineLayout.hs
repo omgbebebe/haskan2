@@ -1,42 +1,35 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+
 module Graphics.Haskan.Vulkan.PipelineLayout where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
-import Foreign.Ptr qualified
-import Graphics.Haskan.Resources (alloc, alloc_, allocaAndPeek, allocaAndPeek_, peekVkList, peekVkList_)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Ext qualified as Vulkan
-import Graphics.Vulkan.Ext.VK_KHR_surface qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, setListRef, setStrListRef, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Data.Vector qualified as Vector
+import Graphics.Haskan.Resources (alloc, alloc_)
+import Vulkan qualified
+import Vulkan.Zero (zero)
 
-managedPipelineLayout :: (MonadManaged m) => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> m Vulkan.VkPipelineLayout
+managedPipelineLayout :: (MonadManaged m) => Vulkan.Device -> [Vulkan.DescriptorSetLayout] -> m Vulkan.PipelineLayout
 managedPipelineLayout dev descriptorSetLayouts =
   managedPipelineLayoutWithPushConstants dev descriptorSetLayouts []
 
-managedPipelineLayoutWithPushConstants :: (MonadManaged m) => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> [Vulkan.VkPushConstantRange] -> m Vulkan.VkPipelineLayout
+managedPipelineLayoutWithPushConstants :: (MonadManaged m) => Vulkan.Device -> [Vulkan.DescriptorSetLayout] -> [Vulkan.PushConstantRange] -> m Vulkan.PipelineLayout
 managedPipelineLayoutWithPushConstants dev descriptorSetLayouts pushConstantRanges =
   alloc
     "PipelineLayout"
     (createPipelineLayoutWithPushConstants dev descriptorSetLayouts pushConstantRanges)
-    (\ptr -> Vulkan.vkDestroyPipelineLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vulkan.destroyPipelineLayout dev ptr Nothing)
 
-createPipelineLayout :: (MonadIO m) => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> m Vulkan.VkPipelineLayout
+createPipelineLayout :: (MonadIO m) => Vulkan.Device -> [Vulkan.DescriptorSetLayout] -> m Vulkan.PipelineLayout
 createPipelineLayout dev descriptorSetLayouts =
   createPipelineLayoutWithPushConstants dev descriptorSetLayouts []
 
-createPipelineLayoutWithPushConstants :: (MonadIO m) => Vulkan.VkDevice -> [Vulkan.VkDescriptorSetLayout] -> [Vulkan.VkPushConstantRange] -> m Vulkan.VkPipelineLayout
+createPipelineLayoutWithPushConstants :: (MonadIO m) => Vulkan.Device -> [Vulkan.DescriptorSetLayout] -> [Vulkan.PushConstantRange] -> m Vulkan.PipelineLayout
 createPipelineLayoutWithPushConstants dev descriptorSetLayouts pushConstantRanges =
   let createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"setLayoutCount" (fromIntegral (length descriptorSetLayouts))
-              &* setListRef @"pSetLayouts" descriptorSetLayouts
-              &* set @"pushConstantRangeCount" (fromIntegral (length pushConstantRanges))
-              &* setListRef @"pPushConstantRanges" pushConstantRanges
-          )
-   in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek $ Vulkan.vkCreatePipelineLayout dev ciPtr Vulkan.VK_NULL)
+        Vulkan.PipelineLayoutCreateInfo
+          { flags = zero
+          , setLayouts = Vector.fromList descriptorSetLayouts
+          , pushConstantRanges = Vector.fromList pushConstantRanges
+          }
+   in liftIO $ Vulkan.createPipelineLayout dev createInfo Nothing

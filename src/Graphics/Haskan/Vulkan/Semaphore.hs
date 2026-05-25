@@ -1,31 +1,23 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Graphics.Haskan.Vulkan.Semaphore where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
-import Graphics.Haskan.Resources (alloc, allocaAndPeek)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Graphics.Haskan.Resources (alloc)
+import Vulkan qualified as Vulkan
+import Vulkan.Core10 qualified as Vulkan
+import Vulkan.Core10.QueueSemaphore (SemaphoreCreateInfo (..))
+import Vulkan.Zero (zero)
 
-managedSemaphore :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkSemaphore
+managedSemaphore :: (MonadManaged m) => Vulkan.Device -> m Vulkan.Semaphore
 managedSemaphore dev =
   alloc
     "Vulkan Semaphore"
     (createSemaphore dev)
-    (\ptr -> Vulkan.vkDestroySemaphore dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vulkan.destroySemaphore dev ptr Nothing)
 
-createSemaphore :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkSemaphore
+createSemaphore :: (MonadIO m) => Vulkan.Device -> m Vulkan.Semaphore
 createSemaphore dev =
-  let createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO
-              &* set @"pNext" Vulkan.vkNullPtr
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateSemaphore dev ciPtr Vulkan.VK_NULL)
-          )
+  let createInfo :: Vulkan.SemaphoreCreateInfo '[]
+      createInfo = Vulkan.SemaphoreCreateInfo {next = (), flags = zero}
+   in liftIO $ Vulkan.createSemaphore dev createInfo Nothing

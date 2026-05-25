@@ -1,30 +1,27 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Graphics.Haskan.Vulkan.Fence where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
-import Graphics.Haskan.Resources (alloc, allocaAndPeek)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Graphics.Haskan.Resources (alloc)
+import Vulkan qualified as Vulkan
+import Vulkan.Core10 qualified as Vulkan
+import Vulkan.Core10.Fence (FenceCreateInfo (..))
+import Vulkan.Zero (zero)
 
-managedFence :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkFence
+managedFence :: (MonadManaged m) => Vulkan.Device -> m Vulkan.Fence
 managedFence dev =
   alloc
     "Vulkan Fence"
     (createFence dev)
-    (\ptr -> Vulkan.vkDestroyFence dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vulkan.destroyFence dev ptr Nothing)
 
-createFence :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkFence
+createFence :: (MonadIO m) => Vulkan.Device -> m Vulkan.Fence
 createFence dev =
-  let createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_FENCE_CREATE_INFO
-              &* set @"pNext" Vulkan.vkNullPtr
-              &* set @"flags" Vulkan.VK_FENCE_CREATE_SIGNALED_BIT
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          (\ciPtr -> allocaAndPeek (Vulkan.vkCreateFence dev ciPtr Vulkan.VK_NULL))
+  let createInfo :: Vulkan.FenceCreateInfo '[]
+      createInfo =
+        Vulkan.FenceCreateInfo
+          { next = ()
+          , flags = Vulkan.FENCE_CREATE_SIGNALED_BIT
+          }
+   in liftIO $ Vulkan.createFence dev createInfo Nothing

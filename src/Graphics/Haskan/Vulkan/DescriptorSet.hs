@@ -4,6 +4,8 @@ module Graphics.Haskan.Vulkan.DescriptorSet where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
+import Data.Vector qualified as Vector
+import Data.Word (Word32)
 import Foreign.Marshal.Array qualified
 import Graphics.Haskan.Resources (alloc, alloc_, allocaAndPeek, allocaAndPeek_, peekVkList, peekVkList_, throwVkResult)
 import Graphics.Vulkan qualified as Vulkan
@@ -13,6 +15,8 @@ import Graphics.Vulkan.Ext.VK_KHR_surface qualified as Vulkan
 import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setListRef, setStrListRef, setVkRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Vulkan.CStruct.Extends (SomeStruct (..))
+import Vulkan qualified as Vk26
 
 -- | Configuration for updating lighting descriptor sets.
 data LightingDescriptorUpdate = LightingDescriptorUpdate
@@ -546,35 +550,30 @@ updateTextureBinding dev descriptorSet sampler imageView bindingIdx = do
 -- dstArrayElement is the index in the texture array.
 updateBindlessTexture ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkDescriptorSet ->
-  Vulkan.VkSampler ->
-  Vulkan.VkImageView ->
-  Vulkan.Word32 -> -- array index
+  Vk26.Device ->
+  Vk26.DescriptorSet ->
+  Vk26.Sampler ->
+  Vk26.ImageView ->
+  Word32 -> -- array index
   m ()
 updateBindlessTexture dev descriptorSet sampler imageView arrayIndex = do
   let textureInfo =
-        Vulkan.createVk
-          ( set @"imageLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-              &* set @"imageView" imageView
-              &* set @"sampler" sampler
-          )
+        Vk26.DescriptorImageInfo
+          sampler
+          imageView
+          Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       write =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"dstSet" descriptorSet
-              &* set @"dstBinding" 0
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-              &* set @"pTexelBufferView" Vulkan.VK_NULL
-              &* setListRef @"pImageInfo" [textureInfo]
-              &* set @"pBufferInfo" Vulkan.VK_NULL
-              &* set @"descriptorCount" 1
-              &* set @"dstArrayElement" arrayIndex
-          )
-  liftIO $
-    Foreign.Marshal.Array.withArray [write] $ \writePtr ->
-      Vulkan.vkUpdateDescriptorSets dev 1 writePtr 0 Vulkan.vkNullPtr
+        Vk26.WriteDescriptorSet
+          ()
+          descriptorSet
+          0
+          arrayIndex
+          1
+          Vk26.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+          (Vector.fromList [textureInfo])
+          Vector.empty
+          Vector.empty
+  liftIO $ Vk26.updateDescriptorSets dev (Vector.fromList [SomeStruct write]) Vector.empty
 
 -- | Update bindless pass descriptor set: UBO (binding 0) + Texture2DArray (binding 1).
 updateBindlessPassDescriptorSet ::

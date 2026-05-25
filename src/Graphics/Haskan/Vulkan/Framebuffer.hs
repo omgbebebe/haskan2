@@ -1,116 +1,117 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+
 module Graphics.Haskan.Vulkan.Framebuffer where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
-import Graphics.Haskan.Resources (alloc, allocaAndPeek)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, setListRef, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Data.Vector qualified as Vector
+import Data.Word (Word32)
+import Graphics.Haskan.Resources (alloc)
+import Vulkan qualified
+import Vulkan.Zero (zero)
 
 managedFramebuffer ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkExtent2D ->
-  Vulkan.VkImageView ->
-  Vulkan.VkImageView ->
-  m Vulkan.VkFramebuffer
+  Vulkan.Device ->
+  Vulkan.RenderPass ->
+  Vulkan.Extent2D ->
+  Vulkan.ImageView ->
+  Vulkan.ImageView ->
+  m Vulkan.Framebuffer
 managedFramebuffer dev renderPass extent imageView depthView =
   alloc
     "Framebuffer"
     (createFramebuffer dev renderPass extent imageView depthView)
-    (\ptr -> Vulkan.vkDestroyFramebuffer dev ptr Vulkan.vkNullPtr)
+    (\fb -> Vulkan.destroyFramebuffer dev fb Nothing)
 
 createFramebuffer ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkExtent2D ->
-  Vulkan.VkImageView ->
-  Vulkan.VkImageView ->
-  m Vulkan.VkFramebuffer
+  Vulkan.Device ->
+  Vulkan.RenderPass ->
+  Vulkan.Extent2D ->
+  Vulkan.ImageView ->
+  Vulkan.ImageView ->
+  m Vulkan.Framebuffer
 createFramebuffer dev renderPass extent imageView depthView = do
-  let framebufferCI =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"renderPass" renderPass
-              &* set @"attachmentCount" 2
-              &* setListRef @"pAttachments" [imageView, depthView]
-              &* set @"width" (Vulkan.getField @"width" extent)
-              &* set @"height" (Vulkan.getField @"height" extent)
-              &* set @"layers" 1
-          )
-  liftIO $ withPtr framebufferCI (\fciPtr -> allocaAndPeek (Vulkan.vkCreateFramebuffer dev fciPtr Vulkan.VK_NULL))
+  let Vulkan.Extent2D{width = w, height = h} = extent
+      createInfo =
+        Vulkan.FramebufferCreateInfo
+          { next = ()
+          , flags = zero
+          , renderPass = renderPass
+          , attachments = Vector.fromList [imageView, depthView]
+          , width = w
+          , height = h
+          , layers = 1
+          }
+  liftIO $ Vulkan.createFramebuffer dev createInfo Nothing
 
 managedGBufferFramebuffer ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkExtent2D ->
-  [Vulkan.VkImageView] ->
-  Vulkan.VkImageView ->
-  m Vulkan.VkFramebuffer
+  Vulkan.Device ->
+  Vulkan.RenderPass ->
+  Vulkan.Extent2D ->
+  [Vulkan.ImageView] ->
+  Vulkan.ImageView ->
+  m Vulkan.Framebuffer
 managedGBufferFramebuffer dev renderPass extent colorViews depthView =
   alloc
     "GBufferFramebuffer"
     (createGBufferFramebuffer dev renderPass extent colorViews depthView)
-    (\ptr -> Vulkan.vkDestroyFramebuffer dev ptr Vulkan.vkNullPtr)
+    (\fb -> Vulkan.destroyFramebuffer dev fb Nothing)
 
 createGBufferFramebuffer ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkExtent2D ->
-  [Vulkan.VkImageView] ->
-  Vulkan.VkImageView ->
-  m Vulkan.VkFramebuffer
+  Vulkan.Device ->
+  Vulkan.RenderPass ->
+  Vulkan.Extent2D ->
+  [Vulkan.ImageView] ->
+  Vulkan.ImageView ->
+  m Vulkan.Framebuffer
 createGBufferFramebuffer dev renderPass extent colorViews depthView = do
-  let framebufferCI =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"renderPass" renderPass
-              &* set @"attachmentCount" (fromIntegral (length colorViews + 1))
-              &* setListRef @"pAttachments" (colorViews ++ [depthView])
-              &* set @"width" (Vulkan.getField @"width" extent)
-              &* set @"height" (Vulkan.getField @"height" extent)
-              &* set @"layers" 1
-          )
-  liftIO $ withPtr framebufferCI (\fciPtr -> allocaAndPeek (Vulkan.vkCreateFramebuffer dev fciPtr Vulkan.VK_NULL))
+  let Vulkan.Extent2D{width = w, height = h} = extent
+      createInfo =
+        Vulkan.FramebufferCreateInfo
+          { next = ()
+          , flags = zero
+          , renderPass = renderPass
+          , attachments = Vector.fromList (colorViews ++ [depthView])
+          , width = w
+          , height = h
+          , layers = 1
+          }
+  liftIO $ Vulkan.createFramebuffer dev createInfo Nothing
 
 managedLightingFramebuffer ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkExtent2D ->
-  Vulkan.VkImageView ->
-  m Vulkan.VkFramebuffer
+  Vulkan.Device ->
+  Vulkan.RenderPass ->
+  Vulkan.Extent2D ->
+  Vulkan.ImageView ->
+  m Vulkan.Framebuffer
 managedLightingFramebuffer dev renderPass extent imageView =
   alloc
     "LightingFramebuffer"
     (createLightingFramebuffer dev renderPass extent imageView)
-    (\ptr -> Vulkan.vkDestroyFramebuffer dev ptr Vulkan.vkNullPtr)
+    (\fb -> Vulkan.destroyFramebuffer dev fb Nothing)
 
 createLightingFramebuffer ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkExtent2D ->
-  Vulkan.VkImageView ->
-  m Vulkan.VkFramebuffer
+  Vulkan.Device ->
+  Vulkan.RenderPass ->
+  Vulkan.Extent2D ->
+  Vulkan.ImageView ->
+  m Vulkan.Framebuffer
 createLightingFramebuffer dev renderPass extent imageView = do
-  let framebufferCI =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"renderPass" renderPass
-              &* set @"attachmentCount" 1
-              &* setListRef @"pAttachments" [imageView]
-              &* set @"width" (Vulkan.getField @"width" extent)
-              &* set @"height" (Vulkan.getField @"height" extent)
-              &* set @"layers" 1
-          )
-  liftIO $ withPtr framebufferCI (\fciPtr -> allocaAndPeek (Vulkan.vkCreateFramebuffer dev fciPtr Vulkan.VK_NULL))
+  let Vulkan.Extent2D{width = w, height = h} = extent
+      createInfo =
+        Vulkan.FramebufferCreateInfo
+          { next = ()
+          , flags = zero
+          , renderPass = renderPass
+          , attachments = Vector.fromList [imageView]
+          , width = w
+          , height = h
+          , layers = 1
+          }
+  liftIO $ Vulkan.createFramebuffer dev createInfo Nothing

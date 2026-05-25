@@ -48,7 +48,7 @@ import Data.Word (Word32, Word64, Word8)
 import GHC.Generics (Generic)
 import Graphics.Haskan.BoundingBox (BBox)
 import Graphics.Haskan.Vertex (Vertex)
-import Graphics.Vulkan qualified as Vulkan
+import Vulkan qualified
 
 -- | Opaque handle for buffer resources.
 newtype BufferHandle = BufferHandle {unBufferHandle :: Word64}
@@ -70,8 +70,8 @@ instance Hashable TextureHandle
 
 -- | GPU buffer with embedded cleanup.
 data BufferResource = BufferResource
-  { brVkBuffer :: !Vulkan.VkBuffer,
-    brMemory :: !Vulkan.VkDeviceMemory,
+  { brVkBuffer :: !Vulkan.Buffer,
+    brMemory :: !Vulkan.DeviceMemory,
     brSize :: !Word64,
     brDestroy :: !(IO ())
   }
@@ -92,9 +92,9 @@ data MeshResource = MeshResource
 -- | Texture with image, view, memory, and cleanup action.
 data TextureResource = TextureResource
   { trHandle :: !TextureHandle,
-    trImage :: !Vulkan.VkImage,
-    trImageView :: !Vulkan.VkImageView,
-    trMemory :: !Vulkan.VkDeviceMemory,
+    trImage :: !Vulkan.Image,
+    trImageView :: !Vulkan.ImageView,
+    trMemory :: !Vulkan.DeviceMemory,
     trWidth :: !Int,
     trHeight :: !Int,
     trPixelData :: !(Maybe (Data.Vector.Storable.Vector Word8)),

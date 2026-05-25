@@ -1,3 +1,5 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE OverloadedStrings #-}
 module Graphics.Haskan.Vulkan.ComputePipeline
   ( managedComputePipeline,
     managedComputePipelineWithSpec,
@@ -8,79 +10,78 @@ where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
-import Foreign (Ptr, nullPtr)
-import Graphics.Haskan.Resources (alloc, allocaAndPeek)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, setStrRef, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Data.ByteString.Char8 qualified as BC
+import Data.Vector qualified as Vector
+import Graphics.Haskan.Resources (alloc)
+import Vulkan qualified as Vulkan
+import Vulkan.Core10 qualified as Vulkan
+import Vulkan.Core10.Pipeline (ComputePipelineCreateInfo (..), PipelineShaderStageCreateInfo (..))
+import Vulkan.CStruct.Extends (SomeStruct (..))
+import Vulkan.Zero (zero)
 
 managedComputePipeline ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkPipelineLayout ->
-  Vulkan.VkShaderModule ->
-  m Vulkan.VkPipeline
+  Vulkan.Device ->
+  Vulkan.PipelineLayout ->
+  Vulkan.ShaderModule ->
+  m Vulkan.Pipeline
 managedComputePipeline dev layout shaderModule =
   alloc
     "ComputePipeline"
     (createComputePipeline dev layout shaderModule)
-    (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vulkan.destroyPipeline dev ptr Nothing)
 
 managedComputePipelineWithSpec ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkPipelineLayout ->
-  Vulkan.VkShaderModule ->
-  Ptr Vulkan.VkSpecializationInfo ->
-  m Vulkan.VkPipeline
-managedComputePipelineWithSpec dev layout shaderModule specInfoPtr =
+  Vulkan.Device ->
+  Vulkan.PipelineLayout ->
+  Vulkan.ShaderModule ->
+  Maybe Vulkan.SpecializationInfo ->
+  m Vulkan.Pipeline
+managedComputePipelineWithSpec dev layout shaderModule specInfo =
   alloc
     "ComputePipeline"
-    (createComputePipelineWithSpec dev layout shaderModule specInfoPtr)
-    (\ptr -> Vulkan.vkDestroyPipeline dev ptr Vulkan.vkNullPtr)
+    (createComputePipelineWithSpec dev layout shaderModule specInfo)
+    (\ptr -> Vulkan.destroyPipeline dev ptr Nothing)
 
 createComputePipeline ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkPipelineLayout ->
-  Vulkan.VkShaderModule ->
-  m Vulkan.VkPipeline
+  Vulkan.Device ->
+  Vulkan.PipelineLayout ->
+  Vulkan.ShaderModule ->
+  m Vulkan.Pipeline
 createComputePipeline dev layout shaderModule =
-  createComputePipelineWithSpec dev layout shaderModule nullPtr
+  createComputePipelineWithSpec dev layout shaderModule Nothing
 
 createComputePipelineWithSpec ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkPipelineLayout ->
-  Vulkan.VkShaderModule ->
-  Ptr Vulkan.VkSpecializationInfo ->
-  m Vulkan.VkPipeline
-createComputePipelineWithSpec dev layout shaderModule specInfoPtr = do
-  let stageCreateInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"stage" Vulkan.VK_SHADER_STAGE_COMPUTE_BIT
-              &* set @"module" shaderModule
-              &* setStrRef @"pName" "main"
-              &* set @"pSpecializationInfo" specInfoPtr
-          )
+  Vulkan.Device ->
+  Vulkan.PipelineLayout ->
+  Vulkan.ShaderModule ->
+  Maybe Vulkan.SpecializationInfo ->
+  m Vulkan.Pipeline
+createComputePipelineWithSpec dev layout shaderModule specInfo = do
+  let stageCreateInfo :: Vulkan.PipelineShaderStageCreateInfo '[]
+      stageCreateInfo =
+        Vulkan.PipelineShaderStageCreateInfo
+          { next = ()
+          , flags = zero
+          , stage = Vulkan.SHADER_STAGE_COMPUTE_BIT
+          , module' = shaderModule
+          , name = BC.pack "main"
+          , specializationInfo = specInfo
+          }
+      createInfo :: Vulkan.ComputePipelineCreateInfo '[]
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"stage" stageCreateInfo
-              &* set @"layout" layout
-              &* set @"basePipelineHandle" Vulkan.VK_NULL_HANDLE
-              &* set @"basePipelineIndex" 0
-          )
-  liftIO $
-    withPtr
-      createInfo
-      ( \ciPtr ->
-          allocaAndPeek (Vulkan.vkCreateComputePipelines dev Vulkan.VK_NULL_HANDLE 1 ciPtr Vulkan.vkNullPtr)
-      )
+        Vulkan.ComputePipelineCreateInfo
+          { next = ()
+          , flags = zero
+          , stage = SomeStruct stageCreateInfo
+          , layout = layout
+          , basePipelineHandle = zero
+          , basePipelineIndex = 0
+          }
+  (_, pipelines) <- liftIO $ Vulkan.createComputePipelines dev (Vulkan.PipelineCache 0) (Vector.fromList [SomeStruct createInfo]) Nothing
+  case Vector.toList pipelines of
+    [pipeline] -> pure pipeline
+    _ -> error "Expected 1 compute pipeline"

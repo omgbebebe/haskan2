@@ -1,3 +1,4 @@
+{-# LANGUAGE DuplicateRecordFields #-}
 module Graphics.Haskan.Vulkan.Buffer where
 
 import Control.Monad (unless)
@@ -9,92 +10,93 @@ import Data.HashMap.Strict qualified as HashMap
 import Data.Int (Int32)
 import Data.List (foldl')
 import Data.Maybe (catMaybes)
+import Data.Vector qualified as Vector
 import Data.Word (Word32)
 import Foreign qualified
 import Foreign.Marshal qualified
 import Foreign.Storable (Storable, sizeOf)
 import Graphics.Haskan.BoundingBox (BBox, fromPoints)
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, showT)
-import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
+import Graphics.Haskan.Resources (alloc)
 import Graphics.Haskan.Vertex (Vertex (..), VertexIndex)
 import Graphics.Haskan.Vulkan.Memory qualified as Memory
 import Graphics.Haskan.Vulkan.Resources
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Vulkan qualified
+import Vulkan.Core10 qualified
+import Vulkan.Zero (zero)
 
 managedBuffer ::
   (MonadManaged m, Storable a) =>
-  Vulkan.VkDevice ->
+  Vulkan.Device ->
   [a] ->
-  Vulkan.VkBufferUsageBitmask Vulkan.FlagMask ->
-  m (Vulkan.VkBuffer, Vulkan.VkMemoryRequirements)
+  Vulkan.BufferUsageFlags ->
+  m (Vulkan.Buffer, Vulkan.MemoryRequirements)
 managedBuffer dev data' usage =
   alloc
     "Buffer"
     (createBuffer dev data' usage)
-    (\(ptr, _) -> Vulkan.vkDestroyBuffer dev ptr Vulkan.vkNullPtr)
+    (\(ptr, _) -> Vulkan.destroyBuffer dev ptr Nothing)
 
 createBuffer ::
   (MonadIO m, Storable a) =>
-  Vulkan.VkDevice ->
+  Vulkan.Device ->
   [a] ->
-  Vulkan.VkBufferUsageBitmask Vulkan.FlagMask ->
-  m (Vulkan.VkBuffer, Vulkan.VkMemoryRequirements)
+  Vulkan.BufferUsageFlags ->
+  m (Vulkan.Buffer, Vulkan.MemoryRequirements)
 createBuffer dev data' usage = do
-  let size = case data' of
+  let bufSize = case data' of
         [] -> 0
         (x : _) -> fromIntegral (length data' * Foreign.sizeOf x)
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"usage" usage
-              &* set @"size" size
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
-  buffer <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateBuffer dev ciPtr Vulkan.vkNullPtr))
-  memoryRequirements <- allocaAndPeek_ (Vulkan.vkGetBufferMemoryRequirements dev buffer)
-  logDebugIO LogBuffer $ "createBuffer size=" <> showT size <> " memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
+        Vulkan.BufferCreateInfo
+          { next = ()
+          , flags = zero
+          , size = bufSize
+          , usage = usage
+          , sharingMode = Vulkan.SHARING_MODE_EXCLUSIVE
+          , queueFamilyIndices = Vector.empty
+          }
+  buffer <- liftIO $ Vulkan.createBuffer dev createInfo Nothing
+  memoryRequirements <- liftIO $ Vulkan.getBufferMemoryRequirements dev buffer
+  let Vulkan.MemoryRequirements{size = reqSize} = memoryRequirements
+  logDebugIO LogBuffer $ "createBuffer size=" <> showT bufSize <> " memReqSize=" <> showT reqSize
   pure (buffer, memoryRequirements)
 
 createBufferMemory ::
   (MonadIO m) =>
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
-  Vulkan.VkMemoryRequirements ->
-  m Vulkan.VkDeviceMemory
+  Vulkan.PhysicalDevice ->
+  Vulkan.Device ->
+  Vulkan.MemoryRequirements ->
+  m Vulkan.DeviceMemory
 createBufferMemory pdev dev memoryRequirements = do
-  logDebugIO LogBuffer $ "createBufferMemory memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
+  let Vulkan.MemoryRequirements{size = reqSize} = memoryRequirements
+  logDebugIO LogBuffer $ "createBufferMemory memReqSize=" <> showT reqSize
   Memory.allocateMemoryFor
     pdev
     dev
     memoryRequirements
-    [ Vulkan.VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
-      Vulkan.VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    [ Vulkan.MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+      Vulkan.MEMORY_PROPERTY_HOST_COHERENT_BIT
     ]
 
 managedBufferMemory pdev dev memoryRequirements = do
-  logDebugIO LogBuffer $ "managedBufferMemory memReqSize=" <> showT (Vulkan.getField @"size" memoryRequirements)
+  let Vulkan.MemoryRequirements{size = reqSize} = memoryRequirements
+  logDebugIO LogBuffer $ "managedBufferMemory memReqSize=" <> showT reqSize
   alloc
     "Buffer memory"
     (createBufferMemory pdev dev memoryRequirements)
-    (\ptr -> Vulkan.vkFreeMemory dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vulkan.freeMemory dev ptr Nothing)
 
 bindBufferMemory ::
   (MonadIO m, Storable a) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkBuffer ->
-  Vulkan.VkDeviceMemory ->
+  Vulkan.Device ->
+  Vulkan.Buffer ->
+  Vulkan.DeviceMemory ->
   [a] ->
   m ()
 bindBufferMemory dev buffer memory data' = liftIO $ do
   logDebugIO LogBuffer $ "bindBufferMemory binding buffer, data size=" <> showT (length data')
-  Vulkan.vkBindBufferMemory dev buffer memory 0 {- offset-} >>= throwVkResult
+  Vulkan.bindBufferMemory dev buffer memory 0
   logDebugIO LogBuffer "bindBufferMemory buffer bound, copying data"
   copyDataToDeviceMemory dev memory data'
   logDebugIO LogBuffer "bindBufferMemory data copied"
@@ -107,81 +109,78 @@ copyDataToDeviceMemory dev memory data' = liftIO $ do
   if size == 0
     then logDebugIO LogBuffer "copyDataToDeviceMemory skipping empty data"
     else do
-      memPtr <-
-        allocaAndPeek (Vulkan.vkMapMemory dev memory 0 size Vulkan.VK_ZERO_FLAGS)
+      memPtr <- liftIO $ Vulkan.mapMemory dev memory 0 size zero
       Foreign.Marshal.pokeArray (Foreign.castPtr memPtr) data'
-      Vulkan.vkUnmapMemory dev memory
+      Vulkan.unmapMemory dev memory
       logDebugIO LogBuffer "copyDataToDeviceMemory done"
 
-managedVertexBuffer :: (MonadManaged m) => Vulkan.VkPhysicalDevice -> Vulkan.VkDevice -> [Vertex] -> m Vulkan.VkBuffer
+managedVertexBuffer :: (MonadManaged m) => Vulkan.PhysicalDevice -> Vulkan.Device -> [Vertex] -> m Vulkan.Buffer
 managedVertexBuffer pdev dev vertices = do
-  (buffer, memoryRequirements) <- managedBuffer dev vertices Vulkan.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+  (buffer, memoryRequirements) <- managedBuffer dev vertices Vulkan.BUFFER_USAGE_VERTEX_BUFFER_BIT
   memory <- managedBufferMemory pdev dev memoryRequirements
   bindBufferMemory dev buffer memory vertices
   pure buffer
 
-managedIndexBuffer :: (MonadManaged m) => Vulkan.VkPhysicalDevice -> Vulkan.VkDevice -> [VertexIndex] -> m Vulkan.VkBuffer
+managedIndexBuffer :: (MonadManaged m) => Vulkan.PhysicalDevice -> Vulkan.Device -> [VertexIndex] -> m Vulkan.Buffer
 managedIndexBuffer pdev dev indices = do
-  (buffer, memoryRequirements) <- managedBuffer dev indices Vulkan.VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+  (buffer, memoryRequirements) <- managedBuffer dev indices Vulkan.BUFFER_USAGE_INDEX_BUFFER_BIT
   memory <- managedBufferMemory pdev dev memoryRequirements
   bindBufferMemory dev buffer memory indices
   pure buffer
 
 managedStorageBuffer ::
   (MonadManaged m, Storable a) =>
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  Vulkan.PhysicalDevice ->
+  Vulkan.Device ->
   [a] ->
-  Vulkan.VkBufferUsageBitmask Vulkan.FlagMask ->
-  m (Vulkan.VkBuffer, Vulkan.VkDeviceMemory)
+  Vulkan.BufferUsageFlags ->
+  m (Vulkan.Buffer, Vulkan.DeviceMemory)
 managedStorageBuffer pdev dev values extraUsage = do
-  (buffer, memoryRequirements) <- managedBuffer dev values (Vulkan.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT .|. extraUsage)
+  (buffer, memoryRequirements) <- managedBuffer dev values (Vulkan.BUFFER_USAGE_STORAGE_BUFFER_BIT .|. extraUsage)
   memory <- managedBufferMemory pdev dev memoryRequirements
   bindBufferMemory dev buffer memory values
   pure (buffer, memory)
 
-updateStorageBuffer :: (MonadIO m, Storable a) => Vulkan.VkDevice -> Vulkan.VkDeviceMemory -> Int -> [a] -> m ()
+updateStorageBuffer :: (MonadIO m, Storable a) => Vulkan.Device -> Vulkan.DeviceMemory -> Int -> [a] -> m ()
 updateStorageBuffer = updateUniformBufferRegion
 
 managedUniformBuffer ::
   (MonadManaged m, Storable a) =>
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  Vulkan.PhysicalDevice ->
+  Vulkan.Device ->
   [a] ->
-  m (Vulkan.VkBuffer, Vulkan.VkDeviceMemory)
+  m (Vulkan.Buffer, Vulkan.DeviceMemory)
 managedUniformBuffer pdev dev values = do
-  (buffer, memoryRequirements) <- managedBuffer dev values Vulkan.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT
+  (buffer, memoryRequirements) <- managedBuffer dev values Vulkan.BUFFER_USAGE_UNIFORM_BUFFER_BIT
   memory <- managedBufferMemory pdev dev memoryRequirements
   bindBufferMemory dev buffer memory values
   pure (buffer, memory)
 
-updateUniformBuffer :: (MonadIO m, Storable a) => Vulkan.VkDevice -> Vulkan.VkDeviceMemory -> [a] -> m ()
+updateUniformBuffer :: (MonadIO m, Storable a) => Vulkan.Device -> Vulkan.DeviceMemory -> [a] -> m ()
 updateUniformBuffer dev memory uniformData = do
   let size = fromIntegral (sum (map Foreign.sizeOf uniformData))
   Control.Monad.unless (size == 0) $ do
-    memPtr <-
-      allocaAndPeek (Vulkan.vkMapMemory dev memory 0 size Vulkan.VK_ZERO_FLAGS)
+    memPtr <- liftIO $ Vulkan.mapMemory dev memory 0 size zero
     liftIO $ do
       Foreign.pokeArray (Foreign.castPtr memPtr) uniformData
-      Vulkan.vkUnmapMemory dev memory
+      Vulkan.unmapMemory dev memory
 
-updateUniformBufferRegion :: (MonadIO m, Storable a) => Vulkan.VkDevice -> Vulkan.VkDeviceMemory -> Int -> [a] -> m ()
+updateUniformBufferRegion :: (MonadIO m, Storable a) => Vulkan.Device -> Vulkan.DeviceMemory -> Int -> [a] -> m ()
 updateUniformBufferRegion dev memory offset uniformData = do
   let size = fromIntegral (sum (map Foreign.sizeOf uniformData))
   Control.Monad.unless (size == 0) $ do
-    memPtr <-
-      allocaAndPeek (Vulkan.vkMapMemory dev memory (fromIntegral offset) size Vulkan.VK_ZERO_FLAGS)
+    memPtr <- liftIO $ Vulkan.mapMemory dev memory (fromIntegral offset) size zero
     liftIO $ do
       Foreign.pokeArray (Foreign.castPtr memPtr) uniformData
-      Vulkan.vkUnmapMemory dev memory
+      Vulkan.unmapMemory dev memory
 
 -- | Create a buffer resource with embedded cleanup (not registered in any manager).
 makeBufferResource ::
   (MonadIO m, Storable a) =>
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  Vulkan.PhysicalDevice ->
+  Vulkan.Device ->
   [a] ->
-  Vulkan.VkBufferUsageBitmask Vulkan.FlagMask ->
+  Vulkan.BufferUsageFlags ->
   m BufferResource
 makeBufferResource pdev dev data' usage = do
   (buffer, memoryRequirements) <- createBuffer dev data' usage
@@ -192,8 +191,8 @@ makeBufferResource pdev dev data' usage = do
         [] -> 0
         (x : _) -> fromIntegral (length data' * sizeOf x)
       destroy = do
-        Vulkan.vkDestroyBuffer dev buffer Vulkan.vkNullPtr
-        Vulkan.vkFreeMemory dev memory Vulkan.vkNullPtr
+        Vulkan.destroyBuffer dev buffer Nothing
+        Vulkan.freeMemory dev memory Nothing
 
   pure
     BufferResource
@@ -207,14 +206,14 @@ makeBufferResource pdev dev data' usage = do
 createMeshResource ::
   (MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  Vulkan.PhysicalDevice ->
+  Vulkan.Device ->
   [Vertex] ->
   [VertexIndex] ->
   m MeshHandle
 createMeshResource rm pdev dev vertices indices = do
-  vertBuf <- makeBufferResource pdev dev vertices Vulkan.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-  idxBuf <- makeBufferResource pdev dev indices Vulkan.VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+  vertBuf <- makeBufferResource pdev dev vertices Vulkan.BUFFER_USAGE_VERTEX_BUFFER_BIT
+  idxBuf <- makeBufferResource pdev dev indices Vulkan.BUFFER_USAGE_INDEX_BUFFER_BIT
 
   meshH <- MeshHandle <$> allocHandle (rmNextId rm)
 
@@ -240,8 +239,8 @@ createMeshResource rm pdev dev vertices indices = do
 mergeMeshes ::
   (MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  Vulkan.PhysicalDevice ->
+  Vulkan.Device ->
   [MeshHandle] ->
   m (MeshResource, HashMap.HashMap MeshHandle (Word32, Int32))
 mergeMeshes rm pdev dev meshHandles = do
@@ -255,8 +254,8 @@ mergeMeshes rm pdev dev meshHandles = do
                 newOffs = HashMap.insert (mrHandle mesh) (fromIntegral ioff, fromIntegral voff) offs
              in (verts ++ mrVertices mesh, idxs ++ newIdxs, newOffs)
 
-  vertBuf <- makeBufferResource pdev dev allVertices Vulkan.VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-  idxBuf <- makeBufferResource pdev dev allIndices Vulkan.VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+  vertBuf <- makeBufferResource pdev dev allVertices Vulkan.BUFFER_USAGE_VERTEX_BUFFER_BIT
+  idxBuf <- makeBufferResource pdev dev allIndices Vulkan.BUFFER_USAGE_INDEX_BUFFER_BIT
 
   -- Create shared buffers with no-op destroy (managed by mergedMesh)
   let sharedVertBuf = vertBuf {brDestroy = pure ()}
@@ -286,7 +285,7 @@ meshBuffers ::
   (MonadIO m) =>
   ResourceManager ->
   MeshHandle ->
-  m (Maybe (Vulkan.VkBuffer, Vulkan.VkBuffer, Int))
+  m (Maybe (Vulkan.Buffer, Vulkan.Buffer, Int))
 meshBuffers rm handle = do
   mMesh <- lookupMesh rm handle
   pure $ fmap (\mesh -> (brVkBuffer (mrVertexBuffer mesh), brVkBuffer (mrIndexBuffer mesh), mrIndexCount mesh)) mMesh

@@ -1,39 +1,35 @@
+{-# LANGUAGE OverloadedStrings #-}
 module Graphics.Haskan.Vulkan.CommandPool where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
-import Graphics.Haskan.Resources (alloc, allocaAndPeek)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Graphics.Haskan.Resources (alloc)
+import Vulkan qualified as Vulkan
+import Vulkan.Core10 qualified as Vulkan
+import Vulkan.Core10.CommandPool (CommandPoolCreateInfo (..))
+import Vulkan.Zero (zero)
 
 managedCommandPool ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
+  Vulkan.Device ->
   Int ->
-  m Vulkan.VkCommandPool
+  m Vulkan.CommandPool
 managedCommandPool dev qfi =
   alloc
     "Command pool"
     (createCommandPool dev qfi)
-    (\ptr -> Vulkan.vkDestroyCommandPool dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vulkan.destroyCommandPool dev ptr Nothing)
 
 createCommandPool ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
+  Vulkan.Device ->
   Int ->
-  m Vulkan.VkCommandPool
+  m Vulkan.CommandPool
 createCommandPool dev queueFamilyIndex = do
-  let commandPoolCI =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"queueFamilyIndex" (fromIntegral queueFamilyIndex)
-              &* set @"flags" Vulkan.VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
-          )
-  liftIO $
-    withPtr
-      commandPoolCI
-      (\ciPtr -> allocaAndPeek (Vulkan.vkCreateCommandPool dev ciPtr Vulkan.VK_NULL))
+  let commandPoolCI :: Vulkan.CommandPoolCreateInfo
+      commandPoolCI =
+        Vulkan.CommandPoolCreateInfo
+          { flags = Vulkan.COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
+          , queueFamilyIndex = fromIntegral queueFamilyIndex
+          }
+  liftIO $ Vulkan.createCommandPool dev commandPoolCI Nothing

@@ -44,8 +44,8 @@ import Data.List (sortBy)
 import Data.Ord (comparing)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Vulkan qualified as Vulkan
+import Vulkan.Core10 qualified as Vulkan
 
 -- ---------------------------------------------------------------------------
 -- Resource IDs
@@ -68,16 +68,16 @@ data GraphResource
   deriving (Eq, Show)
 
 data BufferDesc = BufferDesc
-  { bdSize :: !Vulkan.VkDeviceSize,
-    bdUsage :: !(Vulkan.VkBufferUsageBitmask Vulkan.FlagMask)
+  { bdSize :: !Vulkan.DeviceSize,
+    bdUsage :: !Vulkan.BufferUsageFlags
   }
   deriving (Eq, Show)
 
 data ImageDesc = ImageDesc
-  { idFormat :: !Vulkan.VkFormat,
-    idExtent :: !Vulkan.VkExtent2D,
-    idUsage :: !(Vulkan.VkImageUsageBitmask Vulkan.FlagMask),
-    idSamples :: !Vulkan.VkSampleCountFlagBits
+  { idFormat :: !Vulkan.Format,
+    idExtent :: !Vulkan.Extent2D,
+    idUsage :: !Vulkan.ImageUsageFlags,
+    idSamples :: !Vulkan.SampleCountFlagBits
   }
   deriving (Eq, Show)
 
@@ -99,13 +99,13 @@ data PassRecordFunc = PassRecordFunc
   }
 
 data PassContext = PassContext
-  { pcCommandBuffer :: !Vulkan.VkCommandBuffer,
-    pcPipeline :: !Vulkan.VkPipeline,
-    pcPipelineLayout :: !Vulkan.VkPipelineLayout,
-    pcDescriptorSet :: !Vulkan.VkDescriptorSet,
-    pcFramebuffer :: !Vulkan.VkFramebuffer,
-    pcRenderPass :: !Vulkan.VkRenderPass,
-    pcExtent :: !Vulkan.VkExtent2D
+  { pcCommandBuffer :: !Vulkan.CommandBuffer,
+    pcPipeline :: !Vulkan.Pipeline,
+    pcPipelineLayout :: !Vulkan.PipelineLayout,
+    pcDescriptorSet :: !Vulkan.DescriptorSet,
+    pcFramebuffer :: !Vulkan.Framebuffer,
+    pcRenderPass :: !Vulkan.RenderPass,
+    pcExtent :: !Vulkan.Extent2D
   }
 
 -- ---------------------------------------------------------------------------
@@ -151,22 +151,22 @@ addPass pass = RenderGraphBuilder $ modify' $ \s ->
 -- | Create a transient image resource with an auto-generated ID.
 transientImage ::
   Text ->
-  Vulkan.VkFormat ->
-  Vulkan.VkExtent2D ->
-  Vulkan.VkImageUsageFlags ->
+  Vulkan.Format ->
+  Vulkan.Extent2D ->
+  Vulkan.ImageUsageFlags ->
   RenderGraphBuilder ResourceId
 transientImage name fmt extent usage = do
   idx <- RenderGraphBuilder $ gets gbsNextId
   RenderGraphBuilder $ modify' $ \s -> s {gbsNextId = gbsNextId s + 1}
   let rid = ResourceId (name <> "_" <> Text.pack (show idx))
-  addResource rid (GRImage (ImageDesc fmt extent usage Vulkan.VK_SAMPLE_COUNT_1_BIT))
+  addResource rid (GRImage (ImageDesc fmt extent usage Vulkan.SAMPLE_COUNT_1_BIT))
   pure rid
 
 -- | Create a transient buffer resource with an auto-generated ID.
 transientBuffer ::
   Text ->
-  Vulkan.VkDeviceSize ->
-  Vulkan.VkBufferUsageBitmask Vulkan.FlagMask ->
+  Vulkan.DeviceSize ->
+  Vulkan.BufferUsageFlags ->
   RenderGraphBuilder ResourceId
 transientBuffer name size usage = do
   idx <- RenderGraphBuilder $ gets gbsNextId

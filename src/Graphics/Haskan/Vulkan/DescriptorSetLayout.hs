@@ -66,6 +66,11 @@ import Graphics.Vulkan.Marshal (withPtr)
 import Graphics.Vulkan.Marshal.Create (set, setListRef, (&*))
 import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Language.Haskell.TH (Exp (VarE), mkName)
+import Data.Vector qualified as Vector
+import Vulkan qualified as Vk26
+import Vulkan.CStruct.Extends (SomeStruct (..))
+import Vulkan.Core12.Enums.DescriptorBindingFlagBits qualified as V12
+import Vulkan.Core10.Enums.DescriptorSetLayoutCreateFlagBits qualified as V10
 
 maxBindlessTextures :: Int
 maxBindlessTextures = 1024
@@ -343,47 +348,37 @@ createTerrainMeshDescriptorSetLayout dev = do
 
 -- | Bindless descriptor set layout: one array of textures with
 -- UPDATE_AFTER_BIND + PARTIALLY_BOUND.
-managedBindlessDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedBindlessDescriptorSetLayout :: (MonadManaged m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedBindlessDescriptorSetLayout dev =
   alloc
     "BindlessDescriptorSetLayout"
     (createBindlessDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createBindlessDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createBindlessDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createBindlessDescriptorSetLayout dev = do
   let textureBinding =
-        Vulkan.createVk
-          ( set @"binding" 0
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-              &* set @"descriptorCount" (fromIntegral maxBindlessTextures)
-              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
-              &* set @"pImmutableSamplers" Vulkan.VK_NULL
-          )
-      -- Binding flags: partially bound + update after bind
-      bindingFlags :: Vulkan12.VkDescriptorBindingFlags
+        Vk26.DescriptorSetLayoutBinding
+          0
+          Vk26.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+          (fromIntegral maxBindlessTextures)
+          Vk26.SHADER_STAGE_FRAGMENT_BIT
+          Vector.empty
       bindingFlags =
-        Vulkan12.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
-          .|. Vulkan12.VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
-      bindingFlagsCreateInfo :: Vulkan12.VkDescriptorSetLayoutBindingFlagsCreateInfo
+        V12.DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
+          .|. V12.DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT
       bindingFlagsCreateInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"bindingCount" 1
-              &* setListRef @"pBindingFlags" [bindingFlags]
-          )
+        Vk26.DescriptorSetLayoutBindingFlagsCreateInfo
+          (Vector.fromList [bindingFlags])
+      createInfo ::
+        Vk26.DescriptorSetLayoutCreateInfo
+          '[Vk26.DescriptorSetLayoutBindingFlagsCreateInfo]
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" (castPtr $ Vulkan.unsafePtr bindingFlagsCreateInfo)
-              &* set @"flags" Vulkan12.VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT
-              &* set @"bindingCount" 1
-              &* setListRef @"pBindings" [textureBinding]
-          )
-   in liftIO $ withPtr bindingFlagsCreateInfo $ \_bfcPtr ->
-        withPtr createInfo $ \ciPtr ->
-          allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+        Vk26.DescriptorSetLayoutCreateInfo
+          (bindingFlagsCreateInfo, ())
+          V10.DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT
+          (Vector.fromList [textureBinding])
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
 -- | Bindless pass descriptor set layout: UBO (binding 0) + Texture2DArray (binding 1).
 -- Used by the Texture2DArray bindless g-buffer pass.

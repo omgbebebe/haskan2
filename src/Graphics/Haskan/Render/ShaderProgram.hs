@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Render.ShaderProgram
@@ -9,71 +10,70 @@ module Graphics.Haskan.Render.ShaderProgram
   )
 where
 
+import Data.ByteString (ByteString)
 import Data.Maybe (catMaybes)
-import Foreign (Ptr, nullPtr)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Marshal.Create (set, setStrRef, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Vulkan qualified as Vulkan
+import Vulkan.Core10 qualified as Vulkan
+import Vulkan.Zero (zero)
 
 -- | A single shader stage configuration, with optional specialization constants.
 data ShaderStage = ShaderStage
-  { ssStage :: !Vulkan.VkShaderStageFlagBits,
-    ssModule :: !Vulkan.VkShaderModule,
-    ssSpecializationInfo :: !(Maybe (Ptr Vulkan.VkSpecializationInfo))
+  { ssStage :: !Vulkan.ShaderStageFlagBits,
+    ssModule :: !Vulkan.ShaderModule,
+    ssSpecializationInfo :: !(Maybe Vulkan.SpecializationInfo)
   }
 
 -- | Traditional graphics pipeline shader program.
 -- Supports vertex + optional tessellation + optional geometry + fragment.
 data ShaderProgram = ShaderProgram
-  { spVertex :: !Vulkan.VkShaderModule,
-    spTessControl :: !(Maybe Vulkan.VkShaderModule),
-    spTessEvaluation :: !(Maybe Vulkan.VkShaderModule),
-    spGeometry :: !(Maybe Vulkan.VkShaderModule),
-    spFragment :: !Vulkan.VkShaderModule,
-    spSpecializationInfo :: !(Maybe (Ptr Vulkan.VkSpecializationInfo))
+  { spVertex :: !Vulkan.ShaderModule,
+    spTessControl :: !(Maybe Vulkan.ShaderModule),
+    spTessEvaluation :: !(Maybe Vulkan.ShaderModule),
+    spGeometry :: !(Maybe Vulkan.ShaderModule),
+    spFragment :: !Vulkan.ShaderModule,
+    spSpecializationInfo :: !(Maybe Vulkan.SpecializationInfo)
   }
 
 -- | Mesh shader pipeline program (Vulkan 1.3+ / VK_EXT_mesh_shader).
 -- Replaces vertex/tessellation/geometry with task + mesh + fragment.
 data MeshShaderProgram = MeshShaderProgram
-  { mspTask :: !(Maybe Vulkan.VkShaderModule),
-    mspMesh :: !Vulkan.VkShaderModule,
-    mspFragment :: !Vulkan.VkShaderModule
+  { mspTask :: !(Maybe Vulkan.ShaderModule),
+    mspMesh :: !Vulkan.ShaderModule,
+    mspFragment :: !Vulkan.ShaderModule
   }
 
 -- | Convert a ShaderProgram to a list of Vulkan pipeline stage create infos.
 -- Uses the specialization info from the ShaderProgram if present.
-toPipelineStages :: ShaderProgram -> [Vulkan.VkPipelineShaderStageCreateInfo]
+toPipelineStages :: ShaderProgram -> [Vulkan.PipelineShaderStageCreateInfo '[]]
 toPipelineStages ShaderProgram {..} =
   let mkStage stageFlag mod_ =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"stage" stageFlag
-              &* set @"module" mod_
-              &* setStrRef @"pName" "main"
-              &* set @"pSpecializationInfo" (maybe nullPtr id spSpecializationInfo)
-          )
+        Vulkan.PipelineShaderStageCreateInfo
+          { next = ()
+          , flags = zero
+          , stage = stageFlag
+          , module' = mod_
+          , name = "main"
+          , specializationInfo = spSpecializationInfo
+          }
    in catMaybes
-        [ Just (mkStage Vulkan.VK_SHADER_STAGE_VERTEX_BIT spVertex),
-          mkStage Vulkan.VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT <$> spTessControl,
-          mkStage Vulkan.VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT <$> spTessEvaluation,
-          mkStage Vulkan.VK_SHADER_STAGE_GEOMETRY_BIT <$> spGeometry,
-          Just (mkStage Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT spFragment)
+        [ Just (mkStage Vulkan.SHADER_STAGE_VERTEX_BIT spVertex),
+          mkStage Vulkan.SHADER_STAGE_TESSELLATION_CONTROL_BIT <$> spTessControl,
+          mkStage Vulkan.SHADER_STAGE_TESSELLATION_EVALUATION_BIT <$> spTessEvaluation,
+          mkStage Vulkan.SHADER_STAGE_GEOMETRY_BIT <$> spGeometry,
+          Just (mkStage Vulkan.SHADER_STAGE_FRAGMENT_BIT spFragment)
         ]
 
 -- | Convert shader stages with specialization info.
-toPipelineStagesWithSpec :: [ShaderStage] -> [Vulkan.VkPipelineShaderStageCreateInfo]
+toPipelineStagesWithSpec :: [ShaderStage] -> [Vulkan.PipelineShaderStageCreateInfo '[]]
 toPipelineStagesWithSpec = map $ \ShaderStage {..} ->
-  Vulkan.createVk
-    ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO
-        &* set @"pNext" Vulkan.VK_NULL
-        &* set @"stage" ssStage
-        &* set @"module" ssModule
-        &* setStrRef @"pName" "main"
-        &* set @"pSpecializationInfo" (maybe nullPtr id ssSpecializationInfo)
-    )
+  Vulkan.PipelineShaderStageCreateInfo
+    { next = ()
+    , flags = zero
+    , stage = ssStage
+    , module' = ssModule
+    , name = "main"
+    , specializationInfo = ssSpecializationInfo
+    }
 
 -- | Number of active stages in a ShaderProgram.
 stageCount :: ShaderProgram -> Int

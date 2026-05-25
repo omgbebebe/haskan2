@@ -8,28 +8,26 @@ where
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.IORef (IORef, modifyIORef', newIORef, readIORef)
+import Data.Vector qualified as Vector
 import Data.Word (Word32)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
-import Graphics.Haskan.Resources (allocaAndPeek)
 import Graphics.Haskan.Vulkan.DescriptorPool qualified as DescriptorPool
 import Graphics.Haskan.Vulkan.DescriptorSet (updateBindlessTexture)
 import Graphics.Haskan.Vulkan.DescriptorSetLayout qualified as DescriptorSetLayout
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as VulkanCore
-import Graphics.Vulkan.Marshal.Create (createVk, set, setListRef, (&*))
+import Vulkan qualified as Vk26
 
 -- | Handle to a bindless texture descriptor set.
 data BindlessSet = BindlessSet
-  { bsDescriptorSet :: !Vulkan.VkDescriptorSet,
-    bsSampler :: !Vulkan.VkSampler,
+  { bsDescriptorSet :: !Vk26.DescriptorSet,
+    bsSampler :: !Vk26.Sampler,
     bsNextIndex :: !(IORef Word32),
     bsMaxTextures :: !Word32
   }
 
 createBindlessSet ::
   (MonadIO m, MonadManaged m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkSampler ->
+  Vk26.Device ->
+  Vk26.Sampler ->
   m BindlessSet
 createBindlessSet dev sampler = do
   layout <- DescriptorSetLayout.managedBindlessDescriptorSetLayout dev
@@ -47,9 +45,9 @@ createBindlessSet dev sampler = do
 
 registerTexture ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
+  Vk26.Device ->
   BindlessSet ->
-  Vulkan.VkImageView ->
+  Vk26.ImageView ->
   m (Maybe Word32)
 registerTexture dev bindlessSet textureView = do
   nextIdx <- liftIO $ readIORef (bsNextIndex bindlessSet)
@@ -71,20 +69,16 @@ registerTexture dev bindlessSet textureView = do
 -- Internal: allocate a descriptor set from pool + layout
 allocateDescriptorSet ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkDescriptorPool ->
-  [Vulkan.VkDescriptorSetLayout] ->
-  m Vulkan.VkDescriptorSet
+  Vk26.Device ->
+  Vk26.DescriptorPool ->
+  [Vk26.DescriptorSetLayout] ->
+  m Vk26.DescriptorSet
 allocateDescriptorSet dev descriptorPool setLayouts = do
   let allocateInfo =
-        createVk
-          ( set @"sType" VulkanCore.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"descriptorPool" descriptorPool
-              &* set @"descriptorSetCount" (fromIntegral (length setLayouts))
-              &* setListRef @"pSetLayouts" setLayouts
-          )
-   in liftIO $
-        Vulkan.withPtr
-          allocateInfo
-          (allocaAndPeek . VulkanCore.vkAllocateDescriptorSets dev)
+        Vk26.DescriptorSetAllocateInfo
+          ()
+          descriptorPool
+          (Vector.fromList setLayouts)
+  liftIO $ do
+    dss <- Vk26.allocateDescriptorSets dev allocateInfo
+    pure (Vector.head dss)

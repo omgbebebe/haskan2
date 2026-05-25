@@ -2,48 +2,47 @@
 
 module Graphics.Haskan.Vulkan.Types where
 
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Data.Word (Word32)
+import Vulkan qualified
 
 data VulkanContext = VulkanContext
-  { vcDevice :: !Vulkan.VkDevice,
-    vcPhysicalDevice :: !Vulkan.VkPhysicalDevice,
-    vcQueue :: !Vulkan.VkQueue,
-    vcCommandBuffer :: !Vulkan.VkCommandBuffer
+  { vcDevice :: !Vulkan.Device,
+    vcPhysicalDevice :: !Vulkan.PhysicalDevice,
+    vcQueue :: !Vulkan.Queue,
+    vcCommandBuffer :: !Vulkan.CommandBuffer
   }
 
 data StaticRenderContext = StaticRenderContext
-  { surface :: Vulkan.VkSurfaceKHR,
-    physicalDevice :: Vulkan.VkPhysicalDevice,
-    device :: Vulkan.VkDevice,
+  { surface :: Vulkan.SurfaceKHR,
+    physicalDevice :: Vulkan.PhysicalDevice,
+    device :: Vulkan.Device,
     graphicsQueueFamilyIndex :: QueueFamilyIndex,
     presentQueueFamilyIndex :: QueueFamilyIndex
   }
   deriving (Show)
 
 data RenderContext = RenderContext
-  { device :: Vulkan.VkDevice,
-    swapchain :: Vulkan.VkSwapchainKHR,
-    swapchainImages :: [Vulkan.VkImage],
-    graphicsCommandBuffers :: [Vulkan.VkCommandBuffer],
-    graphicsQueueHandler :: Vulkan.VkQueue,
-    presentQueueHandler :: Vulkan.VkQueue,
-    renderFinishedFences :: [Vulkan.VkFence],
-    renderFinishedSemaphores :: [Vulkan.VkSemaphore],
-    -- Pipeline resources for dynamic command buffer recording
-    rcPipelineLayout :: !Vulkan.VkPipelineLayout,
-    rcGraphicsPipeline :: !Vulkan.VkPipeline,
-    rcRenderPass :: !Vulkan.VkRenderPass,
-    rcFramebuffers :: ![Vulkan.VkFramebuffer],
-    rcDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    rcSurfaceExtent :: !Vulkan.VkExtent2D,
-    rcGraphicsCommandPool :: !Vulkan.VkCommandPool
+  { device :: Vulkan.Device,
+    swapchain :: Vulkan.SwapchainKHR,
+    swapchainImages :: [Vulkan.Image],
+    graphicsCommandBuffers :: [Vulkan.CommandBuffer],
+    graphicsQueueHandler :: Vulkan.Queue,
+    presentQueueHandler :: Vulkan.Queue,
+    renderFinishedFences :: [Vulkan.Fence],
+    renderFinishedSemaphores :: [Vulkan.Semaphore],
+    rcPipelineLayout :: !Vulkan.PipelineLayout,
+    rcGraphicsPipeline :: !Vulkan.Pipeline,
+    rcRenderPass :: !Vulkan.RenderPass,
+    rcFramebuffers :: ![Vulkan.Framebuffer],
+    rcDescriptorSets :: ![Vulkan.DescriptorSet],
+    rcSurfaceExtent :: !Vulkan.Extent2D,
+    rcGraphicsCommandPool :: !Vulkan.CommandPool
   }
   deriving (Show)
 
 type QueueFamilyIndex = Int
 
-type ImageIndex = Vulkan.Word32
+type ImageIndex = Word32
 
 data RenderResult
   = FrameOk ImageIndex

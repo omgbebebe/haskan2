@@ -17,8 +17,17 @@ module Graphics.Haskan.Vulkan.Interop
   , fromVulkanRenderPass
   , fromVulkanCommandBuffer
     -- * Additional reverse conversions
+  , fromVulkanDescriptorPool
+  , fromVulkanDescriptorSet
+  , fromVulkanSampler
+  , fromVulkanImageView
+  , fromVulkanBuffer
+  , fromVulkanDeviceMemory
+  , fromVulkanImage
+    -- * Additional forward conversions
   , toVulkanPipelineLayout
   , toVulkanShaderModule
+  , toVulkanSampler
   ) where
 
 import Data.Coerce (coerce)
@@ -79,6 +88,27 @@ fromVulkanRenderPass = coerce
 fromVulkanCommandBuffer :: Vk.CommandBuffer -> Vulkan.VkCommandBuffer
 fromVulkanCommandBuffer = castPtr . Vk.commandBufferHandle
 
+fromVulkanDescriptorPool :: Vk.DescriptorPool -> Vulkan.VkDescriptorPool
+fromVulkanDescriptorPool = VkPtr . coerce
+
+fromVulkanDescriptorSet :: Vk.DescriptorSet -> Vulkan.VkDescriptorSet
+fromVulkanDescriptorSet = VkPtr . coerce
+
+fromVulkanSampler :: Vk.Sampler -> Vulkan.VkSampler
+fromVulkanSampler = VkPtr . coerce
+
+fromVulkanImageView :: Vk.ImageView -> Vulkan.VkImageView
+fromVulkanImageView = VkPtr . coerce
+
+fromVulkanBuffer :: Vk.Buffer -> Vulkan.VkBuffer
+fromVulkanBuffer = VkPtr . coerce
+
+fromVulkanDeviceMemory :: Vk.DeviceMemory -> Vulkan.VkDeviceMemory
+fromVulkanDeviceMemory = VkPtr . coerce
+
+fromVulkanImage :: Vk.Image -> Vulkan.VkImage
+fromVulkanImage = VkPtr . coerce
+
 -- ---------------------------------------------------------------------------
 -- Additional vulkan-api → vulkan package conversions
 -- ---------------------------------------------------------------------------
@@ -88,3 +118,6 @@ toVulkanPipelineLayout = Vk.PipelineLayout . coerce
 
 toVulkanShaderModule :: Vulkan.VkShaderModule -> Vk.ShaderModule
 toVulkanShaderModule = Vk.ShaderModule . coerce
+
+toVulkanSampler :: Vulkan.VkSampler -> Vk.Sampler
+toVulkanSampler = Vk.Sampler . coerce

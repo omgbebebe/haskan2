@@ -10,24 +10,25 @@ import Data.List (maximumBy, sortOn)
 import Data.Ord (comparing)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Vector qualified as Vector
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
-import Graphics.Haskan.Resources (allocaAndPeek, allocaAndPeek_, peekVkList)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Ext qualified as Vulkan
-import Graphics.Vulkan.Marshal.Internal (getStringField)
+import Vulkan qualified as Vulkan
+import Vulkan.Core10 qualified as Vulkan
+import Vulkan.Core10.DeviceInitialization (PhysicalDeviceProperties (..))
+import Vulkan.Extensions qualified as Vulkan
+import Vulkan.Extensions.VK_KHR_surface (SurfaceCapabilitiesKHR (..))
 
-selectPhysicalDevice :: (MonadIO m) => Vulkan.VkInstance -> m Vulkan.VkPhysicalDevice
+selectPhysicalDevice :: (MonadIO m) => Vulkan.Instance -> m Vulkan.PhysicalDevice
 selectPhysicalDevice inst = do
-  physicalDevices <- liftIO $ peekVkList (Vulkan.vkEnumeratePhysicalDevices inst)
-  case physicalDevices of
+  (_, physicalDevices) <- liftIO $ Vulkan.enumeratePhysicalDevices inst
+  case Vector.toList physicalDevices of
     [] -> error "No Vulkan physical devices found"
     [single] -> do
       logInfoIO LogVulkan "Only one physical device available, using it"
       pure single
     multiple -> selectBestPhysicalDevice multiple
 
-selectBestPhysicalDevice :: (MonadIO m) => [Vulkan.VkPhysicalDevice] -> m Vulkan.VkPhysicalDevice
+selectBestPhysicalDevice :: (MonadIO m) => [Vulkan.PhysicalDevice] -> m Vulkan.PhysicalDevice
 selectBestPhysicalDevice devices = do
   scored <- mapM scoreDevice devices
   let best@(bestDev, bestScore, bestName) = maximumBy (comparing (\(_, s, _) -> s)) scored
@@ -36,39 +37,33 @@ selectBestPhysicalDevice devices = do
   logInfoIO LogVulkan $ "Selected: " <> showT (Text.pack bestName) <> " with score " <> showT bestScore
   pure bestDev
   where
-    scoreDevice :: (MonadIO m) => Vulkan.VkPhysicalDevice -> m (Vulkan.VkPhysicalDevice, Int, String)
+    scoreDevice :: (MonadIO m) => Vulkan.PhysicalDevice -> m (Vulkan.PhysicalDevice, Int, String)
     scoreDevice dev = liftIO $ do
-      props <- allocaAndPeek_ (Vulkan.vkGetPhysicalDeviceProperties dev)
-      let deviceType = Vulkan.getField @"deviceType" props
-          deviceName = getStringField @"deviceName" props
-          -- Score: discrete (100) > integrated (50) > virtual (30) > other (10) > cpu (0)
-          baseScore = case deviceType of
-            Vulkan.VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU -> 100
-            Vulkan.VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU -> 50
-            Vulkan.VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU -> 30
-            Vulkan.VK_PHYSICAL_DEVICE_TYPE_OTHER -> 10
-            Vulkan.VK_PHYSICAL_DEVICE_TYPE_CPU -> 0
+      props <- Vulkan.getPhysicalDeviceProperties dev
+      let baseScore = case deviceType props of
+            Vulkan.PHYSICAL_DEVICE_TYPE_DISCRETE_GPU -> 100
+            Vulkan.PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU -> 50
+            Vulkan.PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU -> 30
+            Vulkan.PHYSICAL_DEVICE_TYPE_OTHER -> 10
+            Vulkan.PHYSICAL_DEVICE_TYPE_CPU -> 0
             _ -> 10
-          -- Bonus for API version (prefer newer)
-          apiVersion = Vulkan.getField @"apiVersion" props
-          versionBonus = fromIntegral ((apiVersion `div` 1000000) `mod` 100) :: Int
+          versionBonus = fromIntegral ((apiVersion props `div` 1000000) `mod` 100) :: Int
           totalScore = baseScore + versionBonus
-      pure (dev, totalScore, deviceName)
+      pure (dev, totalScore, show (deviceName props))
 
-surfaceExtent :: (MonadIO m) => Vulkan.VkPhysicalDevice -> Vulkan.VkSurfaceKHR -> m Vulkan.VkExtent2D
+surfaceExtent :: (MonadIO m) => Vulkan.PhysicalDevice -> Vulkan.SurfaceKHR -> m Vulkan.Extent2D
 surfaceExtent pdev surface = do
-  caps <- liftIO $ allocaAndPeek (Vulkan.vkGetPhysicalDeviceSurfaceCapabilitiesKHR pdev surface)
-  let currentExtent = Vulkan.getField @"currentExtent" caps
-  pure currentExtent
+  caps <- liftIO $ Vulkan.getPhysicalDeviceSurfaceCapabilitiesKHR pdev surface
+  pure (currentExtent caps)
 
 -- | Query supported present modes and select the best available.
 -- Preference order: MAILBOX > IMMEDIATE > FIFO
-selectPresentMode :: (MonadIO m) => Vulkan.VkPhysicalDevice -> Vulkan.VkSurfaceKHR -> m Vulkan.VkPresentModeKHR
+selectPresentMode :: (MonadIO m) => Vulkan.PhysicalDevice -> Vulkan.SurfaceKHR -> m Vulkan.PresentModeKHR
 selectPresentMode pdev surface = do
-  modes <- liftIO $ peekVkList (Vulkan.vkGetPhysicalDeviceSurfacePresentModesKHR pdev surface)
-  let preferred = [Vulkan.VK_PRESENT_MODE_MAILBOX_KHR, Vulkan.VK_PRESENT_MODE_IMMEDIATE_KHR, Vulkan.VK_PRESENT_MODE_FIFO_KHR]
-      chosen = case filter (`elem` modes) preferred of
+  (_, modes) <- liftIO $ Vulkan.getPhysicalDeviceSurfacePresentModesKHR pdev surface
+  let preferred = [Vulkan.PRESENT_MODE_MAILBOX_KHR, Vulkan.PRESENT_MODE_IMMEDIATE_KHR, Vulkan.PRESENT_MODE_FIFO_KHR]
+      chosen = case filter (`elem` Vector.toList modes) preferred of
         (mode : _) -> mode
-        [] -> Vulkan.VK_PRESENT_MODE_FIFO_KHR -- FIFO is guaranteed to be supported
-  logInfoIO LogVulkan $ "selected present mode: " <> showT chosen <> " (available: " <> showT modes <> ")"
+        [] -> Vulkan.PRESENT_MODE_FIFO_KHR -- FIFO is guaranteed to be supported
+  logInfoIO LogVulkan $ "selected present mode: " <> showT chosen <> " (available: " <> showT (Vector.toList modes) <> ")"
   pure chosen
