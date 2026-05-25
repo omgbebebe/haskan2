@@ -19,6 +19,7 @@ import Vulkan qualified as Vk26
 import Vulkan.CStruct.Extends (SomeStruct(..))
 import Vulkan.Core10.DeviceInitialization (PhysicalDeviceProperties(..), PhysicalDeviceFeatures(..), QueueFamilyProperties(..))
 import Vulkan.Core12.Promoted_From_VK_EXT_descriptor_indexing (PhysicalDeviceDescriptorIndexingFeatures(..))
+import Vulkan.Extensions.VK_EXT_mesh_shader (PhysicalDeviceMeshShaderFeaturesEXT(..))
 import Vulkan.Zero (zero)
 
 vkExtMeshShaderExtensionName :: BS8.ByteString
@@ -76,6 +77,7 @@ createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
       vertexStorageSupported = vertexPipelineStoresAndAtomics availableFeatures
       fragmentStorageSupported = fragmentStoresAndAtomics availableFeatures
       multiDrawIndirectSupported = multiDrawIndirect availableFeatures
+      storageExtendedSupported = shaderStorageImageExtendedFormats availableFeatures
 
   descriptorIndexingSupported <-
     if majorVersion >= 1 && minorVersion >= 2
@@ -100,6 +102,16 @@ createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
         logInfoIO LogVulkan "Descriptor indexing requires Vulkan 1.2+, skipping"
         pure False
 
+  meshShaderFeatures <-
+    if enableMeshShader
+      then liftIO $ do
+        features2 <- Vk26.getPhysicalDeviceFeatures2 dev :: IO (Vk26.PhysicalDeviceFeatures2 '[PhysicalDeviceMeshShaderFeaturesEXT])
+        let Vk26.PhysicalDeviceFeatures2 (msFeaturesQuery, ()) _ = features2
+            meshSupported = meshShader msFeaturesQuery
+        logInfoIO LogVulkan $ "Mesh shader supported: " <> showT meshSupported
+        pure (Just msFeaturesQuery)
+      else pure Nothing
+
   let deviceFlags = zero
       queueFlags = zero
       meshShaderExtension = if enableMeshShader then [vkExtMeshShaderExtensionName] else []
@@ -111,6 +123,7 @@ createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
           , vertexPipelineStoresAndAtomics = vertexStorageSupported
           , fragmentStoresAndAtomics = fragmentStorageSupported
           , multiDrawIndirect = multiDrawIndirectSupported
+          , shaderStorageImageExtendedFormats = storageExtendedSupported
           }
       queueCreateInfos =
         map
@@ -127,8 +140,20 @@ createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
           queueFamilyIndices
 
   liftIO $ do
-    case descriptorIndexingSupported of
-      False -> do
+    let diFeatures =
+          if descriptorIndexingSupported
+            then Just
+              ( (zero :: Vk26.PhysicalDeviceDescriptorIndexingFeatures)
+                  { shaderSampledImageArrayNonUniformIndexing = True
+                  , descriptorBindingSampledImageUpdateAfterBind = True
+                  , descriptorBindingPartiallyBound = True
+                  , runtimeDescriptorArray = True
+                  }
+              )
+            else Nothing
+        msFeatures = meshShaderFeatures
+    case (diFeatures, msFeatures) of
+      (Nothing, Nothing) -> do
         let createInfo =
               Vk26.DeviceCreateInfo
                 { next = ()
@@ -139,17 +164,32 @@ createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
                 , enabledFeatures = Just enabledBasicFeatures
                 }
         Vk26.createDevice dev createInfo Nothing
-      True -> do
-        let diFeatures =
-              (zero :: Vk26.PhysicalDeviceDescriptorIndexingFeatures)
-                { shaderSampledImageArrayNonUniformIndexing = True
-                , descriptorBindingSampledImageUpdateAfterBind = True
-                , descriptorBindingPartiallyBound = True
-                , runtimeDescriptorArray = True
-                }
-            createInfo =
+      (Just di, Nothing) -> do
+        let createInfo =
               Vk26.DeviceCreateInfo
-                { next = (diFeatures, ())
+                { next = (di, ())
+                , flags = deviceFlags
+                , queueCreateInfos = Vector.fromList queueCreateInfos
+                , enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers
+                , enabledExtensionNames = enabledExtensions
+                , enabledFeatures = Just enabledBasicFeatures
+                }
+        Vk26.createDevice dev createInfo Nothing
+      (Nothing, Just ms) -> do
+        let createInfo =
+              Vk26.DeviceCreateInfo
+                { next = (ms, ())
+                , flags = deviceFlags
+                , queueCreateInfos = Vector.fromList queueCreateInfos
+                , enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers
+                , enabledExtensionNames = enabledExtensions
+                , enabledFeatures = Just enabledBasicFeatures
+                }
+        Vk26.createDevice dev createInfo Nothing
+      (Just di, Just ms) -> do
+        let createInfo =
+              Vk26.DeviceCreateInfo
+                { next = (di, (ms, ()))
                 , flags = deviceFlags
                 , queueCreateInfos = Vector.fromList queueCreateInfos
                 , enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers
