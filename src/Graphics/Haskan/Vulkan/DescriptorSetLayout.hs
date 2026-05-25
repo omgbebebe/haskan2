@@ -43,8 +43,7 @@ import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
 import Data.Coerce (coerce)
 import Data.Word (Word32)
-import Foreign (castPtr)
-import Graphics.Haskan.Resources (alloc, allocaAndPeek)
+import Graphics.Haskan.Resources (alloc)
 import Graphics.Haskan.Vulkan.DescriptorSetLayout.TH (descriptorSetLayoutBindings)
 import Graphics.Haskan.Vulkan.Shaders.Compute.APVolume qualified as APVolume
 import Graphics.Haskan.Vulkan.Shaders.Compute.CloudDetailNoiseGen qualified as CloudDetailNoiseGen
@@ -59,292 +58,200 @@ import Graphics.Haskan.Vulkan.Shaders.Deferred.GodRays (GodRayFragmentDefs)
 import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as Lighting
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProcedural
 import Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainOverlay (TerrainFragmentDefs)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Core_1_2 qualified as Vulkan12
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, setListRef, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Language.Haskell.TH (Exp (VarE), mkName)
 import Data.Vector qualified as Vector
 import Vulkan qualified as Vk26
-import Vulkan.CStruct.Extends (SomeStruct (..))
 import Vulkan.Core12.Enums.DescriptorBindingFlagBits qualified as V12
 import Vulkan.Core10.Enums.DescriptorSetLayoutCreateFlagBits qualified as V10
+import Vulkan.Zero (zero)
 
 maxBindlessTextures :: Int
 maxBindlessTextures = 1024
 
 -- | Helper to construct a single VkDescriptorSetLayoutBinding.
-layoutBinding :: Int -> Int -> Vulkan.VkDescriptorType -> Vulkan.VkShaderStageFlags -> Vulkan.VkDescriptorSetLayoutBinding
+layoutBinding :: Int -> Int -> Vk26.DescriptorType -> Vk26.ShaderStageFlags -> Vk26.DescriptorSetLayoutBinding
 layoutBinding binding count descriptorType stageFlags =
-  Vulkan.createVk
-    ( set @"binding" (fromIntegral binding)
-        &* set @"descriptorType" descriptorType
-        &* set @"descriptorCount" (fromIntegral count)
-        &* set @"stageFlags" stageFlags
-        &* set @"pImmutableSamplers" Vulkan.VK_NULL
-    )
+  Vk26.DescriptorSetLayoutBinding
+    (fromIntegral binding)
+    descriptorType
+    (fromIntegral count)
+    stageFlags
+    Vector.empty
 
 -- Descriptor type helpers (avoid pattern synonym issues in TH splices).
-vkCombinedImageSampler :: Vulkan.VkDescriptorType
-vkCombinedImageSampler = Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+vkCombinedImageSampler :: Vk26.DescriptorType
+vkCombinedImageSampler = Vk26.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
 
-vkUniformBuffer :: Vulkan.VkDescriptorType
-vkUniformBuffer = Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
+vkUniformBuffer :: Vk26.DescriptorType
+vkUniformBuffer = Vk26.DESCRIPTOR_TYPE_UNIFORM_BUFFER
 
-vkStorageBuffer :: Vulkan.VkDescriptorType
-vkStorageBuffer = Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
+vkStorageBuffer :: Vk26.DescriptorType
+vkStorageBuffer = Vk26.DESCRIPTOR_TYPE_STORAGE_BUFFER
 
-vkStorageImage :: Vulkan.VkDescriptorType
-vkStorageImage = Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_IMAGE
+vkStorageImage :: Vk26.DescriptorType
+vkStorageImage = Vk26.DESCRIPTOR_TYPE_STORAGE_IMAGE
 
 -- Stage flag helpers (avoid pattern synonym issues in TH splices).
-vkFragmentBit :: Vulkan.VkShaderStageFlags
-vkFragmentBit = Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+vkFragmentBit :: Vk26.ShaderStageFlags
+vkFragmentBit = Vk26.SHADER_STAGE_FRAGMENT_BIT
 
-vkVertexFragmentBits :: Vulkan.VkShaderStageFlags
-vkVertexFragmentBits = Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
+vkVertexFragmentBits :: Vk26.ShaderStageFlags
+vkVertexFragmentBits = Vk26.SHADER_STAGE_VERTEX_BIT .|. Vk26.SHADER_STAGE_FRAGMENT_BIT
 
-vkMeshBit :: Vulkan.VkShaderStageFlags
+vkMeshBit :: Vk26.ShaderStageFlags
 vkMeshBit = Data.Coerce.coerce (0x00000080 :: Word32)  -- VK_SHADER_STAGE_MESH_BIT_EXT
 
-vkComputeBit :: Vulkan.VkShaderStageFlags
-vkComputeBit = Vulkan.VK_SHADER_STAGE_COMPUTE_BIT
+vkComputeBit :: Vk26.ShaderStageFlags
+vkComputeBit = Vk26.SHADER_STAGE_COMPUTE_BIT
 
-managedDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedDescriptorSetLayout :: (MonadManaged m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedDescriptorSetLayout dev =
   alloc
     "DescriptorSetLayout"
     (createDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createDescriptorSetLayout dev = do
   let viewProjBinding =
-        Vulkan.createVk
-          ( set @"binding" 0
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-              &* set @"descriptorCount" 1
-              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_VERTEX_BIT
-              &* set @"pImmutableSamplers" Vulkan.VK_NULL
-          )
+        Vk26.DescriptorSetLayoutBinding
+          0
+          Vk26.DESCRIPTOR_TYPE_UNIFORM_BUFFER
+          1
+          Vk26.SHADER_STAGE_VERTEX_BIT
+          Vector.empty
       textureBinding =
-        Vulkan.createVk
-          ( set @"binding" 1
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-              &* set @"descriptorCount" (fromIntegral maxBindlessTextures)
-              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
-              &* set @"pImmutableSamplers" Vulkan.VK_NULL
-          )
+        Vk26.DescriptorSetLayoutBinding
+          1
+          Vk26.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+          (fromIntegral maxBindlessTextures)
+          Vk26.SHADER_STAGE_FRAGMENT_BIT
+          Vector.empty
       entityBinding =
-        Vulkan.createVk
-          ( set @"binding" 2
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-              &* set @"descriptorCount" 1
-              &* set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
-              &* set @"pImmutableSamplers" Vulkan.VK_NULL
-          )
-      -- Binding flags for binding 1: partially bound (allows unused descriptors in array)
-      bindingFlags :: Vulkan12.VkDescriptorBindingFlags
-      bindingFlags = Vulkan12.VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
-      bindingFlagsCreateInfo :: Vulkan12.VkDescriptorSetLayoutBindingFlagsCreateInfo
+        Vk26.DescriptorSetLayoutBinding
+          2
+          Vk26.DESCRIPTOR_TYPE_STORAGE_BUFFER
+          1
+          (Vk26.SHADER_STAGE_VERTEX_BIT .|. Vk26.SHADER_STAGE_FRAGMENT_BIT)
+          Vector.empty
+      bindingFlags :: Vk26.DescriptorBindingFlags
+      bindingFlags = V12.DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT
       bindingFlagsCreateInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"bindingCount" 3
-              &* setListRef @"pBindingFlags" [Vulkan.VK_ZERO_FLAGS, bindingFlags, Vulkan.VK_ZERO_FLAGS] -- binding 0: no flags, binding 1: partially bound, binding 2: no flags
-          )
+        Vk26.DescriptorSetLayoutBindingFlagsCreateInfo
+          (Vector.fromList [zero, bindingFlags, zero])
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" (castPtr $ Vulkan.unsafePtr bindingFlagsCreateInfo)
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" 3
-              &* setListRef @"pBindings" [viewProjBinding, textureBinding, entityBinding]
-          )
-   in liftIO $ withPtr bindingFlagsCreateInfo $ \_bfcPtr ->
-        withPtr createInfo $ \ciPtr ->
-          allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
+        Vk26.DescriptorSetLayoutCreateInfo
+          (bindingFlagsCreateInfo, ())
+          zero
+          (Vector.fromList [viewProjBinding, textureBinding, entityBinding])
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
-managedLightingDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedLightingDescriptorSetLayout :: (MonadManaged m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedLightingDescriptorSetLayout dev =
   alloc
     "LightingDescriptorSetLayout"
     (createLightingDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createLightingDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createLightingDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createLightingDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkFragmentBit"))) Nothing ''Lighting.FragmentDefs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
-managedLightingProceduralDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedLightingProceduralDescriptorSetLayout :: (MonadManaged m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedLightingProceduralDescriptorSetLayout dev =
   alloc
     "LightingProceduralDescriptorSetLayout"
     (createLightingProceduralDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createLightingProceduralDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createLightingProceduralDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createLightingProceduralDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkFragmentBit"))) Nothing ''LightingProcedural.FragmentDefs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
 -- | Cloud descriptor set layout: env cubemap + 3D noise texture
-managedCloudDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedCloudDescriptorSetLayout :: (MonadManaged m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedCloudDescriptorSetLayout dev =
   alloc
     "CloudDescriptorSetLayout"
     (createCloudDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createCloudDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createCloudDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createCloudDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\b -> if b == 4 then pure (VarE (mkName "vkVertexFragmentBits")) else pure (VarE (mkName "vkFragmentBit"))) Nothing ''CloudFragmentDefs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
-managedGodRayDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedGodRayDescriptorSetLayout :: (MonadManaged m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedGodRayDescriptorSetLayout dev =
   alloc
     "GodRayDescriptorSetLayout"
     (createGodRayDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createGodRayDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createGodRayDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createGodRayDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_ -> pure (VarE (mkName "vkFragmentBit"))) Nothing ''GodRayFragmentDefs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
-managedTerrainDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedTerrainDescriptorSetLayout :: (MonadManaged m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedTerrainDescriptorSetLayout dev =
   alloc
     "TerrainDescriptorSetLayout"
     (createTerrainDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createTerrainDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createTerrainDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createTerrainDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\b -> if b == 2 then pure (VarE (mkName "vkVertexFragmentBits")) else pure (VarE (mkName "vkFragmentBit"))) Nothing ''TerrainFragmentDefs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-           allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-           )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
 -- | Mesh terrain descriptor set layout:
 -- binding 0 = node SSBO (mesh stage)
 -- binding 1 = heightmap texture array (mesh stage)
 -- binding 2 = climate texture array (fragment stage)
-managedTerrainMeshDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedTerrainMeshDescriptorSetLayout :: (MonadManaged m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedTerrainMeshDescriptorSetLayout dev =
   alloc
     "TerrainMeshDescriptorSetLayout"
     (createTerrainMeshDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createTerrainMeshDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createTerrainMeshDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createTerrainMeshDescriptorSetLayout dev = do
   let nodeBinding =
-        Vulkan.createVk
-          ( set @"binding" 0
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_STORAGE_BUFFER
-              &* set @"descriptorCount" 1
-              &* set @"stageFlags" vkMeshBit
-              &* set @"pImmutableSamplers" Vulkan.VK_NULL
-          )
+        Vk26.DescriptorSetLayoutBinding
+          0
+          Vk26.DESCRIPTOR_TYPE_STORAGE_BUFFER
+          1
+          vkMeshBit
+          Vector.empty
       heightmapBinding =
-        Vulkan.createVk
-          ( set @"binding" 1
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-              &* set @"descriptorCount" 1
-              &* set @"stageFlags" vkMeshBit
-              &* set @"pImmutableSamplers" Vulkan.VK_NULL
-          )
+        Vk26.DescriptorSetLayoutBinding
+          1
+          Vk26.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+          1
+          vkMeshBit
+          Vector.empty
       climateBinding =
-        Vulkan.createVk
-          ( set @"binding" 2
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-              &* set @"descriptorCount" 1
-              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
-              &* set @"pImmutableSamplers" Vulkan.VK_NULL
-          )
+        Vk26.DescriptorSetLayoutBinding
+          2
+          Vk26.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+          1
+          Vk26.SHADER_STAGE_FRAGMENT_BIT
+          Vector.empty
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" 3
-              &* setListRef @"pBindings" [nodeBinding, heightmapBinding, climateBinding]
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+        Vk26.DescriptorSetLayoutCreateInfo
+          ()
+          zero
+          (Vector.fromList [nodeBinding, heightmapBinding, climateBinding])
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
 -- | Bindless descriptor set layout: one array of textures with
 -- UPDATE_AFTER_BIND + PARTIALLY_BOUND.
@@ -382,221 +289,127 @@ createBindlessDescriptorSetLayout dev = do
 
 -- | Bindless pass descriptor set layout: UBO (binding 0) + Texture2DArray (binding 1).
 -- Used by the Texture2DArray bindless g-buffer pass.
-managedBindlessPassDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedBindlessPassDescriptorSetLayout :: (MonadManaged m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedBindlessPassDescriptorSetLayout dev =
   alloc
     "BindlessPassDescriptorSetLayout"
     (createBindlessPassDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createBindlessPassDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createBindlessPassDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createBindlessPassDescriptorSetLayout dev = do
   let uboBinding =
-        Vulkan.createVk
-          ( set @"binding" 0
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER
-              &* set @"descriptorCount" 1
-              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_VERTEX_BIT
-              &* set @"pImmutableSamplers" Vulkan.VK_NULL
-          )
+        Vk26.DescriptorSetLayoutBinding
+          0
+          Vk26.DESCRIPTOR_TYPE_UNIFORM_BUFFER
+          1
+          Vk26.SHADER_STAGE_VERTEX_BIT
+          Vector.empty
       textureBinding =
-        Vulkan.createVk
-          ( set @"binding" 1
-              &* set @"descriptorType" Vulkan.VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-              &* set @"descriptorCount" 1
-              &* set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
-              &* set @"pImmutableSamplers" Vulkan.VK_NULL
-          )
+        Vk26.DescriptorSetLayoutBinding
+          1
+          Vk26.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+          1
+          Vk26.SHADER_STAGE_FRAGMENT_BIT
+          Vector.empty
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" 2
-              &* setListRef @"pBindings" [uboBinding, textureBinding]
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+        Vk26.DescriptorSetLayoutCreateInfo
+          ()
+          zero
+          (Vector.fromList [uboBinding, textureBinding])
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
 -- | Compute culling descriptor set layout: 2 SSBOs + 1 UBO.
-managedComputeDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedComputeDescriptorSetLayout :: (MonadManaged m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedComputeDescriptorSetLayout dev =
   alloc
     "ComputeDescriptorSetLayout"
     (createComputeDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createComputeDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createComputeDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''Cull.Defs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
 -- | Cubemap compute descriptor set layout: StorageImage (cubemap) + Uniform (genData).
 -- Shared between radiance and irradiance compute shaders.
-managedCubemapComputeDescriptorSetLayout :: (MonadManaged m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedCubemapComputeDescriptorSetLayout :: (MonadManaged m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedCubemapComputeDescriptorSetLayout dev =
   alloc
     "CubemapComputeDescriptorSetLayout"
     (createCubemapComputeDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createCubemapComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createCubemapComputeDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createCubemapComputeDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''RadianceGen.Defs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
-managedCloudNoiseComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedCloudNoiseComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedCloudNoiseComputeDescriptorSetLayout dev =
   alloc
     "CloudNoiseComputeDescriptorSetLayout"
     (createCloudNoiseComputeDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createCloudNoiseComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createCloudNoiseComputeDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createCloudNoiseComputeDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''CloudNoiseGen.Defs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
-managedCloudDetailNoiseComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedCloudDetailNoiseComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedCloudDetailNoiseComputeDescriptorSetLayout dev =
   alloc
     "CloudDetailNoiseComputeDescriptorSetLayout"
     (createCloudDetailNoiseComputeDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createCloudDetailNoiseComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createCloudDetailNoiseComputeDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createCloudDetailNoiseComputeDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''CloudDetailNoiseGen.Defs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
-managedCloudNoiseMipGenComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedCloudNoiseMipGenComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedCloudNoiseMipGenComputeDescriptorSetLayout dev =
   alloc
     "CloudNoiseMipGenComputeDescriptorSetLayout"
     (createCloudNoiseMipGenComputeDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createCloudNoiseMipGenComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createCloudNoiseMipGenComputeDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createCloudNoiseMipGenComputeDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''CloudNoiseMipGen.Defs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
-managedWeatherMapComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedWeatherMapComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedWeatherMapComputeDescriptorSetLayout dev =
   alloc
     "WeatherMapComputeDescriptorSetLayout"
     (createWeatherMapComputeDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createWeatherMapComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createWeatherMapComputeDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createWeatherMapComputeDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''WeatherMapGen.Defs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing
 
 -- | AP volume compute descriptor set layout: StorageImage (3D) + Texture3D + Uniform.
-managedAPVolumeComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+managedAPVolumeComputeDescriptorSetLayout :: (MonadManaged m, MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 managedAPVolumeComputeDescriptorSetLayout dev =
   alloc
     "APVolumeComputeDescriptorSetLayout"
     (createAPVolumeComputeDescriptorSetLayout dev)
-    (\ptr -> Vulkan.vkDestroyDescriptorSetLayout dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyDescriptorSetLayout dev ptr Nothing)
 
-createAPVolumeComputeDescriptorSetLayout :: (MonadIO m) => Vulkan.VkDevice -> m Vulkan.VkDescriptorSetLayout
+createAPVolumeComputeDescriptorSetLayout :: (MonadIO m) => Vk26.Device -> m Vk26.DescriptorSetLayout
 createAPVolumeComputeDescriptorSetLayout dev = do
   let bindings = $(descriptorSetLayoutBindings (\_b -> pure (VarE (mkName "vkComputeBit"))) Nothing ''APVolume.Defs)
-      createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"bindingCount" (fromIntegral (length bindings))
-              &* setListRef @"pBindings" bindings
-          )
-   in liftIO $
-        withPtr
-          createInfo
-          ( \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDescriptorSetLayout dev ciPtr Vulkan.vkNullPtr)
-          )
+      createInfo = Vk26.DescriptorSetLayoutCreateInfo () zero (Vector.fromList bindings)
+  liftIO $ Vk26.createDescriptorSetLayout dev createInfo Nothing

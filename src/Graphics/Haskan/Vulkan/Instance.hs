@@ -1,3 +1,5 @@
+{-# LANGUAGE DuplicateRecordFields #-}
+
 module Graphics.Haskan.Vulkan.Instance where
 
 import Control.Monad (unless, when)
@@ -10,23 +12,24 @@ import Data.List (partition)
 import Data.Text (Text)
 import Data.Text qualified as T
 import Data.Text.IO qualified as T
+import Data.Vector qualified as Vector
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, logWarnIO)
-import Graphics.Haskan.Resources (alloc, allocaAndPeek, peekVkList)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Ext qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, setStrListRef, setVkRef, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Graphics.Haskan.Resources (alloc)
+import Vulkan qualified as Vk26
+import Vulkan.CStruct.Extends (SomeStruct(..))
+import Vulkan.Core10.DeviceInitialization (ApplicationInfo(..), InstanceCreateInfo(..))
+import Vulkan.Core10.ExtensionDiscovery (ExtensionProperties(..))
+import Vulkan.Core10.LayerDiscovery (LayerProperties(..))
+import Vulkan.Zero (zero)
 
-managedInstance :: (MonadManaged m) => [ByteString] -> m (Vulkan.VkInstance, [String])
+managedInstance :: (MonadManaged m) => [ByteString] -> m (Vk26.Instance, [String])
 managedInstance extraExtensions =
   alloc
     "VkInstance"
     (createInstance extraExtensions)
-    (\(ptr, _) -> Vulkan.vkDestroyInstance ptr Vulkan.vkNullPtr)
+    (\(inst, _) -> Vk26.destroyInstance inst Nothing)
 
-createInstance :: (MonadIO m) => [ByteString] -> m (Vulkan.VkInstance, [String])
+createInstance :: (MonadIO m) => [ByteString] -> m (Vk26.Instance, [String])
 createInstance extraExtensions = do
   let partitionOptReq :: (Show a, Eq a, MonadIO m) => Text -> [a] -> [a] -> [a] -> m [a]
       partitionOptReq type' available optional required = do
@@ -41,12 +44,10 @@ createInstance extraExtensions = do
           (\n -> logWarnIO LogVulkan ("Missing required " <> type' <> ": " <> tShow n))
         pure (reqHave <> optHave)
 
-  availableExtensions <-
-    fmap (BC.pack . Vulkan.getStringField @"extensionName")
-      <$> peekVkList (Vulkan.vkEnumerateInstanceExtensionProperties Vulkan.vkNullPtr)
-  availableLayers <-
-    fmap (BC.pack . Vulkan.getStringField @"layerName")
-      <$> peekVkList Vulkan.vkEnumerateInstanceLayerProperties
+  (_, extProps) <- liftIO $ Vk26.enumerateInstanceExtensionProperties Nothing
+  let availableExtensions = Vector.toList $ fmap extensionName extProps
+  (_, layerProps) <- liftIO $ Vk26.enumerateInstanceLayerProperties
+  let availableLayers = Vector.toList $ fmap layerName layerProps
 
   let validationLayerNames =
         [ "VK_LAYER_KHRONOS_validation",
@@ -59,48 +60,42 @@ createInstance extraExtensions = do
   unless anyValidationAvailable $
     logWarnIO LogVulkan "No Vulkan validation layers found (install vulkan-validation-layers for debug builds)"
 
-  reqExtensions <- liftIO $ BC.packCString Vulkan.VK_EXT_DEBUG_UTILS_EXTENSION_NAME
+  let reqExtensions = "VK_EXT_debug_utils"
 
   let optExtensions =
         (["VK_EXT_validation_features" | anyValidationAvailable])
 
-  extensions <-
-    fmap BC.unpack
-      <$> partitionOptReq
-        "extension"
-        availableExtensions
-        optExtensions
-        (reqExtensions : extraExtensions)
+  extensionsBS <-
+    partitionOptReq
+      "extension"
+      availableExtensions
+      optExtensions
+      (reqExtensions : extraExtensions)
 
-  layers <-
-    fmap BC.unpack
-      <$> partitionOptReq
-        "layer"
-        availableLayers
-        validationLayerNames
-        []
+  layersBS <-
+    partitionOptReq
+      "layer"
+      availableLayers
+      validationLayerNames
+      []
 
-  let appInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_APPLICATION_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"pApplicationName" Vulkan.VK_NULL
-              &* set @"pEngineName" Vulkan.VK_NULL
-              &* set @"applicationVersion" (Vulkan._VK_MAKE_VERSION 1 0 0)
-              &* set @"engineVersion" (Vulkan._VK_MAKE_VERSION 1 0 0)
-              &* set @"apiVersion" (Vulkan._VK_MAKE_VERSION 1 2 0)
-          )
+  let layers = fmap BC.unpack layersBS
 
-      instanceInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* setVkRef @"pApplicationInfo" appInfo
-              &* set @"enabledExtensionCount" (fromIntegral (length extensions))
-              &* setStrListRef @"ppEnabledExtensionNames" extensions
-              &* set @"enabledLayerCount" (fromIntegral (length layers))
-              &* setStrListRef @"ppEnabledLayerNames" layers
-          )
+      appInfo = Vk26.ApplicationInfo
+        { applicationName = Nothing
+        , applicationVersion = Vk26.MAKE_API_VERSION 1 0 0
+        , engineName = Nothing
+        , engineVersion = Vk26.MAKE_API_VERSION 1 0 0
+        , apiVersion = Vk26.API_VERSION_1_2
+        }
 
-  inst <- liftIO $ withPtr instanceInfo (\iiPtr -> allocaAndPeek (Vulkan.vkCreateInstance iiPtr Vulkan.VK_NULL_HANDLE))
+      instanceInfo = Vk26.InstanceCreateInfo
+        { next = ()
+        , flags = zero
+        , applicationInfo = Just appInfo
+        , enabledLayerNames = Vector.fromList layersBS
+        , enabledExtensionNames = Vector.fromList extensionsBS
+        }
+
+  inst <- liftIO $ Vk26.createInstance instanceInfo Nothing
   pure (inst, layers)

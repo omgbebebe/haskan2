@@ -73,7 +73,7 @@ import Graphics.Haskan.Physics.Jolt.Types (BodyId, BodyState, BodyType)
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Haskan.Scene.ECS (EntityId (..))
-import Graphics.Vulkan qualified as Vulkan
+import Vulkan qualified as Vk26
 import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
 import Linear.Matrix (identity, inv33, inv44, transpose, (!*), (!*!))
 import Linear.Projection qualified
@@ -271,15 +271,15 @@ instance Storable DrawIndexedIndirectCommand where
     pokeByteOff ptr 16 fii
 
 data ComputeCullResources = ComputeCullResources
-  { ccrPipeline :: Vulkan.VkPipeline,
-    ccrPipelineLayout :: Vulkan.VkPipelineLayout,
-    ccrDescriptorSet :: Vulkan.VkDescriptorSet,
-    ccrEntityBuffer :: Vulkan.VkBuffer,
-    ccrEntityMemory :: Vulkan.VkDeviceMemory,
-    ccrDrawCommandsBuffer :: Vulkan.VkBuffer,
-    ccrDrawCommandsMemory :: Vulkan.VkDeviceMemory,
-    ccrCullDataBuffer :: Vulkan.VkBuffer,
-    ccrCullDataMemory :: Vulkan.VkDeviceMemory,
+  { ccrPipeline :: Vk26.Pipeline,
+    ccrPipelineLayout :: Vk26.PipelineLayout,
+    ccrDescriptorSet :: Vk26.DescriptorSet,
+    ccrEntityBuffer :: Vk26.Buffer,
+    ccrEntityMemory :: Vk26.DeviceMemory,
+    ccrDrawCommandsBuffer :: Vk26.Buffer,
+    ccrDrawCommandsMemory :: Vk26.DeviceMemory,
+    ccrCullDataBuffer :: Vk26.Buffer,
+    ccrCullDataMemory :: Vk26.DeviceMemory,
     ccrMaxEntities :: Int
   }
 

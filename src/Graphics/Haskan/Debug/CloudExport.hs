@@ -13,23 +13,23 @@ import Control.Monad (forM_)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Text qualified as Text
 import Data.Time (defaultTimeLocale, formatTime, getCurrentTime)
+import Data.Word (Word32)
 import Graphics.Haskan.Debug.Screenshot (ensureScreenshotDir, saveImage3DSliceToPng, saveImageToPng)
 import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo)
 import Graphics.Haskan.Logger (LogCategory (..))
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
 import Graphics.Haskan.Vulkan.Resources (TextureResource (..))
 import Graphics.Haskan.Vulkan.Types (VulkanContext (..))
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Vulkan qualified as Vk26
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
 
 -- | Context needed for cloud texture exports.
 data CloudExportContext = CloudExportContext
   { cecVulkanContext :: !VulkanContext,
-    cecCommandPool :: !Vulkan.VkCommandPool,
-    cecResourceManager :: !Vulkan.VkDevice,
-    cecCloudExtent :: !Vulkan.VkExtent2D
+    cecCommandPool :: !Vk26.CommandPool,
+    cecResourceManager :: !Vk26.Device,
+    cecCloudExtent :: !Vk26.Extent2D
   }
 
 cloudDebugDir :: FilePath
@@ -51,7 +51,7 @@ saveCloudNoiseSlices CloudExportContext {..} texResource slices = do
   timestamp <- liftIO $ formatTime defaultTimeLocale "%Y%m%d_%H%M%S" <$> getCurrentTime
   let VulkanContext {..} = cecVulkanContext
       image = trImage texResource
-      format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+      format = Vk26.FORMAT_R8G8B8A8_UNORM
   forM_ slices $ \zSlice -> do
     let path = cloudDebugDir </> (timestamp ++ "_cloud_noise_slice_Z" ++ show zSlice ++ ".png")
     logInfo LogGeneral $ "exporting cloud noise slice Z=" <> Text.pack (show zSlice) <> "..."
@@ -64,7 +64,7 @@ saveCloudNoiseSlices CloudExportContext {..} texResource slices = do
         image
         (256, 256)
         format
-        Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+        Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
         zSlice
         path
     logInfo LogGeneral $ "saved: " <> Text.pack path
@@ -75,7 +75,7 @@ saveCloudOutputImage ::
   (MonadLog m, MonadIO m) =>
   CloudExportContext ->
   -- | Cloud output VkImage
-  Vulkan.VkImage ->
+  Vk26.Image ->
   -- | Base name for the file
   String ->
   m FilePath
@@ -94,8 +94,8 @@ saveCloudOutputImage CloudExportContext {..} cloudImage name = do
       vcQueue
       cloudImage
       cecCloudExtent
-      Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
-      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      Vk26.FORMAT_R16G16B16A16_SFLOAT
+      Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       path
   logInfo LogGeneral $ "saved: " <> Text.pack path
   pure path
@@ -107,7 +107,7 @@ saveCloudDebugOutput ::
   CloudExportContext ->
   DeferredResources ->
   -- | Frame image index
-  Vulkan.Word32 ->
+  Word32 ->
   -- | Debug mode name for filename
   String ->
   m FilePath

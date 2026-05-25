@@ -6,21 +6,8 @@ import Data.Bits ((.|.))
 import Data.Vector qualified as Vector
 import Data.Word (Word32)
 import Graphics.Haskan.Resources (alloc, allocaAndPeek)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Ext qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, setAt, setListRef, setVkRef, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 import Vulkan qualified as Vk26
 import Vulkan.Zero (zero)
-import Graphics.Haskan.Resources (alloc, allocaAndPeek)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Ext qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, setAt, setListRef, setVkRef, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
 
 managedRenderPass ::
   (MonadManaged m) =>
@@ -99,253 +86,123 @@ createRenderPass dev surfaceFormat depthFormat =
           (Vector.fromList [dependency])
    in liftIO $ Vk26.createRenderPass dev renderPassCI Nothing
 
--- ---------------------------------------------------------------------------
--- G-buffer render pass: 3 color attachments + depth
--- ---------------------------------------------------------------------------
-
-managedGBufferRenderPass ::
-  (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkFormat ->
-  Vulkan.VkFormat ->
-  m Vulkan.VkRenderPass
-managedGBufferRenderPass dev colorFormat depthFormat =
-  alloc
-    "GBufferRenderPass"
-    (createGBufferRenderPass dev colorFormat depthFormat)
-    (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
-
-createGBufferRenderPass ::
+withRenderPass ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkFormat ->
-  Vulkan.VkFormat ->
-  m Vulkan.VkRenderPass
-createGBufferRenderPass dev colorFormat depthFormat =
-  let mkColorAttachment fmt =
-        Vulkan.createVk
-          ( set @"format" fmt
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_CLEAR
-              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
-              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
-              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-          )
-      colorAttachments =
-        [ mkColorAttachment colorFormat, -- position
-          mkColorAttachment colorFormat, -- normal
-          mkColorAttachment colorFormat, -- albedo
-          mkColorAttachment colorFormat -- material (metallic, roughness, AO)
+  Vk26.CommandBuffer ->
+  Vk26.RenderPass ->
+  Vk26.Framebuffer ->
+  Vk26.Extent2D ->
+  [Vk26.ClearValue] ->
+  m a ->
+  m a
+withRenderPass commandBuffer renderPass framebuffer extent clearValues action =
+  let beginInfo =
+        Vk26.RenderPassBeginInfo
+          ()
+          renderPass
+          framebuffer
+          (Vk26.Rect2D (Vk26.Offset2D 0 0) extent)
+          (Vector.fromList clearValues)
+      begin = liftIO $ Vk26.cmdBeginRenderPass commandBuffer beginInfo Vk26.SUBPASS_CONTENTS_INLINE
+      end = liftIO $ Vk26.cmdEndRenderPass commandBuffer
+   in (begin *> action <* end)
+
+withGBufferRenderPass ::
+  (MonadIO m) =>
+  Vk26.CommandBuffer ->
+  Vk26.RenderPass ->
+  Vk26.Framebuffer ->
+  Vk26.Extent2D ->
+  m a ->
+  m a
+withGBufferRenderPass commandBuffer renderPass framebuffer extent action =
+  let posClear = Vk26.Float32 0.0 0.0 0.0 0.0
+      normClear = Vk26.Float32 0.0 0.0 0.0 0.0
+      albClear = Vk26.Float32 0.0 0.0 0.0 0.0
+      matClear = Vk26.Float32 0.0 0.5 1.0 1.0
+      depthClear = Vk26.ClearDepthStencilValue 1.0 0
+      clearValues =
+        [ Vk26.Color posClear,
+          Vk26.Color normClear,
+          Vk26.Color albClear,
+          Vk26.Color matClear,
+          Vk26.DepthStencil depthClear
         ]
-      colorAttachmentRefs =
-        [ Vulkan.createVk
-            ( set @"attachment" i
-                &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-            )
-        | i <- [0 .. 3]
-        ]
-      depthAttachment =
-        Vulkan.createVk
-          ( set @"format" depthFormat
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_CLEAR
-              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
-              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-          )
-      depthAttachmentRef =
-        Vulkan.createVk
-          ( set @"attachment" 4
-              &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-          )
-      subpass =
-        Vulkan.createVk
-          ( set @"pipelineBindPoint" Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-              &* set @"colorAttachmentCount" 4
-              &* setListRef @"pColorAttachments" colorAttachmentRefs
-              &* set @"inputAttachmentCount" 0
-              &* setListRef @"pInputAttachments" []
-              &* setVkRef @"pDepthStencilAttachment" depthAttachmentRef
-              &* set @"preserveAttachmentCount" 0
-              &* setListRef @"pPreserveAttachments" []
-          )
-      dependency =
-        Vulkan.createVk
-          ( set @"srcSubpass" Vulkan.VK_SUBPASS_EXTERNAL
-              &* set @"dstSubpass" 0
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ZERO_FLAGS
-              &* set @"dstStageMask" (Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT .|. Vulkan.VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
-              &* set @"dstAccessMask" (Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT .|. Vulkan.VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
-          )
-      dependencyToExternal =
-        Vulkan.createVk
-          ( set @"srcSubpass" 0
-              &* set @"dstSubpass" Vulkan.VK_SUBPASS_EXTERNAL
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-              &* set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
-          )
-      renderPassCI =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"attachmentCount" 5
-              &* setListRef @"pAttachments" (colorAttachments ++ [depthAttachment])
-              &* set @"subpassCount" 1
-              &* setListRef @"pSubpasses" [subpass]
-              &* set @"dependencyCount" 2
-              &* setListRef @"pDependencies" [dependency, dependencyToExternal]
-          )
-   in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
+   in withRenderPass commandBuffer renderPass framebuffer extent clearValues action
+
+withLightingRenderPass ::
+  (MonadIO m) =>
+  Vk26.CommandBuffer ->
+  Vk26.RenderPass ->
+  Vk26.Framebuffer ->
+  Vk26.Extent2D ->
+  m a ->
+  m a
+withLightingRenderPass commandBuffer renderPass framebuffer extent action =
+  let colorClear = Vk26.Float32 0.0 0.0 1.0 1.0
+      clearValues = [Vk26.Color colorClear]
+   in withRenderPass commandBuffer renderPass framebuffer extent clearValues action
+
+withCloudRenderPass ::
+  (MonadIO m) =>
+  Vk26.CommandBuffer ->
+  Vk26.RenderPass ->
+  Vk26.Framebuffer ->
+  Vk26.Extent2D ->
+  m a ->
+  m a
+withCloudRenderPass commandBuffer renderPass framebuffer extent action =
+  let colorClear = Vk26.Float32 0.0 0.0 0.0 0.0
+      clearValues = [Vk26.Color colorClear]
+   in withRenderPass commandBuffer renderPass framebuffer extent clearValues action
+
+withImGuiRenderPass ::
+  (MonadIO m) =>
+  Vk26.CommandBuffer ->
+  Vk26.RenderPass ->
+  Vk26.Framebuffer ->
+  Vk26.Extent2D ->
+  m a ->
+  m a
+withImGuiRenderPass commandBuffer renderPass framebuffer extent =
+  withRenderPass commandBuffer renderPass framebuffer extent []
+
+-- ---------------------------------------------------------------------------
+-- G-buffer render pass: 4 color attachments + depth
+-- ---------------------------------------------------------------------------
 
 managedGBufferRenderPassEx ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  -- | position format (e.g. SFLOAT)
-  Vulkan.VkFormat ->
-  -- | other color formats (e.g. UNORM)
-  Vulkan.VkFormat ->
-  -- | depth format
-  Vulkan.VkFormat ->
-  m Vulkan.VkRenderPass
+  Vk26.Device ->
+  Vk26.Format ->
+  Vk26.Format ->
+  Vk26.Format ->
+  m Vk26.RenderPass
 managedGBufferRenderPassEx dev posFormat colorFormat depthFormat =
   alloc
     "GBufferRenderPass"
     (createGBufferRenderPassEx dev posFormat colorFormat depthFormat)
-    (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyRenderPass dev ptr Nothing)
 
 createGBufferRenderPassEx ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkFormat ->
-  Vulkan.VkFormat ->
-  Vulkan.VkFormat ->
-  m Vulkan.VkRenderPass
+  Vk26.Device ->
+  Vk26.Format ->
+  Vk26.Format ->
+  Vk26.Format ->
+  m Vk26.RenderPass
 createGBufferRenderPassEx dev posFormat colorFormat depthFormat =
   let mkColorAttachment fmt =
-        Vulkan.createVk
-          ( set @"format" fmt
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_CLEAR
-              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
-              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
-              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-          )
-      colorAttachments =
-        [ mkColorAttachment posFormat, -- position (needs negative values)
-          mkColorAttachment colorFormat, -- normal
-          mkColorAttachment colorFormat, -- albedo
-          mkColorAttachment colorFormat -- emissive
-        ]
-      colorAttachmentRefs =
-        [ Vulkan.createVk
-            ( set @"attachment" i
-                &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-            )
-        | i <- [0 .. 3]
-        ]
-      depthAttachment =
-        Vulkan.createVk
-          ( set @"format" depthFormat
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_CLEAR
-              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
-              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-          )
-      depthAttachmentRef =
-        Vulkan.createVk
-          ( set @"attachment" 4
-              &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-          )
-      subpass =
-        Vulkan.createVk
-          ( set @"pipelineBindPoint" Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-              &* set @"colorAttachmentCount" 4
-              &* setListRef @"pColorAttachments" colorAttachmentRefs
-              &* set @"inputAttachmentCount" 0
-              &* setListRef @"pInputAttachments" []
-              &* setVkRef @"pDepthStencilAttachment" depthAttachmentRef
-              &* set @"preserveAttachmentCount" 0
-              &* setListRef @"pPreserveAttachments" []
-          )
-      dependency =
-        Vulkan.createVk
-          ( set @"srcSubpass" Vulkan.VK_SUBPASS_EXTERNAL
-              &* set @"dstSubpass" 0
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ZERO_FLAGS
-              &* set @"dstStageMask" (Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT .|. Vulkan.VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
-              &* set @"dstAccessMask" (Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT .|. Vulkan.VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
-          )
-      dependencyToExternal =
-        Vulkan.createVk
-          ( set @"srcSubpass" 0
-              &* set @"dstSubpass" Vulkan.VK_SUBPASS_EXTERNAL
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-              &* set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
-          )
-      renderPassCI =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"attachmentCount" 5
-              &* setListRef @"pAttachments" (colorAttachments ++ [depthAttachment])
-              &* set @"subpassCount" 1
-              &* setListRef @"pSubpasses" [subpass]
-              &* set @"dependencyCount" 2
-              &* setListRef @"pDependencies" [dependency, dependencyToExternal]
-          )
-   in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
-
--- ---------------------------------------------------------------------------
--- Bindless render pass: same attachments as g-buffer but with LOAD_OP_LOAD
--- ---------------------------------------------------------------------------
-
-managedBindlessRenderPass ::
-  (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkFormat ->
-  Vulkan.VkFormat ->
-  Vulkan.VkFormat ->
-  m Vulkan.VkRenderPass
-managedBindlessRenderPass dev posFormat colorFormat depthFormat =
-  alloc
-    "BindlessRenderPass"
-    (createBindlessRenderPass dev posFormat colorFormat depthFormat)
-    (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
-
-createBindlessRenderPass ::
-  (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkFormat ->
-  Vulkan.VkFormat ->
-  Vulkan.VkFormat ->
-  m Vulkan.VkRenderPass
-createBindlessRenderPass dev posFormat colorFormat depthFormat =
-  let mkColorAttachment fmt =
-        Vulkan.createVk
-          ( set @"format" fmt
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_LOAD
-              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
-              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
-              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-          )
+        Vk26.AttachmentDescription
+          zero
+          fmt
+          Vk26.SAMPLE_COUNT_1_BIT
+          Vk26.ATTACHMENT_LOAD_OP_CLEAR
+          Vk26.ATTACHMENT_STORE_OP_STORE
+          Vk26.ATTACHMENT_LOAD_OP_DONT_CARE
+          Vk26.ATTACHMENT_STORE_OP_DONT_CARE
+          Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       colorAttachments =
         [ mkColorAttachment posFormat,
           mkColorAttachment colorFormat,
@@ -353,69 +210,152 @@ createBindlessRenderPass dev posFormat colorFormat depthFormat =
           mkColorAttachment colorFormat
         ]
       colorAttachmentRefs =
-        [ Vulkan.createVk
-            ( set @"attachment" i
-                &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-            )
+        [ Vk26.AttachmentReference i Vk26.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
         | i <- [0 .. 3]
         ]
       depthAttachment =
-        Vulkan.createVk
-          ( set @"format" depthFormat
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_CLEAR
-              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
-              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
-              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-          )
+        Vk26.AttachmentDescription
+          zero
+          depthFormat
+          Vk26.SAMPLE_COUNT_1_BIT
+          Vk26.ATTACHMENT_LOAD_OP_CLEAR
+          Vk26.ATTACHMENT_STORE_OP_DONT_CARE
+          Vk26.ATTACHMENT_LOAD_OP_DONT_CARE
+          Vk26.ATTACHMENT_STORE_OP_DONT_CARE
+          Vk26.IMAGE_LAYOUT_UNDEFINED
+          Vk26.IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
       depthAttachmentRef =
-        Vulkan.createVk
-          ( set @"attachment" 4
-              &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
-          )
+        Vk26.AttachmentReference 4 Vk26.IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
       subpass =
-        Vulkan.createVk
-          ( set @"pipelineBindPoint" Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-              &* set @"colorAttachmentCount" 4
-              &* setListRef @"pColorAttachments" colorAttachmentRefs
-              &* set @"inputAttachmentCount" 0
-              &* setListRef @"pInputAttachments" []
-              &* setVkRef @"pDepthStencilAttachment" depthAttachmentRef
-              &* set @"preserveAttachmentCount" 0
-              &* setListRef @"pPreserveAttachments" []
-          )
+        Vk26.SubpassDescription
+          zero
+          Vk26.PIPELINE_BIND_POINT_GRAPHICS
+          Vector.empty
+          (Vector.fromList colorAttachmentRefs)
+          Vector.empty
+          (Just depthAttachmentRef)
+          Vector.empty
       dependency =
-        Vulkan.createVk
-          ( set @"srcSubpass" Vulkan.VK_SUBPASS_EXTERNAL
-              &* set @"dstSubpass" 0
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ZERO_FLAGS
-              &* set @"dstStageMask" (Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT .|. Vulkan.VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
-              &* set @"dstAccessMask" (Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT .|. Vulkan.VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
-          )
+        Vk26.SubpassDependency
+          Vk26.SUBPASS_EXTERNAL
+          0
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          (Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT .|. Vk26.PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+          zero
+          (Vk26.ACCESS_COLOR_ATTACHMENT_WRITE_BIT .|. Vk26.ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+          zero
       dependencyToExternal =
-        Vulkan.createVk
-          ( set @"srcSubpass" 0
-              &* set @"dstSubpass" Vulkan.VK_SUBPASS_EXTERNAL
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-              &* set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
-          )
+        Vk26.SubpassDependency
+          0
+          Vk26.SUBPASS_EXTERNAL
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          Vk26.PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+          Vk26.ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          Vk26.ACCESS_SHADER_READ_BIT
+          zero
       renderPassCI =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"attachmentCount" 5
-              &* setListRef @"pAttachments" (colorAttachments ++ [depthAttachment])
-              &* set @"subpassCount" 1
-              &* setListRef @"pSubpasses" [subpass]
-              &* set @"dependencyCount" 2
-              &* setListRef @"pDependencies" [dependency, dependencyToExternal]
-          )
-   in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
+        Vk26.RenderPassCreateInfo
+          ()
+          zero
+          (Vector.fromList (colorAttachments ++ [depthAttachment]))
+          (Vector.fromList [subpass])
+          (Vector.fromList [dependency, dependencyToExternal])
+   in liftIO $ Vk26.createRenderPass dev renderPassCI Nothing
+
+-- ---------------------------------------------------------------------------
+-- Bindless render pass: same attachments as g-buffer but with LOAD_OP_LOAD
+-- ---------------------------------------------------------------------------
+
+managedBindlessRenderPass ::
+  (MonadManaged m) =>
+  Vk26.Device ->
+  Vk26.Format ->
+  Vk26.Format ->
+  Vk26.Format ->
+  m Vk26.RenderPass
+managedBindlessRenderPass dev posFormat colorFormat depthFormat =
+  alloc
+    "BindlessRenderPass"
+    (createBindlessRenderPass dev posFormat colorFormat depthFormat)
+    (\ptr -> Vk26.destroyRenderPass dev ptr Nothing)
+
+createBindlessRenderPass ::
+  (MonadIO m) =>
+  Vk26.Device ->
+  Vk26.Format ->
+  Vk26.Format ->
+  Vk26.Format ->
+  m Vk26.RenderPass
+createBindlessRenderPass dev posFormat colorFormat depthFormat =
+  let mkColorAttachment fmt =
+        Vk26.AttachmentDescription
+          zero
+          fmt
+          Vk26.SAMPLE_COUNT_1_BIT
+          Vk26.ATTACHMENT_LOAD_OP_LOAD
+          Vk26.ATTACHMENT_STORE_OP_STORE
+          Vk26.ATTACHMENT_LOAD_OP_DONT_CARE
+          Vk26.ATTACHMENT_STORE_OP_DONT_CARE
+          Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      colorAttachments =
+        [ mkColorAttachment posFormat,
+          mkColorAttachment colorFormat,
+          mkColorAttachment colorFormat,
+          mkColorAttachment colorFormat
+        ]
+      colorAttachmentRefs =
+        [ Vk26.AttachmentReference i Vk26.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+        | i <- [0 .. 3]
+        ]
+      depthAttachment =
+        Vk26.AttachmentDescription
+          zero
+          depthFormat
+          Vk26.SAMPLE_COUNT_1_BIT
+          Vk26.ATTACHMENT_LOAD_OP_CLEAR
+          Vk26.ATTACHMENT_STORE_OP_STORE
+          Vk26.ATTACHMENT_LOAD_OP_DONT_CARE
+          Vk26.ATTACHMENT_STORE_OP_DONT_CARE
+          Vk26.IMAGE_LAYOUT_UNDEFINED
+          Vk26.IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+      depthAttachmentRef =
+        Vk26.AttachmentReference 4 Vk26.IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+      subpass =
+        Vk26.SubpassDescription
+          zero
+          Vk26.PIPELINE_BIND_POINT_GRAPHICS
+          Vector.empty
+          (Vector.fromList colorAttachmentRefs)
+          Vector.empty
+          (Just depthAttachmentRef)
+          Vector.empty
+      dependency =
+        Vk26.SubpassDependency
+          Vk26.SUBPASS_EXTERNAL
+          0
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          (Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT .|. Vk26.PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT)
+          zero
+          (Vk26.ACCESS_COLOR_ATTACHMENT_WRITE_BIT .|. Vk26.ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT)
+          zero
+      dependencyToExternal =
+        Vk26.SubpassDependency
+          0
+          Vk26.SUBPASS_EXTERNAL
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          Vk26.PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+          Vk26.ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          Vk26.ACCESS_SHADER_READ_BIT
+          zero
+      renderPassCI =
+        Vk26.RenderPassCreateInfo
+          ()
+          zero
+          (Vector.fromList (colorAttachments ++ [depthAttachment]))
+          (Vector.fromList [subpass])
+          (Vector.fromList [dependency, dependencyToExternal])
+   in liftIO $ Vk26.createRenderPass dev renderPassCI Nothing
 
 -- ---------------------------------------------------------------------------
 -- Lighting render pass: single color attachment (swapchain)
@@ -423,205 +363,61 @@ createBindlessRenderPass dev posFormat colorFormat depthFormat =
 
 managedLightingRenderPass ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkSurfaceFormatKHR ->
-  m Vulkan.VkRenderPass
+  Vk26.Device ->
+  Vk26.SurfaceFormatKHR ->
+  m Vk26.RenderPass
 managedLightingRenderPass dev surfaceFormat =
   alloc
     "LightingRenderPass"
     (createLightingRenderPass dev surfaceFormat)
-    (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyRenderPass dev ptr Nothing)
 
 createLightingRenderPass ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkSurfaceFormatKHR ->
-  m Vulkan.VkRenderPass
+  Vk26.Device ->
+  Vk26.SurfaceFormatKHR ->
+  m Vk26.RenderPass
 createLightingRenderPass dev surfaceFormat =
-  let imageFormat = Vulkan.getField @"format" surfaceFormat
+  let Vk26.SurfaceFormatKHR imageFormat _ = surfaceFormat
       colorAttachment =
-        Vulkan.createVk
-          ( set @"format" imageFormat
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_CLEAR
-              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
-              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
-              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-          )
+        Vk26.AttachmentDescription
+          zero
+          imageFormat
+          Vk26.SAMPLE_COUNT_1_BIT
+          Vk26.ATTACHMENT_LOAD_OP_CLEAR
+          Vk26.ATTACHMENT_STORE_OP_STORE
+          Vk26.ATTACHMENT_LOAD_OP_DONT_CARE
+          Vk26.ATTACHMENT_STORE_OP_DONT_CARE
+          Vk26.IMAGE_LAYOUT_UNDEFINED
+          Vk26.IMAGE_LAYOUT_PRESENT_SRC_KHR
       colorAttachmentRef =
-        Vulkan.createVk
-          ( set @"attachment" 0
-              &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-          )
+        Vk26.AttachmentReference 0 Vk26.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
       subpass =
-        Vulkan.createVk
-          ( set @"pipelineBindPoint" Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-              &* set @"colorAttachmentCount" 1
-              &* setListRef @"pColorAttachments" [colorAttachmentRef]
-              &* set @"inputAttachmentCount" 0
-              &* setListRef @"pInputAttachments" []
-              &* set @"preserveAttachmentCount" 0
-              &* setListRef @"pPreserveAttachments" []
-          )
+        Vk26.SubpassDescription
+          zero
+          Vk26.PIPELINE_BIND_POINT_GRAPHICS
+          Vector.empty
+          (Vector.fromList [colorAttachmentRef])
+          Vector.empty
+          Nothing
+          Vector.empty
       dependency =
-        Vulkan.createVk
-          ( set @"srcSubpass" Vulkan.VK_SUBPASS_EXTERNAL
-              &* set @"dstSubpass" 0
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ZERO_FLAGS
-              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"dstAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-          )
+        Vk26.SubpassDependency
+          Vk26.SUBPASS_EXTERNAL
+          0
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          zero
+          Vk26.ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          zero
       renderPassCI =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"attachmentCount" 1
-              &* setListRef @"pAttachments" [colorAttachment]
-              &* set @"subpassCount" 1
-              &* setListRef @"pSubpasses" [subpass]
-              &* set @"dependencyCount" 1
-              &* setListRef @"pDependencies" [dependency]
-          )
-   in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
-
-managedTerrainOverlayRenderPass ::
-  (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkSurfaceFormatKHR ->
-  m Vulkan.VkRenderPass
-managedTerrainOverlayRenderPass dev surfaceFormat =
-  alloc
-    "TerrainOverlayRenderPass"
-    (createTerrainOverlayRenderPass dev surfaceFormat)
-    (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
-
-createTerrainOverlayRenderPass ::
-  (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkSurfaceFormatKHR ->
-  m Vulkan.VkRenderPass
-createTerrainOverlayRenderPass dev surfaceFormat =
-  let imageFormat = Vulkan.getField @"format" surfaceFormat
-      colorAttachment =
-        Vulkan.createVk
-          ( set @"format" imageFormat
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_LOAD
-              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
-              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
-              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-          )
-      colorAttachmentRef =
-        Vulkan.createVk
-          ( set @"attachment" 0
-              &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-          )
-      subpass =
-        Vulkan.createVk
-          ( set @"pipelineBindPoint" Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-              &* set @"colorAttachmentCount" 1
-              &* setListRef @"pColorAttachments" [colorAttachmentRef]
-              &* set @"inputAttachmentCount" 0
-              &* setListRef @"pInputAttachments" []
-              &* set @"preserveAttachmentCount" 0
-              &* setListRef @"pPreserveAttachments" []
-          )
-      dependency =
-        Vulkan.createVk
-          ( set @"srcSubpass" Vulkan.VK_SUBPASS_EXTERNAL
-              &* set @"dstSubpass" 0
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"dstAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-          )
-      renderPassCI =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"attachmentCount" 1
-              &* setListRef @"pAttachments" [colorAttachment]
-              &* set @"subpassCount" 1
-              &* setListRef @"pSubpasses" [subpass]
-              &* set @"dependencyCount" 1
-              &* setListRef @"pDependencies" [dependency]
-          )
-   in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
-
-withRenderPass ::
-  (MonadIO m) =>
-  Vulkan.VkCommandBuffer ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkFramebuffer ->
-  Vulkan.VkExtent2D ->
-  [Vulkan.VkClearValue] ->
-  m a ->
-  m a
-withRenderPass commandBuffer renderPass framebuffer extent clearValues action =
-  let offset =
-        Vulkan.createVk
-          ( set @"x" 0
-              &* set @"y" 0
-          )
-      renderArea =
-        Vulkan.createVk
-          ( set @"offset" offset
-              &* set @"extent" extent
-          )
-      beginInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
-              &* set @"pNext" Vulkan.vkNullPtr
-              &* set @"renderPass" renderPass
-              &* set @"framebuffer" framebuffer
-              &* set @"renderArea" renderArea
-              &* set @"clearValueCount" (fromIntegral (length clearValues))
-              &* setListRef @"pClearValues" clearValues
-          )
-      begin = liftIO $ withPtr beginInfo (\biPtr -> Vulkan.vkCmdBeginRenderPass commandBuffer biPtr Vulkan.VK_SUBPASS_CONTENTS_INLINE)
-      end = liftIO $ Vulkan.vkCmdEndRenderPass commandBuffer
-   in (begin *> action <* end)
-
-withGBufferRenderPass ::
-  (MonadIO m) =>
-  Vulkan.VkCommandBuffer ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkFramebuffer ->
-  Vulkan.VkExtent2D ->
-  m a ->
-  m a
-withGBufferRenderPass commandBuffer renderPass framebuffer extent action =
-  let posClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.0 &* setAt @"float32" @2 0.0 &* setAt @"float32" @3 0.0)
-      normClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.0 &* setAt @"float32" @2 0.0 &* setAt @"float32" @3 0.0)
-      albClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.0 &* setAt @"float32" @2 0.0 &* setAt @"float32" @3 0.0)
-      matClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.5 &* setAt @"float32" @2 1.0 &* setAt @"float32" @3 1.0)
-      depthClear = Vulkan.createVk (set @"depth" 1 &* set @"stencil" 0)
-      clearValues =
-        [ Vulkan.createVk (set @"color" posClear),
-          Vulkan.createVk (set @"color" normClear),
-          Vulkan.createVk (set @"color" albClear),
-          Vulkan.createVk (set @"color" matClear),
-          Vulkan.createVk (set @"depthStencil" depthClear)
-        ]
-   in withRenderPass commandBuffer renderPass framebuffer extent clearValues action
-
-withLightingRenderPass ::
-  (MonadIO m) =>
-  Vulkan.VkCommandBuffer ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkFramebuffer ->
-  Vulkan.VkExtent2D ->
-  m a ->
-  m a
-withLightingRenderPass commandBuffer renderPass framebuffer extent action =
-  let colorClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.0 &* setAt @"float32" @2 1.0 &* setAt @"float32" @3 1.0)
-      clearValues = [Vulkan.createVk (set @"color" colorClear)]
-   in withRenderPass commandBuffer renderPass framebuffer extent clearValues action
+        Vk26.RenderPassCreateInfo
+          ()
+          zero
+          (Vector.fromList [colorAttachment])
+          (Vector.fromList [subpass])
+          (Vector.fromList [dependency])
+   in liftIO $ Vk26.createRenderPass dev renderPassCI Nothing
 
 -- ---------------------------------------------------------------------------
 -- Cloud render pass: single RGBA16F color attachment (intermediate texture)
@@ -629,76 +425,130 @@ withLightingRenderPass commandBuffer renderPass framebuffer extent action =
 
 managedCloudRenderPass ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  m Vulkan.VkRenderPass
+  Vk26.Device ->
+  m Vk26.RenderPass
 managedCloudRenderPass dev =
   alloc
     "CloudRenderPass"
     (createCloudRenderPass dev)
-    (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyRenderPass dev ptr Nothing)
 
 createCloudRenderPass ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  m Vulkan.VkRenderPass
+  Vk26.Device ->
+  m Vk26.RenderPass
 createCloudRenderPass dev =
-  let cloudFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
+  let cloudFormat = Vk26.FORMAT_R16G16B16A16_SFLOAT
       colorAttachment =
-        Vulkan.createVk
-          ( set @"format" cloudFormat
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_CLEAR
-              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
-              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
-              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-          )
+        Vk26.AttachmentDescription
+          zero
+          cloudFormat
+          Vk26.SAMPLE_COUNT_1_BIT
+          Vk26.ATTACHMENT_LOAD_OP_CLEAR
+          Vk26.ATTACHMENT_STORE_OP_STORE
+          Vk26.ATTACHMENT_LOAD_OP_DONT_CARE
+          Vk26.ATTACHMENT_STORE_OP_DONT_CARE
+          Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       colorAttachmentRef =
-        Vulkan.createVk
-          ( set @"attachment" 0
-              &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-          )
+        Vk26.AttachmentReference 0 Vk26.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
       subpass =
-        Vulkan.createVk
-          ( set @"pipelineBindPoint" Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-              &* set @"colorAttachmentCount" 1
-              &* setListRef @"pColorAttachments" [colorAttachmentRef]
-              &* set @"inputAttachmentCount" 0
-              &* setListRef @"pInputAttachments" []
-              &* set @"preserveAttachmentCount" 0
-              &* setListRef @"pPreserveAttachments" []
-          )
+        Vk26.SubpassDescription
+          zero
+          Vk26.PIPELINE_BIND_POINT_GRAPHICS
+          Vector.empty
+          (Vector.fromList [colorAttachmentRef])
+          Vector.empty
+          Nothing
+          Vector.empty
       dependency =
-        Vulkan.createVk
-          ( set @"srcSubpass" Vulkan.VK_SUBPASS_EXTERNAL
-              &* set @"dstSubpass" 0
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ZERO_FLAGS
-              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"dstAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-          )
+        Vk26.SubpassDependency
+          Vk26.SUBPASS_EXTERNAL
+          0
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          zero
+          Vk26.ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          zero
       dependencyToExternal =
-        Vulkan.createVk
-          ( set @"srcSubpass" 0
-              &* set @"dstSubpass" Vulkan.VK_SUBPASS_EXTERNAL
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-              &* set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
-          )
+        Vk26.SubpassDependency
+          0
+          Vk26.SUBPASS_EXTERNAL
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          Vk26.PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+          Vk26.ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          Vk26.ACCESS_SHADER_READ_BIT
+          zero
       renderPassCI =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"attachmentCount" 1
-              &* setListRef @"pAttachments" [colorAttachment]
-              &* set @"subpassCount" 1
-              &* setListRef @"pSubpasses" [subpass]
-              &* set @"dependencyCount" 2
-              &* setListRef @"pDependencies" [dependency, dependencyToExternal]
-          )
-   in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
+        Vk26.RenderPassCreateInfo
+          ()
+          zero
+          (Vector.fromList [colorAttachment])
+          (Vector.fromList [subpass])
+          (Vector.fromList [dependency, dependencyToExternal])
+   in liftIO $ Vk26.createRenderPass dev renderPassCI Nothing
+
+-- ---------------------------------------------------------------------------
+-- Terrain overlay render pass: single color attachment (swapchain), load existing
+-- ---------------------------------------------------------------------------
+
+managedTerrainOverlayRenderPass ::
+  (MonadManaged m) =>
+  Vk26.Device ->
+  Vk26.SurfaceFormatKHR ->
+  m Vk26.RenderPass
+managedTerrainOverlayRenderPass dev surfaceFormat =
+  alloc
+    "TerrainOverlayRenderPass"
+    (createTerrainOverlayRenderPass dev surfaceFormat)
+    (\ptr -> Vk26.destroyRenderPass dev ptr Nothing)
+
+createTerrainOverlayRenderPass ::
+  (MonadIO m) =>
+  Vk26.Device ->
+  Vk26.SurfaceFormatKHR ->
+  m Vk26.RenderPass
+createTerrainOverlayRenderPass dev surfaceFormat =
+  let Vk26.SurfaceFormatKHR imageFormat _ = surfaceFormat
+      colorAttachment =
+        Vk26.AttachmentDescription
+          zero
+          imageFormat
+          Vk26.SAMPLE_COUNT_1_BIT
+          Vk26.ATTACHMENT_LOAD_OP_LOAD
+          Vk26.ATTACHMENT_STORE_OP_STORE
+          Vk26.ATTACHMENT_LOAD_OP_DONT_CARE
+          Vk26.ATTACHMENT_STORE_OP_DONT_CARE
+          Vk26.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+          Vk26.IMAGE_LAYOUT_PRESENT_SRC_KHR
+      colorAttachmentRef =
+        Vk26.AttachmentReference 0 Vk26.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+      subpass =
+        Vk26.SubpassDescription
+          zero
+          Vk26.PIPELINE_BIND_POINT_GRAPHICS
+          Vector.empty
+          (Vector.fromList [colorAttachmentRef])
+          Vector.empty
+          Nothing
+          Vector.empty
+      dependency =
+        Vk26.SubpassDependency
+          Vk26.SUBPASS_EXTERNAL
+          0
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          Vk26.ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          Vk26.ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          zero
+      renderPassCI =
+        Vk26.RenderPassCreateInfo
+          ()
+          zero
+          (Vector.fromList [colorAttachment])
+          (Vector.fromList [subpass])
+          (Vector.fromList [dependency])
+   in liftIO $ Vk26.createRenderPass dev renderPassCI Nothing
 
 -- ---------------------------------------------------------------------------
 -- ImGui overlay render pass: single color attachment (swapchain), load existing
@@ -706,112 +556,58 @@ createCloudRenderPass dev =
 
 managedImGuiRenderPass ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkSurfaceFormatKHR ->
-  m Vulkan.VkRenderPass
+  Vk26.Device ->
+  Vk26.SurfaceFormatKHR ->
+  m Vk26.RenderPass
 managedImGuiRenderPass dev surfaceFormat =
   alloc
     "ImGuiRenderPass"
     (createImGuiRenderPass dev surfaceFormat)
-    (\ptr -> Vulkan.vkDestroyRenderPass dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroyRenderPass dev ptr Nothing)
 
 createImGuiRenderPass ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkSurfaceFormatKHR ->
-  m Vulkan.VkRenderPass
+  Vk26.Device ->
+  Vk26.SurfaceFormatKHR ->
+  m Vk26.RenderPass
 createImGuiRenderPass dev surfaceFormat =
-  let imageFormat = Vulkan.getField @"format" surfaceFormat
+  let Vk26.SurfaceFormatKHR imageFormat _ = surfaceFormat
       colorAttachment =
-        Vulkan.createVk
-          ( set @"format" imageFormat
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"loadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_LOAD
-              &* set @"storeOp" Vulkan.VK_ATTACHMENT_STORE_OP_STORE
-              &* set @"stencilLoadOp" Vulkan.VK_ATTACHMENT_LOAD_OP_DONT_CARE
-              &* set @"stencilStoreOp" Vulkan.VK_ATTACHMENT_STORE_OP_DONT_CARE
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-              &* set @"finalLayout" Vulkan.VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
-          )
+        Vk26.AttachmentDescription
+          zero
+          imageFormat
+          Vk26.SAMPLE_COUNT_1_BIT
+          Vk26.ATTACHMENT_LOAD_OP_LOAD
+          Vk26.ATTACHMENT_STORE_OP_STORE
+          Vk26.ATTACHMENT_LOAD_OP_DONT_CARE
+          Vk26.ATTACHMENT_STORE_OP_DONT_CARE
+          Vk26.IMAGE_LAYOUT_PRESENT_SRC_KHR
+          Vk26.IMAGE_LAYOUT_PRESENT_SRC_KHR
       colorAttachmentRef =
-        Vulkan.createVk
-          ( set @"attachment" 0
-              &* set @"layout" Vulkan.VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
-          )
+        Vk26.AttachmentReference 0 Vk26.IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
       subpass =
-        Vulkan.createVk
-          ( set @"pipelineBindPoint" Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-              &* set @"colorAttachmentCount" 1
-              &* setListRef @"pColorAttachments" [colorAttachmentRef]
-              &* set @"inputAttachmentCount" 0
-              &* setListRef @"pInputAttachments" []
-              &* set @"preserveAttachmentCount" 0
-              &* setListRef @"pPreserveAttachments" []
-          )
+        Vk26.SubpassDescription
+          zero
+          Vk26.PIPELINE_BIND_POINT_GRAPHICS
+          Vector.empty
+          (Vector.fromList [colorAttachmentRef])
+          Vector.empty
+          Nothing
+          Vector.empty
       dependency =
-        Vulkan.createVk
-          ( set @"srcSubpass" Vulkan.VK_SUBPASS_EXTERNAL
-              &* set @"dstSubpass" 0
-              &* set @"srcStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"srcAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-              &* set @"dstStageMask" Vulkan.VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-              &* set @"dstAccessMask" Vulkan.VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-          )
+        Vk26.SubpassDependency
+          Vk26.SUBPASS_EXTERNAL
+          0
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+          Vk26.ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          Vk26.ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          zero
       renderPassCI =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"attachmentCount" 1
-              &* setListRef @"pAttachments" [colorAttachment]
-              &* set @"subpassCount" 1
-              &* setListRef @"pSubpasses" [subpass]
-              &* set @"dependencyCount" 1
-              &* setListRef @"pDependencies" [dependency]
-          )
-   in liftIO $ withPtr renderPassCI (\rpciPtr -> allocaAndPeek (Vulkan.vkCreateRenderPass dev rpciPtr Vulkan.VK_NULL))
-
-withImGuiRenderPass ::
-  (MonadIO m) =>
-  Vulkan.VkCommandBuffer ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkFramebuffer ->
-  Vulkan.VkExtent2D ->
-  m a ->
-  m a
-withImGuiRenderPass commandBuffer renderPass framebuffer extent action =
-  let offset =
-        Vulkan.createVk
-          ( set @"x" 0
-              &* set @"y" 0
-          )
-      renderArea =
-        Vulkan.createVk
-          ( set @"offset" offset
-              &* set @"extent" extent
-          )
-      beginInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO
-              &* set @"pNext" Vulkan.vkNullPtr
-              &* set @"renderPass" renderPass
-              &* set @"framebuffer" framebuffer
-              &* set @"renderArea" renderArea
-              &* set @"clearValueCount" 0
-              &* set @"pClearValues" Vulkan.vkNullPtr
-          )
-      begin = liftIO $ withPtr beginInfo (\biPtr -> Vulkan.vkCmdBeginRenderPass commandBuffer biPtr Vulkan.VK_SUBPASS_CONTENTS_INLINE)
-      end = liftIO $ Vulkan.vkCmdEndRenderPass commandBuffer
-   in (begin *> action <* end)
-
-withCloudRenderPass ::
-  (MonadIO m) =>
-  Vulkan.VkCommandBuffer ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkFramebuffer ->
-  Vulkan.VkExtent2D ->
-  m a ->
-  m a
-withCloudRenderPass commandBuffer renderPass framebuffer extent action =
-  let colorClear = Vulkan.createVk (setAt @"float32" @0 0.0 &* setAt @"float32" @1 0.0 &* setAt @"float32" @2 0.0 &* setAt @"float32" @3 0.0)
-      clearValues = [Vulkan.createVk (set @"color" colorClear)]
-   in withRenderPass commandBuffer renderPass framebuffer extent clearValues action
+        Vk26.RenderPassCreateInfo
+          ()
+          zero
+          (Vector.fromList [colorAttachment])
+          (Vector.fromList [subpass])
+          (Vector.fromList [dependency])
+   in liftIO $ Vk26.createRenderPass dev renderPassCI Nothing

@@ -31,52 +31,52 @@ import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Resources (BufferResource (..), MeshResource (..), TextureResource (..))
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Data.Vector qualified as Vector
+import Vulkan qualified as Vk26
 import Linear.Matrix (M44, transpose)
 import Linear.V3 (V3 (..))
 import Linear.V4 (V4 (..))
 
 -- | G-buffer pass resources.
 data GBufferPassData = GBufferPassData
-  { gbpRenderPass :: !Vulkan.VkRenderPass,
-    gbpFramebuffer :: !Vulkan.VkFramebuffer,
-    gbpPipeline :: !Vulkan.VkPipeline,
-    gbpDoubleSidedPipeline :: !Vulkan.VkPipeline,
-    gbpLayout :: !Vulkan.VkPipelineLayout,
-    gbpDescriptor :: !Vulkan.VkDescriptorSet,
-    gbpSampler :: !Vulkan.VkSampler,
-    gbpDrawCommandsBuffer :: !Vulkan.VkBuffer,
+  { gbpRenderPass :: !Vk26.RenderPass,
+    gbpFramebuffer :: !Vk26.Framebuffer,
+    gbpPipeline :: !Vk26.Pipeline,
+    gbpDoubleSidedPipeline :: !Vk26.Pipeline,
+    gbpLayout :: !Vk26.PipelineLayout,
+    gbpDescriptor :: !Vk26.DescriptorSet,
+    gbpSampler :: !Vk26.Sampler,
+    gbpDrawCommandsBuffer :: !Vk26.Buffer,
     gbpEntityCount :: !Word32,
-    gbpGBufferImages :: ![Vulkan.VkImage],
-    gbpWireframePipeline :: !Vulkan.VkPipeline,
-    gbpWireframeLayout :: !Vulkan.VkPipelineLayout,
+    gbpGBufferImages :: ![Vk26.Image],
+    gbpWireframePipeline :: !Vk26.Pipeline,
+    gbpWireframeLayout :: !Vk26.PipelineLayout,
     gbpWireframeEnabled :: !Bool
   }
 
 -- | Bindless pass resources.
 data BindlessPassData = BindlessPassData
-  { blpPipeline :: !Vulkan.VkPipeline,
-    blpLayout :: !Vulkan.VkPipelineLayout,
-    blpDescriptor :: !Vulkan.VkDescriptorSet,
-    blpRenderPass :: !Vulkan.VkRenderPass,
-    blpFramebuffer :: !Vulkan.VkFramebuffer,
+  { blpPipeline :: !Vk26.Pipeline,
+    blpLayout :: !Vk26.PipelineLayout,
+    blpDescriptor :: !Vk26.DescriptorSet,
+    blpRenderPass :: !Vk26.RenderPass,
+    blpFramebuffer :: !Vk26.Framebuffer,
     blpDrawList :: ![DrawCall],
-    blpTextureArrayView :: !(Maybe Vulkan.VkImageView),
-    blpSampler :: !Vulkan.VkSampler
+    blpTextureArrayView :: !(Maybe Vk26.ImageView),
+    blpSampler :: !Vk26.Sampler
   }
 
 -- | Cloud pass resources and parameters.
 data CloudPassData = CloudPassData
-  { cpRenderPass :: !Vulkan.VkRenderPass,
-    cpFramebuffer :: !Vulkan.VkFramebuffer,
-    cpPipeline :: !Vulkan.VkPipeline,
-    cpLayout :: !Vulkan.VkPipelineLayout,
-    cpDescriptor :: !Vulkan.VkDescriptorSet,
-    cpExtent :: !Vulkan.VkExtent2D,
-    cpImage :: !Vulkan.VkImage,
-    cpHistoryImage :: !Vulkan.VkImage,
-    cpFrameDataMemory :: !Vulkan.VkDeviceMemory,
+  { cpRenderPass :: !Vk26.RenderPass,
+    cpFramebuffer :: !Vk26.Framebuffer,
+    cpPipeline :: !Vk26.Pipeline,
+    cpLayout :: !Vk26.PipelineLayout,
+    cpDescriptor :: !Vk26.DescriptorSet,
+    cpExtent :: !Vk26.Extent2D,
+    cpImage :: !Vk26.Image,
+    cpHistoryImage :: !Vk26.Image,
+    cpFrameDataMemory :: !Vk26.DeviceMemory,
     cpCameraPos :: !(V3 Float),
     cpSkyboxRays :: !(V3 Float, V3 Float, V3 Float),
     cpSunDir :: !(V3 Float),
@@ -100,23 +100,23 @@ data CloudPassData = CloudPassData
 
 -- | God ray pass resources and parameters.
 data GodRayPassData = GodRayPassData
-  { grpRenderPass :: !Vulkan.VkRenderPass,
-    grpFramebuffer :: !Vulkan.VkFramebuffer,
-    grpPipeline :: !Vulkan.VkPipeline,
-    grpLayout :: !Vulkan.VkPipelineLayout,
-    grpDescriptor :: !Vulkan.VkDescriptorSet,
-    grpExtent :: !Vulkan.VkExtent2D,
+  { grpRenderPass :: !Vk26.RenderPass,
+    grpFramebuffer :: !Vk26.Framebuffer,
+    grpPipeline :: !Vk26.Pipeline,
+    grpLayout :: !Vk26.PipelineLayout,
+    grpDescriptor :: !Vk26.DescriptorSet,
+    grpExtent :: !Vk26.Extent2D,
     grpSunScreenX :: !Float,
     grpSunScreenY :: !Float
   }
 
 -- | Lighting pass resources and parameters.
 data LightingPassData = LightingPassData
-  { lpRenderPass :: !Vulkan.VkRenderPass,
-    lpFramebuffer :: !Vulkan.VkFramebuffer,
-    lpPipeline :: !Vulkan.VkPipeline,
-    lpLayout :: !Vulkan.VkPipelineLayout,
-    lpDescriptor :: !Vulkan.VkDescriptorSet,
+  { lpRenderPass :: !Vk26.RenderPass,
+    lpFramebuffer :: !Vk26.Framebuffer,
+    lpPipeline :: !Vk26.Pipeline,
+    lpLayout :: !Vk26.PipelineLayout,
+    lpDescriptor :: !Vk26.DescriptorSet,
     lpCameraPos :: !(V3 Float),
     lpSkyboxRays :: !(V3 Float, V3 Float, V3 Float),
     lpSkyTint :: !(V3 Float),
@@ -131,14 +131,14 @@ data LightingPassData = LightingPassData
     lpAxisOverlay :: !Float,
     lpGroundPlane :: !Float,
     lpLightCount :: !Word32,
-    lpLightBuffer :: !Vulkan.VkBuffer
+    lpLightBuffer :: !Vk26.Buffer
   }
 
 -- | Data needed to build a deferred rendering graph.
 data DeferredPassData = DeferredPassData
-  { dpdExtent :: !Vulkan.VkExtent2D,
+  { dpdExtent :: !Vk26.Extent2D,
     dpdDrawList :: ![DrawCall],
-    dpdDevice :: !Vulkan.VkDevice,
+    dpdDevice :: !Vk26.Device,
     dpdGBuffer :: !GBufferPassData,
     dpdBindless :: !(Maybe BindlessPassData),
     dpdCloud :: !CloudPassData,
@@ -179,20 +179,17 @@ buildDeferredGraph DeferredPassData {..} = do
                 let firstMesh = dcMesh firstDc
                     vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
                     idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
-                Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-                  Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
-                Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+                Vk26.cmdBindVertexBuffers commandBuffer 0 (Vector.fromList [vertBuf]) (Vector.fromList [0])
+                  
+                Vk26.cmdBindIndexBuffer commandBuffer idxBuf 0 Vk26.INDEX_TYPE_UINT32
             -- Bind descriptor set once (no dynamic offsets)
-            Foreign.Marshal.Array.withArray [gbpDescriptor] $ \dsPtr ->
-              DescriptorSet.cmdBindDescriptorSets
-                commandBuffer
-                Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                gbpLayout
-                0
-                1
-                dsPtr
-                0
-                Vulkan.vkNullPtr
+            DescriptorSet.cmdBindDescriptorSets
+              commandBuffer
+              Vk26.PIPELINE_BIND_POINT_GRAPHICS
+              gbpLayout
+              0
+              (Vector.fromList [gbpDescriptor])
+              Vector.empty
             -- Draw culled entities (backface culling enabled)
             when (culledCount > 0) $
               CommandBuffer.cmdDrawIndexedIndirect commandBuffer gbpDrawCommandsBuffer culledCount 20
@@ -209,26 +206,23 @@ buildDeferredGraph DeferredPassData {..} = do
                   let firstMesh = dcMesh firstDc
                       vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
                       idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
-                  Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-                    Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
-                  Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+                  Vk26.cmdBindVertexBuffers commandBuffer 0 (Vector.fromList [vertBuf]) (Vector.fromList [0])
+                    
+                  Vk26.cmdBindIndexBuffer commandBuffer idxBuf 0 Vk26.INDEX_TYPE_UINT32
               -- Bind descriptor set for wireframe (shares layout)
-              Foreign.Marshal.Array.withArray [gbpDescriptor] $ \dsPtr ->
-                DescriptorSet.cmdBindDescriptorSets
-                  commandBuffer
-                  Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                  gbpWireframeLayout
-                  0
-                  1
-                  dsPtr
-                  0
-                  Vulkan.vkNullPtr
+              DescriptorSet.cmdBindDescriptorSets
+                commandBuffer
+                Vk26.PIPELINE_BIND_POINT_GRAPHICS
+                gbpWireframeLayout
+                0
+                (Vector.fromList [gbpDescriptor])
+                Vector.empty
               case dpdDrawList of
                 [] -> pure ()
                 (firstDc : _) -> do
                   let firstMesh = dcMesh firstDc
                       idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
-                  Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+                  Vk26.cmdBindIndexBuffer commandBuffer idxBuf 0 Vk26.INDEX_TYPE_UINT32
               CommandBuffer.cmdDrawIndexedIndirect commandBuffer gbpDrawCommandsBuffer (fromIntegral $ length dpdDrawList) 20
       }
   -- Bindless pass: alternative g-buffer for texture-array materials
@@ -250,20 +244,17 @@ buildDeferredGraph DeferredPassData {..} = do
                     let firstMesh = dcMesh firstDc
                         vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
                         idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
-                    Foreign.Marshal.Array.withArray [vertBuf] $ \bufferPtr ->
-                      Foreign.Marshal.Array.withArray [0] $ Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 bufferPtr
-                    Vulkan.vkCmdBindIndexBuffer commandBuffer idxBuf 0 Vulkan.VK_INDEX_TYPE_UINT32
+                    Vk26.cmdBindVertexBuffers commandBuffer 0 (Vector.fromList [vertBuf]) (Vector.fromList [0])
+                      
+                    Vk26.cmdBindIndexBuffer commandBuffer idxBuf 0 Vk26.INDEX_TYPE_UINT32
                 -- Bind descriptor set
-                Foreign.Marshal.Array.withArray [blpDescriptor] $ \dsPtr ->
-                  DescriptorSet.cmdBindDescriptorSets
-                    commandBuffer
-                    Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                    blpLayout
-                    0
-                    1
-                    dsPtr
-                    0
-                    Vulkan.vkNullPtr
+                DescriptorSet.cmdBindDescriptorSets
+                  commandBuffer
+                  Vk26.PIPELINE_BIND_POINT_GRAPHICS
+                  blpLayout
+                  0
+                  (Vector.fromList [blpDescriptor])
+                  Vector.empty
                 -- Draw all bindless meshes with push constants
                 for_ blpDrawList $ \drawCall -> do
                   let mesh = dcMesh drawCall
@@ -302,14 +293,14 @@ buildDeferredGraph DeferredPassData {..} = do
                           [Float]
                   liftIO $ do
                     Foreign.Marshal.Array.withArray pushData $ \(pushPtr :: Ptr Float) ->
-                      Vulkan.vkCmdPushConstants
+                      Vk26.cmdPushConstants
                         commandBuffer
                         blpLayout
-                        (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
+                        (Vk26.SHADER_STAGE_VERTEX_BIT .|. Vk26.SHADER_STAGE_FRAGMENT_BIT)
                         0
                         68
                         (Foreign.castPtr pushPtr)
-                    Vulkan.vkCmdDrawIndexed commandBuffer indexCount 1 firstIndex vertexOffset 0
+                    Vk26.cmdDrawIndexed commandBuffer indexCount 1 firstIndex vertexOffset 0
           }
 
   -- Cloud pass: fullscreen triangle ray marching
@@ -322,16 +313,13 @@ buildDeferredGraph DeferredPassData {..} = do
           let commandBuffer = pcCommandBuffer ctx
           RenderPass.withCloudRenderPass commandBuffer cpRenderPass cpFramebuffer cpExtent $ do
             GraphicsPipeline.cmdBindPipeline commandBuffer cpPipeline
-            Foreign.Marshal.Array.withArray [cpDescriptor] $ \dsPtr ->
-              DescriptorSet.cmdBindDescriptorSets
-                commandBuffer
-                Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                cpLayout
-                0
-                1
-                dsPtr
-                0
-                Vulkan.vkNullPtr
+            DescriptorSet.cmdBindDescriptorSets
+              commandBuffer
+              Vk26.PIPELINE_BIND_POINT_GRAPHICS
+              cpLayout
+              0
+              (Vector.fromList [cpDescriptor])
+              Vector.empty
             -- Write cloud frame data to UBO (std430 layout)
             let (V3 camX camY camZ) = cpCameraPos
                 (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = cpSkyboxRays
@@ -398,13 +386,14 @@ buildDeferredGraph DeferredPassData {..} = do
                   ] ::
                     [CFloat]
              in liftIO $ Buffer.copyDataToDeviceMemory dpdDevice cpFrameDataMemory cloudFrameData
-            Vulkan.vkCmdDraw commandBuffer 3 1 0 0
+            Vk26.cmdDraw commandBuffer 3 1 0 0
           -- Copy current cloud result to history buffer for next frame (OUTSIDE render pass)
-          CommandBuffer.layerTransition commandBuffer cpImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-          CommandBuffer.layerTransition commandBuffer cpHistoryImage Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-          CommandBuffer.cmdCopyImage commandBuffer cpImage cpHistoryImage (Vulkan.getField @"width" cpExtent) (Vulkan.getField @"height" cpExtent)
-          CommandBuffer.layerTransition commandBuffer cpImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-          CommandBuffer.layerTransition commandBuffer cpHistoryImage Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          let Vk26.Extent2D cloudWidth cloudHeight = cpExtent
+          CommandBuffer.layerTransition commandBuffer cpImage Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vk26.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+          CommandBuffer.layerTransition commandBuffer cpHistoryImage Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+          CommandBuffer.cmdCopyImage commandBuffer cpImage cpHistoryImage cloudWidth cloudHeight
+          CommandBuffer.layerTransition commandBuffer cpImage Vk26.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          CommandBuffer.layerTransition commandBuffer cpHistoryImage Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       }
 
   -- God ray pass: radial blur on cloud opacity
@@ -418,16 +407,13 @@ buildDeferredGraph DeferredPassData {..} = do
           let commandBuffer = pcCommandBuffer ctx
           RenderPass.withCloudRenderPass commandBuffer grpRenderPass grpFramebuffer grpExtent $ do
             GraphicsPipeline.cmdBindPipeline commandBuffer grpPipeline
-            Foreign.Marshal.Array.withArray [grpDescriptor] $ \dsPtr ->
-              DescriptorSet.cmdBindDescriptorSets
-                commandBuffer
-                Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                grpLayout
-                0
-                1
-                dsPtr
-                0
-                Vulkan.vkNullPtr
+            DescriptorSet.cmdBindDescriptorSets
+              commandBuffer
+              Vk26.PIPELINE_BIND_POINT_GRAPHICS
+              grpLayout
+              0
+              (Vector.fromList [grpDescriptor])
+              Vector.empty
             -- Push constants for god ray parameters
             let godRayData =
                   [ realToFrac grpSunScreenX,
@@ -443,8 +429,8 @@ buildDeferredGraph DeferredPassData {..} = do
                     0 -- padding
                   ] ::
                     [CFloat]
-             in Foreign.Marshal.Array.withArray godRayData $ Vulkan.vkCmdPushConstants commandBuffer grpLayout Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT 0 (fromIntegral (length godRayData * 4)) . Foreign.castPtr
-            Vulkan.vkCmdDraw commandBuffer 3 1 0 0
+             in Foreign.Marshal.Array.withArray godRayData $ Vk26.cmdPushConstants commandBuffer grpLayout Vk26.SHADER_STAGE_FRAGMENT_BIT 0 (fromIntegral (length godRayData * 4)) . Foreign.castPtr
+            Vk26.cmdDraw commandBuffer 3 1 0 0
       }
 
   -- Lighting pass: fullscreen triangle compositing
@@ -457,16 +443,13 @@ buildDeferredGraph DeferredPassData {..} = do
           let commandBuffer = pcCommandBuffer ctx
           RenderPass.withLightingRenderPass commandBuffer lpRenderPass lpFramebuffer dpdExtent $ do
             GraphicsPipeline.cmdBindPipeline commandBuffer lpPipeline
-            Foreign.Marshal.Array.withArray [lpDescriptor] $ \dsPtr ->
-              DescriptorSet.cmdBindDescriptorSets
-                commandBuffer
-                Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS
-                lpLayout
-                0
-                1
-                dsPtr
-                0
-                Vulkan.vkNullPtr
+            DescriptorSet.cmdBindDescriptorSets
+              commandBuffer
+              Vk26.PIPELINE_BIND_POINT_GRAPHICS
+              lpLayout
+              0
+              (Vector.fromList [lpDescriptor])
+              Vector.empty
             -- Set camera position + debug mode + overlays + skybox rays + sun dir + cloud height push constant
             let (V3 camX camY camZ) = lpCameraPos
                 (V3 r0x r0y r0z, V3 r1x r1y r1z, V3 r2x r2y r2z) = lpSkyboxRays
@@ -513,7 +496,7 @@ buildDeferredGraph DeferredPassData {..} = do
                     realToFrac lpSunScreenY
                   ] ::
                     [CFloat]
-             in Foreign.Marshal.Array.withArray camPosData $ Vulkan.vkCmdPushConstants commandBuffer lpLayout (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT) 0 124 . Foreign.castPtr
+             in Foreign.Marshal.Array.withArray camPosData $ Vk26.cmdPushConstants commandBuffer lpLayout (Vk26.SHADER_STAGE_VERTEX_BIT .|. Vk26.SHADER_STAGE_FRAGMENT_BIT) 0 124 . Foreign.castPtr
             -- Fullscreen triangle: 3 vertices, no indices
-            Vulkan.vkCmdDraw commandBuffer 3 1 0 0
+            Vk26.cmdDraw commandBuffer 3 1 0 0
       }

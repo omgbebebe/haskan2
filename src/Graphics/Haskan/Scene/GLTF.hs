@@ -40,7 +40,7 @@ import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.Resources (MeshHandle, ResourceManager, TextureHandle (..), allocHandle, rmNextId)
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
-import Graphics.Vulkan qualified as Vulkan
+import Vulkan qualified as Vk26
 import Linear (Quaternion (..), V2 (..), V3 (..), V4 (..))
 import Linear qualified
 import System.Directory (withCurrentDirectory)
@@ -129,10 +129,10 @@ data GLTFImportResult = GLTFImportResult
 importGLTF ::
   (MonadIO m, MonadManaged m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
+  Vk26.PhysicalDevice ->
+  Vk26.Device ->
+  Vk26.Queue ->
+  Vk26.CommandBuffer ->
   AssetCache ->
   FilePath ->
   m GLTFImportResult
@@ -206,10 +206,10 @@ importGLTF rm pdev dev queue cmdBuf cache path = do
 loadTextures ::
   (MonadIO m, MonadManaged m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
-  Vulkan.VkQueue ->
-  Vulkan.VkCommandBuffer ->
+  Vk26.PhysicalDevice ->
+  Vk26.Device ->
+  Vk26.Queue ->
+  Vk26.CommandBuffer ->
   AssetCache ->
   GLTFTypes.Gltf ->
   m ([TextureHandle], [(Int, Int, VectorStorable.Vector Word8)])
@@ -356,8 +356,8 @@ buildMaterialEmissiveTextures gltf textures =
 loadMeshes ::
   (MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  Vk26.PhysicalDevice ->
+  Vk26.Device ->
   GLTFTypes.Gltf ->
   m [MeshHandle]
 loadMeshes rm pdev dev gltf = do
@@ -376,8 +376,8 @@ loadMeshes rm pdev dev gltf = do
 loadMesh ::
   (MonadIO m) =>
   ResourceManager ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  Vk26.PhysicalDevice ->
+  Vk26.Device ->
   GLTFTypes.Mesh ->
   m MeshHandle
 loadMesh rm pdev dev gltfMesh = do

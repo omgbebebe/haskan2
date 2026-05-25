@@ -13,13 +13,11 @@ where
 
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
-import Data.Word (Word32)
-import Foreign (Ptr, alloca, allocaArray, castPtr, copyBytes, free, mallocBytes, peek, plusPtr, poke, sizeOf)
-import Foreign.C.Types (CSize)
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Marshal.Create (set, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Data.Vector qualified as Vector
+import Data.Word (Word32, Word64)
+import Foreign (Ptr, alloca, allocaArray, castPtr, copyBytes, free, mallocBytes, plusPtr, poke, sizeOf)
 import System.IO.Unsafe (unsafePerformIO)
+import Vulkan qualified as Vk26
 
 -- | A single specialization constant entry.
 data SpecEntry = SpecEntry
@@ -45,93 +43,53 @@ packFloat x =
 
 -- | Execute an action with a valid @VkSpecializationInfo@ pointer.
 --
--- Memory for the map entries, raw data, and the info struct itself is
--- allocated on the C stack and freed after the action completes.
+-- Memory for the raw data buffer is allocated on the C stack and freed after
+-- the action completes. Map entries are passed as a Vector.
 withSpecializationInfo ::
   SpecializationData ->
-  (Ptr Vulkan.VkSpecializationInfo -> IO a) ->
+  (Vk26.SpecializationInfo -> IO a) ->
   IO a
 withSpecializationInfo SpecializationData {..} action = do
   let entryCount = length sdEntries
       totalSize = sum (map (BS.length . seValue) sdEntries)
 
-  allocaArray entryCount $ \(entriesPtr :: Ptr Vulkan.VkSpecializationMapEntry) -> do
-    allocaArray totalSize $ \(dataPtr :: Ptr Word32) -> do
-      -- Write map entries and pack values contiguously
-      let go :: Int -> Int -> [SpecEntry] -> IO ()
-          go _ _ [] = pure ()
-          go i offset (SpecEntry cid val : rest) = do
-            let valLen = BS.length val
-            poke (entriesPtr `plusPtr` (i * sizeOf (undefined :: Vulkan.VkSpecializationMapEntry))) $
-              Vulkan.createVk @(Vulkan.VkSpecializationMapEntry)
-                ( set @"constantID" cid
-                    &* set @"offset" (fromIntegral offset)
-                    &* set @"size" (fromIntegral valLen)
-                )
-            BS.useAsCStringLen val $ \(valPtr, _) ->
-              copyBytes (dataPtr `plusPtr` offset) valPtr valLen
-            go (i + 1) (offset + valLen) rest
+  allocaArray totalSize $ \(dataPtr :: Ptr Word32) -> do
+    let go :: Int -> Int -> [SpecEntry] -> IO [Vk26.SpecializationMapEntry]
+        go _ _ [] = pure []
+        go i offset (SpecEntry cid val : rest) = do
+          let valLen = BS.length val
+          BS.useAsCStringLen val $ \(valPtr, _) ->
+            copyBytes (dataPtr `plusPtr` offset) valPtr valLen
+          restEntries <- go (i + 1) (offset + valLen) rest
+          pure (Vk26.SpecializationMapEntry cid (fromIntegral offset) (fromIntegral valLen) : restEntries)
 
-      go 0 0 sdEntries
+    mapEntries <- go 0 0 sdEntries
+    action (Vk26.SpecializationInfo (Vector.fromList mapEntries) (fromIntegral totalSize) (castPtr dataPtr))
 
-      -- Build and run action with VkSpecializationInfo
-      let specInfo =
-            Vulkan.createVk
-              ( set @"mapEntryCount" (fromIntegral entryCount)
-                  &* set @"pMapEntries" entriesPtr
-                  &* set @"dataSize" (fromIntegral totalSize)
-                  &* set @"pData" (Foreign.castPtr dataPtr)
-              )
-      alloca $ \specInfoPtr -> do
-        poke specInfoPtr specInfo
-        action specInfoPtr
-
--- | Allocate a long-lived @VkSpecializationInfo@ on the C heap.
+-- | Allocate a long-lived @VkSpecializationInfo@.
 --
--- The caller is responsible for freeing with 'freeSpecializationInfo'.
--- This is needed when the pointer must outlive a single @with@-style
+-- The caller is responsible for freeing the data pointer with 'freeSpecializationInfo'.
+-- This is needed when the specialization info must outlive a single @with@-style
 -- callback (e.g. stored in a 'ShaderProgram' record).
-mallocSpecializationInfo :: SpecializationData -> IO (Ptr Vulkan.VkSpecializationInfo)
+mallocSpecializationInfo :: SpecializationData -> IO Vk26.SpecializationInfo
 mallocSpecializationInfo SpecializationData {..} = do
   let entryCount = length sdEntries
       totalSize = sum (map (BS.length . seValue) sdEntries)
 
-  entriesPtr <- mallocBytes (entryCount * sizeOf (undefined :: Vulkan.VkSpecializationMapEntry))
   dataPtr <- mallocBytes totalSize
 
-  let go :: Int -> Int -> [SpecEntry] -> IO ()
-      go _ _ [] = pure ()
+  let go :: Int -> Int -> [SpecEntry] -> IO [Vk26.SpecializationMapEntry]
+      go _ _ [] = pure []
       go i offset (SpecEntry cid val : rest) = do
         let valLen = BS.length val
-        poke (entriesPtr `plusPtr` (i * sizeOf (undefined :: Vulkan.VkSpecializationMapEntry))) $
-          Vulkan.createVk @(Vulkan.VkSpecializationMapEntry)
-            ( set @"constantID" cid
-                &* set @"offset" (fromIntegral offset)
-                &* set @"size" (fromIntegral valLen)
-            )
         BS.useAsCStringLen val $ \(valPtr, _) ->
           copyBytes (dataPtr `plusPtr` offset) valPtr valLen
-        go (i + 1) (offset + valLen) rest
+        restEntries <- go (i + 1) (offset + valLen) rest
+        pure (Vk26.SpecializationMapEntry cid (fromIntegral offset) (fromIntegral valLen) : restEntries)
 
-  go 0 0 sdEntries
+  mapEntries <- go 0 0 sdEntries
+  pure (Vk26.SpecializationInfo (Vector.fromList mapEntries) (fromIntegral totalSize) (castPtr dataPtr))
 
-  specInfoPtr <- mallocBytes (sizeOf (undefined :: Vulkan.VkSpecializationInfo))
-  poke specInfoPtr $
-    Vulkan.createVk
-      ( set @"mapEntryCount" (fromIntegral entryCount)
-          &* set @"pMapEntries" entriesPtr
-          &* set @"dataSize" (fromIntegral totalSize)
-          &* set @"pData" (Foreign.castPtr dataPtr)
-      )
-
-  pure specInfoPtr
-
--- | Free a @VkSpecializationInfo@ allocated by 'mallocSpecializationInfo'.
---
--- This also frees the associated map entries and raw data arrays.
-freeSpecializationInfo :: Ptr Vulkan.VkSpecializationInfo -> IO ()
-freeSpecializationInfo ptr = do
-  specInfo <- peek ptr
-  free (Vulkan.getField @"pMapEntries" specInfo)
-  free (Vulkan.getField @"pData" specInfo)
-  free ptr
+-- | Free the data pointer associated with a @VkSpecializationInfo@ allocated by 'mallocSpecializationInfo'.
+freeSpecializationInfo :: Vk26.SpecializationInfo -> IO ()
+freeSpecializationInfo (Vk26.SpecializationInfo _ _ dptr) = free dptr

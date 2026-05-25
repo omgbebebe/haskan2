@@ -19,8 +19,7 @@ import Graphics.Haskan.Engine.Capabilities.Log (MonadLog (..), logInfo)
 import Graphics.Haskan.Logger (LogCategory (..))
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
 import Graphics.Haskan.Vulkan.Types (RenderContext (..), VulkanContext (..))
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Vulkan qualified as Vk26
 
 -- | Mutable screenshot trigger flags.
 data ScreenshotFlags = ScreenshotFlags
@@ -32,9 +31,9 @@ data ScreenshotFlags = ScreenshotFlags
 -- | Common Vulkan handles needed by all screenshot operations.
 data ScreenshotContext = ScreenshotContext
   { scVulkanContext :: !VulkanContext,
-    scCommandPool :: !Vulkan.VkCommandPool,
-    scExtent :: !Vulkan.VkExtent2D,
-    scImageIndex :: !Vulkan.Word32
+    scCommandPool :: !Vk26.CommandPool,
+    scExtent :: !Vk26.Extent2D,
+    scImageIndex :: !Word32
   }
 
 -- | Handle single gbuffer screenshot capture
@@ -47,7 +46,7 @@ handleScreenshotSingle dr ScreenshotContext {scVulkanContext = VulkanContext {..
   deviceWaitIdle
   let gbufferImages = drGBufferImages dr !! fromIntegral scImageIndex
   logInfo LogGeneral "capturing screenshot..."
-  liftIO $ Screenshot.saveGBufferStage vcDevice vcPhysicalDevice scCommandPool vcQueue (gbufferImages !! 2) scExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
+  liftIO $ Screenshot.saveGBufferStage vcDevice vcPhysicalDevice scCommandPool vcQueue (gbufferImages !! 2) scExtent Vk26.FORMAT_R8G8B8A8_UNORM "albedo"
   logInfo LogGeneral "screenshot saved"
 
 -- | Handle all pipeline stages screenshot capture
@@ -61,10 +60,10 @@ handleScreenshotAllStages dr ScreenshotContext {scVulkanContext = VulkanContext 
   let gbufferImages = drGBufferImages dr !! fromIntegral scImageIndex
   logInfo LogGeneral "capturing all pipeline stages..."
   liftIO $ do
-    Screenshot.saveGBufferStage vcDevice vcPhysicalDevice scCommandPool vcQueue (gbufferImages !! 0) scExtent Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT "position"
-    Screenshot.saveGBufferStage vcDevice vcPhysicalDevice scCommandPool vcQueue (gbufferImages !! 1) scExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "normal"
-    Screenshot.saveGBufferStage vcDevice vcPhysicalDevice scCommandPool vcQueue (gbufferImages !! 2) scExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "albedo"
-    Screenshot.saveGBufferStage vcDevice vcPhysicalDevice scCommandPool vcQueue (gbufferImages !! 3) scExtent Vulkan.VK_FORMAT_R8G8B8A8_UNORM "emissive"
+    Screenshot.saveGBufferStage vcDevice vcPhysicalDevice scCommandPool vcQueue (gbufferImages !! 0) scExtent Vk26.FORMAT_R16G16B16A16_SFLOAT "position"
+    Screenshot.saveGBufferStage vcDevice vcPhysicalDevice scCommandPool vcQueue (gbufferImages !! 1) scExtent Vk26.FORMAT_R8G8B8A8_UNORM "normal"
+    Screenshot.saveGBufferStage vcDevice vcPhysicalDevice scCommandPool vcQueue (gbufferImages !! 2) scExtent Vk26.FORMAT_R8G8B8A8_UNORM "albedo"
+    Screenshot.saveGBufferStage vcDevice vcPhysicalDevice scCommandPool vcQueue (gbufferImages !! 3) scExtent Vk26.FORMAT_R8G8B8A8_UNORM "emissive"
   logInfo LogGeneral "all stages saved"
 
 -- | Handle swapchain screenshot capture

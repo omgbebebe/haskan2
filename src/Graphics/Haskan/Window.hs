@@ -9,10 +9,10 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Coerce
 import Data.Text (Text)
+import Foreign.Ptr (castPtr)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Resources (alloc, alloc_)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Ext qualified as Vulkan
+import Vulkan qualified as Vk26
 import SDL qualified
 import SDL.Internal.Types (Window (..))
 import SDL.Raw qualified as Raw
@@ -71,21 +71,21 @@ windowExtensions window = liftIO $ traverse BS.packCString =<< SDL.Video.Vulkan.
 
 managedSurface ::
   (MonadManaged m) =>
-  Vulkan.VkInstance ->
+  Vk26.Instance ->
   SDL.Window ->
-  m Vulkan.VkSurfaceKHR
+  m Vk26.SurfaceKHR
 managedSurface inst window =
   alloc
     "Surface"
     (createSurface inst window)
-    (\ptr -> Vulkan.vkDestroySurfaceKHR (coerce inst) ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroySurfaceKHR inst ptr Nothing)
 
 createSurface ::
   (MonadIO m) =>
-  Vulkan.VkInstance ->
+  Vk26.Instance ->
   SDL.Window ->
-  m Vulkan.VkSurfaceKHR
-createSurface inst window = liftIO $ Vulkan.VkPtr <$> SDL.Video.Vulkan.vkCreateSurface window (coerce inst)
+  m Vk26.SurfaceKHR
+createSurface inst window = liftIO $ Vk26.SurfaceKHR <$> SDL.Video.Vulkan.vkCreateSurface window (castPtr (Vk26.instanceHandle inst))
 
 showWindow :: (MonadIO m) => SDL.Window -> m ()
 showWindow window = liftIO (SDL.showWindow window)

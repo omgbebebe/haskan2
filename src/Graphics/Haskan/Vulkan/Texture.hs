@@ -1,4 +1,4 @@
-{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE DuplicateRecordFields, LambdaCase #-}
 
 module Graphics.Haskan.Vulkan.Texture
   ( readImageFromFile,
@@ -44,7 +44,7 @@ import Data.Foldable (for_)
 import Data.Int (Int16)
 import Data.Vector.Storable qualified
 import Data.Vector.Storable qualified as Vector
-import Data.Word (Word8)
+import Data.Word (Word32, Word8)
 import Foreign.Storable (Storable)
 import Graphics.Haskan.Assets.Cache (AssetCache)
 import Graphics.Haskan.Assets.InternalFormat (InternalTexture (..), TextureMetadata (..))
@@ -63,11 +63,10 @@ import Graphics.Haskan.Vulkan.ImageView qualified as Haskan
 import Graphics.Haskan.Vulkan.Memory qualified as Haskan
 import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Types (VulkanContext (..))
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Vulkan qualified as Vk26
+import Vulkan.CStruct.Extends (SomeStruct(..))
+import Vulkan.Zero (zero)
+import Data.Vector qualified as V
 
 readImageFromFile ::
   (MonadIO m) =>
@@ -101,7 +100,7 @@ managedTexture ::
   (MonadManaged m) =>
   VulkanContext ->
   FilePath ->
-  m Vulkan.VkImageView
+  m Vk26.ImageView
 managedTexture vc filePath = do
   let dev = vcDevice vc
       pdev = vcPhysicalDevice vc
@@ -111,7 +110,7 @@ managedTexture vc filePath = do
   let dataList = Vector.toList imgData
 
   (stagingBuffer, stagingMemoryRequirement) <-
-    Haskan.managedBuffer dev dataList Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    Haskan.managedBuffer dev dataList Vk26.BUFFER_USAGE_TRANSFER_SRC_BIT
 
   stagingMemory <-
     Haskan.managedBufferMemory pdev dev stagingMemoryRequirement
@@ -120,44 +119,36 @@ managedTexture vc filePath = do
     Haskan.bindBufferMemory dev stagingBuffer stagingMemory dataList
     Haskan.copyDataToDeviceMemory dev stagingMemory dataList
 
-  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+  let format = Vk26.FORMAT_R8G8B8A8_UNORM
       imageExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral width)
-              &* set @"height" (fromIntegral height)
-              &* set @"depth" 1
-          )
+        Vk26.Extent3D (fromIntegral width) (fromIntegral height) 1
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
-              &* set @"extent" imageExtent
-              &* set @"mipLevels" 1
-              &* set @"arrayLayers" 1
-              &* set @"format" format
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
+        Vk26.ImageCreateInfo
+                  { next = ()
+                  , imageType = Vk26.IMAGE_TYPE_2D
+                  , extent = imageExtent
+                  , mipLevels = 1
+                  , arrayLayers = 1
+                  , format = format
+                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
+                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
+                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+                  , samples = Vk26.SAMPLE_COUNT_1_BIT
+                  , flags = zero
+                  , queueFamilyIndices = V.empty
+                  }
 
   image <-
     alloc
       "texture image"
-      (withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr)))
-      (\ptr -> Vulkan.vkDestroyImage dev ptr Vulkan.vkNullPtr)
+      (Vk26.createImage dev createInfo Nothing)
+      (\ptr -> Vk26.destroyImage dev ptr Nothing)
 
-  imageMemoryRequirements <-
-    allocaAndPeek_
-      (Vulkan.vkGetImageMemoryRequirements dev image)
+  imageMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements dev image
 
   imageMemory <-
-    Haskan.managedMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.managedMemoryFor pdev dev imageMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   bindImageMemory dev image imageMemory 0
 
@@ -165,8 +156,8 @@ managedTexture vc filePath = do
     Haskan.layerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_UNDEFINED
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
 
     Haskan.copyBufferToImage
       commandBuffer
@@ -178,10 +169,10 @@ managedTexture vc filePath = do
     Haskan.layerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
 
-  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+    liftIO $ Vk26.queueWaitIdle queue
   Haskan.managedImageView dev format image
 
 -- | Load a 3D texture from raw binary RGBA8 data.
@@ -197,7 +188,7 @@ managedTexture3D ::
   Int ->
   -- | Depth
   Int ->
-  m Vulkan.VkImageView
+  m Vk26.ImageView
 managedTexture3D vc filePath width height depth = do
   let dev = vcDevice vc
       pdev = vcPhysicalDevice vc
@@ -212,7 +203,7 @@ managedTexture3D vc filePath width height depth = do
       "managedTexture3D: expected " ++ show expectedSize ++ " bytes, got " ++ show actualSize
 
   (stagingBuffer, stagingMemoryRequirement) <-
-    Haskan.managedBuffer dev dataList Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    Haskan.managedBuffer dev dataList Vk26.BUFFER_USAGE_TRANSFER_SRC_BIT
 
   stagingMemory <-
     Haskan.managedBufferMemory pdev dev stagingMemoryRequirement
@@ -221,44 +212,36 @@ managedTexture3D vc filePath width height depth = do
     Haskan.bindBufferMemory dev stagingBuffer stagingMemory dataList
     Haskan.copyDataToDeviceMemory dev stagingMemory dataList
 
-  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+  let format = Vk26.FORMAT_R8G8B8A8_UNORM
       imageExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral width)
-              &* set @"height" (fromIntegral height)
-              &* set @"depth" (fromIntegral depth)
-          )
+        Vk26.Extent3D (fromIntegral width) (fromIntegral height) (fromIntegral depth)
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_3D
-              &* set @"extent" imageExtent
-              &* set @"mipLevels" 1
-              &* set @"arrayLayers" 1
-              &* set @"format" format
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
+        Vk26.ImageCreateInfo
+                  { next = ()
+                  , imageType = Vk26.IMAGE_TYPE_2D
+                  , extent = imageExtent
+                  , mipLevels = 1
+                  , arrayLayers = 1
+                  , format = format
+                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
+                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
+                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+                  , samples = Vk26.SAMPLE_COUNT_1_BIT
+                  , flags = zero
+                  , queueFamilyIndices = V.empty
+                  }
 
   image <-
     alloc
       "texture 3D image"
-      (withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr)))
-      (\ptr -> Vulkan.vkDestroyImage dev ptr Vulkan.vkNullPtr)
+      (Vk26.createImage dev createInfo Nothing)
+      (\ptr -> Vk26.destroyImage dev ptr Nothing)
 
-  imageMemoryRequirements <-
-    allocaAndPeek_
-      (Vulkan.vkGetImageMemoryRequirements dev image)
+  imageMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements dev image
 
   imageMemory <-
-    Haskan.managedMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.managedMemoryFor pdev dev imageMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   bindImageMemory dev image imageMemory 0
 
@@ -266,8 +249,8 @@ managedTexture3D vc filePath width height depth = do
     Haskan.layerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_UNDEFINED
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
 
     Haskan.copyBufferToImage3D
       commandBuffer
@@ -280,10 +263,10 @@ managedTexture3D vc filePath width height depth = do
     Haskan.layerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
 
-  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+    liftIO $ Vk26.queueWaitIdle queue
   Haskan.managedImageView3D dev format image
 
 managedTexture3DWithMips ::
@@ -299,7 +282,7 @@ managedTexture3DWithMips ::
   Int ->
   -- | Mip level count
   Int ->
-  m Vulkan.VkImageView
+  m Vk26.ImageView
 managedTexture3DWithMips vc filePath width height depth mipLevels = do
   let dev = vcDevice vc
       pdev = vcPhysicalDevice vc
@@ -314,7 +297,7 @@ managedTexture3DWithMips vc filePath width height depth mipLevels = do
       "managedTexture3DWithMips: expected " ++ show expectedSize ++ " bytes, got " ++ show actualSize
 
   (stagingBuffer, stagingMemoryRequirement) <-
-    Haskan.managedBuffer dev dataList Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    Haskan.managedBuffer dev dataList Vk26.BUFFER_USAGE_TRANSFER_SRC_BIT
 
   stagingMemory <-
     Haskan.managedBufferMemory pdev dev stagingMemoryRequirement
@@ -323,44 +306,36 @@ managedTexture3DWithMips vc filePath width height depth mipLevels = do
     Haskan.bindBufferMemory dev stagingBuffer stagingMemory dataList
     Haskan.copyDataToDeviceMemory dev stagingMemory dataList
 
-  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+  let format = Vk26.FORMAT_R8G8B8A8_UNORM
       imageExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral width)
-              &* set @"height" (fromIntegral height)
-              &* set @"depth" (fromIntegral depth)
-          )
+        Vk26.Extent3D (fromIntegral width) (fromIntegral height) (fromIntegral depth)
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_3D
-              &* set @"extent" imageExtent
-              &* set @"mipLevels" (fromIntegral mipLevels)
-              &* set @"arrayLayers" 1
-              &* set @"format" format
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
+        Vk26.ImageCreateInfo
+                  { next = ()
+                  , imageType = Vk26.IMAGE_TYPE_3D
+                  , extent = imageExtent
+                  , mipLevels = (fromIntegral mipLevels)
+                  , arrayLayers = 1
+                  , format = format
+                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
+                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
+                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+                  , samples = Vk26.SAMPLE_COUNT_1_BIT
+                  , flags = zero
+                  , queueFamilyIndices = V.empty
+                  }
 
   image <-
     alloc
       "texture 3D image"
-      (withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr)))
-      (\ptr -> Vulkan.vkDestroyImage dev ptr Vulkan.vkNullPtr)
+      (Vk26.createImage dev createInfo Nothing)
+      (\ptr -> Vk26.destroyImage dev ptr Nothing)
 
-  imageMemoryRequirements <-
-    allocaAndPeek_
-      (Vulkan.vkGetImageMemoryRequirements dev image)
+  imageMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements dev image
 
   imageMemory <-
-    Haskan.managedMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.managedMemoryFor pdev dev imageMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   bindImageMemory dev image imageMemory 0
 
@@ -368,8 +343,8 @@ managedTexture3DWithMips vc filePath width height depth mipLevels = do
     Haskan.mipLayerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_UNDEFINED
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
       0
       1
       1
@@ -394,14 +369,14 @@ managedTexture3DWithMips vc filePath width height depth mipLevels = do
           dstD = fromIntegral (depth `div` (2 ^ mip))
           srcOldLayout =
             if mip == 1
-              then Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-              else Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+              then Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+              else Vk26.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
 
       Haskan.mipLayerTransition
         commandBuffer
         image
         srcOldLayout
-        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        Vk26.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
         srcMip
         1
         1
@@ -409,8 +384,8 @@ managedTexture3DWithMips vc filePath width height depth mipLevels = do
       Haskan.mipLayerTransition
         commandBuffer
         image
-        Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        Vk26.IMAGE_LAYOUT_UNDEFINED
+        Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
         dstMip
         1
         1
@@ -430,8 +405,8 @@ managedTexture3DWithMips vc filePath width height depth mipLevels = do
       Haskan.mipLayerTransition
         commandBuffer
         image
-        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        Vk26.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
         dstMip
         1
         1
@@ -439,140 +414,136 @@ managedTexture3DWithMips vc filePath width height depth mipLevels = do
     Haskan.mipLayerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      Vk26.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+      Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       0
       (fromIntegral mipLevels)
       1
 
-  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+    liftIO $ Vk26.queueWaitIdle queue
   Haskan.managedImageView3DMips dev format image (fromIntegral mipLevels)
 
 bindImageMemory ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  Vulkan.VkImage ->
-  Vulkan.VkDeviceMemory ->
-  Vulkan.VkDeviceSize ->
+  Vk26.Device ->
+  Vk26.Image ->
+  Vk26.DeviceMemory ->
+  Vk26.DeviceSize ->
   m ()
-bindImageMemory dev image memory offset =
-  liftIO (Vulkan.vkBindImageMemory dev image memory offset) >>= throwVkResult
-
+bindImageMemory dev image memory offset = liftIO $ Vk26.bindImageMemory dev image memory offset
 managedSampler ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  m Vulkan.VkSampler
+  Vk26.Device ->
+  m Vk26.Sampler
 managedSampler dev =
   alloc
     "Sampler"
     (createSampler dev)
-    (\ptr -> Vulkan.vkDestroySampler dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroySampler dev ptr Nothing)
 
 createSampler ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  m Vulkan.VkSampler
+  Vk26.Device ->
+  m Vk26.Sampler
 createSampler dev =
   let createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"magFilter" Vulkan.VK_FILTER_LINEAR
-              &* set @"minFilter" Vulkan.VK_FILTER_LINEAR
-              &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-              &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-              &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-              --      &* set @"anisotropyEnable" Vulkan.VK_TRUE
-              --      &* set @"maxAnisotropy" 16.0
-              &* set @"anisotropyEnable" Vulkan.VK_FALSE
-              &* set @"maxAnisotropy" 1.0
-              &* set @"borderColor" Vulkan.VK_BORDER_COLOR_INT_OPAQUE_BLACK
-              &* set @"unnormalizedCoordinates" Vulkan.VK_FALSE
-              &* set @"compareEnable" Vulkan.VK_FALSE
-              &* set @"compareOp" Vulkan.VK_COMPARE_OP_ALWAYS
-              &* set @"mipmapMode" Vulkan.VK_SAMPLER_MIPMAP_MODE_LINEAR
-              &* set @"mipLodBias" 0.0
-              &* set @"minLod" 0.0
-              &* set @"maxLod" 0.0
-          )
-   in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateSampler dev ciPtr Vulkan.vkNullPtr))
+        Vk26.SamplerCreateInfo
+                  { next = ()
+                  , flags = zero
+                  , magFilter = Vk26.FILTER_LINEAR
+                  , minFilter = Vk26.FILTER_LINEAR
+                  , addressModeU = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
+                  , addressModeV = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
+                  , addressModeW = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
+                  , anisotropyEnable = False
+                  , maxAnisotropy = 1.0
+                  , borderColor = Vk26.BORDER_COLOR_INT_OPAQUE_BLACK
+                  , unnormalizedCoordinates = False
+                  , compareEnable = False
+                  , compareOp = Vk26.COMPARE_OP_ALWAYS
+                  , mipmapMode = Vk26.SAMPLER_MIPMAP_MODE_LINEAR
+                  , mipLodBias = 0.0
+                  , minLod = 0.0
+                  , maxLod = 0.0
+                  }
+   in liftIO $ Vk26.createSampler dev createInfo Nothing
 
 createSamplerWithLod ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
+  Vk26.Device ->
   -- | max LOD
   Float ->
-  m Vulkan.VkSampler
+  m Vk26.Sampler
 createSamplerWithLod dev maxLod =
   let createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"magFilter" Vulkan.VK_FILTER_LINEAR
-              &* set @"minFilter" Vulkan.VK_FILTER_LINEAR
-              &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-              &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-              &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-              &* set @"anisotropyEnable" Vulkan.VK_FALSE
-              &* set @"maxAnisotropy" 1.0
-              &* set @"borderColor" Vulkan.VK_BORDER_COLOR_INT_OPAQUE_BLACK
-              &* set @"unnormalizedCoordinates" Vulkan.VK_FALSE
-              &* set @"compareEnable" Vulkan.VK_FALSE
-              &* set @"compareOp" Vulkan.VK_COMPARE_OP_ALWAYS
-              &* set @"mipmapMode" Vulkan.VK_SAMPLER_MIPMAP_MODE_LINEAR
-              &* set @"mipLodBias" 0.0
-              &* set @"minLod" 0.0
-              &* set @"maxLod" maxLod
-          )
-   in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateSampler dev ciPtr Vulkan.vkNullPtr))
+        Vk26.SamplerCreateInfo
+                  { next = ()
+                  , flags = zero
+                  , magFilter = Vk26.FILTER_LINEAR
+                  , minFilter = Vk26.FILTER_LINEAR
+                  , addressModeU = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
+                  , addressModeV = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
+                  , addressModeW = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
+                  , anisotropyEnable = False
+                  , maxAnisotropy = 1.0
+                  , borderColor = Vk26.BORDER_COLOR_INT_OPAQUE_BLACK
+                  , unnormalizedCoordinates = False
+                  , compareEnable = False
+                  , compareOp = Vk26.COMPARE_OP_ALWAYS
+                  , mipmapMode = Vk26.SAMPLER_MIPMAP_MODE_LINEAR
+                  , mipLodBias = 0.0
+                  , minLod = 0.0
+                  , maxLod = maxLod
+                  }
+    in liftIO $ Vk26.createSampler dev createInfo Nothing
 
 managedSamplerNearest ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
-  m Vulkan.VkSampler
+  Vk26.Device ->
+  m Vk26.Sampler
 managedSamplerNearest dev =
   alloc
     "SamplerNearest"
     (createSamplerNearest dev)
-    (\ptr -> Vulkan.vkDestroySampler dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroySampler dev ptr Nothing)
 
 managedSamplerWithLod ::
   (MonadManaged m) =>
-  Vulkan.VkDevice ->
+  Vk26.Device ->
   Float ->
-  m Vulkan.VkSampler
+  m Vk26.Sampler
 managedSamplerWithLod dev maxLod =
   alloc
     "SamplerWithLod"
     (createSamplerWithLod dev maxLod)
-    (\ptr -> Vulkan.vkDestroySampler dev ptr Vulkan.vkNullPtr)
+    (\ptr -> Vk26.destroySampler dev ptr Nothing)
 
 createSamplerNearest ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  m Vulkan.VkSampler
+  Vk26.Device ->
+  m Vk26.Sampler
 createSamplerNearest dev =
   let createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"magFilter" Vulkan.VK_FILTER_NEAREST
-              &* set @"minFilter" Vulkan.VK_FILTER_NEAREST
-              &* set @"addressModeU" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-              &* set @"addressModeV" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-              &* set @"addressModeW" Vulkan.VK_SAMPLER_ADDRESS_MODE_REPEAT
-              &* set @"anisotropyEnable" Vulkan.VK_FALSE
-              &* set @"maxAnisotropy" 1.0
-              &* set @"borderColor" Vulkan.VK_BORDER_COLOR_INT_OPAQUE_BLACK
-              &* set @"unnormalizedCoordinates" Vulkan.VK_FALSE
-              &* set @"compareEnable" Vulkan.VK_FALSE
-              &* set @"compareOp" Vulkan.VK_COMPARE_OP_ALWAYS
-              &* set @"mipmapMode" Vulkan.VK_SAMPLER_MIPMAP_MODE_NEAREST
-              &* set @"mipLodBias" 0.0
-              &* set @"minLod" 0.0
-              &* set @"maxLod" 0.0
-          )
-   in liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateSampler dev ciPtr Vulkan.vkNullPtr))
+        Vk26.SamplerCreateInfo
+                  { next = ()
+                  , flags = zero
+                  , magFilter = Vk26.FILTER_NEAREST
+                  , minFilter = Vk26.FILTER_NEAREST
+                  , addressModeU = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
+                  , addressModeV = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
+                  , addressModeW = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
+                  , anisotropyEnable = False
+                  , maxAnisotropy = 1.0
+                  , borderColor = Vk26.BORDER_COLOR_INT_OPAQUE_BLACK
+                  , unnormalizedCoordinates = False
+                  , compareEnable = False
+                  , compareOp = Vk26.COMPARE_OP_ALWAYS
+                  , mipmapMode = Vk26.SAMPLER_MIPMAP_MODE_NEAREST
+                  , mipLodBias = 0.0
+                  , minLod = 0.0
+                  , maxLod = 0.0
+                  }
+    in liftIO $ Vk26.createSampler dev createInfo Nothing
 
 -- | Shared texture upload logic: staging buffer -> image -> imageView -> register.
 uploadTextureWithFormat ::
@@ -582,7 +553,7 @@ uploadTextureWithFormat ::
   Int ->
   Int ->
   Data.Vector.Storable.Vector Word8 ->
-  Vulkan.VkFormat ->
+  Vk26.Format ->
   m TextureHandle
 uploadTextureWithFormat rm vc width height imgData format = do
   let dataList = Vector.toList imgData
@@ -592,7 +563,7 @@ uploadTextureWithFormat rm vc width height imgData format = do
       commandBuffer = vcCommandBuffer vc
 
   (stagingBuffer, stagingMemoryRequirement) <-
-    Haskan.managedBuffer dev dataList Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    Haskan.managedBuffer dev dataList Vk26.BUFFER_USAGE_TRANSFER_SRC_BIT
 
   stagingMemory <-
     Haskan.managedBufferMemory pdev dev stagingMemoryRequirement
@@ -602,39 +573,31 @@ uploadTextureWithFormat rm vc width height imgData format = do
     Haskan.copyDataToDeviceMemory dev stagingMemory dataList
 
   let imageExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral width)
-              &* set @"height" (fromIntegral height)
-              &* set @"depth" 1
-          )
+        Vk26.Extent3D (fromIntegral width) (fromIntegral height) 1
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
-              &* set @"extent" imageExtent
-              &* set @"mipLevels" 1
-              &* set @"arrayLayers" 1
-              &* set @"format" format
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
+        Vk26.ImageCreateInfo
+                  { next = ()
+                  , imageType = Vk26.IMAGE_TYPE_2D
+                  , extent = imageExtent
+                  , mipLevels = 1
+                  , arrayLayers = 1
+                  , format = format
+                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
+                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
+                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+                  , samples = Vk26.SAMPLE_COUNT_1_BIT
+                  , flags = zero
+                  , queueFamilyIndices = V.empty
+                  }
 
-  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+  image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
-  imageMemoryRequirements <-
-    allocaAndPeek_
-      (Vulkan.vkGetImageMemoryRequirements dev image)
-  logDebugIO LogTexture $ "texture image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " width=" <> showT width <> " height=" <> showT height
+  imageMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements dev image
+  logDebugIO LogTexture $ "texture image memory requirements size=" <> showT ((\(Vk26.MemoryRequirements size _ _) -> size) imageMemoryRequirements) <> " width=" <> showT width <> " height=" <> showT height
 
   imageMemory <-
-    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   liftIO $ bindImageMemory dev image imageMemory 0
 
@@ -642,8 +605,8 @@ uploadTextureWithFormat rm vc width height imgData format = do
     Haskan.layerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_UNDEFINED
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
 
     Haskan.copyBufferToImage
       commandBuffer
@@ -655,18 +618,18 @@ uploadTextureWithFormat rm vc width height imgData format = do
     Haskan.layerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
 
-  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+    liftIO $ Vk26.queueWaitIdle queue
   imageView <- Haskan.createImageView dev format image
 
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 
   let destroy = do
-        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
-        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
-        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+        Vk26.destroyImageView dev imageView Nothing
+        Vk26.destroyImage dev image Nothing
+        Vk26.freeMemory dev imageMemory Nothing
 
       resource =
         TextureResource
@@ -692,7 +655,7 @@ uploadTextureSRGB ::
   Data.Vector.Storable.Vector Word8 ->
   m TextureHandle
 uploadTextureSRGB rm vc width height imgData =
-  uploadTextureWithFormat rm vc width height imgData Vulkan.VK_FORMAT_R8G8B8A8_SRGB
+  uploadTextureWithFormat rm vc width height imgData Vk26.FORMAT_R8G8B8A8_SRGB
 
 createTextureFromDataSRGB ::
   (MonadManaged m, MonadIO m) =>
@@ -713,7 +676,7 @@ uploadTexture ::
   Data.Vector.Storable.Vector Word8 ->
   m TextureHandle
 uploadTexture rm vc width height imgData =
-  uploadTextureWithFormat rm vc width height imgData Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+  uploadTextureWithFormat rm vc width height imgData Vk26.FORMAT_R8G8B8A8_UNORM
 
 createTextureFromHalfFloatData ::
   (MonadManaged m, MonadIO m) =>
@@ -724,7 +687,7 @@ createTextureFromHalfFloatData ::
   Data.Vector.Storable.Vector Word8 ->
   m TextureHandle
 createTextureFromHalfFloatData rm vc width height imgData =
-  uploadTextureWithFormat rm vc width height imgData Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
+  uploadTextureWithFormat rm vc width height imgData Vk26.FORMAT_R16G16B16A16_SFLOAT
 
 uploadTextureWithFormatVector ::
   (MonadManaged m, MonadIO m, Storable a) =>
@@ -733,7 +696,7 @@ uploadTextureWithFormatVector ::
   Int ->
   Int ->
   Vector.Vector a ->
-  Vulkan.VkFormat ->
+  Vk26.Format ->
   m TextureHandle
 uploadTextureWithFormatVector rm vc width height imgData format = do
   let dataList = Vector.toList imgData
@@ -743,7 +706,7 @@ uploadTextureWithFormatVector rm vc width height imgData format = do
       commandBuffer = vcCommandBuffer vc
 
   (stagingBuffer, stagingMemoryRequirement) <-
-    Haskan.managedBuffer dev dataList Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    Haskan.managedBuffer dev dataList Vk26.BUFFER_USAGE_TRANSFER_SRC_BIT
 
   stagingMemory <-
     Haskan.managedBufferMemory pdev dev stagingMemoryRequirement
@@ -753,38 +716,30 @@ uploadTextureWithFormatVector rm vc width height imgData format = do
     Haskan.copyDataToDeviceMemory dev stagingMemory dataList
 
   let imageExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral width)
-              &* set @"height" (fromIntegral height)
-              &* set @"depth" 1
-          )
+        Vk26.Extent3D (fromIntegral width) (fromIntegral height) 1
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
-              &* set @"extent" imageExtent
-              &* set @"mipLevels" 1
-              &* set @"arrayLayers" 1
-              &* set @"format" format
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
+        Vk26.ImageCreateInfo
+                  { next = ()
+                  , imageType = Vk26.IMAGE_TYPE_2D
+                  , extent = imageExtent
+                  , mipLevels = 1
+                  , arrayLayers = 1
+                  , format = format
+                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
+                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
+                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+                  , samples = Vk26.SAMPLE_COUNT_1_BIT
+                  , flags = zero
+                  , queueFamilyIndices = V.empty
+                  }
 
-  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+  image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
-  imageMemoryRequirements <-
-    allocaAndPeek_
-      (Vulkan.vkGetImageMemoryRequirements dev image)
+  imageMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements dev image
 
   imageMemory <-
-    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   liftIO $ bindImageMemory dev image imageMemory 0
 
@@ -792,8 +747,8 @@ uploadTextureWithFormatVector rm vc width height imgData format = do
     Haskan.layerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_UNDEFINED
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
 
     Haskan.copyBufferToImage
       commandBuffer
@@ -805,18 +760,18 @@ uploadTextureWithFormatVector rm vc width height imgData format = do
     Haskan.layerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
 
-  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+    liftIO $ Vk26.queueWaitIdle queue
   imageView <- Haskan.createImageView dev format image
 
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 
   let destroy = do
-        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
-        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
-        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+        Vk26.destroyImageView dev imageView Nothing
+        Vk26.destroyImage dev image Nothing
+        Vk26.freeMemory dev imageMemory Nothing
 
       resource =
         TextureResource
@@ -842,7 +797,7 @@ createTerrainElevationTexture ::
   Vector.Vector Int16 ->
   m TextureHandle
 createTerrainElevationTexture rm vc width height vec =
-  uploadTextureWithFormatVector rm vc width height vec Vulkan.VK_FORMAT_R16_SNORM
+  uploadTextureWithFormatVector rm vc width height vec Vk26.FORMAT_R16_SNORM
 
 createTerrainClimateTexture ::
   (MonadManaged m, MonadIO m) =>
@@ -853,7 +808,7 @@ createTerrainClimateTexture ::
   Vector.Vector Float ->
   m TextureHandle
 createTerrainClimateTexture rm vc width height vec =
-  uploadTextureWithFormatVector rm vc width height vec Vulkan.VK_FORMAT_R32G32B32A32_SFLOAT
+  uploadTextureWithFormatVector rm vc width height vec Vk26.FORMAT_R32G32B32A32_SFLOAT
 
 -- | Create and register a texture resource from file, using asset cache.
 createTextureResource ::
@@ -910,7 +865,7 @@ decodeTextureCached cache rawBytes = liftIO $ do
     Right (InternalTexture meta imgData) -> pure (Right (itmWidth meta, itmHeight meta, imgData))
 
 -- | Resolve a texture handle to its VkImageView.
-textureImageView :: (MonadIO m) => ResourceManager -> TextureHandle -> m (Maybe Vulkan.VkImageView)
+textureImageView :: (MonadIO m) => ResourceManager -> TextureHandle -> m (Maybe Vk26.ImageView)
 textureImageView rm handle = do
   mTex <- lookupTexture rm handle
   pure $ fmap trImageView mTex
@@ -972,7 +927,7 @@ createTexture2DArray rm vc width height layers = do
 
   -- Staging buffer
   (stagingBuffer, stagingMemoryRequirement) <-
-    Haskan.managedBuffer dev allData Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    Haskan.managedBuffer dev allData Vk26.BUFFER_USAGE_TRANSFER_SRC_BIT
 
   stagingMemory <-
     Haskan.managedBufferMemory pdev dev stagingMemoryRequirement
@@ -981,41 +936,33 @@ createTexture2DArray rm vc width height layers = do
     Haskan.bindBufferMemory dev stagingBuffer stagingMemory allData
     Haskan.copyDataToDeviceMemory dev stagingMemory allData
 
-  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+  let format = Vk26.FORMAT_R8G8B8A8_UNORM
       imageExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral width)
-              &* set @"height" (fromIntegral height)
-              &* set @"depth" 1
-          )
+        Vk26.Extent3D (fromIntegral width) (fromIntegral height) 1
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
-              &* set @"extent" imageExtent
-              &* set @"mipLevels" 1
-              &* set @"arrayLayers" (fromIntegral numLayers)
-              &* set @"format" format
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
+        Vk26.ImageCreateInfo
+                  { next = ()
+                  , imageType = Vk26.IMAGE_TYPE_2D
+                  , extent = imageExtent
+                  , mipLevels = 1
+                  , arrayLayers = (fromIntegral numLayers)
+                  , format = format
+                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
+                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
+                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+                  , samples = Vk26.SAMPLE_COUNT_1_BIT
+                  , flags = zero
+                  , queueFamilyIndices = V.empty
+                  }
 
-  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+  image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
-  imageMemoryRequirements <-
-    allocaAndPeek_
-      (Vulkan.vkGetImageMemoryRequirements dev image)
-  logDebugIO LogTexture $ "texture2DArray image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " layers=" <> showT numLayers <> " width=" <> showT width <> " height=" <> showT height
+  imageMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements dev image
+  logDebugIO LogTexture $ "texture2DArray image memory requirements size=" <> showT ((\(Vk26.MemoryRequirements size _ _) -> size) imageMemoryRequirements) <> " layers=" <> showT numLayers <> " width=" <> showT width <> " height=" <> showT height
 
   imageMemory <-
-    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   liftIO $ bindImageMemory dev image imageMemory 0
 
@@ -1023,8 +970,8 @@ createTexture2DArray rm vc width height layers = do
     Haskan.layerTransitionAll
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_UNDEFINED
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
       (fromIntegral numLayers)
 
     for_ (zip [0 ..] layers) $ \(layerIdx, _) -> do
@@ -1041,19 +988,19 @@ createTexture2DArray rm vc width height layers = do
     Haskan.layerTransitionAll
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       (fromIntegral numLayers)
 
-  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+    liftIO $ Vk26.queueWaitIdle queue
   imageView <- Haskan.createImageView2DArray dev format image (fromIntegral numLayers)
 
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 
   let destroy = do
-        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
-        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
-        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+        Vk26.destroyImageView dev imageView Nothing
+        Vk26.destroyImage dev image Nothing
+        Vk26.freeMemory dev imageMemory Nothing
 
       resource =
         TextureResource
@@ -1130,7 +1077,7 @@ createCubemap rm vc faceSize faces = do
 
   -- Staging buffer (manual alloc, freed after upload)
   (stagingBuffer, stagingMemoryRequirement) <-
-    Haskan.createBuffer dev allData Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    Haskan.createBuffer dev allData Vk26.BUFFER_USAGE_TRANSFER_SRC_BIT
 
   stagingMemory <-
     Haskan.createBufferMemory pdev dev stagingMemoryRequirement
@@ -1139,41 +1086,33 @@ createCubemap rm vc faceSize faces = do
     Haskan.bindBufferMemory dev stagingBuffer stagingMemory allData
     Haskan.copyDataToDeviceMemory dev stagingMemory allData
 
-  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+  let format = Vk26.FORMAT_R8G8B8A8_UNORM
       imageExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral faceSize)
-              &* set @"height" (fromIntegral faceSize)
-              &* set @"depth" 1
-          )
+        Vk26.Extent3D (fromIntegral faceSize) (fromIntegral faceSize) 1
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
-              &* set @"extent" imageExtent
-              &* set @"mipLevels" 1
-              &* set @"arrayLayers" 6
-              &* set @"format" format
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
+        Vk26.ImageCreateInfo
+                  { next = ()
+                  , imageType = Vk26.IMAGE_TYPE_2D
+                  , extent = imageExtent
+                  , mipLevels = 1
+                  , arrayLayers = 6
+                  , format = format
+                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
+                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
+                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+                  , samples = Vk26.SAMPLE_COUNT_1_BIT
+                  , flags = Vk26.IMAGE_CREATE_CUBE_COMPATIBLE_BIT
+                  , queueFamilyIndices = V.empty
+                  }
 
-  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+  image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
-  imageMemoryRequirements <-
-    allocaAndPeek_
-      (Vulkan.vkGetImageMemoryRequirements dev image)
-  logDebugIO LogTexture $ "cubemap image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " faceSize=" <> showT faceSize
+  imageMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements dev image
+  logDebugIO LogTexture $ "cubemap image memory requirements size=" <> showT ((\(Vk26.MemoryRequirements size _ _) -> size) imageMemoryRequirements) <> " faceSize=" <> showT faceSize
 
   imageMemory <-
-    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   liftIO $ bindImageMemory dev image imageMemory 0
 
@@ -1181,8 +1120,8 @@ createCubemap rm vc faceSize faces = do
     Haskan.layerTransitionAll
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_UNDEFINED
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
       6
 
     for_ (zip [0 ..] faces) $ \(faceIdx, _) -> do
@@ -1199,25 +1138,25 @@ createCubemap rm vc faceSize faces = do
     Haskan.layerTransitionAll
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       6
 
-  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+    liftIO $ Vk26.queueWaitIdle queue
 
   -- Free staging resources
   liftIO $ do
-    Vulkan.vkDestroyBuffer dev stagingBuffer Vulkan.vkNullPtr
-    Vulkan.vkFreeMemory dev stagingMemory Vulkan.vkNullPtr
+    Vk26.destroyBuffer dev stagingBuffer Nothing
+    Vk26.freeMemory dev stagingMemory Nothing
 
   imageView <- Haskan.createImageViewCube dev format image
 
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 
   let destroy = do
-        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
-        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
-        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+        Vk26.destroyImageView dev imageView Nothing
+        Vk26.destroyImage dev image Nothing
+        Vk26.freeMemory dev imageMemory Nothing
 
       resource =
         TextureResource
@@ -1259,7 +1198,7 @@ createCubemapMips rm vc faceSize faces = do
 
   -- Staging buffer (manual alloc, freed after upload)
   (stagingBuffer, stagingMemoryRequirement) <-
-    Haskan.createBuffer dev allData Vulkan.VK_BUFFER_USAGE_TRANSFER_SRC_BIT
+    Haskan.createBuffer dev allData Vk26.BUFFER_USAGE_TRANSFER_SRC_BIT
 
   stagingMemory <-
     Haskan.createBufferMemory pdev dev stagingMemoryRequirement
@@ -1268,41 +1207,33 @@ createCubemapMips rm vc faceSize faces = do
     Haskan.bindBufferMemory dev stagingBuffer stagingMemory allData
     Haskan.copyDataToDeviceMemory dev stagingMemory allData
 
-  let format = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
+  let format = Vk26.FORMAT_R8G8B8A8_UNORM
       imageExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral faceSize)
-              &* set @"height" (fromIntegral faceSize)
-              &* set @"depth" 1
-          )
+        Vk26.Extent3D (fromIntegral faceSize) (fromIntegral faceSize) 1
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
-              &* set @"extent" imageExtent
-              &* set @"mipLevels" (fromIntegral mipLevels)
-              &* set @"arrayLayers" 6
-              &* set @"format" format
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
+        Vk26.ImageCreateInfo
+                  { next = ()
+                  , imageType = Vk26.IMAGE_TYPE_2D
+                  , extent = imageExtent
+                  , mipLevels = (fromIntegral mipLevels)
+                  , arrayLayers = 6
+                  , format = format
+                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
+                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
+                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+                  , samples = Vk26.SAMPLE_COUNT_1_BIT
+                  , flags = Vk26.IMAGE_CREATE_CUBE_COMPATIBLE_BIT
+                  , queueFamilyIndices = V.empty
+                  }
 
-  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+  image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
-  imageMemoryRequirements <-
-    allocaAndPeek_
-      (Vulkan.vkGetImageMemoryRequirements dev image)
-  logDebugIO LogTexture $ "cubemapMips image memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " faceSize=" <> showT faceSize <> " mipLevels=" <> showT mipLevels
+  imageMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements dev image
+  logDebugIO LogTexture $ "cubemapMips image memory requirements size=" <> showT ((\(Vk26.MemoryRequirements size _ _) -> size) imageMemoryRequirements) <> " faceSize=" <> showT faceSize <> " mipLevels=" <> showT mipLevels
 
   imageMemory <-
-    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   liftIO $ bindImageMemory dev image imageMemory 0
 
@@ -1311,8 +1242,8 @@ createCubemapMips rm vc faceSize faces = do
     Haskan.mipLayerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+      Vk26.IMAGE_LAYOUT_UNDEFINED
+      Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
       0
       1
       6
@@ -1337,15 +1268,15 @@ createCubemapMips rm vc faceSize faces = do
           dstSize = faceSize `div` (2 ^ mip)
           srcOldLayout =
             if mip == 1
-              then Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-              else Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+              then Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+              else Vk26.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
 
       -- Transition src mip to SRC optimal
       Haskan.mipLayerTransition
         commandBuffer
         image
         srcOldLayout
-        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        Vk26.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
         srcMip
         1
         6
@@ -1354,8 +1285,8 @@ createCubemapMips rm vc faceSize faces = do
       Haskan.mipLayerTransition
         commandBuffer
         image
-        Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        Vk26.IMAGE_LAYOUT_UNDEFINED
+        Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
         dstMip
         1
         6
@@ -1373,8 +1304,8 @@ createCubemapMips rm vc faceSize faces = do
       Haskan.mipLayerTransition
         commandBuffer
         image
-        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
-        Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+        Vk26.IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL
+        Vk26.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
         dstMip
         1
         6
@@ -1383,27 +1314,27 @@ createCubemapMips rm vc faceSize faces = do
     Haskan.mipLayerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
-      Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      Vk26.IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+      Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
       0
       (fromIntegral mipLevels)
       6
 
-  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+    liftIO $ Vk26.queueWaitIdle queue
 
   -- Free staging resources
   liftIO $ do
-    Vulkan.vkDestroyBuffer dev stagingBuffer Vulkan.vkNullPtr
-    Vulkan.vkFreeMemory dev stagingMemory Vulkan.vkNullPtr
+    Vk26.destroyBuffer dev stagingBuffer Nothing
+    Vk26.freeMemory dev stagingMemory Nothing
 
   imageView <- Haskan.createImageViewCubeMips dev format image (fromIntegral mipLevels)
 
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 
   let destroy = do
-        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
-        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
-        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+        Vk26.destroyImageView dev imageView Nothing
+        Vk26.destroyImage dev image Nothing
+        Vk26.freeMemory dev imageMemory Nothing
 
       resource =
         TextureResource
@@ -1428,7 +1359,7 @@ createStorageImage2D ::
   VulkanContext ->
   Int ->
   Int ->
-  Vulkan.VkFormat ->
+  Vk26.Format ->
   m TextureHandle
 createStorageImage2D rm vc width height format = do
   let dev = vcDevice vc
@@ -1436,39 +1367,31 @@ createStorageImage2D rm vc width height format = do
       queue = vcQueue vc
       commandBuffer = vcCommandBuffer vc
       imageExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral width)
-              &* set @"height" (fromIntegral height)
-              &* set @"depth" 1
-          )
+        Vk26.Extent3D (fromIntegral width) (fromIntegral height) 1
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
-              &* set @"extent" imageExtent
-              &* set @"mipLevels" 1
-              &* set @"arrayLayers" 1
-              &* set @"format" format
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_STORAGE_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
+        Vk26.ImageCreateInfo
+                  { next = ()
+                  , imageType = Vk26.IMAGE_TYPE_2D
+                  , extent = imageExtent
+                  , mipLevels = 1
+                  , arrayLayers = 1
+                  , format = format
+                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
+                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+                  , usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
+                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+                  , samples = Vk26.SAMPLE_COUNT_1_BIT
+                  , flags = zero
+                  , queueFamilyIndices = V.empty
+                  }
 
-  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+  image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
-  imageMemoryRequirements <-
-    allocaAndPeek_
-      (Vulkan.vkGetImageMemoryRequirements dev image)
-  logDebugIO LogTexture $ "storage image 2D memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " width=" <> showT width <> " height=" <> showT height
+  imageMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements dev image
+  logDebugIO LogTexture $ "storage image 2D memory requirements size=" <> showT ((\(Vk26.MemoryRequirements size _ _) -> size) imageMemoryRequirements) <> " width=" <> showT width <> " height=" <> showT height
 
   imageMemory <-
-    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   liftIO $ bindImageMemory dev image imageMemory 0
 
@@ -1477,19 +1400,19 @@ createStorageImage2D rm vc width height format = do
     Haskan.layerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-      Vulkan.VK_IMAGE_LAYOUT_GENERAL
+      Vk26.IMAGE_LAYOUT_UNDEFINED
+      Vk26.IMAGE_LAYOUT_GENERAL
 
-  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+    liftIO $ Vk26.queueWaitIdle queue
 
   imageView <- Haskan.createImageView dev format image
 
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 
   let destroy = do
-        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
-        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
-        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+        Vk26.destroyImageView dev imageView Nothing
+        Vk26.destroyImage dev image Nothing
+        Vk26.freeMemory dev imageMemory Nothing
 
       resource =
         TextureResource
@@ -1517,7 +1440,7 @@ createStorageImage3D ::
   Int ->
   Int ->
   Int -> -- mip levels
-  Vulkan.VkFormat ->
+  Vk26.Format ->
   m TextureHandle
 createStorageImage3D rm vc width height depth mipLevels format = do
   let dev = vcDevice vc
@@ -1525,39 +1448,31 @@ createStorageImage3D rm vc width height depth mipLevels format = do
       queue = vcQueue vc
       commandBuffer = vcCommandBuffer vc
       imageExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral width)
-              &* set @"height" (fromIntegral height)
-              &* set @"depth" (fromIntegral depth)
-          )
+        Vk26.Extent3D (fromIntegral width) (fromIntegral height) (fromIntegral depth)
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_3D
-              &* set @"extent" imageExtent
-              &* set @"mipLevels" (fromIntegral mipLevels)
-              &* set @"arrayLayers" 1
-              &* set @"format" format
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_STORAGE_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT .|. Vulkan.VK_IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vulkan.VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
+        Vk26.ImageCreateInfo
+                  { next = ()
+                  , imageType = Vk26.IMAGE_TYPE_3D
+                  , extent = imageExtent
+                  , mipLevels = (fromIntegral mipLevels)
+                  , arrayLayers = 1
+                  , format = format
+                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
+                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+                  , usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_DST_BIT)
+                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+                  , samples = Vk26.SAMPLE_COUNT_1_BIT
+                  , flags = zero
+                  , queueFamilyIndices = V.empty
+                  }
 
-  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+  image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
-  imageMemoryRequirements <-
-    allocaAndPeek_
-      (Vulkan.vkGetImageMemoryRequirements dev image)
-  logDebugIO LogTexture $ "storage image 3D memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " width=" <> showT width <> " height=" <> showT height <> " depth=" <> showT depth <> " mips=" <> showT mipLevels
+  imageMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements dev image
+  logDebugIO LogTexture $ "storage image 3D memory requirements size=" <> showT ((\(Vk26.MemoryRequirements size _ _) -> size) imageMemoryRequirements) <> " width=" <> showT width <> " height=" <> showT height <> " depth=" <> showT depth <> " mips=" <> showT mipLevels
 
   imageMemory <-
-    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   liftIO $ bindImageMemory dev image imageMemory 0
 
@@ -1566,13 +1481,13 @@ createStorageImage3D rm vc width height depth mipLevels format = do
     Haskan.mipLayerTransition
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-      Vulkan.VK_IMAGE_LAYOUT_GENERAL
+      Vk26.IMAGE_LAYOUT_UNDEFINED
+      Vk26.IMAGE_LAYOUT_GENERAL
       0
       (fromIntegral mipLevels)
       1
 
-  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+    liftIO $ Vk26.queueWaitIdle queue
 
   imageView <-
     if mipLevels > 1
@@ -1582,9 +1497,9 @@ createStorageImage3D rm vc width height depth mipLevels format = do
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 
   let destroy = do
-        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
-        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
-        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+        Vk26.destroyImageView dev imageView Nothing
+        Vk26.destroyImage dev image Nothing
+        Vk26.freeMemory dev imageMemory Nothing
 
       resource =
         TextureResource
@@ -1608,7 +1523,7 @@ createStorageImageCube ::
   ResourceManager ->
   VulkanContext ->
   Int ->
-  Vulkan.VkFormat ->
+  Vk26.Format ->
   m TextureHandle
 createStorageImageCube rm vc faceSize format = do
   let dev = vcDevice vc
@@ -1616,39 +1531,31 @@ createStorageImageCube rm vc faceSize format = do
       queue = vcQueue vc
       commandBuffer = vcCommandBuffer vc
       imageExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral faceSize)
-              &* set @"height" (fromIntegral faceSize)
-              &* set @"depth" 1
-          )
+        Vk26.Extent3D (fromIntegral faceSize) (fromIntegral faceSize) 1
       createInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_2D
-              &* set @"extent" imageExtent
-              &* set @"mipLevels" 1
-              &* set @"arrayLayers" 6
-              &* set @"format" format
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_STORAGE_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
+        Vk26.ImageCreateInfo
+                  { next = ()
+                  , imageType = Vk26.IMAGE_TYPE_2D
+                  , extent = imageExtent
+                  , mipLevels = 1
+                  , arrayLayers = 6
+                  , format = format
+                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
+                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+                  , usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
+                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+                  , samples = Vk26.SAMPLE_COUNT_1_BIT
+                  , flags = Vk26.IMAGE_CREATE_CUBE_COMPATIBLE_BIT
+                  , queueFamilyIndices = V.empty
+                  }
 
-  image <- liftIO $ withPtr createInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage dev ciPtr Vulkan.vkNullPtr))
+  image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
-  imageMemoryRequirements <-
-    allocaAndPeek_
-      (Vulkan.vkGetImageMemoryRequirements dev image)
-  logDebugIO LogTexture $ "storage image cube memory requirements size=" <> showT (Vulkan.getField @"size" imageMemoryRequirements) <> " faceSize=" <> showT faceSize
+  imageMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements dev image
+  logDebugIO LogTexture $ "storage image cube memory requirements size=" <> showT ((\(Vk26.MemoryRequirements size _ _) -> size) imageMemoryRequirements) <> " faceSize=" <> showT faceSize
 
   imageMemory <-
-    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+    Haskan.allocateMemoryFor pdev dev imageMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
 
   liftIO $ bindImageMemory dev image imageMemory 0
 
@@ -1657,20 +1564,20 @@ createStorageImageCube rm vc faceSize format = do
     Haskan.layerTransitionAll
       commandBuffer
       image
-      Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-      Vulkan.VK_IMAGE_LAYOUT_GENERAL
+      Vk26.IMAGE_LAYOUT_UNDEFINED
+      Vk26.IMAGE_LAYOUT_GENERAL
       6
 
-  liftIO $ Vulkan.vkQueueWaitIdle queue >>= throwVkResult
+    liftIO $ Vk26.queueWaitIdle queue
 
   imageView <- Haskan.createImageViewCube dev format image
 
   texH <- TextureHandle <$> allocHandle (rmNextId rm)
 
   let destroy = do
-        Vulkan.vkDestroyImageView dev imageView Vulkan.vkNullPtr
-        Vulkan.vkDestroyImage dev image Vulkan.vkNullPtr
-        Vulkan.vkFreeMemory dev imageMemory Vulkan.vkNullPtr
+        Vk26.destroyImageView dev imageView Nothing
+        Vk26.destroyImage dev image Nothing
+        Vk26.freeMemory dev imageMemory Nothing
 
       resource =
         TextureResource
@@ -1691,44 +1598,24 @@ createStorageImageCube rm vc faceSize format = do
 -- after compute shader writes are complete.
 transitionStorageImageToShaderRead ::
   (MonadIO m) =>
-  Vulkan.VkCommandBuffer ->
-  Vulkan.VkImage ->
+  Vk26.CommandBuffer ->
+  Vk26.Image ->
   -- | layer count (1 for 2D, 6 for cube)
-  Vulkan.Word32 ->
+  Word32 ->
   m ()
 transitionStorageImageToShaderRead commandBuffer image layerCount = do
   let subresourceRange =
-        Vulkan.createVk
-          ( set @"aspectMask" Vulkan.VK_IMAGE_ASPECT_COLOR_BIT
-              &* set @"baseMipLevel" 0
-              &* set @"levelCount" 1
-              &* set @"baseArrayLayer" 0
-              &* set @"layerCount" layerCount
-          )
+        Vk26.ImageSubresourceRange Vk26.IMAGE_ASPECT_COLOR_BIT 0 1 0 layerCount
       barrier =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"oldLayout" Vulkan.VK_IMAGE_LAYOUT_GENERAL
-              &* set @"newLayout" Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-              &* set @"srcQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
-              &* set @"dstQueueFamilyIndex" Vulkan.VK_QUEUE_FAMILY_IGNORED
-              &* set @"image" image
-              &* set @"subresourceRange" subresourceRange
-              &* set @"srcAccessMask" Vulkan.VK_ACCESS_SHADER_WRITE_BIT
-              &* set @"dstAccessMask" Vulkan.VK_ACCESS_SHADER_READ_BIT
-          )
-  liftIO $
-    withPtr
-      barrier
-      ( Vulkan.vkCmdPipelineBarrier
-          commandBuffer
-          Vulkan.VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-          Vulkan.VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-          Vulkan.VK_ZERO_FLAGS
-          0
-          Vulkan.vkNullPtr
-          0
-          Vulkan.vkNullPtr
-          1
-      )
+        Vk26.ImageMemoryBarrier
+                  { next = ()
+                  , oldLayout = Vk26.IMAGE_LAYOUT_GENERAL
+                  , newLayout = Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+                  , srcQueueFamilyIndex = Vk26.QUEUE_FAMILY_IGNORED
+                  , dstQueueFamilyIndex = Vk26.QUEUE_FAMILY_IGNORED
+                  , image = image
+                  , subresourceRange = subresourceRange
+                  , srcAccessMask = Vk26.ACCESS_SHADER_WRITE_BIT
+                  , dstAccessMask = Vk26.ACCESS_SHADER_READ_BIT
+                  }
+  liftIO $ Vk26.cmdPipelineBarrier commandBuffer Vk26.PIPELINE_STAGE_COMPUTE_SHADER_BIT Vk26.PIPELINE_STAGE_FRAGMENT_SHADER_BIT zero V.empty V.empty (V.fromList [SomeStruct barrier])

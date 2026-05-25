@@ -39,8 +39,6 @@ import Graphics.Haskan.Camera (AnyCamera, cameraDistance, cameraPosition)
 import Graphics.Haskan.Engine.Types (FrameStats (..))
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
 import Linear (V3 (..))
 import Numeric (showFFloat)
 import SDL qualified
@@ -49,36 +47,6 @@ import Unsafe.Coerce (unsafeCoerce)
 import Vulkan qualified as Vk
 import Vulkan.Core10.Handles qualified as Vk
 import Vulkan.Zero qualified as Vk
-
--- ---------------------------------------------------------------------------
--- Vulkan interop: convert vulkan-api handles to vulkan package handles
--- ---------------------------------------------------------------------------
-
--- | vulkan-api handles are type synonyms: type VkDevice = Ptr VkDevice_T
--- The vulkan package uses data types: Device = Device (Ptr Device_T) DeviceCmds
--- dear-imgui only uses the *Handle accessors, never the Cmds fields,
--- so 'zero' is safe for Cmds.
--- castPtr converts between phantom-tagged pointer types (same runtime rep).
-toVulkanDevice :: Vulkan.VkDevice -> Vk.Device
-toVulkanDevice ptr = Vk.Device (castPtr ptr) Vk.zero
-
-toVulkanInstance :: Vulkan.VkInstance -> Vk.Instance
-toVulkanInstance ptr = Vk.Instance (castPtr ptr) Vk.zero
-
-toVulkanPhysicalDevice :: Vulkan.VkPhysicalDevice -> Vk.PhysicalDevice
-toVulkanPhysicalDevice ptr = Vk.PhysicalDevice (castPtr ptr) Vk.zero
-
-toVulkanQueue :: Vulkan.VkQueue -> Vk.Queue
-toVulkanQueue ptr = Vk.Queue (castPtr ptr) Vk.zero
-
-toVulkanCommandBuffer :: Vulkan.VkCommandBuffer -> Vk.CommandBuffer
-toVulkanCommandBuffer ptr = Vk.CommandBuffer (castPtr ptr) Vk.zero
-
-toVulkanRenderPass :: Vulkan.VkRenderPass -> Vk.RenderPass
-toVulkanRenderPass = Vk.RenderPass . coerce
-
-toVulkanDescriptorPool :: Vulkan.VkDescriptorPool -> Vk.DescriptorPool
-toVulkanDescriptorPool = Vk.DescriptorPool . coerce
 
 -- ---------------------------------------------------------------------------
 -- ImGui backend state
@@ -96,13 +64,13 @@ data ImGuiBackend = ImGuiBackend
 
 initImGuiBackend ::
   SDL.Window ->
-  Vulkan.VkInstance ->
-  Vulkan.VkPhysicalDevice ->
-  Vulkan.VkDevice ->
+  Vk.Instance ->
+  Vk.PhysicalDevice ->
+  Vk.Device ->
   Word32 ->
-  Vulkan.VkQueue ->
-  Vulkan.VkDescriptorPool ->
-  Vulkan.VkRenderPass ->
+  Vk.Queue ->
+  Vk.DescriptorPool ->
+  Vk.RenderPass ->
   Word32 ->
   Word32 ->
   IO ImGuiBackend
@@ -129,18 +97,18 @@ initImGuiBackend window vkInstance vkPhysicalDevice vkDevice queueFamily vkQueue
   -- Initialize Vulkan backend
   let initInfo =
         ImGui.Vulkan.InitInfo
-          { ImGui.Vulkan.instance' = toVulkanInstance vkInstance,
-            ImGui.Vulkan.physicalDevice = toVulkanPhysicalDevice vkPhysicalDevice,
-            ImGui.Vulkan.device = toVulkanDevice vkDevice,
+          { ImGui.Vulkan.instance' = vkInstance,
+            ImGui.Vulkan.physicalDevice = vkPhysicalDevice,
+            ImGui.Vulkan.device = vkDevice,
             ImGui.Vulkan.queueFamily = queueFamily,
-            ImGui.Vulkan.queue = toVulkanQueue vkQueue,
+            ImGui.Vulkan.queue = vkQueue,
             ImGui.Vulkan.pipelineCache = Vk.NULL_HANDLE,
-            ImGui.Vulkan.descriptorPool = toVulkanDescriptorPool vkDescriptorPool,
+            ImGui.Vulkan.descriptorPool = vkDescriptorPool,
             ImGui.Vulkan.subpass = 0,
             ImGui.Vulkan.minImageCount = minImageCount,
             ImGui.Vulkan.imageCount = imageCount,
             ImGui.Vulkan.msaaSamples = Vk.SAMPLE_COUNT_1_BIT,
-            ImGui.Vulkan.rendering = Left (toVulkanRenderPass vkRenderPass),
+            ImGui.Vulkan.rendering = Left vkRenderPass,
             ImGui.Vulkan.mbAllocator = Nothing,
             ImGui.Vulkan.checkResult = checkVkResult
           }
@@ -420,13 +388,12 @@ buildDebugPanel = do
 -- ---------------------------------------------------------------------------
 
 recordImGuiDrawData ::
-  Vulkan.VkCommandBuffer ->
-  Vulkan.VkRenderPass ->
-  Vulkan.VkFramebuffer ->
-  Vulkan.VkExtent2D ->
+  Vk.CommandBuffer ->
+  Vk.RenderPass ->
+  Vk.Framebuffer ->
+  Vk.Extent2D ->
   ImGui.Raw.DrawData ->
   IO ()
 recordImGuiDrawData cmdBuf renderPass framebuffer extent drawData =
   RenderPass.withImGuiRenderPass cmdBuf renderPass framebuffer extent $ do
-    let vkCmdBuf = toVulkanCommandBuffer cmdBuf
-    ImGui.Vulkan.vulkanRenderDrawData drawData vkCmdBuf Nothing
+    ImGui.Vulkan.vulkanRenderDrawData drawData cmdBuf Nothing

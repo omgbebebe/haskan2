@@ -17,9 +17,10 @@ import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
 import Data.Foldable (for_)
 import Data.Traversable (for)
+import Data.Vector qualified as Vector
 import Data.Word (Word8)
 import Foreign.Marshal.Array qualified
-import Foreign.Ptr (Ptr, nullPtr)
+import Foreign.Ptr (Ptr)
 import Graphics.Haskan.Logger (LogCategory (..), logDebugIO, logInfoIO, showT)
 import Graphics.Haskan.Render.ShaderProgram (MeshShaderProgram (..), ShaderProgram (..))
 import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, throwVkResult)
@@ -40,12 +41,8 @@ import Graphics.Haskan.Vulkan.PipelineLayout qualified as PipelineLayout
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Swapchain qualified as Swapchain
 import Graphics.Haskan.Vulkan.Types (RenderContext (..))
-import Graphics.Haskan.Vulkan.VertexFormat qualified as VertexFormat
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Vulkan qualified as Vk26
+import Vulkan.Zero (zero)
 
 data DeferredShaders = DeferredShaders
   { dsGBuffer :: !ShaderProgram,
@@ -55,112 +52,112 @@ data DeferredShaders = DeferredShaders
     dsGodRay :: !ShaderProgram,
     dsTerrain :: !ShaderProgram,
     dsTerrainMesh :: !MeshShaderProgram,
-    dsAPVolume :: !Vulkan.VkShaderModule,
-    dsAPVolumeSpecInfo :: !(Maybe (Ptr Vulkan.VkSpecializationInfo)),
+    dsAPVolume :: !Vk26.ShaderModule,
+    dsAPVolumeSpecInfo :: !(Maybe Vk26.SpecializationInfo),
     dsBindless :: !ShaderProgram
   }
 
 data IBLResources = IBLResources
-  { irRadianceView :: !(Maybe Vulkan.VkImageView),
-    irIrradianceView :: !(Maybe Vulkan.VkImageView),
-    irBrdfView :: !(Maybe Vulkan.VkImageView),
-    irSampler :: !Vulkan.VkSampler
+  { irRadianceView :: !(Maybe Vk26.ImageView),
+    irIrradianceView :: !(Maybe Vk26.ImageView),
+    irBrdfView :: !(Maybe Vk26.ImageView),
+    irSampler :: !Vk26.Sampler
   }
 
 data CloudTextures = CloudTextures
-  { ctNoiseView :: !(Maybe Vulkan.VkImageView),
-    ctBlueNoiseView :: !(Maybe Vulkan.VkImageView),
-    ctWeatherMapView :: !(Maybe Vulkan.VkImageView),
-    ctBlueNoiseSampler :: !Vulkan.VkSampler,
-    ctNoiseSampler :: !Vulkan.VkSampler
+  { ctNoiseView :: !(Maybe Vk26.ImageView),
+    ctBlueNoiseView :: !(Maybe Vk26.ImageView),
+    ctWeatherMapView :: !(Maybe Vk26.ImageView),
+    ctBlueNoiseSampler :: !Vk26.Sampler,
+    ctNoiseSampler :: !Vk26.Sampler
   }
 
 data TerrainTextures = TerrainTextures
-  { ttElevationView :: !(Maybe Vulkan.VkImageView),
-    ttClimateView :: !(Maybe Vulkan.VkImageView),
-    ttSampler :: !Vulkan.VkSampler
+  { ttElevationView :: !(Maybe Vk26.ImageView),
+    ttClimateView :: !(Maybe Vk26.ImageView),
+    ttSampler :: !Vk26.Sampler
   }
 
 data DeferredConfig = DeferredConfig
-  { dcPhysicalDevice :: !Vulkan.VkPhysicalDevice,
-    dcDevice :: !Vulkan.VkDevice,
+  { dcPhysicalDevice :: !Vk26.PhysicalDevice,
+    dcDevice :: !Vk26.Device,
     dcRenderContext :: !RenderContext,
-    dcBindlessDescSetLayout :: !Vulkan.VkDescriptorSetLayout,
+    dcBindlessDescSetLayout :: !Vk26.DescriptorSetLayout,
     dcShaders :: !DeferredShaders,
     dcIBL :: !IBLResources,
     dcCloudTextures :: !CloudTextures,
     dcTerrainTextures :: !TerrainTextures,
-    dcLightBuffer :: !(Maybe Vulkan.VkBuffer),
-    dcImGuiRenderPass :: !Vulkan.VkRenderPass,
+    dcLightBuffer :: !(Maybe Vk26.Buffer),
+    dcImGuiRenderPass :: !Vk26.RenderPass,
     dcProceduralSky :: !Bool,
-    dcBindlessTextureArrayView :: !(Maybe Vulkan.VkImageView),
-    dcBindlessUniformBuffers :: ![Vulkan.VkBuffer]
+    dcBindlessTextureArrayView :: !(Maybe Vk26.ImageView),
+    dcBindlessUniformBuffers :: ![Vk26.Buffer]
   }
 
 data DeferredResources = DeferredResources
-  { drGBufferRenderPass :: !Vulkan.VkRenderPass,
-    drGBufferPipeline :: !Vulkan.VkPipeline,
-    drGBufferDoubleSidedPipeline :: !Vulkan.VkPipeline,
-    drGBufferPipelineLayout :: !Vulkan.VkPipelineLayout,
-    drGBufferFramebuffers :: ![Vulkan.VkFramebuffer],
-    drBindlessRenderPass :: !Vulkan.VkRenderPass,
-    drBindlessPipeline :: !Vulkan.VkPipeline,
-    drBindlessPipelineLayout :: !Vulkan.VkPipelineLayout,
-    drBindlessDescriptorPool :: !Vulkan.VkDescriptorPool,
-    drBindlessDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    drLightingRenderPass :: !Vulkan.VkRenderPass,
-    drLightingPipeline :: !Vulkan.VkPipeline,
-    drLightingPipelineLayout :: !Vulkan.VkPipelineLayout,
-    drLightingFramebuffers :: ![Vulkan.VkFramebuffer],
-    drLightingDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    drCloudRenderPass :: !Vulkan.VkRenderPass,
-    drCloudPipeline :: !Vulkan.VkPipeline,
-    drCloudPipelineLayout :: !Vulkan.VkPipelineLayout,
-    drCloudFramebuffers :: ![Vulkan.VkFramebuffer],
-    drCloudDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    drCloudFrameDataBuffer :: !Vulkan.VkBuffer,
-    drCloudFrameDataMemory :: !Vulkan.VkDeviceMemory,
-    drCloudImages :: ![Vulkan.VkImage],
-    drCloudImageViews :: ![Vulkan.VkImageView],
-    drCloudHistoryImages :: ![Vulkan.VkImage],
-    drCloudHistoryImageViews :: ![Vulkan.VkImageView],
-    drCloudExtent :: !Vulkan.VkExtent2D,
-    drGodRayImages :: ![Vulkan.VkImage],
-    drGodRayImageViews :: ![Vulkan.VkImageView],
-    drGodRayRenderPass :: !Vulkan.VkRenderPass,
-    drGodRayPipeline :: !Vulkan.VkPipeline,
-    drGodRayPipelineLayout :: !Vulkan.VkPipelineLayout,
-    drGodRayFramebuffers :: ![Vulkan.VkFramebuffer],
-    drGodRayDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    drTerrainRenderPass :: !Vulkan.VkRenderPass,
-    drTerrainPipeline :: !Vulkan.VkPipeline,
-    drTerrainPipelineLayout :: !Vulkan.VkPipelineLayout,
-    drTerrainFramebuffers :: ![Vulkan.VkFramebuffer],
-    drTerrainDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    drTerrainFrameDataBuffer :: !Vulkan.VkBuffer,
-    drTerrainFrameDataMemory :: !Vulkan.VkDeviceMemory,
-    drTerrainMeshPipeline :: !Vulkan.VkPipeline,
-    drTerrainMeshPipelineLayout :: !Vulkan.VkPipelineLayout,
-    drTerrainMeshDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    drTerrainMeshNodeBuffer :: !Vulkan.VkBuffer,
-    drTerrainMeshNodeMemory :: !Vulkan.VkDeviceMemory,
-    drSwapchainImages :: ![Vulkan.VkImage],
-    drAPVolumeImage :: !Vulkan.VkImage,
-    drAPVolumeImageView :: !Vulkan.VkImageView,
-    drAPVolumeMemory :: !Vulkan.VkDeviceMemory,
-    drAPVolumePipeline :: !Vulkan.VkPipeline,
-    drAPVolumePipelineLayout :: !Vulkan.VkPipelineLayout,
-    drAPVolumeDescriptorPool :: !Vulkan.VkDescriptorPool,
-    drAPVolumeDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    drAPVolumeUniformBuffer :: !Vulkan.VkBuffer,
-    drAPVolumeUniformMemory :: !Vulkan.VkDeviceMemory,
-    drGBufferImages :: ![[Vulkan.VkImage]],
-    drGBufferImageViews :: ![[Vulkan.VkImageView]],
-    drSampler :: !Vulkan.VkSampler,
-    drWireframePipeline :: !Vulkan.VkPipeline,
-    drWireframePipelineLayout :: !Vulkan.VkPipelineLayout,
-    drImGuiFramebuffers :: ![Vulkan.VkFramebuffer],
-    drImGuiRenderPass :: !Vulkan.VkRenderPass
+  { drGBufferRenderPass :: !Vk26.RenderPass,
+    drGBufferPipeline :: !Vk26.Pipeline,
+    drGBufferDoubleSidedPipeline :: !Vk26.Pipeline,
+    drGBufferPipelineLayout :: !Vk26.PipelineLayout,
+    drGBufferFramebuffers :: ![Vk26.Framebuffer],
+    drBindlessRenderPass :: !Vk26.RenderPass,
+    drBindlessPipeline :: !Vk26.Pipeline,
+    drBindlessPipelineLayout :: !Vk26.PipelineLayout,
+    drBindlessDescriptorPool :: !Vk26.DescriptorPool,
+    drBindlessDescriptorSets :: ![Vk26.DescriptorSet],
+    drLightingRenderPass :: !Vk26.RenderPass,
+    drLightingPipeline :: !Vk26.Pipeline,
+    drLightingPipelineLayout :: !Vk26.PipelineLayout,
+    drLightingFramebuffers :: ![Vk26.Framebuffer],
+    drLightingDescriptorSets :: ![Vk26.DescriptorSet],
+    drCloudRenderPass :: !Vk26.RenderPass,
+    drCloudPipeline :: !Vk26.Pipeline,
+    drCloudPipelineLayout :: !Vk26.PipelineLayout,
+    drCloudFramebuffers :: ![Vk26.Framebuffer],
+    drCloudDescriptorSets :: ![Vk26.DescriptorSet],
+    drCloudFrameDataBuffer :: !Vk26.Buffer,
+    drCloudFrameDataMemory :: !Vk26.DeviceMemory,
+    drCloudImages :: ![Vk26.Image],
+    drCloudImageViews :: ![Vk26.ImageView],
+    drCloudHistoryImages :: ![Vk26.Image],
+    drCloudHistoryImageViews :: ![Vk26.ImageView],
+    drCloudExtent :: !Vk26.Extent2D,
+    drGodRayImages :: ![Vk26.Image],
+    drGodRayImageViews :: ![Vk26.ImageView],
+    drGodRayRenderPass :: !Vk26.RenderPass,
+    drGodRayPipeline :: !Vk26.Pipeline,
+    drGodRayPipelineLayout :: !Vk26.PipelineLayout,
+    drGodRayFramebuffers :: ![Vk26.Framebuffer],
+    drGodRayDescriptorSets :: ![Vk26.DescriptorSet],
+    drTerrainRenderPass :: !Vk26.RenderPass,
+    drTerrainPipeline :: !Vk26.Pipeline,
+    drTerrainPipelineLayout :: !Vk26.PipelineLayout,
+    drTerrainFramebuffers :: ![Vk26.Framebuffer],
+    drTerrainDescriptorSets :: ![Vk26.DescriptorSet],
+    drTerrainFrameDataBuffer :: !Vk26.Buffer,
+    drTerrainFrameDataMemory :: !Vk26.DeviceMemory,
+    drTerrainMeshPipeline :: !Vk26.Pipeline,
+    drTerrainMeshPipelineLayout :: !Vk26.PipelineLayout,
+    drTerrainMeshDescriptorSets :: ![Vk26.DescriptorSet],
+    drTerrainMeshNodeBuffer :: !Vk26.Buffer,
+    drTerrainMeshNodeMemory :: !Vk26.DeviceMemory,
+    drSwapchainImages :: ![Vk26.Image],
+    drAPVolumeImage :: !Vk26.Image,
+    drAPVolumeImageView :: !Vk26.ImageView,
+    drAPVolumeMemory :: !Vk26.DeviceMemory,
+    drAPVolumePipeline :: !Vk26.Pipeline,
+    drAPVolumePipelineLayout :: !Vk26.PipelineLayout,
+    drAPVolumeDescriptorPool :: !Vk26.DescriptorPool,
+    drAPVolumeDescriptorSets :: ![Vk26.DescriptorSet],
+    drAPVolumeUniformBuffer :: !Vk26.Buffer,
+    drAPVolumeUniformMemory :: !Vk26.DeviceMemory,
+    drGBufferImages :: ![[Vk26.Image]],
+    drGBufferImageViews :: ![[Vk26.ImageView]],
+    drSampler :: !Vk26.Sampler,
+    drWireframePipeline :: !Vk26.Pipeline,
+    drWireframePipelineLayout :: !Vk26.PipelineLayout,
+    drImGuiFramebuffers :: ![Vk26.Framebuffer],
+    drImGuiRenderPass :: !Vk26.RenderPass
   }
 
 createDeferredResources ::
@@ -191,13 +188,11 @@ createDeferredResources DeferredConfig {..} = do
       pushConstantRanges = []
   let extent = rcSurfaceExtent ctx
       cloudExtent =
-        Vulkan.createVk
-          ( set @"width" (Vulkan.getField @"width" extent `div` 2)
-              &* set @"height" (Vulkan.getField @"height" extent `div` 2)
-          )
-      gbufPosFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
-      gbufColorFormat = Vulkan.VK_FORMAT_R8G8B8A8_UNORM
-      depthFormat = Vulkan.VK_FORMAT_D32_SFLOAT
+        let Vk26.Extent2D w h = extent
+        in Vk26.Extent2D (w `div` 2) (h `div` 2)
+      gbufPosFormat = Vk26.FORMAT_R16G16B16A16_SFLOAT
+      gbufColorFormat = Vk26.FORMAT_R8G8B8A8_UNORM
+      depthFormat = Vk26.FORMAT_D32_SFLOAT
       numSwapchainImages = length (rcFramebuffers ctx)
 
   logInfoIO LogRender $ "creating deferred resources for " <> showT numSwapchainImages <> " swapchain images"
@@ -242,13 +237,13 @@ createDeferredResources DeferredConfig {..} = do
     tempCmdBufGbuf
     ( do
         for_ (concat gBufferImages) $ \img ->
-          CommandBuffer.layerTransition tempCmdBufGbuf img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          CommandBuffer.layerTransition tempCmdBufGbuf img Vk26.IMAGE_LAYOUT_UNDEFINED Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     )
-  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBufGbuf] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
+  liftIO $ Vk26.freeCommandBuffers device (rcGraphicsCommandPool ctx) (Vector.fromList [tempCmdBufGbuf])
   logDebugIO LogRender "g-buffer images transitioned to SHADER_READ_ONLY_OPTIMAL"
 
   -- Create cloud images and views (RGBA16F, quarter resolution)
-  let cloudFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
+  let cloudFormat = Vk26.FORMAT_R16G16B16A16_SFLOAT
   cloudImagesAndViews <- for [0 .. numSwapchainImages - 1] $ \_ -> do
     cloudImage <- Swapchain.managedGBufferImage pdev device cloudExtent cloudFormat
     cloudView <- ImageView.managedImageView device cloudFormat cloudImage
@@ -264,9 +259,9 @@ createDeferredResources DeferredConfig {..} = do
     tempCmdBufCloud
     ( do
         for_ cloudImages $ \img ->
-          CommandBuffer.layerTransition tempCmdBufCloud img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          CommandBuffer.layerTransition tempCmdBufCloud img Vk26.IMAGE_LAYOUT_UNDEFINED Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     )
-  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBufCloud] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
+  liftIO $ Vk26.freeCommandBuffers device (rcGraphicsCommandPool ctx) (Vector.fromList [tempCmdBufCloud])
   logDebugIO LogRender "cloud images transitioned to SHADER_READ_ONLY_OPTIMAL"
 
   -- Create cloud history images and views (same format/size)
@@ -285,9 +280,9 @@ createDeferredResources DeferredConfig {..} = do
     tempCmdBufHist
     ( do
         for_ cloudHistoryImages $ \img ->
-          CommandBuffer.layerTransition tempCmdBufHist img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          CommandBuffer.layerTransition tempCmdBufHist img Vk26.IMAGE_LAYOUT_UNDEFINED Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     )
-  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBufHist] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
+  liftIO $ Vk26.freeCommandBuffers device (rcGraphicsCommandPool ctx) (Vector.fromList [tempCmdBufHist])
   logDebugIO LogRender "cloud history images transitioned to SHADER_READ_ONLY_OPTIMAL"
 
   -- Create god ray images and views (RGBA16F, half resolution)
@@ -306,52 +301,46 @@ createDeferredResources DeferredConfig {..} = do
     tempCmdBuf2
     ( do
         for_ godRayImages $ \img ->
-          CommandBuffer.layerTransition tempCmdBuf2 img Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+          CommandBuffer.layerTransition tempCmdBuf2 img Vk26.IMAGE_LAYOUT_UNDEFINED Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     )
-  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBuf2] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
+  liftIO $ Vk26.freeCommandBuffers device (rcGraphicsCommandPool ctx) (Vector.fromList [tempCmdBuf2])
   logDebugIO LogRender "god ray images transitioned to SHADER_READ_ONLY_OPTIMAL"
 
   -- Create AP volume 3D image (RGBA16F, 64x32x64) for compute writes + fragment sampling
-  let apFormat = Vulkan.VK_FORMAT_R16G16B16A16_SFLOAT
+  let apFormat = Vk26.FORMAT_R16G16B16A16_SFLOAT
       apWidth = 64
       apHeight = 32
       apDepth = 64
       apExtent =
-        Vulkan.createVk
-          ( set @"width" (fromIntegral apWidth)
-              &* set @"height" (fromIntegral apHeight)
-              &* set @"depth" (fromIntegral apDepth)
-          )
+        Vk26.Extent3D (fromIntegral apWidth) (fromIntegral apHeight) (fromIntegral apDepth)
       apCreateInfo =
-        Vulkan.createVk
-          ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
-              &* set @"pNext" Vulkan.VK_NULL
-              &* set @"imageType" Vulkan.VK_IMAGE_TYPE_3D
-              &* set @"extent" apExtent
-              &* set @"mipLevels" 1
-              &* set @"arrayLayers" 1
-              &* set @"format" apFormat
-              &* set @"tiling" Vulkan.VK_IMAGE_TILING_OPTIMAL
-              &* set @"initialLayout" Vulkan.VK_IMAGE_LAYOUT_UNDEFINED
-              &* set @"usage" (Vulkan.VK_IMAGE_USAGE_STORAGE_BIT .|. Vulkan.VK_IMAGE_USAGE_SAMPLED_BIT)
-              &* set @"sharingMode" Vulkan.VK_SHARING_MODE_EXCLUSIVE
-              &* set @"samples" Vulkan.VK_SAMPLE_COUNT_1_BIT
-              &* set @"flags" Vulkan.VK_ZERO_FLAGS
-              &* set @"queueFamilyIndexCount" 0
-              &* set @"pQueueFamilyIndices" Vulkan.VK_NULL
-          )
-  apImage <- liftIO $ withPtr apCreateInfo (\ciPtr -> allocaAndPeek (Vulkan.vkCreateImage device ciPtr Vulkan.vkNullPtr))
-  apMemoryRequirements <- allocaAndPeek_ (Vulkan.vkGetImageMemoryRequirements device apImage)
-  apMemory <- Memory.allocateMemoryFor pdev device apMemoryRequirements [Vulkan.VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
-  liftIO $ Vulkan.vkBindImageMemory device apImage apMemory 0 >>= throwVkResult
+        Vk26.ImageCreateInfo
+          { next = ()
+          , imageType = Vk26.IMAGE_TYPE_3D
+          , extent = apExtent
+          , mipLevels = 1
+          , arrayLayers = 1
+          , format = apFormat
+          , tiling = Vk26.IMAGE_TILING_OPTIMAL
+          , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
+          , usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
+          , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
+          , samples = Vk26.SAMPLE_COUNT_1_BIT
+          , flags = zero
+          , queueFamilyIndices = Vector.empty
+          }
+  apImage <- liftIO $ Vk26.createImage device apCreateInfo Nothing
+  apMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements device apImage
+  apMemory <- Memory.allocateMemoryFor pdev device apMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+  liftIO $ Vk26.bindImageMemory device apImage apMemory 0
   apImageView <- ImageView.managedImageView3D device apFormat apImage
   -- Transition to GENERAL for compute writes
   tempCmdBufAP <- CommandBuffer.createCommandBuffer device (rcGraphicsCommandPool ctx)
   CommandBuffer.withCommandBufferOneTime
     (graphicsQueueHandler ctx)
     tempCmdBufAP
-    (CommandBuffer.layerTransition tempCmdBufAP apImage Vulkan.VK_IMAGE_LAYOUT_UNDEFINED Vulkan.VK_IMAGE_LAYOUT_GENERAL)
-  liftIO $ Foreign.Marshal.Array.withArray [tempCmdBufAP] $ Vulkan.vkFreeCommandBuffers device (rcGraphicsCommandPool ctx) 1
+    (CommandBuffer.layerTransition tempCmdBufAP apImage Vk26.IMAGE_LAYOUT_UNDEFINED Vk26.IMAGE_LAYOUT_GENERAL)
+  liftIO $ Vk26.freeCommandBuffers device (rcGraphicsCommandPool ctx) (Vector.fromList [tempCmdBufAP])
   logDebugIO LogRender $ "AP volume 3D image created: " <> showT apWidth <> "x" <> showT apHeight <> "x" <> showT apDepth
 
   -- Shared depth image for g-buffer
@@ -395,7 +384,7 @@ createDeferredResources DeferredConfig {..} = do
       extent
       Vertex.vertexFormat
       4
-      Vulkan.VK_CULL_MODE_NONE
+      Vk26.CULL_MODE_NONE
   logDebugIO LogRender "g-buffer double-sided pipeline created"
 
   -- Lighting pipeline layout
@@ -404,11 +393,10 @@ createDeferredResources DeferredConfig {..} = do
       then DescriptorSetLayout.managedLightingProceduralDescriptorSetLayout device
       else DescriptorSetLayout.managedLightingDescriptorSetLayout device
   let cameraPushConstantRange =
-        Vulkan.createVk
-          ( set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
-              &* set @"offset" 0
-              &* set @"size" 124
-          )
+        Vk26.PushConstantRange
+          (Vk26.SHADER_STAGE_VERTEX_BIT .|. Vk26.SHADER_STAGE_FRAGMENT_BIT)
+          0
+          124
   lightingPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [lightingDescriptorSetLayout] [cameraPushConstantRange]
   logDebugIO LogRender "lighting pipeline layout created"
 
@@ -455,11 +443,10 @@ createDeferredResources DeferredConfig {..} = do
 
   -- God ray pipeline (reuses cloud render pass since same format)
   let godRayPushConstantRange =
-        Vulkan.createVk
-          ( set @"stageFlags" Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT
-              &* set @"offset" 0
-              &* set @"size" 44
-          )
+        Vk26.PushConstantRange
+          Vk26.SHADER_STAGE_FRAGMENT_BIT
+          0
+          44
   godRayPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [godRayDescriptorSetLayout] [godRayPushConstantRange]
   logDebugIO LogRender "god ray pipeline layout created"
 
@@ -479,7 +466,7 @@ createDeferredResources DeferredConfig {..} = do
 
   -- Lighting framebuffers
   swapchainImages <- Swapchain.getSwapchainImages device (swapchain ctx)
-  let surfaceFormat' = Vulkan.getField @"format" surfaceFormat
+  let Vk26.SurfaceFormatKHR surfaceFormat' _ = surfaceFormat
   swapchainImageViews <- for swapchainImages (ImageView.managedImageView device surfaceFormat')
   lightingFramebuffers <- for swapchainImageViews $ Framebuffer.managedLightingFramebuffer device lightingRenderPass extent
   logDebugIO LogRender $ "lighting framebuffers created: " <> showT (length lightingFramebuffers)
@@ -499,7 +486,7 @@ createDeferredResources DeferredConfig {..} = do
   liftIO $ for_ (zip (zip lightingDescriptorSets gBufferImageViews) (zip cloudImageViews godRayImageViews)) $ \((ds, views), (cloudView, godRayView)) -> do
     let baseViews = case (mEnvMapView, mIrradianceView, mBrdfView) of
           (Just env, Just irr, Just brdf) -> views ++ [env, irr, brdf]
-          _ -> views ++ replicate 3 Vulkan.VK_NULL_HANDLE
+          _ -> views ++ replicate 3 zero
     if proceduralSkyEnabled
       then do
         DescriptorSet.updateLightingProceduralDescriptorSets $
@@ -529,7 +516,7 @@ createDeferredResources DeferredConfig {..} = do
   -- Create cloud frame data UBO (256 bytes, minimum UBO alignment)
   let cloudFrameDataSize = 256
   (cloudFrameDataBuffer, cloudFrameDataMemoryRequirement) <-
-    Buffer.managedBuffer device (replicate cloudFrameDataSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+    Buffer.managedBuffer device (replicate cloudFrameDataSize (0 :: Word8)) (Vk26.BUFFER_USAGE_UNIFORM_BUFFER_BIT)
   cloudFrameDataMemory <- Buffer.managedBufferMemory pdev device cloudFrameDataMemoryRequirement
   liftIO $ Buffer.bindBufferMemory device cloudFrameDataBuffer cloudFrameDataMemory (replicate cloudFrameDataSize (0 :: Word8))
   logDebugIO LogRender "cloud frame data UBO created"
@@ -605,7 +592,7 @@ createDeferredResources DeferredConfig {..} = do
   -- Terrain frame data UBO (128 bytes)
   let terrainFrameDataSize = 128
   (terrainFrameDataBuffer, terrainFrameDataMemoryRequirement) <-
-    Buffer.managedBuffer device (replicate terrainFrameDataSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+    Buffer.managedBuffer device (replicate terrainFrameDataSize (0 :: Word8)) (Vk26.BUFFER_USAGE_UNIFORM_BUFFER_BIT)
   terrainFrameDataMemory <- Buffer.managedBufferMemory pdev device terrainFrameDataMemoryRequirement
   liftIO $ Buffer.bindBufferMemory device terrainFrameDataBuffer terrainFrameDataMemory (replicate terrainFrameDataSize (0 :: Word8))
   logDebugIO LogRender "terrain frame data UBO created"
@@ -657,7 +644,7 @@ createDeferredResources DeferredConfig {..} = do
   -- Terrain mesh node SSBO (1024 nodes * 32 bytes = 32KB)
   let terrainNodeSSBOSize = 1024 * 32
   (terrainMeshNodeBuffer, terrainMeshNodeMemoryRequirement) <-
-    Buffer.managedBuffer device (replicate terrainNodeSSBOSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_STORAGE_BUFFER_BIT)
+    Buffer.managedBuffer device (replicate terrainNodeSSBOSize (0 :: Word8)) (Vk26.BUFFER_USAGE_STORAGE_BUFFER_BIT)
   terrainMeshNodeMemory <- Buffer.managedBufferMemory pdev device terrainMeshNodeMemoryRequirement
   liftIO $ Buffer.bindBufferMemory device terrainMeshNodeBuffer terrainMeshNodeMemory (replicate terrainNodeSSBOSize (0 :: Word8))
   logDebugIO LogRender "terrain mesh node SSBO created"
@@ -686,7 +673,7 @@ createDeferredResources DeferredConfig {..} = do
   logDebugIO LogRender "AP volume descriptor set layout created"
   apVolumePipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [apVolumeDescriptorSetLayout] []
   logDebugIO LogRender "AP volume pipeline layout created"
-  apVolumePipeline <- ComputePipeline.managedComputePipelineWithSpec device apVolumePipelineLayout dsAPVolume (maybe nullPtr id dsAPVolumeSpecInfo)
+  apVolumePipeline <- ComputePipeline.managedComputePipelineWithSpec device apVolumePipelineLayout dsAPVolume dsAPVolumeSpecInfo
   logDebugIO LogRender "AP volume compute pipeline created"
 
   -- AP volume descriptor pool and sets
@@ -698,7 +685,7 @@ createDeferredResources DeferredConfig {..} = do
   -- AP volume uniform buffer (256 bytes, std140 aligned)
   let apUniformSize = 256
   (apUniformBuffer, apUniformMemoryRequirement) <-
-    Buffer.managedBuffer device (replicate apUniformSize (0 :: Word8)) (Vulkan.VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)
+    Buffer.managedBuffer device (replicate apUniformSize (0 :: Word8)) (Vk26.BUFFER_USAGE_UNIFORM_BUFFER_BIT)
   apUniformMemory <- Buffer.managedBufferMemory pdev device apUniformMemoryRequirement
   liftIO $ Buffer.bindBufferMemory device apUniformBuffer apUniformMemory (replicate apUniformSize (0 :: Word8))
   logDebugIO LogRender "AP volume uniform buffer created"
@@ -724,11 +711,10 @@ createDeferredResources DeferredConfig {..} = do
 
   -- Bindless pipeline layout (UBO + texture array + push constants)
   let bindlessPushConstantRange =
-        Vulkan.createVk
-          ( set @"stageFlags" (Vulkan.VK_SHADER_STAGE_VERTEX_BIT .|. Vulkan.VK_SHADER_STAGE_FRAGMENT_BIT)
-              &* set @"offset" 0
-              &* set @"size" 68
-          )
+        Vk26.PushConstantRange
+          (Vk26.SHADER_STAGE_VERTEX_BIT .|. Vk26.SHADER_STAGE_FRAGMENT_BIT)
+          0
+          68
   bindlessPipelineLayout <- PipelineLayout.managedPipelineLayoutWithPushConstants device [bindlessPassDescriptorSetLayout] [bindlessPushConstantRange]
   logDebugIO LogRender "bindless pipeline layout created"
 
@@ -742,7 +728,7 @@ createDeferredResources DeferredConfig {..} = do
       extent
       Vertex.vertexFormat
       4
-      Vulkan.VK_CULL_MODE_NONE
+      Vk26.CULL_MODE_NONE
   logDebugIO LogRender "bindless pipeline created"
 
   -- Bindless descriptor pool and sets (one per frame-in-flight UBO)

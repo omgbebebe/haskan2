@@ -1,56 +1,51 @@
+{-# LANGUAGE DataKinds, DuplicateRecordFields #-}
 module Graphics.Haskan.Vulkan.Device where
 
-import Control.Monad (filterM, when)
+import Control.Monad (filterM)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits (shiftR, (.&.))
 import Data.ByteString.Char8 qualified as BS8
-import Data.ByteString.Unsafe (unsafeUseAsCString)
 import Data.List (nub)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Vector qualified as Vector
 import Data.Word (Word32)
-import Foreign (castPtr, nullPtr)
-import Foreign.C.String (CString)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
-import Graphics.Haskan.Resources (alloc, allocaAndPeek, allocaAndPeek_, peekVkList_)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Core_1_1 qualified as Vulkan11
-import Graphics.Vulkan.Core_1_2 qualified as Vulkan12
-import Graphics.Vulkan.Ext qualified as Vulkan
-import Graphics.Vulkan.Marshal (withPtr)
-import Graphics.Vulkan.Marshal.Create (set, setListRef, setStrListRef, (&*))
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Graphics.Haskan.Resources (alloc)
 import Numeric (showHex)
 import System.IO.Unsafe (unsafePerformIO)
+import Vulkan qualified as Vk26
+import Vulkan.CStruct.Extends (SomeStruct(..))
+import Vulkan.Core10.DeviceInitialization (PhysicalDeviceProperties(..), PhysicalDeviceFeatures(..), QueueFamilyProperties(..))
+import Vulkan.Core12.Promoted_From_VK_EXT_descriptor_indexing (PhysicalDeviceDescriptorIndexingFeatures(..))
+import Vulkan.Zero (zero)
 
-vkExtMeshShaderExtensionName :: CString
-vkExtMeshShaderExtensionName = unsafePerformIO $ BS8.useAsCString (BS8.pack "VK_EXT_mesh_shader") pure
-{-# NOINLINE vkExtMeshShaderExtensionName #-}
+vkExtMeshShaderExtensionName :: BS8.ByteString
+vkExtMeshShaderExtensionName = BS8.pack "VK_EXT_mesh_shader"
 
-managedRenderDevice :: (MonadManaged m) => Vulkan.VkPhysicalDevice -> Vulkan.VkSurfaceKHR -> [String] -> Bool -> m (Vulkan.VkDevice, (Int, Int))
+managedRenderDevice :: (MonadManaged m) => Vk26.PhysicalDevice -> Vk26.SurfaceKHR -> [String] -> Bool -> m (Vk26.Device, (Int, Int))
 managedRenderDevice pdev surface layers enableMeshShader =
   alloc
     "Vulkan Render Device"
     (createRenderDevice pdev surface layers enableMeshShader)
-    (\(ptr, _) -> Vulkan.vkDestroyDevice ptr Vulkan.vkNullPtr)
+    (\(ptr, _) -> Vk26.destroyDevice ptr Nothing)
 
-createRenderDevice :: (MonadIO m) => Vulkan.VkPhysicalDevice -> Vulkan.VkSurfaceKHR -> [String] -> Bool -> m (Vulkan.VkDevice, (Int, Int))
+createRenderDevice :: (MonadIO m) => Vk26.PhysicalDevice -> Vk26.SurfaceKHR -> [String] -> Bool -> m (Vk26.Device, (Int, Int))
 createRenderDevice pdev surface layers enableMeshShader = do
-  queueFamilies <- liftIO $ zip [0 ..] <$> peekVkList_ (Vulkan.vkGetPhysicalDeviceQueueFamilyProperties pdev)
+  queueFamilies <- liftIO $ zip [0 ..] . Vector.toList <$> Vk26.getPhysicalDeviceQueueFamilyProperties pdev
 
   presentQueueFamilies <-
     filterM
       ( \(i, _) -> do
-          presentSupported <- liftIO $ allocaAndPeek (Vulkan.vkGetPhysicalDeviceSurfaceSupportKHR pdev (fromIntegral i) surface)
-          pure (presentSupported == Vulkan.VK_TRUE)
+          presentSupported <- liftIO $ Vk26.getPhysicalDeviceSurfaceSupportKHR pdev (fromIntegral i) surface
+          pure presentSupported
       )
       queueFamilies
 
   let graphicsQueueFamilies =
         filter
-          (\(_, p) -> Vulkan.getField @"queueFlags" p .&. Vulkan.VK_QUEUE_GRAPHICS_BIT /= Vulkan.VK_ZERO_FLAGS)
+          (\(_, p) -> queueFlags p .&. Vk26.QUEUE_GRAPHICS_BIT /= zero)
           queueFamilies
 
       queueFamilyIndices = case (graphicsQueueFamilies, presentQueueFamilies) of
@@ -65,48 +60,32 @@ createRenderDevice pdev surface layers enableMeshShader = do
         [] -> error "unreachable: queueFamilyIndices is non-empty"
   pure (device, (graphicsQueueFamilyIndex, presentQueueFamilyIndex))
 
-createDevice :: (MonadIO m) => Vulkan.VkPhysicalDevice -> [Int] -> [String] -> Bool -> m Vulkan.VkDevice
+createDevice :: (MonadIO m) => Vk26.PhysicalDevice -> [Int] -> [String] -> Bool -> m Vk26.Device
 createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
-  -- Query physical device properties to check Vulkan version
-  props <- liftIO $ allocaAndPeek_ (Vulkan.vkGetPhysicalDeviceProperties dev)
-  let apiVersion = Vulkan.getField @"apiVersion" props
-      apiVersionWord = fromIntegral apiVersion :: Word32
+  props <- liftIO $ Vk26.getPhysicalDeviceProperties dev
+  let apiVersionWord = fromIntegral (apiVersion props) :: Word32
       majorVersion = fromIntegral ((apiVersionWord `shiftR` 22) .&. (0x7F :: Word32)) :: Int
       minorVersion = fromIntegral ((apiVersionWord `shiftR` 12) .&. (0x3FF :: Word32)) :: Int
       patchVersion = fromIntegral (apiVersionWord .&. (0xFFF :: Word32)) :: Int
-  logInfoIO LogVulkan $ "Vulkan API version raw: " <> showT apiVersion <> " hex: 0x" <> Text.pack (showHex apiVersionWord "")
+  logInfoIO LogVulkan $ "Vulkan API version raw: " <> showT (apiVersion props) <> " hex: 0x" <> Text.pack (showHex apiVersionWord "")
   logInfoIO LogVulkan $ "Vulkan API version: " <> showT majorVersion <> "." <> showT minorVersion <> "." <> showT patchVersion
 
-  -- Query basic features
-  availableFeatures <- liftIO $ allocaAndPeek_ (Vulkan.vkGetPhysicalDeviceFeatures dev)
-  let geometrySupported = Vulkan.getField @"geometryShader" availableFeatures == Vulkan.VK_TRUE
-      cullDistanceSupported = Vulkan.getField @"shaderCullDistance" availableFeatures == Vulkan.VK_TRUE
-      vertexStorageSupported = Vulkan.getField @"vertexPipelineStoresAndAtomics" availableFeatures == Vulkan.VK_TRUE
-      fragmentStorageSupported = Vulkan.getField @"fragmentStoresAndAtomics" availableFeatures == Vulkan.VK_TRUE
-      multiDrawIndirectSupported = Vulkan.getField @"multiDrawIndirect" availableFeatures == Vulkan.VK_TRUE
+  availableFeatures <- liftIO $ Vk26.getPhysicalDeviceFeatures dev
+  let geometrySupported = geometryShader availableFeatures
+      cullDistanceSupported = shaderCullDistance availableFeatures
+      vertexStorageSupported = vertexPipelineStoresAndAtomics availableFeatures
+      fragmentStorageSupported = fragmentStoresAndAtomics availableFeatures
+      multiDrawIndirectSupported = multiDrawIndirect availableFeatures
 
-  -- Check descriptor indexing support (requires Vulkan 1.2+)
   descriptorIndexingSupported <-
     if majorVersion >= 1 && minorVersion >= 2
       then liftIO $ do
-        let diFeaturesQuery :: Vulkan12.VkPhysicalDeviceDescriptorIndexingFeatures
-            diFeaturesQuery =
-              Vulkan.createVk
-                ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES
-                    &* set @"pNext" Vulkan.VK_NULL
-                )
-            features2Query :: Vulkan11.VkPhysicalDeviceFeatures2
-            features2Query =
-              Vulkan.createVk
-                ( set @"sType" Vulkan11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
-                    &* set @"pNext" (castPtr $ Vulkan.unsafePtr diFeaturesQuery)
-                    &* set @"features" availableFeatures
-                )
-        withPtr features2Query $ Vulkan11.vkGetPhysicalDeviceFeatures2 dev
-        let nonUniform = Vulkan.getField @"shaderSampledImageArrayNonUniformIndexing" diFeaturesQuery == Vulkan.VK_TRUE
-            updateAfterBind = Vulkan.getField @"descriptorBindingSampledImageUpdateAfterBind" diFeaturesQuery == Vulkan.VK_TRUE
-            partiallyBound = Vulkan.getField @"descriptorBindingPartiallyBound" diFeaturesQuery == Vulkan.VK_TRUE
-            runtimeArray = Vulkan.getField @"runtimeDescriptorArray" diFeaturesQuery == Vulkan.VK_TRUE
+        features2 <- Vk26.getPhysicalDeviceFeatures2 dev :: IO (Vk26.PhysicalDeviceFeatures2 '[Vk26.PhysicalDeviceDescriptorIndexingFeatures])
+        let Vk26.PhysicalDeviceFeatures2 (diFeaturesQuery, ()) _ = features2
+            nonUniform = shaderSampledImageArrayNonUniformIndexing diFeaturesQuery
+            updateAfterBind = descriptorBindingSampledImageUpdateAfterBind diFeaturesQuery
+            partiallyBound = descriptorBindingPartiallyBound diFeaturesQuery
+            runtimeArray = runtimeDescriptorArray diFeaturesQuery
         logInfoIO LogVulkan $
           "Descriptor indexing capabilities: nonUniform="
             <> showT nonUniform
@@ -121,97 +100,70 @@ createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
         logInfoIO LogVulkan "Descriptor indexing requires Vulkan 1.2+, skipping"
         pure False
 
-  let deviceFlags = Vulkan.VK_ZERO_FLAGS
-      queueFlags = Vulkan.VK_ZERO_FLAGS
+  let deviceFlags = zero
+      queueFlags = zero
       meshShaderExtension = if enableMeshShader then [vkExtMeshShaderExtensionName] else []
-      enabledExtensions = Vulkan.VK_KHR_SWAPCHAIN_EXTENSION_NAME : meshShaderExtension
+      enabledExtensions = Vector.fromList $ Vk26.KHR_SWAPCHAIN_EXTENSION_NAME : meshShaderExtension
       enabledBasicFeatures =
-        Vulkan.createVk
-          ( set @"geometryShader" (if geometrySupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
-              &* set @"shaderCullDistance" (if cullDistanceSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
-              &* set @"vertexPipelineStoresAndAtomics" (if vertexStorageSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
-              &* set @"fragmentStoresAndAtomics" (if fragmentStorageSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
-              &* set @"multiDrawIndirect" (if multiDrawIndirectSupported then Vulkan.VK_TRUE else Vulkan.VK_FALSE)
-          )
-      queueCreateInfos :: [Vulkan.VkDeviceQueueCreateInfo]
+        (zero :: Vk26.PhysicalDeviceFeatures)
+          { geometryShader = geometrySupported
+          , shaderCullDistance = cullDistanceSupported
+          , vertexPipelineStoresAndAtomics = vertexStorageSupported
+          , fragmentStoresAndAtomics = fragmentStorageSupported
+          , multiDrawIndirect = multiDrawIndirectSupported
+          }
       queueCreateInfos =
         map
           ( \i ->
-              Vulkan.createVk
-                ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO
-                    &* set @"pNext" Vulkan.VK_NULL
-                    &* set @"flags" queueFlags
-                    &* set @"queueFamilyIndex" (fromIntegral i)
-                    &* set @"queueCount" 1
-                    &* setListRef @"pQueuePriorities" [1.0]
+              SomeStruct
+                ( Vk26.DeviceQueueCreateInfo
+                    { next = ()
+                    , flags = queueFlags
+                    , queueFamilyIndex = fromIntegral i
+                    , queuePriorities = Vector.fromList [1.0]
+                    }
                 )
           )
           queueFamilyIndices
 
-  -- Build device create info with feature chain
   liftIO $ do
     case descriptorIndexingSupported of
       False -> do
-        -- No descriptor indexing: use legacy pEnabledFeatures path
-        withPtr enabledBasicFeatures $ \featPtr -> do
-          let createInfo =
-                Vulkan.createVk
-                  ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
-                      &* set @"pNext" Vulkan.VK_NULL
-                      &* set @"flags" deviceFlags
-                      &* set @"queueCreateInfoCount" (fromIntegral (length queueCreateInfos))
-                      &* setListRef @"pQueueCreateInfos" queueCreateInfos
-                      &* set @"enabledLayerCount" (fromIntegral (length enabledLayers))
-                      &* setStrListRef @"ppEnabledLayerNames" enabledLayers
-                      &* set @"enabledExtensionCount" (fromIntegral (length enabledExtensions))
-                      &* setListRef @"ppEnabledExtensionNames" enabledExtensions
-                      &* set @"pEnabledFeatures" featPtr
-                  )
-          withPtr createInfo $ \ciPtr ->
-            allocaAndPeek (Vulkan.vkCreateDevice dev ciPtr Vulkan.vkNullPtr)
+        let createInfo =
+              Vk26.DeviceCreateInfo
+                { next = ()
+                , flags = deviceFlags
+                , queueCreateInfos = Vector.fromList queueCreateInfos
+                , enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers
+                , enabledExtensionNames = enabledExtensions
+                , enabledFeatures = Just enabledBasicFeatures
+                }
+        Vk26.createDevice dev createInfo Nothing
       True -> do
-        -- Descriptor indexing: chain VkPhysicalDeviceFeatures2 into VkDeviceCreateInfo
-        let diFeatures :: Vulkan12.VkPhysicalDeviceDescriptorIndexingFeatures
-            diFeatures =
-              Vulkan.createVk
-                ( set @"sType" Vulkan12.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES
-                    &* set @"pNext" Vulkan.VK_NULL
-                    &* set @"shaderSampledImageArrayNonUniformIndexing" Vulkan.VK_TRUE
-                    &* set @"descriptorBindingSampledImageUpdateAfterBind" Vulkan.VK_TRUE
-                    &* set @"descriptorBindingPartiallyBound" Vulkan.VK_TRUE
-                    &* set @"runtimeDescriptorArray" Vulkan.VK_TRUE
-                )
-        withPtr diFeatures $ \diPtr -> do
-          let features2 :: Vulkan11.VkPhysicalDeviceFeatures2
-              features2 =
-                Vulkan.createVk
-                  ( set @"sType" Vulkan11.VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2
-                      &* set @"pNext" (castPtr diPtr)
-                      &* set @"features" enabledBasicFeatures
-                  )
-          withPtr features2 $ \f2Ptr -> do
-            let createInfo =
-                  Vulkan.createVk
-                    ( set @"sType" Vulkan.VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
-                        &* set @"pNext" (castPtr f2Ptr)
-                        &* set @"flags" deviceFlags
-                        &* set @"queueCreateInfoCount" (fromIntegral (length queueCreateInfos))
-                        &* setListRef @"pQueueCreateInfos" queueCreateInfos
-                        &* set @"enabledLayerCount" (fromIntegral (length enabledLayers))
-                        &* setStrListRef @"ppEnabledLayerNames" enabledLayers
-                        &* set @"enabledExtensionCount" (fromIntegral (length enabledExtensions))
-                        &* setListRef @"ppEnabledExtensionNames" enabledExtensions
-                        &* set @"pEnabledFeatures" Vulkan.VK_NULL
-                    )
-            withPtr createInfo $ \ciPtr ->
-              allocaAndPeek (Vulkan.vkCreateDevice dev ciPtr Vulkan.vkNullPtr)
+        let diFeatures =
+              (zero :: Vk26.PhysicalDeviceDescriptorIndexingFeatures)
+                { shaderSampledImageArrayNonUniformIndexing = True
+                , descriptorBindingSampledImageUpdateAfterBind = True
+                , descriptorBindingPartiallyBound = True
+                , runtimeDescriptorArray = True
+                }
+            createInfo =
+              Vk26.DeviceCreateInfo
+                { next = (diFeatures, ())
+                , flags = deviceFlags
+                , queueCreateInfos = Vector.fromList queueCreateInfos
+                , enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers
+                , enabledExtensionNames = enabledExtensions
+                , enabledFeatures = Just enabledBasicFeatures
+                }
+        Vk26.createDevice dev createInfo Nothing
 
 getDeviceQueueHandler ::
   (MonadIO m) =>
-  Vulkan.VkDevice ->
-  -- | | queueFamilyIndex
+  Vk26.Device ->
+  -- | queueFamilyIndex
   Int ->
-  -- | | queueIndex
+  -- | queueIndex
   Int ->
-  m Vulkan.VkQueue
-getDeviceQueueHandler dev qfi qi = liftIO $ allocaAndPeek_ (Vulkan.vkGetDeviceQueue dev (fromIntegral qfi) (fromIntegral qi))
+  m Vk26.Queue
+getDeviceQueueHandler dev qfi qi = liftIO $ Vk26.getDeviceQueue dev (fromIntegral qfi) (fromIntegral qi)

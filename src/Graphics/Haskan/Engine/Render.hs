@@ -32,7 +32,7 @@ import Data.List (nub, sort, sortOn)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
-import Data.Vector.Storable qualified as Vector
+import Data.Vector.Storable qualified as VS
 import Data.Word (Word32, Word64, Word8)
 import DearImGui.Raw qualified as ImGui.Raw
 import FIR qualified
@@ -158,10 +158,10 @@ import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Graphics.Haskan.Vulkan.Types (RenderContext (..), VulkanContext (..))
 import Graphics.Haskan.Window (isWindowVisible)
 import Graphics.Haskan.Window qualified as Window
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-import Graphics.Vulkan.Ext qualified as Vulkan
-import Graphics.Vulkan.Marshal.Create qualified as Vulkan
+import Vulkan qualified as Vk26
+import Vulkan.CStruct.Extends (SomeStruct(..))
+import Vulkan.Zero (zero)
+import Data.Vector qualified as Vector
 import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
 import Linear.Matrix (M44, identity, inv33, inv44, transpose, (!*), (!*!))
 import Linear.Projection qualified
@@ -179,9 +179,9 @@ type RenderLoopM m = ReaderT RenderEnv m
 -- | Configuration passed to the render loop at startup.
 data RenderLoopConfig = RenderLoopConfig
   { rlcWindow :: !SDL.Window,
-    rlcPhysicalDevice :: !Vulkan.VkPhysicalDevice,
-    rlcSurface :: !Vulkan.VkSurfaceKHR,
-    rlcInstance :: !Vulkan.VkInstance,
+    rlcPhysicalDevice :: !Vk26.PhysicalDevice,
+    rlcSurface :: !Vk26.SurfaceKHR,
+    rlcInstance :: !Vk26.Instance,
     rlcLayers :: ![String],
     rlcTargetFPS :: !Integer,
     rlcGameState :: !(GameState AnyCamera),
@@ -257,17 +257,17 @@ data RenderEnv = RenderEnv
     reContext :: !RenderContext,
     reDeferred :: DeferredResources,
     reTargetFPS :: !Integer,
-    reImageAvailableSemaphores :: ![Vulkan.VkSemaphore],
+    reImageAvailableSemaphores :: ![Vk26.Semaphore],
     reControl :: !(TChan ControlMessage),
-    reFrameMvpMemories :: ![Vulkan.VkDeviceMemory],
-    reFrameDescriptorSets :: ![Vulkan.VkDescriptorSet],
-    reTextureSampler :: !Vulkan.VkSampler,
+    reFrameMvpMemories :: ![Vk26.DeviceMemory],
+    reFrameDescriptorSets :: ![Vk26.DescriptorSet],
+    reTextureSampler :: !Vk26.Sampler,
     reTextureIndexMap :: !(IntMap Word32),
     reFrameStatsRef :: !(IORef FrameStats),
     reCullResources :: ComputeCullResources,
-    rePhysicalDevice :: !Vulkan.VkPhysicalDevice,
-    reLightSsboBuffer :: Vulkan.VkBuffer,
-    reLightSsboMemory :: Vulkan.VkDeviceMemory,
+    rePhysicalDevice :: !Vk26.PhysicalDevice,
+    reLightSsboBuffer :: Vk26.Buffer,
+    reLightSsboMemory :: Vk26.DeviceMemory,
     reECSWorld :: !ECS.World,
     reResourceManager :: !ResourceManager,
     reGameState :: !GameStateTVars,
@@ -320,7 +320,7 @@ instance (MonadIO m) => MonadGraphics (ReaderT RenderEnv m) where
     liftIO $ Buffer.updateUniformBufferRegion device mem offset dat
   deviceWaitIdle = do
     device <- asks (device . reContext)
-    liftIO $ Vulkan.vkDeviceWaitIdle device >>= throwVkResult
+    liftIO $ Vk26.deviceWaitIdle device
   drawFrameGraphics sem idx action = do
     ctx <- asks reContext
     liftIO $ Render.runRenderM ctx $ Render.drawFrame sem idx action
@@ -335,7 +335,7 @@ handleInspector ::
   [DrawCall] ->
   RenderContext ->
   AnyCamera ->
-  Vulkan.VkExtent2D ->
+  Vk26.Extent2D ->
   m ()
 handleInspector frameNumber drawList ctx camera rcSurfaceExtent = do
   mInsp <- readInspector
@@ -412,7 +412,7 @@ runFrame frameNumber = do
             ctx = reContext
         -- Create a one-time command buffer and dispatch sky compute shaders
         regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
-        liftIO $ Vulkan.vkDeviceWaitIdle (device ctx)
+        liftIO $ Vk26.deviceWaitIdle (device ctx)
         let vc = VulkanContext (device ctx) rePhysicalDevice (graphicsQueueHandler ctx) regenCmdBuf
         liftIO $
           runManaged $
@@ -437,7 +437,7 @@ runFrame frameNumber = do
             ctx = reContext
         -- Create a one-time command buffer and dispatch noise compute shaders
         regenCmdBuf <- CommandBuffer.createCommandBuffer (device ctx) (rcGraphicsCommandPool ctx)
-        liftIO $ Vulkan.vkDeviceWaitIdle (device ctx)
+        liftIO $ Vk26.deviceWaitIdle (device ctx)
         let vc = VulkanContext (device ctx) rePhysicalDevice (graphicsQueueHandler ctx) regenCmdBuf
         liftIO $
           runManaged $
@@ -465,8 +465,8 @@ renderAndPresent ::
   AnyCamera ->
   [DrawCall] ->
   Word32 ->
-  Vulkan.VkDeviceMemory ->
-  Vulkan.VkSemaphore ->
+  Vk26.DeviceMemory ->
+  Vk26.Semaphore ->
   RenderLoopM m (Bool, Bool)
 renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMemory imageAvailableSemaphore = do
   let ctx = reContext
@@ -569,7 +569,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
               { vcDevice = device ctx,
                 vcPhysicalDevice = rePhysicalDevice,
                 vcQueue = graphicsQueueHandler ctx,
-                vcCommandBuffer = Vulkan.vkNullPtr
+                vcCommandBuffer = zero
               }
           cloudExportCtx =
             CloudExport.CloudExportContext
@@ -589,7 +589,7 @@ renderAndPresent env@RenderEnv {..} frameNumber camera drawList lightCount mvpMe
             { vcDevice = device ctx,
               vcPhysicalDevice = rePhysicalDevice,
               vcQueue = graphicsQueueHandler ctx,
-              vcCommandBuffer = Vulkan.vkNullPtr
+              vcCommandBuffer = zero
             }
         cloudExportCtx =
           CloudExport.CloudExportContext
@@ -615,8 +615,8 @@ renderAndPresentSimple ::
   Int ->
   AnyCamera ->
   [DrawCall] ->
-  Vulkan.VkDeviceMemory ->
-  Vulkan.VkSemaphore ->
+  Vk26.DeviceMemory ->
+  Vk26.Semaphore ->
   RenderLoopM m (Bool, Bool)
 renderAndPresentSimple env@RenderEnv {..} frameNumber camera drawList mvpMemory imageAvailableSemaphore = do
   let ctx = reContext
@@ -635,9 +635,9 @@ renderAndPresentSimple env@RenderEnv {..} frameNumber camera drawList mvpMemory 
           pipelineLayout = rcPipelineLayout ctx
           descriptorSet = reFrameDescriptorSets !! frameIdx
           extent = rcSurfaceExtent ctx
-          colorClear = Vulkan.createVk (Vulkan.setAt @"float32" @0 0.2 Vulkan.&* Vulkan.setAt @"float32" @1 0.2 Vulkan.&* Vulkan.setAt @"float32" @2 0.2 Vulkan.&* Vulkan.setAt @"float32" @3 1.0)
-          depthClear = Vulkan.createVk (Vulkan.set @"depth" 1.0 Vulkan.&* Vulkan.set @"stencil" 0)
-          clearValues = [Vulkan.createVk (Vulkan.set @"color" colorClear), Vulkan.createVk (Vulkan.set @"depthStencil" depthClear)]
+          colorClear = Vk26.Float32 0.2 0.2 0.2 1.0
+          depthClear = Vk26.ClearDepthStencilValue 1.0 0
+          clearValues = [Vk26.Color colorClear, Vk26.DepthStencil depthClear]
       case drawList of
         [] -> pure ()
         (drawCall : _) -> do
@@ -648,14 +648,11 @@ renderAndPresentSimple env@RenderEnv {..} frameNumber camera drawList mvpMemory 
               vertexOffset = fromIntegral (mrVertexOffset (dcMesh drawCall))
           CommandBuffer.withCommandBuffer commandBuffer $ do
             RenderPass.withRenderPass commandBuffer renderPass framebuffer extent clearValues $ do
-              liftIO $ Vulkan.vkCmdBindPipeline commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS pipeline
-              liftIO $ Foreign.Marshal.Array.withArray [descriptorSet] $ \dsPtr ->
-                Vulkan.vkCmdBindDescriptorSets commandBuffer Vulkan.VK_PIPELINE_BIND_POINT_GRAPHICS pipelineLayout 0 1 dsPtr 0 Vulkan.vkNullPtr
-              liftIO $ Foreign.Marshal.Array.withArray [vertexBuffer] $ \vbPtr ->
-                Foreign.Marshal.Array.withArray [0] $ \offsetPtr ->
-                  Vulkan.vkCmdBindVertexBuffers commandBuffer 0 1 vbPtr offsetPtr
-              liftIO $ Vulkan.vkCmdBindIndexBuffer commandBuffer indexBuffer 0 Vulkan.VK_INDEX_TYPE_UINT32
-              liftIO $ Vulkan.vkCmdDrawIndexed commandBuffer indexCount 1 firstIndex vertexOffset 0
+              liftIO $ Vk26.cmdBindPipeline commandBuffer Vk26.PIPELINE_BIND_POINT_GRAPHICS pipeline
+              liftIO $ Vk26.cmdBindDescriptorSets commandBuffer Vk26.PIPELINE_BIND_POINT_GRAPHICS pipelineLayout 0 (Vector.fromList [descriptorSet]) Vector.empty
+              liftIO $ Vk26.cmdBindVertexBuffers commandBuffer 0 (Vector.fromList [vertexBuffer]) (Vector.fromList [0])
+              liftIO $ Vk26.cmdBindIndexBuffer commandBuffer indexBuffer 0 Vk26.INDEX_TYPE_UINT32
+              liftIO $ Vk26.cmdDrawIndexed commandBuffer indexCount 1 firstIndex vertexOffset 0
 
 -- | Handle frame draw result
 handleFrameResult ::
@@ -688,11 +685,11 @@ handlePresentResult ::
   Int ->
   AnyCamera ->
   [DrawCall] ->
-  Vulkan.Word32 ->
-  Vulkan.VkResult ->
+  Word32 ->
+  Vk26.Result ->
   RenderLoopM m (Bool, Bool)
 handlePresentResult env@RenderEnv {..} frameNumber camera drawList imageIndex = \case
-  Vulkan.VK_SUCCESS -> do
+  Vk26.SUCCESS -> do
     shouldInspect <- consumeInspectFlag
     when shouldInspect $ do
       handleInspector frameNumber drawList reContext camera (rcSurfaceExtent reContext)
@@ -714,9 +711,9 @@ handlePresentResult env@RenderEnv {..} frameNumber camera drawList imageIndex = 
       when shouldSwapchain $ do
         handleScreenshotSwapchain reContext screenshotCtx
     pure (False, False)
-  Vulkan.VK_SUBOPTIMAL_KHR ->
+  Vk26.SUBOPTIMAL_KHR ->
     pure (True, False)
-  Vulkan.VK_ERROR_OUT_OF_DATE_KHR ->
+  Vk26.ERROR_OUT_OF_DATE_KHR ->
     pure (True, False)
   _ ->
     fail "presentFrame failed"
@@ -914,13 +911,13 @@ renderLoop RenderLoopConfig {..} = do
           }
       initialDrawCommands = replicate maxEntities (DrawIndexedIndirectCommand 0 0 0 0 0)
 
-  (entitySsboBuffer, entitySsboMemory) <- Buffer.managedStorageBuffer rlcPhysicalDevice device (replicate maxEntities dummyEntityData) Vulkan.VK_ZERO_FLAGS
-  (drawCommandsBuffer, drawCommandsMemory) <- Buffer.managedStorageBuffer rlcPhysicalDevice device initialDrawCommands Vulkan.VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT
+  (entitySsboBuffer, entitySsboMemory) <- Buffer.managedStorageBuffer rlcPhysicalDevice device (replicate maxEntities dummyEntityData) zero
+  (drawCommandsBuffer, drawCommandsMemory) <- Buffer.managedStorageBuffer rlcPhysicalDevice device initialDrawCommands Vk26.BUFFER_USAGE_INDIRECT_BUFFER_BIT
   (cullDataBuffer, cullDataMemory) <- Buffer.managedUniformBuffer rlcPhysicalDevice device [dummyCullData]
 
   let maxLights = 256 :: Int
       dummyLightData = LightData (V3 0 0 0) 0.0 (V3 0 0 0) 0 (V3 0 0 0) 0.0
-  (lightSsboBuffer, lightSsboMemory) <- Buffer.managedStorageBuffer rlcPhysicalDevice device (replicate maxLights dummyLightData) Vulkan.VK_ZERO_FLAGS
+  (lightSsboBuffer, lightSsboMemory) <- Buffer.managedStorageBuffer rlcPhysicalDevice device (replicate maxLights dummyLightData) zero
   logDebug LogBuffer $ "light SSBO created: " <> showT (maxLights * sizeOf (undefined :: LightData)) <> " bytes"
 
   logDebug LogBuffer $ "compute buffers created: entitySSBO=" <> showT (maxEntities * sizeOf (undefined :: ComputeEntityData)) <> " drawCommands=" <> showT (maxEntities * sizeOf (undefined :: DrawIndexedIndirectCommand)) <> " cullData=" <> showT (sizeOf (undefined :: ComputeCullData))
@@ -966,10 +963,10 @@ renderLoop RenderLoopConfig {..} = do
                   iyf = 1 - fy
                   lerpPixel a b t = round (fromIntegral a * (1 - t) + fromIntegral b * t)
                   blendChannel i =
-                    let c00 = src Vector.! (srcIdx x0 y0 + i)
-                        c10 = src Vector.! (srcIdx x1 y0 + i)
-                        c01 = src Vector.! (srcIdx x0 y1 + i)
-                        c11 = src Vector.! (srcIdx x1 y1 + i)
+                    let c00 = src VS.! (srcIdx x0 y0 + i)
+                        c10 = src VS.! (srcIdx x1 y0 + i)
+                        c01 = src VS.! (srcIdx x0 y1 + i)
+                        c11 = src VS.! (srcIdx x1 y1 + i)
                         c0 = lerpPixel c00 c10 fx
                         c1 = lerpPixel c01 c11 fx
                      in lerpPixel c0 c1 fy
@@ -979,7 +976,7 @@ renderLoop RenderLoopConfig {..} = do
                   sy = fromIntegral dy * fromIntegral sh / fromIntegral dh
                in sample sx sy
             clamp lo hi v = max lo (min hi v)
-         in Vector.fromList [dstPixel dx dy !! c | dy <- [0 .. dh - 1], dx <- [0 .. dw - 1], c <- [0 .. 3]]
+         in VS.fromList [dstPixel dx dy !! c | dy <- [0 .. dh - 1], dx <- [0 .. dw - 1], c <- [0 .. 3]]
 
   ecsMaterials <- liftIO $ STM.readTVarIO (ECS.wMaterials ecsWorld)
   let uniqueTextures = nub $ IntMap.elems ecsMaterials
