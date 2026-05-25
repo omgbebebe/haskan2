@@ -282,6 +282,9 @@ buildDebugPanel = do
       frameStatsRef = dpeFrameStatsRef env
       cam = dpeCamera env
   liftIO $ withCString "Debug Panels" $ \windowTitle -> do
+    Foreign.Marshal.Alloc.alloca $ \sizePtr -> do
+      Foreign.Storable.poke sizePtr (ImGui.Raw.ImVec2 400 600)
+      ImGui.Raw.setNextWindowSize sizePtr ImGui.Raw.ImGuiCond_FirstUseEver
     _open <- ImGui.Raw.begin windowTitle Nothing Nothing
 
     -- Status section

@@ -30,7 +30,9 @@ managedRenderDevice pdev surface layers enableMeshShader =
   alloc
     "Vulkan Render Device"
     (createRenderDevice pdev surface layers enableMeshShader)
-    (\(ptr, _) -> Vk26.destroyDevice ptr Nothing)
+    (\(ptr, _) -> do
+      Vk26.deviceWaitIdle ptr
+      Vk26.destroyDevice ptr Nothing)
 
 createRenderDevice :: (MonadIO m) => Vk26.PhysicalDevice -> Vk26.SurfaceKHR -> [String] -> Bool -> m (Vk26.Device, (Int, Int))
 createRenderDevice pdev surface layers enableMeshShader = do

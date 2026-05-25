@@ -1360,4 +1360,5 @@ renderLoop RenderLoopConfig {..} = do
   outerLoop False
 
   logInfo LogGeneral "renderLoop finished"
+  liftIO $ Vk26.deviceWaitIdle device
   destroyAllResources rm
