@@ -85,8 +85,8 @@ terrainMesh = meshShader do
       texU = worldX / 2560.0 + 0.5
       texV = worldZ / 2560.0 + 0.5
 
-  -- Sample heightmap
-  elevRaw <- use @(ImageTexel "heightmap") NilOps (Vec2 texU texV)
+  -- Sample heightmap with explicit LOD 0 (mesh shaders don't support implicit LOD)
+  elevRaw <- use @(ImageTexel "heightmap") (LOD (0.0 :: Code Float) NilOps) (Vec2 texU texV)
   let height = elevRaw * 32767.0 * heightScale
 
   let pos = Vec4 worldX height worldZ 1 :: Code (V 4 Float)
