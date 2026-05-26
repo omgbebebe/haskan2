@@ -40,7 +40,6 @@ import Graphics.Haskan.Vertex (Vertex (..))
 import Graphics.Haskan.Vulkan.Buffer qualified as Buffer
 import Graphics.Haskan.Vulkan.Resources (MeshHandle, ResourceManager, TextureHandle (..), allocHandle, rmNextId)
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
-import Vulkan qualified as Vk26
 import Linear (Quaternion (..), V2 (..), V3 (..), V4 (..))
 import Linear qualified
 import System.Directory (withCurrentDirectory)
@@ -83,6 +82,7 @@ import Text.GLTF.Loader.Gltf qualified as GLTFTypes
     Texture (..),
     TextureInfo (..),
   )
+import Vulkan qualified as Vk26
 
 -- | Pre-process glTF JSON to add missing image mime types.
 fixImageMimeTypes :: ByteString -> ByteString

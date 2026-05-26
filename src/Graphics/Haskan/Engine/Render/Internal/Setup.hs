@@ -33,12 +33,12 @@ import Data.IntMap.Strict qualified as IntMap
 import Data.List (nub)
 import Data.Maybe (catMaybes, fromMaybe, listToMaybe)
 import Data.Text qualified as Text
+import Data.Vector qualified as Vector
 import Data.Vector.Storable (Vector, fromList)
 import Data.Vector.Storable qualified as VS
 import Data.Word (Word16, Word32, Word8)
 import FIR qualified
 import Foreign.C qualified
-import Data.Vector qualified as Vector
 import Graphics.Haskan.Assets.Cache (AssetCache)
 import Graphics.Haskan.BoundingBox (BBox (..), emptyBBox, fromPoints)
 import Graphics.Haskan.Camera (AnyCamera, Camera (..))
@@ -115,9 +115,6 @@ import Graphics.Haskan.Vulkan.Shaders.Wireframe qualified as WireframeShaders
 import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Graphics.Haskan.Vulkan.Types (RenderContext (..), VulkanContext (..))
 import Graphics.Haskan.Window qualified as Window
-import Vulkan qualified as Vk26
-import Vulkan.CStruct.Extends (SomeStruct(..))
-import Vulkan.Zero (zero)
 import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
 import Linear.Matrix (identity, inv33, inv44, transpose, (!*), (!*!))
 import Linear.Projection qualified
@@ -126,6 +123,9 @@ import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
 import System.Clock (TimeSpec, toNanoSecs)
 import System.Directory (doesFileExist)
+import Vulkan qualified as Vk26
+import Vulkan.CStruct.Extends (SomeStruct (..))
+import Vulkan.Zero (zero)
 
 -- | Compile all FIR shaders to SPIR-V
 compileAllShaders :: (MonadLog m, MonadIO m) => m ()
@@ -498,7 +498,8 @@ loadScene ::
   String ->
   Maybe UVCheckMode ->
   Maybe Mesh.Mesh ->
-  Bool -> -- ^ mesh terrain enabled
+  -- | mesh terrain enabled
+  Bool ->
   m SceneLoadResult
 loadScene vc@VulkanContext {..} rm assetCache meshName uvCheckMode mSimpleMesh meshTerrainEnabled = do
   let isGLTF = ".gltf" `Text.isSuffixOf` Text.pack meshName || ".glb" `Text.isSuffixOf` Text.pack meshName
@@ -784,24 +785,26 @@ dispatchProceduralSkyGeneration VulkanContext {..} rm radianceHandle irradianceH
 
     -- Radiance: 512x512x6 / 8x8 = 64x64x6 workgroups
     liftIO $ Vk26.cmdBindPipeline vcCommandBuffer Vk26.PIPELINE_BIND_POINT_COMPUTE radiancePipeline
-    liftIO $ Vk26.cmdBindDescriptorSets
-      vcCommandBuffer
-      Vk26.PIPELINE_BIND_POINT_COMPUTE
-      cubemapPipelineLayout
-      0
-      (Vector.fromList [radianceDescriptorSet])
-      Vector.empty
+    liftIO $
+      Vk26.cmdBindDescriptorSets
+        vcCommandBuffer
+        Vk26.PIPELINE_BIND_POINT_COMPUTE
+        cubemapPipelineLayout
+        0
+        (Vector.fromList [radianceDescriptorSet])
+        Vector.empty
     CommandBuffer.cmdDispatch vcCommandBuffer 64 64 6
 
     -- Irradiance: 64x64x6 / 8x8 = 8x8x6 workgroups
     liftIO $ Vk26.cmdBindPipeline vcCommandBuffer Vk26.PIPELINE_BIND_POINT_COMPUTE irradiancePipeline
-    liftIO $ Vk26.cmdBindDescriptorSets
-      vcCommandBuffer
-      Vk26.PIPELINE_BIND_POINT_COMPUTE
-      cubemapPipelineLayout
-      0
-      (Vector.fromList [irradianceDescriptorSet])
-      Vector.empty
+    liftIO $
+      Vk26.cmdBindDescriptorSets
+        vcCommandBuffer
+        Vk26.PIPELINE_BIND_POINT_COMPUTE
+        cubemapPipelineLayout
+        0
+        (Vector.fromList [irradianceDescriptorSet])
+        Vector.empty
     CommandBuffer.cmdDispatch vcCommandBuffer 8 8 6
 
     -- Transition storage images to SHADER_READ_ONLY_OPTIMAL
@@ -910,13 +913,14 @@ dispatchCloudNoiseGeneration VulkanContext {..} rm noiseHandle NoiseParams {..} 
         1
     -- 256x256x256 / 8x8x4 = 32x32x64 workgroups
     liftIO $ Vk26.cmdBindPipeline vcCommandBuffer Vk26.PIPELINE_BIND_POINT_COMPUTE noisePipeline
-    liftIO $ Vk26.cmdBindDescriptorSets
-      vcCommandBuffer
-      Vk26.PIPELINE_BIND_POINT_COMPUTE
-      noisePipelineLayout
-      0
-      (Vector.fromList [noiseDescriptorSet])
-      Vector.empty
+    liftIO $
+      Vk26.cmdBindDescriptorSets
+        vcCommandBuffer
+        Vk26.PIPELINE_BIND_POINT_COMPUTE
+        noisePipelineLayout
+        0
+        (Vector.fromList [noiseDescriptorSet])
+        Vector.empty
     CommandBuffer.cmdDispatch vcCommandBuffer 32 32 64
 
     -- Generate mipmaps 1..4 using REPEAT-aware compute shader
@@ -941,24 +945,26 @@ dispatchCloudNoiseGeneration VulkanContext {..} rm noiseHandle NoiseParams {..} 
 
         -- Dispatch mipgen compute shader
         liftIO $ Vk26.cmdBindPipeline vcCommandBuffer Vk26.PIPELINE_BIND_POINT_COMPUTE mipgenPipeline
-        liftIO $ Vk26.cmdBindDescriptorSets
-          vcCommandBuffer
-          Vk26.PIPELINE_BIND_POINT_COMPUTE
-          mipgenPipelineLayout
-          0
-          (Vector.fromList [ds])
-          Vector.empty
+        liftIO $
+          Vk26.cmdBindDescriptorSets
+            vcCommandBuffer
+            Vk26.PIPELINE_BIND_POINT_COMPUTE
+            mipgenPipelineLayout
+            0
+            (Vector.fromList [ds])
+            Vector.empty
         CommandBuffer.cmdDispatch vcCommandBuffer (fromIntegral (dstW `div` 8)) (fromIntegral (dstH `div` 8)) (fromIntegral (dstD `div` 4))
 
         -- Barrier: ensure compute writes are visible to next dispatch's reads
-        liftIO $ Vk26.cmdPipelineBarrier
-          vcCommandBuffer
-          Vk26.PIPELINE_STAGE_COMPUTE_SHADER_BIT
-          Vk26.PIPELINE_STAGE_COMPUTE_SHADER_BIT
-          zero
-          (Vector.fromList [Vk26.MemoryBarrier Vk26.ACCESS_SHADER_WRITE_BIT Vk26.ACCESS_SHADER_READ_BIT])
-          Vector.empty
-          Vector.empty
+        liftIO $
+          Vk26.cmdPipelineBarrier
+            vcCommandBuffer
+            Vk26.PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            Vk26.PIPELINE_STAGE_COMPUTE_SHADER_BIT
+            zero
+            (Vector.fromList [Vk26.MemoryBarrier Vk26.ACCESS_SHADER_WRITE_BIT Vk26.ACCESS_SHADER_READ_BIT])
+            Vector.empty
+            Vector.empty
 
       -- Transition all mips to SHADER_READ_ONLY_OPTIMAL
       CommandBuffer.mipLayerTransition
@@ -1011,13 +1017,14 @@ dispatchCloudDetailNoiseGeneration VulkanContext {..} rm noiseHandle = do
   CommandBuffer.withCommandBufferOneTime vcQueue vcCommandBuffer $ do
     -- 64x64x64 / 8x8x8 = 8x8x8 workgroups
     liftIO $ Vk26.cmdBindPipeline vcCommandBuffer Vk26.PIPELINE_BIND_POINT_COMPUTE noisePipeline
-    liftIO $ Vk26.cmdBindDescriptorSets
-      vcCommandBuffer
-      Vk26.PIPELINE_BIND_POINT_COMPUTE
-      noisePipelineLayout
-      0
-      (Vector.fromList [noiseDescriptorSet])
-      Vector.empty
+    liftIO $
+      Vk26.cmdBindDescriptorSets
+        vcCommandBuffer
+        Vk26.PIPELINE_BIND_POINT_COMPUTE
+        noisePipelineLayout
+        0
+        (Vector.fromList [noiseDescriptorSet])
+        Vector.empty
     CommandBuffer.cmdDispatch vcCommandBuffer 8 8 8
 
     -- Transition to SHADER_READ_ONLY_OPTIMAL
@@ -1072,13 +1079,14 @@ dispatchWeatherMapGeneration VulkanContext {..} rm weatherHandle = do
   CommandBuffer.withCommandBufferOneTime vcQueue vcCommandBuffer $ do
     -- 1024x1024 / 8x8 = 128x128x1 workgroups
     liftIO $ Vk26.cmdBindPipeline vcCommandBuffer Vk26.PIPELINE_BIND_POINT_COMPUTE weatherPipeline
-    liftIO $ Vk26.cmdBindDescriptorSets
-      vcCommandBuffer
-      Vk26.PIPELINE_BIND_POINT_COMPUTE
-      weatherPipelineLayout
-      0
-      (Vector.fromList [weatherDescriptorSet])
-      Vector.empty
+    liftIO $
+      Vk26.cmdBindDescriptorSets
+        vcCommandBuffer
+        Vk26.PIPELINE_BIND_POINT_COMPUTE
+        weatherPipelineLayout
+        0
+        (Vector.fromList [weatherDescriptorSet])
+        Vector.empty
     CommandBuffer.cmdDispatch vcCommandBuffer 128 128 1
 
     -- Transition to SHADER_READ_ONLY_OPTIMAL

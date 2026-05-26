@@ -7,9 +7,9 @@ import Control.Monad.Managed (MonadManaged)
 import Data.Vector qualified as Vector
 import Data.Word (Word32)
 import Graphics.Haskan.Resources (alloc)
-import Vulkan.CStruct.Extends (SomeStruct(..))
-import Vulkan.Zero (zero)
 import Vulkan qualified as Vk26
+import Vulkan.CStruct.Extends (SomeStruct (..))
+import Vulkan.Zero (zero)
 
 -- | Configuration for updating lighting descriptor sets.
 data LightingDescriptorUpdate = LightingDescriptorUpdate

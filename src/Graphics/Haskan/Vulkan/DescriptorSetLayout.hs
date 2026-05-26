@@ -42,6 +42,7 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Managed (MonadManaged)
 import Data.Bits ((.|.))
 import Data.Coerce (coerce)
+import Data.Vector qualified as Vector
 import Data.Word (Word32)
 import Graphics.Haskan.Resources (alloc)
 import Graphics.Haskan.Vulkan.DescriptorSetLayout.TH (descriptorSetLayoutBindings)
@@ -59,10 +60,9 @@ import Graphics.Haskan.Vulkan.Shaders.Deferred.Lighting qualified as Lighting
 import Graphics.Haskan.Vulkan.Shaders.Deferred.LightingProcedural qualified as LightingProcedural
 import Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainOverlay (TerrainFragmentDefs)
 import Language.Haskell.TH (Exp (VarE), mkName)
-import Data.Vector qualified as Vector
 import Vulkan qualified as Vk26
-import Vulkan.Core12.Enums.DescriptorBindingFlagBits qualified as V12
 import Vulkan.Core10.Enums.DescriptorSetLayoutCreateFlagBits qualified as V10
+import Vulkan.Core12.Enums.DescriptorBindingFlagBits qualified as V12
 import Vulkan.Zero (zero)
 
 maxBindlessTextures :: Int
@@ -99,7 +99,7 @@ vkVertexFragmentBits :: Vk26.ShaderStageFlags
 vkVertexFragmentBits = Vk26.SHADER_STAGE_VERTEX_BIT .|. Vk26.SHADER_STAGE_FRAGMENT_BIT
 
 vkMeshBit :: Vk26.ShaderStageFlags
-vkMeshBit = Data.Coerce.coerce (0x00000080 :: Word32)  -- VK_SHADER_STAGE_MESH_BIT_EXT
+vkMeshBit = Data.Coerce.coerce (0x00000080 :: Word32) -- VK_SHADER_STAGE_MESH_BIT_EXT
 
 vkComputeBit :: Vk26.ShaderStageFlags
 vkComputeBit = Vk26.SHADER_STAGE_COMPUTE_BIT

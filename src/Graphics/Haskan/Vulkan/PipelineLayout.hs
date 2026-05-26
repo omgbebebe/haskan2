@@ -28,8 +28,8 @@ createPipelineLayoutWithPushConstants :: (MonadIO m) => Vulkan.Device -> [Vulkan
 createPipelineLayoutWithPushConstants dev descriptorSetLayouts pushConstantRanges =
   let createInfo =
         Vulkan.PipelineLayoutCreateInfo
-          { flags = zero
-          , setLayouts = Vector.fromList descriptorSetLayouts
-          , pushConstantRanges = Vector.fromList pushConstantRanges
+          { flags = zero,
+            setLayouts = Vector.fromList descriptorSetLayouts,
+            pushConstantRanges = Vector.fromList pushConstantRanges
           }
    in liftIO $ Vulkan.createPipelineLayout dev createInfo Nothing

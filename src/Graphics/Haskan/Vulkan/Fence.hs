@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 module Graphics.Haskan.Vulkan.Fence where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -21,7 +22,7 @@ createFence dev =
   let createInfo :: Vulkan.FenceCreateInfo '[]
       createInfo =
         Vulkan.FenceCreateInfo
-          { next = ()
-          , flags = Vulkan.FENCE_CREATE_SIGNALED_BIT
+          { next = (),
+            flags = Vulkan.FENCE_CREATE_SIGNALED_BIT
           }
    in liftIO $ Vulkan.createFence dev createInfo Nothing

@@ -1,4 +1,6 @@
-{-# LANGUAGE DataKinds, DuplicateRecordFields #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+
 module Graphics.Haskan.Vulkan.Device where
 
 import Control.Monad (filterM)
@@ -16,10 +18,10 @@ import Graphics.Haskan.Resources (alloc)
 import Numeric (showHex)
 import System.IO.Unsafe (unsafePerformIO)
 import Vulkan qualified as Vk26
-import Vulkan.CStruct.Extends (SomeStruct(..))
-import Vulkan.Core10.DeviceInitialization (PhysicalDeviceProperties(..), PhysicalDeviceFeatures(..), QueueFamilyProperties(..))
-import Vulkan.Core12.Promoted_From_VK_EXT_descriptor_indexing (PhysicalDeviceDescriptorIndexingFeatures(..))
-import Vulkan.Extensions.VK_EXT_mesh_shader (PhysicalDeviceMeshShaderFeaturesEXT(..))
+import Vulkan.CStruct.Extends (SomeStruct (..))
+import Vulkan.Core10.DeviceInitialization (PhysicalDeviceFeatures (..), PhysicalDeviceProperties (..), QueueFamilyProperties (..))
+import Vulkan.Core12.Promoted_From_VK_EXT_descriptor_indexing (PhysicalDeviceDescriptorIndexingFeatures (..))
+import Vulkan.Extensions.VK_EXT_mesh_shader (PhysicalDeviceMeshShaderFeaturesEXT (..))
 import Vulkan.Zero (zero)
 
 vkExtMeshShaderExtensionName :: BS8.ByteString
@@ -30,9 +32,10 @@ managedRenderDevice pdev surface layers enableMeshShader =
   alloc
     "Vulkan Render Device"
     (createRenderDevice pdev surface layers enableMeshShader)
-    (\(ptr, _) -> do
-      Vk26.deviceWaitIdle ptr
-      Vk26.destroyDevice ptr Nothing)
+    ( \(ptr, _) -> do
+        Vk26.deviceWaitIdle ptr
+        Vk26.destroyDevice ptr Nothing
+    )
 
 createRenderDevice :: (MonadIO m) => Vk26.PhysicalDevice -> Vk26.SurfaceKHR -> [String] -> Bool -> m (Vk26.Device, (Int, Int))
 createRenderDevice pdev surface layers enableMeshShader = do
@@ -111,10 +114,11 @@ createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
         let Vk26.PhysicalDeviceFeatures2 (msFeaturesQuery, ()) _ = features2
             meshSupported = meshShader msFeaturesQuery
             -- Disable features that require additional extensions we don't enable
-            msFeaturesQuery' = msFeaturesQuery
-              { multiviewMeshShader = False
-              , primitiveFragmentShadingRateMeshShader = False
-              }
+            msFeaturesQuery' =
+              msFeaturesQuery
+                { multiviewMeshShader = False,
+                  primitiveFragmentShadingRateMeshShader = False
+                }
         logInfoIO LogVulkan $ "Mesh shader supported: " <> showT meshSupported
         pure (Just msFeaturesQuery')
       else pure Nothing
@@ -125,22 +129,22 @@ createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
       enabledExtensions = Vector.fromList $ Vk26.KHR_SWAPCHAIN_EXTENSION_NAME : meshShaderExtension
       enabledBasicFeatures =
         (zero :: Vk26.PhysicalDeviceFeatures)
-          { geometryShader = geometrySupported
-          , shaderCullDistance = cullDistanceSupported
-          , vertexPipelineStoresAndAtomics = vertexStorageSupported
-          , fragmentStoresAndAtomics = fragmentStorageSupported
-          , multiDrawIndirect = multiDrawIndirectSupported
-          , shaderStorageImageExtendedFormats = storageExtendedSupported
+          { geometryShader = geometrySupported,
+            shaderCullDistance = cullDistanceSupported,
+            vertexPipelineStoresAndAtomics = vertexStorageSupported,
+            fragmentStoresAndAtomics = fragmentStorageSupported,
+            multiDrawIndirect = multiDrawIndirectSupported,
+            shaderStorageImageExtendedFormats = storageExtendedSupported
           }
       queueCreateInfos =
         map
           ( \i ->
               SomeStruct
                 ( Vk26.DeviceQueueCreateInfo
-                    { next = ()
-                    , flags = queueFlags
-                    , queueFamilyIndex = fromIntegral i
-                    , queuePriorities = Vector.fromList [1.0]
+                    { next = (),
+                      flags = queueFlags,
+                      queueFamilyIndex = fromIntegral i,
+                      queuePriorities = Vector.fromList [1.0]
                     }
                 )
           )
@@ -149,59 +153,60 @@ createDevice dev queueFamilyIndices enabledLayers enableMeshShader = do
   liftIO $ do
     let diFeatures =
           if descriptorIndexingSupported
-            then Just
-              ( (zero :: Vk26.PhysicalDeviceDescriptorIndexingFeatures)
-                  { shaderSampledImageArrayNonUniformIndexing = True
-                  , descriptorBindingSampledImageUpdateAfterBind = True
-                  , descriptorBindingPartiallyBound = True
-                  , runtimeDescriptorArray = True
-                  }
-              )
+            then
+              Just
+                ( (zero :: Vk26.PhysicalDeviceDescriptorIndexingFeatures)
+                    { shaderSampledImageArrayNonUniformIndexing = True,
+                      descriptorBindingSampledImageUpdateAfterBind = True,
+                      descriptorBindingPartiallyBound = True,
+                      runtimeDescriptorArray = True
+                    }
+                )
             else Nothing
         msFeatures = meshShaderFeatures
     case (diFeatures, msFeatures) of
       (Nothing, Nothing) -> do
         let createInfo =
               Vk26.DeviceCreateInfo
-                { next = ()
-                , flags = deviceFlags
-                , queueCreateInfos = Vector.fromList queueCreateInfos
-                , enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers
-                , enabledExtensionNames = enabledExtensions
-                , enabledFeatures = Just enabledBasicFeatures
+                { next = (),
+                  flags = deviceFlags,
+                  queueCreateInfos = Vector.fromList queueCreateInfos,
+                  enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers,
+                  enabledExtensionNames = enabledExtensions,
+                  enabledFeatures = Just enabledBasicFeatures
                 }
         Vk26.createDevice dev createInfo Nothing
       (Just di, Nothing) -> do
         let createInfo =
               Vk26.DeviceCreateInfo
-                { next = (di, ())
-                , flags = deviceFlags
-                , queueCreateInfos = Vector.fromList queueCreateInfos
-                , enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers
-                , enabledExtensionNames = enabledExtensions
-                , enabledFeatures = Just enabledBasicFeatures
+                { next = (di, ()),
+                  flags = deviceFlags,
+                  queueCreateInfos = Vector.fromList queueCreateInfos,
+                  enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers,
+                  enabledExtensionNames = enabledExtensions,
+                  enabledFeatures = Just enabledBasicFeatures
                 }
         Vk26.createDevice dev createInfo Nothing
       (Nothing, Just ms) -> do
         let createInfo =
               Vk26.DeviceCreateInfo
-                { next = (ms, ())
-                , flags = deviceFlags
-                , queueCreateInfos = Vector.fromList queueCreateInfos
-                , enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers
-                , enabledExtensionNames = enabledExtensions
-                , enabledFeatures = Just enabledBasicFeatures
+                { next = (ms, ()),
+                  flags = deviceFlags,
+                  queueCreateInfos = Vector.fromList queueCreateInfos,
+                  enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers,
+                  enabledExtensionNames = enabledExtensions,
+                  enabledFeatures = Just enabledBasicFeatures
                 }
         Vk26.createDevice dev createInfo Nothing
       (Just di, Just ms) -> do
         let createInfo =
               Vk26.DeviceCreateInfo
-                { next = (di, (ms, ()))
-                , flags = deviceFlags
-                , queueCreateInfos = Vector.fromList queueCreateInfos
-                , enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers
-                , enabledExtensionNames = enabledExtensions
-                , enabledFeatures = Just enabledBasicFeatures
+                { next = (di, (ms, ())),
+                  flags = deviceFlags,
+                  queueCreateInfos = Vector.fromList queueCreateInfos,
+                  enabledLayerNames = Vector.fromList $ map BS8.pack enabledLayers,
+                  enabledExtensionNames = enabledExtensions,
+                  enabledFeatures = Just enabledBasicFeatures
                 }
         Vk26.createDevice dev createInfo Nothing
 

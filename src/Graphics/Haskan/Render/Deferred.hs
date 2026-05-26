@@ -18,6 +18,7 @@ import Data.Foldable (for_)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Vector qualified as Vector
 import Data.Word (Word32)
 import Foreign (Ptr, castPtr)
 import Foreign.C (CFloat)
@@ -31,11 +32,10 @@ import Graphics.Haskan.Vulkan.DescriptorSet qualified as DescriptorSet
 import Graphics.Haskan.Vulkan.GraphicsPipeline qualified as GraphicsPipeline
 import Graphics.Haskan.Vulkan.RenderPass qualified as RenderPass
 import Graphics.Haskan.Vulkan.Resources (BufferResource (..), MeshResource (..), TextureResource (..))
-import Data.Vector qualified as Vector
-import Vulkan qualified as Vk26
 import Linear.Matrix (M44, transpose)
 import Linear.V3 (V3 (..))
 import Linear.V4 (V4 (..))
+import Vulkan qualified as Vk26
 
 -- | G-buffer pass resources.
 data GBufferPassData = GBufferPassData
@@ -180,7 +180,7 @@ buildDeferredGraph DeferredPassData {..} = do
                     vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
                     idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
                 Vk26.cmdBindVertexBuffers commandBuffer 0 (Vector.fromList [vertBuf]) (Vector.fromList [0])
-                  
+
                 Vk26.cmdBindIndexBuffer commandBuffer idxBuf 0 Vk26.INDEX_TYPE_UINT32
             -- Bind descriptor set once (no dynamic offsets)
             DescriptorSet.cmdBindDescriptorSets
@@ -207,7 +207,7 @@ buildDeferredGraph DeferredPassData {..} = do
                       vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
                       idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
                   Vk26.cmdBindVertexBuffers commandBuffer 0 (Vector.fromList [vertBuf]) (Vector.fromList [0])
-                    
+
                   Vk26.cmdBindIndexBuffer commandBuffer idxBuf 0 Vk26.INDEX_TYPE_UINT32
               -- Bind descriptor set for wireframe (shares layout)
               DescriptorSet.cmdBindDescriptorSets
@@ -245,7 +245,7 @@ buildDeferredGraph DeferredPassData {..} = do
                         vertBuf = brVkBuffer (mrVertexBuffer firstMesh)
                         idxBuf = brVkBuffer (mrIndexBuffer firstMesh)
                     Vk26.cmdBindVertexBuffers commandBuffer 0 (Vector.fromList [vertBuf]) (Vector.fromList [0])
-                      
+
                     Vk26.cmdBindIndexBuffer commandBuffer idxBuf 0 Vk26.INDEX_TYPE_UINT32
                 -- Bind descriptor set
                 DescriptorSet.cmdBindDescriptorSets

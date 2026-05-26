@@ -4,14 +4,13 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.ByteString.Char8 qualified as BS8
 import Data.Foldable (find)
 import Graphics.Haskan.Resources (allocaAndPeek_)
-import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Core_1_0 qualified as Vulkan
-
 -- vulkan package
-import Vulkan.Core10.ExtensionDiscovery qualified as Vk
-import Vulkan.Zero qualified as Vk
 
 import Graphics.Haskan.Vulkan.Interop (toVulkanPhysicalDevice)
+import Graphics.Vulkan qualified as Vulkan
+import Graphics.Vulkan.Core_1_0 qualified as Vulkan
+import Vulkan.Core10.ExtensionDiscovery qualified as Vk
+import Vulkan.Zero qualified as Vk
 
 -- | Detected device capabilities relevant to advanced shader stages.
 data DeviceCapabilities = DeviceCapabilities

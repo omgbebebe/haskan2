@@ -20,9 +20,9 @@ import Graphics.Haskan.Logger (LogCategory (..))
 import Graphics.Haskan.Vulkan.DeferredResources (DeferredResources (..))
 import Graphics.Haskan.Vulkan.Resources (TextureResource (..))
 import Graphics.Haskan.Vulkan.Types (VulkanContext (..))
-import Vulkan qualified as Vk26
 import System.Directory (createDirectoryIfMissing)
 import System.FilePath ((</>))
+import Vulkan qualified as Vk26
 
 -- | Context needed for cloud texture exports.
 data CloudExportContext = CloudExportContext

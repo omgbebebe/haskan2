@@ -2,41 +2,43 @@
 
 module Graphics.Haskan.Vulkan.Interop
   ( -- * vulkan-api → vulkan package (existing, re-exported)
-    toVulkanDevice
-  , toVulkanInstance
-  , toVulkanPhysicalDevice
-  , toVulkanQueue
-  , toVulkanCommandBuffer
-  , toVulkanRenderPass
-  , toVulkanDescriptorPool
+    toVulkanDevice,
+    toVulkanInstance,
+    toVulkanPhysicalDevice,
+    toVulkanQueue,
+    toVulkanCommandBuffer,
+    toVulkanRenderPass,
+    toVulkanDescriptorPool,
+
     -- * vulkan package → vulkan-api (new)
-  , fromVulkanDevice
-  , fromVulkanPipeline
-  , fromVulkanPipelineLayout
-  , fromVulkanShaderModule
-  , fromVulkanRenderPass
-  , fromVulkanCommandBuffer
+    fromVulkanDevice,
+    fromVulkanPipeline,
+    fromVulkanPipelineLayout,
+    fromVulkanShaderModule,
+    fromVulkanRenderPass,
+    fromVulkanCommandBuffer,
+
     -- * Additional reverse conversions
-  , fromVulkanDescriptorPool
-  , fromVulkanDescriptorSet
-  , fromVulkanSampler
-  , fromVulkanImageView
-  , fromVulkanBuffer
-  , fromVulkanDeviceMemory
-  , fromVulkanImage
+    fromVulkanDescriptorPool,
+    fromVulkanDescriptorSet,
+    fromVulkanSampler,
+    fromVulkanImageView,
+    fromVulkanBuffer,
+    fromVulkanDeviceMemory,
+    fromVulkanImage,
+
     -- * Additional forward conversions
-  , toVulkanPipelineLayout
-  , toVulkanShaderModule
-  , toVulkanSampler
-  ) where
+    toVulkanPipelineLayout,
+    toVulkanShaderModule,
+    toVulkanSampler,
+  )
+where
 
 import Data.Coerce (coerce)
 import Foreign.Ptr (castPtr)
-
 -- vulkan-api
 import Graphics.Vulkan qualified as Vulkan
-import Graphics.Vulkan.Marshal (VkPtr(..))
-
+import Graphics.Vulkan.Marshal (VkPtr (..))
 -- vulkan package
 import Vulkan.Core10.Handles qualified as Vk
 import Vulkan.Zero qualified as Vk

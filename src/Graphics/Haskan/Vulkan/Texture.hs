@@ -1,4 +1,5 @@
-{-# LANGUAGE DuplicateRecordFields, LambdaCase #-}
+{-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Graphics.Haskan.Vulkan.Texture
   ( readImageFromFile,
@@ -42,6 +43,7 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.Foldable (for_)
 import Data.Int (Int16)
+import Data.Vector qualified as V
 import Data.Vector.Storable qualified
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word32, Word8)
@@ -64,9 +66,8 @@ import Graphics.Haskan.Vulkan.Memory qualified as Haskan
 import Graphics.Haskan.Vulkan.Resources
 import Graphics.Haskan.Vulkan.Types (VulkanContext (..))
 import Vulkan qualified as Vk26
-import Vulkan.CStruct.Extends (SomeStruct(..))
+import Vulkan.CStruct.Extends (SomeStruct (..))
 import Vulkan.Zero (zero)
-import Data.Vector qualified as V
 
 readImageFromFile ::
   (MonadIO m) =>
@@ -124,20 +125,20 @@ managedTexture vc filePath = do
         Vk26.Extent3D (fromIntegral width) (fromIntegral height) 1
       createInfo =
         Vk26.ImageCreateInfo
-                  { next = ()
-                  , imageType = Vk26.IMAGE_TYPE_2D
-                  , extent = imageExtent
-                  , mipLevels = 1
-                  , arrayLayers = 1
-                  , format = format
-                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
-                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
-                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-                  , samples = Vk26.SAMPLE_COUNT_1_BIT
-                  , flags = zero
-                  , queueFamilyIndices = V.empty
-                  }
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_2D,
+            extent = imageExtent,
+            mipLevels = 1,
+            arrayLayers = 1,
+            format = format,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = zero,
+            queueFamilyIndices = V.empty
+          }
 
   image <-
     alloc
@@ -217,20 +218,20 @@ managedTexture3D vc filePath width height depth = do
         Vk26.Extent3D (fromIntegral width) (fromIntegral height) (fromIntegral depth)
       createInfo =
         Vk26.ImageCreateInfo
-                  { next = ()
-                  , imageType = Vk26.IMAGE_TYPE_2D
-                  , extent = imageExtent
-                  , mipLevels = 1
-                  , arrayLayers = 1
-                  , format = format
-                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
-                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
-                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-                  , samples = Vk26.SAMPLE_COUNT_1_BIT
-                  , flags = zero
-                  , queueFamilyIndices = V.empty
-                  }
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_2D,
+            extent = imageExtent,
+            mipLevels = 1,
+            arrayLayers = 1,
+            format = format,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = zero,
+            queueFamilyIndices = V.empty
+          }
 
   image <-
     alloc
@@ -311,20 +312,20 @@ managedTexture3DWithMips vc filePath width height depth mipLevels = do
         Vk26.Extent3D (fromIntegral width) (fromIntegral height) (fromIntegral depth)
       createInfo =
         Vk26.ImageCreateInfo
-                  { next = ()
-                  , imageType = Vk26.IMAGE_TYPE_3D
-                  , extent = imageExtent
-                  , mipLevels = (fromIntegral mipLevels)
-                  , arrayLayers = 1
-                  , format = format
-                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
-                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
-                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-                  , samples = Vk26.SAMPLE_COUNT_1_BIT
-                  , flags = zero
-                  , queueFamilyIndices = V.empty
-                  }
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_3D,
+            extent = imageExtent,
+            mipLevels = (fromIntegral mipLevels),
+            arrayLayers = 1,
+            format = format,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = zero,
+            queueFamilyIndices = V.empty
+          }
 
   image <-
     alloc
@@ -431,6 +432,7 @@ bindImageMemory ::
   Vk26.DeviceSize ->
   m ()
 bindImageMemory dev image memory offset = liftIO $ Vk26.bindImageMemory dev image memory offset
+
 managedSampler ::
   (MonadManaged m) =>
   Vk26.Device ->
@@ -448,24 +450,24 @@ createSampler ::
 createSampler dev =
   let createInfo =
         Vk26.SamplerCreateInfo
-                  { next = ()
-                  , flags = zero
-                  , magFilter = Vk26.FILTER_LINEAR
-                  , minFilter = Vk26.FILTER_LINEAR
-                  , addressModeU = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
-                  , addressModeV = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
-                  , addressModeW = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
-                  , anisotropyEnable = False
-                  , maxAnisotropy = 1.0
-                  , borderColor = Vk26.BORDER_COLOR_INT_OPAQUE_BLACK
-                  , unnormalizedCoordinates = False
-                  , compareEnable = False
-                  , compareOp = Vk26.COMPARE_OP_ALWAYS
-                  , mipmapMode = Vk26.SAMPLER_MIPMAP_MODE_LINEAR
-                  , mipLodBias = 0.0
-                  , minLod = 0.0
-                  , maxLod = 0.0
-                  }
+          { next = (),
+            flags = zero,
+            magFilter = Vk26.FILTER_LINEAR,
+            minFilter = Vk26.FILTER_LINEAR,
+            addressModeU = Vk26.SAMPLER_ADDRESS_MODE_REPEAT,
+            addressModeV = Vk26.SAMPLER_ADDRESS_MODE_REPEAT,
+            addressModeW = Vk26.SAMPLER_ADDRESS_MODE_REPEAT,
+            anisotropyEnable = False,
+            maxAnisotropy = 1.0,
+            borderColor = Vk26.BORDER_COLOR_INT_OPAQUE_BLACK,
+            unnormalizedCoordinates = False,
+            compareEnable = False,
+            compareOp = Vk26.COMPARE_OP_ALWAYS,
+            mipmapMode = Vk26.SAMPLER_MIPMAP_MODE_LINEAR,
+            mipLodBias = 0.0,
+            minLod = 0.0,
+            maxLod = 0.0
+          }
    in liftIO $ Vk26.createSampler dev createInfo Nothing
 
 createSamplerWithLod ::
@@ -477,25 +479,25 @@ createSamplerWithLod ::
 createSamplerWithLod dev maxLod =
   let createInfo =
         Vk26.SamplerCreateInfo
-                  { next = ()
-                  , flags = zero
-                  , magFilter = Vk26.FILTER_LINEAR
-                  , minFilter = Vk26.FILTER_LINEAR
-                  , addressModeU = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
-                  , addressModeV = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
-                  , addressModeW = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
-                  , anisotropyEnable = False
-                  , maxAnisotropy = 1.0
-                  , borderColor = Vk26.BORDER_COLOR_INT_OPAQUE_BLACK
-                  , unnormalizedCoordinates = False
-                  , compareEnable = False
-                  , compareOp = Vk26.COMPARE_OP_ALWAYS
-                  , mipmapMode = Vk26.SAMPLER_MIPMAP_MODE_LINEAR
-                  , mipLodBias = 0.0
-                  , minLod = 0.0
-                  , maxLod = maxLod
-                  }
-    in liftIO $ Vk26.createSampler dev createInfo Nothing
+          { next = (),
+            flags = zero,
+            magFilter = Vk26.FILTER_LINEAR,
+            minFilter = Vk26.FILTER_LINEAR,
+            addressModeU = Vk26.SAMPLER_ADDRESS_MODE_REPEAT,
+            addressModeV = Vk26.SAMPLER_ADDRESS_MODE_REPEAT,
+            addressModeW = Vk26.SAMPLER_ADDRESS_MODE_REPEAT,
+            anisotropyEnable = False,
+            maxAnisotropy = 1.0,
+            borderColor = Vk26.BORDER_COLOR_INT_OPAQUE_BLACK,
+            unnormalizedCoordinates = False,
+            compareEnable = False,
+            compareOp = Vk26.COMPARE_OP_ALWAYS,
+            mipmapMode = Vk26.SAMPLER_MIPMAP_MODE_LINEAR,
+            mipLodBias = 0.0,
+            minLod = 0.0,
+            maxLod = maxLod
+          }
+   in liftIO $ Vk26.createSampler dev createInfo Nothing
 
 managedSamplerNearest ::
   (MonadManaged m) =>
@@ -525,25 +527,25 @@ createSamplerNearest ::
 createSamplerNearest dev =
   let createInfo =
         Vk26.SamplerCreateInfo
-                  { next = ()
-                  , flags = zero
-                  , magFilter = Vk26.FILTER_NEAREST
-                  , minFilter = Vk26.FILTER_NEAREST
-                  , addressModeU = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
-                  , addressModeV = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
-                  , addressModeW = Vk26.SAMPLER_ADDRESS_MODE_REPEAT
-                  , anisotropyEnable = False
-                  , maxAnisotropy = 1.0
-                  , borderColor = Vk26.BORDER_COLOR_INT_OPAQUE_BLACK
-                  , unnormalizedCoordinates = False
-                  , compareEnable = False
-                  , compareOp = Vk26.COMPARE_OP_ALWAYS
-                  , mipmapMode = Vk26.SAMPLER_MIPMAP_MODE_NEAREST
-                  , mipLodBias = 0.0
-                  , minLod = 0.0
-                  , maxLod = 0.0
-                  }
-    in liftIO $ Vk26.createSampler dev createInfo Nothing
+          { next = (),
+            flags = zero,
+            magFilter = Vk26.FILTER_NEAREST,
+            minFilter = Vk26.FILTER_NEAREST,
+            addressModeU = Vk26.SAMPLER_ADDRESS_MODE_REPEAT,
+            addressModeV = Vk26.SAMPLER_ADDRESS_MODE_REPEAT,
+            addressModeW = Vk26.SAMPLER_ADDRESS_MODE_REPEAT,
+            anisotropyEnable = False,
+            maxAnisotropy = 1.0,
+            borderColor = Vk26.BORDER_COLOR_INT_OPAQUE_BLACK,
+            unnormalizedCoordinates = False,
+            compareEnable = False,
+            compareOp = Vk26.COMPARE_OP_ALWAYS,
+            mipmapMode = Vk26.SAMPLER_MIPMAP_MODE_NEAREST,
+            mipLodBias = 0.0,
+            minLod = 0.0,
+            maxLod = 0.0
+          }
+   in liftIO $ Vk26.createSampler dev createInfo Nothing
 
 -- | Shared texture upload logic: staging buffer -> image -> imageView -> register.
 uploadTextureWithFormat ::
@@ -576,20 +578,20 @@ uploadTextureWithFormat rm vc width height imgData format = do
         Vk26.Extent3D (fromIntegral width) (fromIntegral height) 1
       createInfo =
         Vk26.ImageCreateInfo
-                  { next = ()
-                  , imageType = Vk26.IMAGE_TYPE_2D
-                  , extent = imageExtent
-                  , mipLevels = 1
-                  , arrayLayers = 1
-                  , format = format
-                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
-                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
-                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-                  , samples = Vk26.SAMPLE_COUNT_1_BIT
-                  , flags = zero
-                  , queueFamilyIndices = V.empty
-                  }
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_2D,
+            extent = imageExtent,
+            mipLevels = 1,
+            arrayLayers = 1,
+            format = format,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = zero,
+            queueFamilyIndices = V.empty
+          }
 
   image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
@@ -719,20 +721,20 @@ uploadTextureWithFormatVector rm vc width height imgData format = do
         Vk26.Extent3D (fromIntegral width) (fromIntegral height) 1
       createInfo =
         Vk26.ImageCreateInfo
-                  { next = ()
-                  , imageType = Vk26.IMAGE_TYPE_2D
-                  , extent = imageExtent
-                  , mipLevels = 1
-                  , arrayLayers = 1
-                  , format = format
-                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
-                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
-                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-                  , samples = Vk26.SAMPLE_COUNT_1_BIT
-                  , flags = zero
-                  , queueFamilyIndices = V.empty
-                  }
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_2D,
+            extent = imageExtent,
+            mipLevels = 1,
+            arrayLayers = 1,
+            format = format,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = zero,
+            queueFamilyIndices = V.empty
+          }
 
   image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
@@ -941,20 +943,20 @@ createTexture2DArray rm vc width height layers = do
         Vk26.Extent3D (fromIntegral width) (fromIntegral height) 1
       createInfo =
         Vk26.ImageCreateInfo
-                  { next = ()
-                  , imageType = Vk26.IMAGE_TYPE_2D
-                  , extent = imageExtent
-                  , mipLevels = 1
-                  , arrayLayers = (fromIntegral numLayers)
-                  , format = format
-                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
-                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
-                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-                  , samples = Vk26.SAMPLE_COUNT_1_BIT
-                  , flags = zero
-                  , queueFamilyIndices = V.empty
-                  }
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_2D,
+            extent = imageExtent,
+            mipLevels = 1,
+            arrayLayers = (fromIntegral numLayers),
+            format = format,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = zero,
+            queueFamilyIndices = V.empty
+          }
 
   image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
@@ -1091,20 +1093,20 @@ createCubemap rm vc faceSize faces = do
         Vk26.Extent3D (fromIntegral faceSize) (fromIntegral faceSize) 1
       createInfo =
         Vk26.ImageCreateInfo
-                  { next = ()
-                  , imageType = Vk26.IMAGE_TYPE_2D
-                  , extent = imageExtent
-                  , mipLevels = 1
-                  , arrayLayers = 6
-                  , format = format
-                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
-                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
-                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-                  , samples = Vk26.SAMPLE_COUNT_1_BIT
-                  , flags = Vk26.IMAGE_CREATE_CUBE_COMPATIBLE_BIT
-                  , queueFamilyIndices = V.empty
-                  }
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_2D,
+            extent = imageExtent,
+            mipLevels = 1,
+            arrayLayers = 6,
+            format = format,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = Vk26.IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+            queueFamilyIndices = V.empty
+          }
 
   image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
@@ -1212,20 +1214,20 @@ createCubemapMips rm vc faceSize faces = do
         Vk26.Extent3D (fromIntegral faceSize) (fromIntegral faceSize) 1
       createInfo =
         Vk26.ImageCreateInfo
-                  { next = ()
-                  , imageType = Vk26.IMAGE_TYPE_2D
-                  , extent = imageExtent
-                  , mipLevels = (fromIntegral mipLevels)
-                  , arrayLayers = 6
-                  , format = format
-                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
-                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-                  , usage = (Vk26.IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
-                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-                  , samples = Vk26.SAMPLE_COUNT_1_BIT
-                  , flags = Vk26.IMAGE_CREATE_CUBE_COMPATIBLE_BIT
-                  , queueFamilyIndices = V.empty
-                  }
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_2D,
+            extent = imageExtent,
+            mipLevels = (fromIntegral mipLevels),
+            arrayLayers = 6,
+            format = format,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_DST_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = Vk26.IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+            queueFamilyIndices = V.empty
+          }
 
   image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
@@ -1370,20 +1372,20 @@ createStorageImage2D rm vc width height format = do
         Vk26.Extent3D (fromIntegral width) (fromIntegral height) 1
       createInfo =
         Vk26.ImageCreateInfo
-                  { next = ()
-                  , imageType = Vk26.IMAGE_TYPE_2D
-                  , extent = imageExtent
-                  , mipLevels = 1
-                  , arrayLayers = 1
-                  , format = format
-                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
-                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-                  , usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
-                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-                  , samples = Vk26.SAMPLE_COUNT_1_BIT
-                  , flags = zero
-                  , queueFamilyIndices = V.empty
-                  }
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_2D,
+            extent = imageExtent,
+            mipLevels = 1,
+            arrayLayers = 1,
+            format = format,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = zero,
+            queueFamilyIndices = V.empty
+          }
 
   image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
@@ -1451,20 +1453,20 @@ createStorageImage3D rm vc width height depth mipLevels format = do
         Vk26.Extent3D (fromIntegral width) (fromIntegral height) (fromIntegral depth)
       createInfo =
         Vk26.ImageCreateInfo
-                  { next = ()
-                  , imageType = Vk26.IMAGE_TYPE_3D
-                  , extent = imageExtent
-                  , mipLevels = (fromIntegral mipLevels)
-                  , arrayLayers = 1
-                  , format = format
-                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
-                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-                  , usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_DST_BIT)
-                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-                  , samples = Vk26.SAMPLE_COUNT_1_BIT
-                  , flags = zero
-                  , queueFamilyIndices = V.empty
-                  }
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_3D,
+            extent = imageExtent,
+            mipLevels = (fromIntegral mipLevels),
+            arrayLayers = 1,
+            format = format,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vk26.IMAGE_USAGE_TRANSFER_DST_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = zero,
+            queueFamilyIndices = V.empty
+          }
 
   image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
@@ -1534,20 +1536,20 @@ createStorageImageCube rm vc faceSize format = do
         Vk26.Extent3D (fromIntegral faceSize) (fromIntegral faceSize) 1
       createInfo =
         Vk26.ImageCreateInfo
-                  { next = ()
-                  , imageType = Vk26.IMAGE_TYPE_2D
-                  , extent = imageExtent
-                  , mipLevels = 1
-                  , arrayLayers = 6
-                  , format = format
-                  , tiling = Vk26.IMAGE_TILING_OPTIMAL
-                  , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-                  , usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
-                  , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-                  , samples = Vk26.SAMPLE_COUNT_1_BIT
-                  , flags = Vk26.IMAGE_CREATE_CUBE_COMPATIBLE_BIT
-                  , queueFamilyIndices = V.empty
-                  }
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_2D,
+            extent = imageExtent,
+            mipLevels = 1,
+            arrayLayers = 6,
+            format = format,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = Vk26.IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+            queueFamilyIndices = V.empty
+          }
 
   image <- liftIO $ Vk26.createImage dev createInfo Nothing
 
@@ -1608,14 +1610,14 @@ transitionStorageImageToShaderRead commandBuffer image layerCount = do
         Vk26.ImageSubresourceRange Vk26.IMAGE_ASPECT_COLOR_BIT 0 1 0 layerCount
       barrier =
         Vk26.ImageMemoryBarrier
-                  { next = ()
-                  , oldLayout = Vk26.IMAGE_LAYOUT_GENERAL
-                  , newLayout = Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
-                  , srcQueueFamilyIndex = Vk26.QUEUE_FAMILY_IGNORED
-                  , dstQueueFamilyIndex = Vk26.QUEUE_FAMILY_IGNORED
-                  , image = image
-                  , subresourceRange = subresourceRange
-                  , srcAccessMask = Vk26.ACCESS_SHADER_WRITE_BIT
-                  , dstAccessMask = Vk26.ACCESS_SHADER_READ_BIT
-                  }
+          { next = (),
+            oldLayout = Vk26.IMAGE_LAYOUT_GENERAL,
+            newLayout = Vk26.IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            srcQueueFamilyIndex = Vk26.QUEUE_FAMILY_IGNORED,
+            dstQueueFamilyIndex = Vk26.QUEUE_FAMILY_IGNORED,
+            image = image,
+            subresourceRange = subresourceRange,
+            srcAccessMask = Vk26.ACCESS_SHADER_WRITE_BIT,
+            dstAccessMask = Vk26.ACCESS_SHADER_READ_BIT
+          }
   liftIO $ Vk26.cmdPipelineBarrier commandBuffer Vk26.PIPELINE_STAGE_COMPUTE_SHADER_BIT Vk26.PIPELINE_STAGE_FRAGMENT_SHADER_BIT zero V.empty V.empty (V.fromList [SomeStruct barrier])

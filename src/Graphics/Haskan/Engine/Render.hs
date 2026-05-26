@@ -32,6 +32,7 @@ import Data.List (nub, sort, sortOn)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import Data.Text qualified as Text
+import Data.Vector qualified as Vector
 import Data.Vector.Storable qualified as VS
 import Data.Word (Word32, Word64, Word8)
 import DearImGui.Raw qualified as ImGui.Raw
@@ -158,10 +159,6 @@ import Graphics.Haskan.Vulkan.Texture qualified as Texture
 import Graphics.Haskan.Vulkan.Types (RenderContext (..), VulkanContext (..))
 import Graphics.Haskan.Window (isWindowVisible)
 import Graphics.Haskan.Window qualified as Window
-import Vulkan qualified as Vk26
-import Vulkan.CStruct.Extends (SomeStruct(..))
-import Vulkan.Zero (zero)
-import Data.Vector qualified as Vector
 import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
 import Linear.Matrix (M44, identity, inv33, inv44, transpose, (!*), (!*!))
 import Linear.Projection qualified
@@ -173,6 +170,9 @@ import SDL.Input.Mouse qualified as SDL.Mouse
 import System.Clock (TimeSpec, toNanoSecs)
 import System.Directory (doesFileExist)
 import System.IO.Unsafe (unsafePerformIO)
+import Vulkan qualified as Vk26
+import Vulkan.CStruct.Extends (SomeStruct (..))
+import Vulkan.Zero (zero)
 
 type RenderLoopM m = ReaderT RenderEnv m
 

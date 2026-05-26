@@ -49,7 +49,7 @@ import Linear.Projection (perspective)
 import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
 import Vulkan qualified as Vk26
-import Vulkan.CStruct.Extends (SomeStruct(..))
+import Vulkan.CStruct.Extends (SomeStruct (..))
 import Vulkan.Zero (zero)
 
 -- | All values pre-computed before creating the IO callback
@@ -325,13 +325,14 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
         let numWorkgroups = (length rcDrawList + 63) `div` 64
         when (numWorkgroups > 0) $ do
           liftIO $ Vk26.cmdBindPipeline commandBuffer Vk26.PIPELINE_BIND_POINT_COMPUTE (ccrPipeline rcCullResources)
-          liftIO $ Vk26.cmdBindDescriptorSets
-            commandBuffer
-            Vk26.PIPELINE_BIND_POINT_COMPUTE
-            (ccrPipelineLayout rcCullResources)
-            0
-            (Vector.fromList [ccrDescriptorSet rcCullResources])
-            (Vector.empty)
+          liftIO $
+            Vk26.cmdBindDescriptorSets
+              commandBuffer
+              Vk26.PIPELINE_BIND_POINT_COMPUTE
+              (ccrPipelineLayout rcCullResources)
+              0
+              (Vector.fromList [ccrDescriptorSet rcCullResources])
+              (Vector.empty)
           liftIO $ CommandBuffer.cmdDispatch commandBuffer (fromIntegral numWorkgroups) 1 1
           liftIO $
             CommandBuffer.cmdBufferBarrier
@@ -416,24 +417,26 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                 apVolumeLayout = drAPVolumePipelineLayout rcDeferred
                 apVolumeDescriptorSet = drAPVolumeDescriptorSets rcDeferred !! fromIntegral imageIdx
             liftIO $ Vk26.cmdBindPipeline commandBuffer Vk26.PIPELINE_BIND_POINT_COMPUTE apVolumePipeline
-            liftIO $ Vk26.cmdBindDescriptorSets
-              commandBuffer
-              Vk26.PIPELINE_BIND_POINT_COMPUTE
-              apVolumeLayout
-              0
-              (Vector.fromList [apVolumeDescriptorSet])
-              (Vector.empty)
+            liftIO $
+              Vk26.cmdBindDescriptorSets
+                commandBuffer
+                Vk26.PIPELINE_BIND_POINT_COMPUTE
+                apVolumeLayout
+                0
+                (Vector.fromList [apVolumeDescriptorSet])
+                (Vector.empty)
             -- Dispatch: 64x32x64 voxels with 4x4x4 local size = 16x8x16 workgroups
             liftIO $ CommandBuffer.cmdDispatch commandBuffer 16 8 16
             -- Barrier: ensure compute writes are visible to fragment shader reads
-            liftIO $ Vk26.cmdPipelineBarrier
-              commandBuffer
-              Vk26.PIPELINE_STAGE_COMPUTE_SHADER_BIT
-              Vk26.PIPELINE_STAGE_FRAGMENT_SHADER_BIT
-              zero
-              (Vector.fromList [Vk26.MemoryBarrier Vk26.ACCESS_SHADER_WRITE_BIT Vk26.ACCESS_SHADER_READ_BIT])
-              Vector.empty
-              Vector.empty
+            liftIO $
+              Vk26.cmdPipelineBarrier
+                commandBuffer
+                Vk26.PIPELINE_STAGE_COMPUTE_SHADER_BIT
+                Vk26.PIPELINE_STAGE_FRAGMENT_SHADER_BIT
+                zero
+                (Vector.fromList [Vk26.MemoryBarrier Vk26.ACCESS_SHADER_WRITE_BIT Vk26.ACCESS_SHADER_READ_BIT])
+                Vector.empty
+                Vector.empty
 
         -- Terrain pass (mesh terrain or legacy overlay)
         let terrainFramebuffer = drTerrainFramebuffers rcDeferred !! fromIntegral imageIdx
@@ -451,14 +454,15 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
                 Vk26.QUEUE_FAMILY_IGNORED
                 swapchainImage
                 (Vk26.ImageSubresourceRange Vk26.IMAGE_ASPECT_COLOR_BIT 0 1 0 1)
-        liftIO $ Vk26.cmdPipelineBarrier
-          commandBuffer
-          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-          Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-          zero
-          Vector.empty
-          Vector.empty
-          (Vector.fromList [SomeStruct imageBarrier])
+        liftIO $
+          Vk26.cmdPipelineBarrier
+            commandBuffer
+            Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            Vk26.PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            zero
+            Vector.empty
+            Vector.empty
+            (Vector.fromList [SomeStruct imageBarrier])
 
         -- Mesh terrain pass (when enabled)
         let terrainMeshDescriptorSet = drTerrainMeshDescriptorSets rcDeferred !! fromIntegral imageIdx
@@ -474,13 +478,14 @@ buildRecordAction FrameRenderResources {..} FrameRenderInput {..} imageIdx frame
           liftIO $ Buffer.copyDataToDeviceMemory rcDevice (drTerrainMeshNodeMemory rcDeferred) (VS.toList nodeGPUData)
           liftIO $ RenderPass.withRenderPass commandBuffer terrainRenderPass terrainFramebuffer rcPassSurfaceExtent [] $ do
             liftIO $ Vk26.cmdBindPipeline commandBuffer Vk26.PIPELINE_BIND_POINT_GRAPHICS terrainMeshPipeline
-            liftIO $ Vk26.cmdBindDescriptorSets
-              commandBuffer
-              Vk26.PIPELINE_BIND_POINT_GRAPHICS
-              terrainMeshPipelineLayout
-              0
-              (Vector.fromList [terrainMeshDescriptorSet])
-              (Vector.empty)
+            liftIO $
+              Vk26.cmdBindDescriptorSets
+                commandBuffer
+                Vk26.PIPELINE_BIND_POINT_GRAPHICS
+                terrainMeshPipelineLayout
+                0
+                (Vector.fromList [terrainMeshDescriptorSet])
+                (Vector.empty)
             MeshPipeline.cmdDrawMeshTasksEXT rcDevice commandBuffer (fromIntegral nodeCount) 1 1
 
         -- Dear ImGui overlay pass

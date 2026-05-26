@@ -1,4 +1,5 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+
 module Graphics.Haskan.Vulkan.Buffer where
 
 import Control.Monad (unless)
@@ -49,16 +50,16 @@ createBuffer dev data' usage = do
         (x : _) -> fromIntegral (length data' * Foreign.sizeOf x)
       createInfo =
         Vulkan.BufferCreateInfo
-          { next = ()
-          , flags = zero
-          , size = bufSize
-          , usage = usage
-          , sharingMode = Vulkan.SHARING_MODE_EXCLUSIVE
-          , queueFamilyIndices = Vector.empty
+          { next = (),
+            flags = zero,
+            size = bufSize,
+            usage = usage,
+            sharingMode = Vulkan.SHARING_MODE_EXCLUSIVE,
+            queueFamilyIndices = Vector.empty
           }
   buffer <- liftIO $ Vulkan.createBuffer dev createInfo Nothing
   memoryRequirements <- liftIO $ Vulkan.getBufferMemoryRequirements dev buffer
-  let Vulkan.MemoryRequirements{size = reqSize} = memoryRequirements
+  let Vulkan.MemoryRequirements {size = reqSize} = memoryRequirements
   logDebugIO LogBuffer $ "createBuffer size=" <> showT bufSize <> " memReqSize=" <> showT reqSize
   pure (buffer, memoryRequirements)
 
@@ -69,7 +70,7 @@ createBufferMemory ::
   Vulkan.MemoryRequirements ->
   m Vulkan.DeviceMemory
 createBufferMemory pdev dev memoryRequirements = do
-  let Vulkan.MemoryRequirements{size = reqSize} = memoryRequirements
+  let Vulkan.MemoryRequirements {size = reqSize} = memoryRequirements
   logDebugIO LogBuffer $ "createBufferMemory memReqSize=" <> showT reqSize
   Memory.allocateMemoryFor
     pdev
@@ -80,7 +81,7 @@ createBufferMemory pdev dev memoryRequirements = do
     ]
 
 managedBufferMemory pdev dev memoryRequirements = do
-  let Vulkan.MemoryRequirements{size = reqSize} = memoryRequirements
+  let Vulkan.MemoryRequirements {size = reqSize} = memoryRequirements
   logDebugIO LogBuffer $ "managedBufferMemory memReqSize=" <> showT reqSize
   alloc
     "Buffer memory"

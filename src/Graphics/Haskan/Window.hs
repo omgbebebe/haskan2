@@ -12,13 +12,13 @@ import Data.Text (Text)
 import Foreign.Ptr (castPtr)
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, showT)
 import Graphics.Haskan.Resources (alloc, alloc_)
-import Vulkan qualified as Vk26
 import SDL qualified
 import SDL.Internal.Types (Window (..))
 import SDL.Raw qualified as Raw
 import SDL.Raw.Enum (pattern SDL_WINDOW_HIDDEN, pattern SDL_WINDOW_MINIMIZED)
 -- import SDL.Raw.Video (createWindowFrom)
 import SDL.Video.Vulkan qualified
+import Vulkan qualified as Vk26
 
 managedWindow ::
   (MonadManaged m) =>

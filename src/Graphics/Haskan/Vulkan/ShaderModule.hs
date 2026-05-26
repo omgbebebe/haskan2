@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 module Graphics.Haskan.Vulkan.ShaderModule where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -23,8 +24,8 @@ createShaderModule dev path = liftIO $ do
   let createInfo :: Vulkan.ShaderModuleCreateInfo '[]
       createInfo =
         Vulkan.ShaderModuleCreateInfo
-          { next = ()
-          , flags = zero
-          , code = bytes
+          { next = (),
+            flags = zero,
+            code = bytes
           }
   Vulkan.createShaderModule dev createInfo Nothing

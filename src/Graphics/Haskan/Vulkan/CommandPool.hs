@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 module Graphics.Haskan.Vulkan.CommandPool where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -29,7 +30,7 @@ createCommandPool dev queueFamilyIndex = do
   let commandPoolCI :: Vulkan.CommandPoolCreateInfo
       commandPoolCI =
         Vulkan.CommandPoolCreateInfo
-          { flags = Vulkan.COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT
-          , queueFamilyIndex = fromIntegral queueFamilyIndex
+          { flags = Vulkan.COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            queueFamilyIndex = fromIntegral queueFamilyIndex
           }
   liftIO $ Vulkan.createCommandPool dev commandPoolCI Nothing

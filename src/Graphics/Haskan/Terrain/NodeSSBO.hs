@@ -1,17 +1,18 @@
 {-# LANGUAGE RecordWildCards #-}
 
 module Graphics.Haskan.Terrain.NodeSSBO
-  ( TerrainNodeGPU(..)
-  , packNodesToSSBO
-  , nodeSSBOSize
-  ) where
+  ( TerrainNodeGPU (..),
+    packNodesToSSBO,
+    nodeSSBOSize,
+  )
+where
 
 import Data.Vector.Storable (Vector)
 import Data.Vector.Storable qualified as Vector
 import Data.Word (Word32)
-import Foreign (Storable(..), castPtr, pokeByteOff, peekByteOff)
-import Graphics.Haskan.Terrain.CDLOD (TerrainNode(..))
-import Linear (V2(..), V4(..))
+import Foreign (Storable (..), castPtr, peekByteOff, pokeByteOff)
+import Graphics.Haskan.Terrain.CDLOD (TerrainNode (..))
+import Linear (V2 (..), V4 (..))
 
 -- ---------------------------------------------------------------------------
 -- GPU-side terrain node structure
@@ -29,13 +30,13 @@ import Linear (V2(..), V4(..))
 -- ---------------------------------------------------------------------------
 
 data TerrainNodeGPU = TerrainNodeGPU
-  { tngWorldOffset :: !(V2 Float)
-  , tngWorldSize :: !Float
-  , tngHeightScale :: !Float
-  , tngLODLevel :: !Int
-  , tngHeightmapLayer :: !Word32
-  , tngClimateLayer :: !Word32
-  , tngMorphStart :: !Float
+  { tngWorldOffset :: !(V2 Float),
+    tngWorldSize :: !Float,
+    tngHeightScale :: !Float,
+    tngLODLevel :: !Int,
+    tngHeightmapLayer :: !Word32,
+    tngClimateLayer :: !Word32,
+    tngMorphStart :: !Float
   }
   deriving (Show)
 
@@ -48,16 +49,17 @@ instance Storable TerrainNodeGPU where
     hml <- peekByteOff ptr 20
     cl <- peekByteOff ptr 24
     ms <- peekByteOff ptr 28
-    pure TerrainNodeGPU
-      { tngWorldOffset = V2 ox oy
-      , tngWorldSize = ws
-      , tngHeightScale = hs
-      , tngLODLevel = lod
-      , tngHeightmapLayer = hml
-      , tngClimateLayer = cl
-      , tngMorphStart = ms
-      }
-  poke ptr TerrainNodeGPU{..} = do
+    pure
+      TerrainNodeGPU
+        { tngWorldOffset = V2 ox oy,
+          tngWorldSize = ws,
+          tngHeightScale = hs,
+          tngLODLevel = lod,
+          tngHeightmapLayer = hml,
+          tngClimateLayer = cl,
+          tngMorphStart = ms
+        }
+  poke ptr TerrainNodeGPU {..} = do
     let V2 ox oy = tngWorldOffset
     poke (castPtr ptr) (V4 ox oy tngWorldSize tngHeightScale)
     pokeByteOff ptr 16 tngLODLevel
@@ -69,15 +71,16 @@ instance Storable TerrainNodeGPU where
 packNodesToSSBO :: [TerrainNode] -> Vector TerrainNodeGPU
 packNodesToSSBO = Vector.fromList . map convert
   where
-    convert TerrainNode{..} = TerrainNodeGPU
-      { tngWorldOffset = tnWorldOffset
-      , tngWorldSize = tnWorldSize
-      , tngHeightScale = 1.0
-      , tngLODLevel = tnLOD
-      , tngHeightmapLayer = tnHeightmapLayer
-      , tngClimateLayer = tnClimateLayer
-      , tngMorphStart = tnMorphStart
-      }
+    convert TerrainNode {..} =
+      TerrainNodeGPU
+        { tngWorldOffset = tnWorldOffset,
+          tngWorldSize = tnWorldSize,
+          tngHeightScale = 1.0,
+          tngLODLevel = tnLOD,
+          tngHeightmapLayer = tnHeightmapLayer,
+          tngClimateLayer = tnClimateLayer,
+          tngMorphStart = tnMorphStart
+        }
 
 -- | Compute total SSBO size in bytes for given node count.
 nodeSSBOSize :: Int -> Int

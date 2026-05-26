@@ -1,5 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
+
 module Graphics.Haskan.Vulkan.ComputePipeline
   ( managedComputePipeline,
     managedComputePipelineWithSpec,
@@ -14,9 +15,9 @@ import Data.ByteString.Char8 qualified as BC
 import Data.Vector qualified as Vector
 import Graphics.Haskan.Resources (alloc)
 import Vulkan qualified as Vk26
+import Vulkan.CStruct.Extends (SomeStruct (..))
 import Vulkan.Core10 qualified as Vk26
 import Vulkan.Core10.Pipeline (ComputePipelineCreateInfo (..), PipelineShaderStageCreateInfo (..))
-import Vulkan.CStruct.Extends (SomeStruct (..))
 import Vulkan.Zero (zero)
 
 managedComputePipeline ::
@@ -64,22 +65,22 @@ createComputePipelineWithSpec dev layout shaderModule specInfo = do
   let stageCreateInfo :: Vk26.PipelineShaderStageCreateInfo '[]
       stageCreateInfo =
         Vk26.PipelineShaderStageCreateInfo
-          { next = ()
-          , flags = zero
-          , stage = Vk26.SHADER_STAGE_COMPUTE_BIT
-          , module' = shaderModule
-          , name = BC.pack "main"
-          , specializationInfo = specInfo
+          { next = (),
+            flags = zero,
+            stage = Vk26.SHADER_STAGE_COMPUTE_BIT,
+            module' = shaderModule,
+            name = BC.pack "main",
+            specializationInfo = specInfo
           }
       createInfo :: Vk26.ComputePipelineCreateInfo '[]
       createInfo =
         Vk26.ComputePipelineCreateInfo
-          { next = ()
-          , flags = zero
-          , stage = SomeStruct stageCreateInfo
-          , layout = layout
-          , basePipelineHandle = zero
-          , basePipelineIndex = 0
+          { next = (),
+            flags = zero,
+            stage = SomeStruct stageCreateInfo,
+            layout = layout,
+            basePipelineHandle = zero,
+            basePipelineIndex = 0
           }
   (_, pipelines) <- liftIO $ Vk26.createComputePipelines dev (Vk26.PipelineCache 0) (Vector.fromList [SomeStruct createInfo]) Nothing
   case Vector.toList pipelines of

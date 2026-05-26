@@ -48,12 +48,12 @@ toPipelineStages :: ShaderProgram -> [Vulkan.PipelineShaderStageCreateInfo '[]]
 toPipelineStages ShaderProgram {..} =
   let mkStage stageFlag mod_ =
         Vulkan.PipelineShaderStageCreateInfo
-          { next = ()
-          , flags = zero
-          , stage = stageFlag
-          , module' = mod_
-          , name = "main"
-          , specializationInfo = spSpecializationInfo
+          { next = (),
+            flags = zero,
+            stage = stageFlag,
+            module' = mod_,
+            name = "main",
+            specializationInfo = spSpecializationInfo
           }
    in catMaybes
         [ Just (mkStage Vulkan.SHADER_STAGE_VERTEX_BIT spVertex),
@@ -67,12 +67,12 @@ toPipelineStages ShaderProgram {..} =
 toPipelineStagesWithSpec :: [ShaderStage] -> [Vulkan.PipelineShaderStageCreateInfo '[]]
 toPipelineStagesWithSpec = map $ \ShaderStage {..} ->
   Vulkan.PipelineShaderStageCreateInfo
-    { next = ()
-    , flags = zero
-    , stage = ssStage
-    , module' = ssModule
-    , name = "main"
-    , specializationInfo = ssSpecializationInfo
+    { next = (),
+      flags = zero,
+      stage = ssStage,
+      module' = ssModule,
+      name = "main",
+      specializationInfo = ssSpecializationInfo
     }
 
 -- | Number of active stages in a ShaderProgram.

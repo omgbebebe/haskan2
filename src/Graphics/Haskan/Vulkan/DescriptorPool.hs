@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 module Graphics.Haskan.Vulkan.DescriptorPool
   ( managedDescriptorPool,
     createDescriptorPool,
@@ -55,25 +56,25 @@ createDescriptorPool :: (MonadIO m) => Vulkan.Device -> Int -> m Vulkan.Descript
 createDescriptorPool dev numSets = do
   let poolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER
-          , descriptorCount = fromIntegral numSets
+          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount = fromIntegral numSets
           }
       samplerPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-          , descriptorCount = fromIntegral (numSets * maxBindlessTextures)
+          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount = fromIntegral (numSets * maxBindlessTextures)
           }
       ssboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER
-          , descriptorCount = fromIntegral numSets
+          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            descriptorCount = fromIntegral numSets
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = fromIntegral numSets
-          , poolSizes = Vector.fromList [poolSize, samplerPoolSize, ssboPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = fromIntegral numSets,
+            poolSizes = Vector.fromList [poolSize, samplerPoolSize, ssboPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
   where
@@ -90,20 +91,20 @@ createLightingDescriptorPool :: (MonadIO m) => Vulkan.Device -> Int -> Int -> m 
 createLightingDescriptorPool dev numSets texturesPerSet = do
   let samplerPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-          , descriptorCount = fromIntegral (numSets * texturesPerSet)
+          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount = fromIntegral (numSets * texturesPerSet)
           }
       ssboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER
-          , descriptorCount = fromIntegral numSets
+          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            descriptorCount = fromIntegral numSets
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = fromIntegral numSets
-          , poolSizes = Vector.fromList [samplerPoolSize, ssboPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = fromIntegral numSets,
+            poolSizes = Vector.fromList [samplerPoolSize, ssboPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -118,20 +119,20 @@ createCloudDescriptorPool :: (MonadIO m) => Vulkan.Device -> Int -> m Vulkan.Des
 createCloudDescriptorPool dev numSets = do
   let samplerPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-          , descriptorCount = fromIntegral (numSets * 5)
+          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount = fromIntegral (numSets * 5)
           }
       uboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER
-          , descriptorCount = fromIntegral numSets
+          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount = fromIntegral numSets
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = fromIntegral numSets
-          , poolSizes = Vector.fromList [samplerPoolSize, uboPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = fromIntegral numSets,
+            poolSizes = Vector.fromList [samplerPoolSize, uboPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -146,15 +147,15 @@ createGodRayDescriptorPool :: (MonadIO m) => Vulkan.Device -> Int -> m Vulkan.De
 createGodRayDescriptorPool dev numSets = do
   let samplerPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-          , descriptorCount = fromIntegral (numSets * 1)
+          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount = fromIntegral (numSets * 1)
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = fromIntegral numSets
-          , poolSizes = Vector.fromList [samplerPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = fromIntegral numSets,
+            poolSizes = Vector.fromList [samplerPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -169,20 +170,20 @@ createTerrainDescriptorPool :: (MonadIO m) => Vulkan.Device -> Int -> m Vulkan.D
 createTerrainDescriptorPool dev numSets = do
   let samplerPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-          , descriptorCount = fromIntegral (numSets * 2)
+          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount = fromIntegral (numSets * 2)
           }
       uboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER
-          , descriptorCount = fromIntegral numSets
+          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount = fromIntegral numSets
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = fromIntegral numSets
-          , poolSizes = Vector.fromList [samplerPoolSize, uboPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = fromIntegral numSets,
+            poolSizes = Vector.fromList [samplerPoolSize, uboPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -197,20 +198,20 @@ createTerrainMeshDescriptorPool :: (MonadIO m) => Vulkan.Device -> Int -> m Vulk
 createTerrainMeshDescriptorPool dev numSets = do
   let ssboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER
-          , descriptorCount = fromIntegral (numSets * 1)
+          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            descriptorCount = fromIntegral (numSets * 1)
           }
       samplerPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-          , descriptorCount = fromIntegral (numSets * 2)
+          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount = fromIntegral (numSets * 2)
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = fromIntegral numSets
-          , poolSizes = Vector.fromList [ssboPoolSize, samplerPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = fromIntegral numSets,
+            poolSizes = Vector.fromList [ssboPoolSize, samplerPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -225,25 +226,25 @@ createAPVolumeDescriptorPool :: (MonadIO m) => Vulkan.Device -> Int -> m Vulkan.
 createAPVolumeDescriptorPool dev numSets = do
   let storageImagePoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE
-          , descriptorCount = fromIntegral (numSets * 1)
+          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            descriptorCount = fromIntegral (numSets * 1)
           }
       samplerPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-          , descriptorCount = fromIntegral (numSets * 2)
+          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount = fromIntegral (numSets * 2)
           }
       uniformBufferPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER
-          , descriptorCount = fromIntegral (numSets * 1)
+          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount = fromIntegral (numSets * 1)
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = fromIntegral numSets
-          , poolSizes = Vector.fromList [storageImagePoolSize, samplerPoolSize, uniformBufferPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = fromIntegral numSets,
+            poolSizes = Vector.fromList [storageImagePoolSize, samplerPoolSize, uniformBufferPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -258,15 +259,15 @@ createBindlessDescriptorPool :: (MonadIO m) => Vulkan.Device -> Int -> m Vulkan.
 createBindlessDescriptorPool dev maxTextures = do
   let samplerPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
-          , descriptorCount = fromIntegral maxTextures
+          { type' = Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+            descriptorCount = fromIntegral maxTextures
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = Vulkan12.DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT
-          , maxSets = 1
-          , poolSizes = Vector.fromList [samplerPoolSize]
+          { next = (),
+            flags = Vulkan12.DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
+            maxSets = 1,
+            poolSizes = Vector.fromList [samplerPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -281,20 +282,20 @@ createComputeDescriptorPool :: (MonadIO m) => Vulkan.Device -> m Vulkan.Descript
 createComputeDescriptorPool dev = do
   let ssboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER
-          , descriptorCount = 2
+          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            descriptorCount = 2
           }
       uboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER
-          , descriptorCount = 1
+          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount = 1
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = 1
-          , poolSizes = Vector.fromList [ssboPoolSize, uboPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = 1,
+            poolSizes = Vector.fromList [ssboPoolSize, uboPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -309,20 +310,20 @@ createCubemapComputeDescriptorPool :: (MonadIO m) => Vulkan.Device -> m Vulkan.D
 createCubemapComputeDescriptorPool dev = do
   let storageImagePoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE
-          , descriptorCount = 2
+          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            descriptorCount = 2
           }
       uboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER
-          , descriptorCount = 2
+          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount = 2
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = 2
-          , poolSizes = Vector.fromList [storageImagePoolSize, uboPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = 2,
+            poolSizes = Vector.fromList [storageImagePoolSize, uboPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -337,20 +338,20 @@ createCloudNoiseComputeDescriptorPool :: (MonadIO m) => Vulkan.Device -> m Vulka
 createCloudNoiseComputeDescriptorPool dev = do
   let storageImagePoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE
-          , descriptorCount = 1
+          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            descriptorCount = 1
           }
       uboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER
-          , descriptorCount = 1
+          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount = 1
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = 1
-          , poolSizes = Vector.fromList [storageImagePoolSize, uboPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = 1,
+            poolSizes = Vector.fromList [storageImagePoolSize, uboPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -365,20 +366,20 @@ createCloudDetailNoiseComputeDescriptorPool :: (MonadIO m) => Vulkan.Device -> m
 createCloudDetailNoiseComputeDescriptorPool dev = do
   let storageImagePoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE
-          , descriptorCount = 1
+          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            descriptorCount = 1
           }
       uboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER
-          , descriptorCount = 1
+          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount = 1
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = 1
-          , poolSizes = Vector.fromList [storageImagePoolSize, uboPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = 1,
+            poolSizes = Vector.fromList [storageImagePoolSize, uboPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -393,20 +394,20 @@ createWeatherMapComputeDescriptorPool :: (MonadIO m) => Vulkan.Device -> m Vulka
 createWeatherMapComputeDescriptorPool dev = do
   let storageImagePoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE
-          , descriptorCount = 1
+          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            descriptorCount = 1
           }
       uboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER
-          , descriptorCount = 1
+          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount = 1
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = 1
-          , poolSizes = Vector.fromList [storageImagePoolSize, uboPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = 1,
+            poolSizes = Vector.fromList [storageImagePoolSize, uboPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -421,20 +422,20 @@ createCloudNoiseMipGenComputeDescriptorPool :: (MonadIO m) => Vulkan.Device -> m
 createCloudNoiseMipGenComputeDescriptorPool dev = do
   let storageImagePoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE
-          , descriptorCount = 8
+          { type' = Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE,
+            descriptorCount = 8
           }
       uboPoolSize =
         Vulkan.DescriptorPoolSize
-          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER
-          , descriptorCount = 4
+          { type' = Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+            descriptorCount = 4
           }
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = zero
-          , maxSets = 4
-          , poolSizes = Vector.fromList [storageImagePoolSize, uboPoolSize]
+          { next = (),
+            flags = zero,
+            maxSets = 4,
+            poolSizes = Vector.fromList [storageImagePoolSize, uboPoolSize]
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing
 
@@ -449,27 +450,27 @@ createImGuiDescriptorPool :: (MonadIO m) => Vulkan.Device -> m Vulkan.Descriptor
 createImGuiDescriptorPool dev = do
   let poolSize t c =
         Vulkan.DescriptorPoolSize
-          { type' = t
-          , descriptorCount = fromIntegral c
+          { type' = t,
+            descriptorCount = fromIntegral c
           }
       poolSizes =
-        [ poolSize Vulkan.DESCRIPTOR_TYPE_SAMPLER 1000
-        , poolSize Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER 1000
-        , poolSize Vulkan.DESCRIPTOR_TYPE_SAMPLED_IMAGE 1000
-        , poolSize Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE 1000
-        , poolSize Vulkan.DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER 1000
-        , poolSize Vulkan.DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER 1000
-        , poolSize Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER 1000
-        , poolSize Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER 1000
-        , poolSize Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC 1000
-        , poolSize Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC 1000
-        , poolSize Vulkan.DESCRIPTOR_TYPE_INPUT_ATTACHMENT 1000
+        [ poolSize Vulkan.DESCRIPTOR_TYPE_SAMPLER 1000,
+          poolSize Vulkan.DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER 1000,
+          poolSize Vulkan.DESCRIPTOR_TYPE_SAMPLED_IMAGE 1000,
+          poolSize Vulkan.DESCRIPTOR_TYPE_STORAGE_IMAGE 1000,
+          poolSize Vulkan.DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER 1000,
+          poolSize Vulkan.DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER 1000,
+          poolSize Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER 1000,
+          poolSize Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER 1000,
+          poolSize Vulkan.DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC 1000,
+          poolSize Vulkan.DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC 1000,
+          poolSize Vulkan.DESCRIPTOR_TYPE_INPUT_ATTACHMENT 1000
         ]
       createInfo =
         Vulkan.DescriptorPoolCreateInfo
-          { next = ()
-          , flags = Vulkan.DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT
-          , maxSets = 1000
-          , poolSizes = Vector.fromList poolSizes
+          { next = (),
+            flags = Vulkan.DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+            maxSets = 1000,
+            poolSizes = Vector.fromList poolSizes
           }
   liftIO $ Vulkan.createDescriptorPool dev createInfo Nothing

@@ -73,7 +73,6 @@ import Graphics.Haskan.Physics.Jolt.Types (BodyId, BodyState, BodyType)
 import Graphics.Haskan.Render.RenderSystem (DrawCall (..))
 import Graphics.Haskan.Resources (allocaAndPeek, throwVkResult)
 import Graphics.Haskan.Scene.ECS (EntityId (..))
-import Vulkan qualified as Vk26
 import Linear (M44, V2 (..), V3 (..), V4 (..), normalize, (*^), (^+^), (^-^))
 import Linear.Matrix (identity, inv33, inv44, transpose, (!*), (!*!))
 import Linear.Projection qualified
@@ -81,6 +80,7 @@ import Linear.Quaternion (Quaternion (..))
 import Linear.V3 (_x, _y, _z)
 import Linear.V4 (_w)
 import System.Clock (Clock (..), getTime, toNanoSecs)
+import Vulkan qualified as Vk26
 
 toListOfV4 :: V4 (V4 a) -> [[a]]
 toListOfV4 (V4 r1 r2 r3 r4) = [toList r1, toList r2, toList r3, toList r4]

@@ -1,5 +1,6 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE OverloadedStrings #-}
+
 module Graphics.Haskan.Vulkan.Swapchain where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
@@ -36,22 +37,22 @@ createSwapchain dev pdev surface extent = do
   let createInfo :: Vulkan.SwapchainCreateInfoKHR '[]
       createInfo =
         Vulkan.SwapchainCreateInfoKHR
-          { next = ()
-          , flags = zero
-          , surface = surface
-          , minImageCount = fromIntegral imageCount
-          , imageFormat = imageFormat
-          , imageColorSpace = imageColorSpace
-          , imageExtent = extent
-          , imageArrayLayers = 1
-          , imageUsage = Vulkan.IMAGE_USAGE_COLOR_ATTACHMENT_BIT .|. Vulkan.IMAGE_USAGE_TRANSFER_SRC_BIT
-          , imageSharingMode = Vulkan.SHARING_MODE_EXCLUSIVE
-          , queueFamilyIndices = Vector.empty
-          , compositeAlpha = Vulkan.COMPOSITE_ALPHA_OPAQUE_BIT_KHR
-          , presentMode = presentMode
-          , clipped = True
-          , oldSwapchain = zero
-          , preTransform = preTransform
+          { next = (),
+            flags = zero,
+            surface = surface,
+            minImageCount = fromIntegral imageCount,
+            imageFormat = imageFormat,
+            imageColorSpace = imageColorSpace,
+            imageExtent = extent,
+            imageArrayLayers = 1,
+            imageUsage = Vulkan.IMAGE_USAGE_COLOR_ATTACHMENT_BIT .|. Vulkan.IMAGE_USAGE_TRANSFER_SRC_BIT,
+            imageSharingMode = Vulkan.SHARING_MODE_EXCLUSIVE,
+            queueFamilyIndices = Vector.empty,
+            compositeAlpha = Vulkan.COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
+            presentMode = presentMode,
+            clipped = True,
+            oldSwapchain = zero,
+            preTransform = preTransform
           }
   liftIO $ Vulkan.createSwapchainKHR dev createInfo Nothing
 
@@ -65,8 +66,8 @@ getSwapchainImages dev swapchain = do
 surfaceFormat :: Vulkan.SurfaceFormatKHR
 surfaceFormat =
   Vulkan.SurfaceFormatKHR
-    { format = Vulkan.FORMAT_B8G8R8A8_SRGB
-    , colorSpace = Vulkan.COLOR_SPACE_SRGB_NONLINEAR_KHR
+    { format = Vulkan.FORMAT_B8G8R8A8_SRGB,
+      colorSpace = Vulkan.COLOR_SPACE_SRGB_NONLINEAR_KHR
     }
 
 managedDepthImage ::
@@ -83,8 +84,8 @@ managedDepthImage pdev dev extent depthFormat = do
       (createDepthImage dev extent depthFormat)
       (\ptr -> Vulkan.destroyImage dev ptr Nothing)
   memoryRequirements <- getImageMemoryRequirements dev image
-  let Vulkan.MemoryRequirements{size = memSize} = memoryRequirements
-      Vulkan.Extent2D{width = w, height = h} = extent
+  let Vulkan.MemoryRequirements {size = memSize} = memoryRequirements
+      Vulkan.Extent2D {width = w, height = h} = extent
   logDebugIO LogVulkan $ "depth image memory requirements size=" <> showT memSize <> " extent=" <> showT w <> "x" <> showT h
   memory <- managedMemoryFor pdev dev memoryRequirements [Vulkan.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
   liftIO $ Vulkan.bindImageMemory dev image memory 0
@@ -115,23 +116,23 @@ createGBufferImage ::
   Vulkan.Format ->
   m Vulkan.Image
 createGBufferImage dev extent format = do
-  let Vulkan.Extent2D{width = w, height = h} = extent
+  let Vulkan.Extent2D {width = w, height = h} = extent
       createInfo :: Vulkan.ImageCreateInfo '[]
       createInfo =
         Vulkan.ImageCreateInfo
-          { next = ()
-          , flags = zero
-          , imageType = Vulkan.IMAGE_TYPE_2D
-          , format = format
-          , extent = Vulkan.Extent3D w h 1
-          , mipLevels = 1
-          , arrayLayers = 1
-          , samples = Vulkan.SAMPLE_COUNT_1_BIT
-          , tiling = Vulkan.IMAGE_TILING_OPTIMAL
-          , usage = Vulkan.IMAGE_USAGE_COLOR_ATTACHMENT_BIT .|. Vulkan.IMAGE_USAGE_SAMPLED_BIT .|. Vulkan.IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vulkan.IMAGE_USAGE_TRANSFER_DST_BIT
-          , sharingMode = Vulkan.SHARING_MODE_EXCLUSIVE
-          , queueFamilyIndices = Vector.empty
-          , initialLayout = Vulkan.IMAGE_LAYOUT_UNDEFINED
+          { next = (),
+            flags = zero,
+            imageType = Vulkan.IMAGE_TYPE_2D,
+            format = format,
+            extent = Vulkan.Extent3D w h 1,
+            mipLevels = 1,
+            arrayLayers = 1,
+            samples = Vulkan.SAMPLE_COUNT_1_BIT,
+            tiling = Vulkan.IMAGE_TILING_OPTIMAL,
+            usage = Vulkan.IMAGE_USAGE_COLOR_ATTACHMENT_BIT .|. Vulkan.IMAGE_USAGE_SAMPLED_BIT .|. Vulkan.IMAGE_USAGE_TRANSFER_SRC_BIT .|. Vulkan.IMAGE_USAGE_TRANSFER_DST_BIT,
+            sharingMode = Vulkan.SHARING_MODE_EXCLUSIVE,
+            queueFamilyIndices = Vector.empty,
+            initialLayout = Vulkan.IMAGE_LAYOUT_UNDEFINED
           }
   liftIO $ Vulkan.createImage dev createInfo Nothing
 
@@ -142,23 +143,23 @@ createDepthImage ::
   Vulkan.Format ->
   m Vulkan.Image
 createDepthImage dev extent depthFormat = do
-  let Vulkan.Extent2D{width = w, height = h} = extent
+  let Vulkan.Extent2D {width = w, height = h} = extent
       createInfo :: Vulkan.ImageCreateInfo '[]
       createInfo =
         Vulkan.ImageCreateInfo
-          { next = ()
-          , flags = zero
-          , imageType = Vulkan.IMAGE_TYPE_2D
-          , format = depthFormat
-          , extent = Vulkan.Extent3D w h 1
-          , mipLevels = 1
-          , arrayLayers = 1
-          , samples = Vulkan.SAMPLE_COUNT_1_BIT
-          , tiling = Vulkan.IMAGE_TILING_OPTIMAL
-          , usage = Vulkan.IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT
-          , sharingMode = Vulkan.SHARING_MODE_EXCLUSIVE
-          , queueFamilyIndices = Vector.empty
-          , initialLayout = Vulkan.IMAGE_LAYOUT_UNDEFINED
+          { next = (),
+            flags = zero,
+            imageType = Vulkan.IMAGE_TYPE_2D,
+            format = depthFormat,
+            extent = Vulkan.Extent3D w h 1,
+            mipLevels = 1,
+            arrayLayers = 1,
+            samples = Vulkan.SAMPLE_COUNT_1_BIT,
+            tiling = Vulkan.IMAGE_TILING_OPTIMAL,
+            usage = Vulkan.IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+            sharingMode = Vulkan.SHARING_MODE_EXCLUSIVE,
+            queueFamilyIndices = Vector.empty,
+            initialLayout = Vulkan.IMAGE_LAYOUT_UNDEFINED
           }
   liftIO $ Vulkan.createImage dev createInfo Nothing
 
@@ -184,13 +185,13 @@ createDepthView dev img depthFormat = do
   let createInfo :: Vulkan.ImageViewCreateInfo '[]
       createInfo =
         Vulkan.ImageViewCreateInfo
-          { next = ()
-          , flags = zero
-          , image = img
-          , viewType = Vulkan.IMAGE_VIEW_TYPE_2D
-          , format = depthFormat
-          , components = Vulkan.ComponentMapping Vulkan.COMPONENT_SWIZZLE_IDENTITY Vulkan.COMPONENT_SWIZZLE_IDENTITY Vulkan.COMPONENT_SWIZZLE_IDENTITY Vulkan.COMPONENT_SWIZZLE_IDENTITY
-          , subresourceRange = Vulkan.ImageSubresourceRange Vulkan.IMAGE_ASPECT_DEPTH_BIT 0 1 0 1
+          { next = (),
+            flags = zero,
+            image = img,
+            viewType = Vulkan.IMAGE_VIEW_TYPE_2D,
+            format = depthFormat,
+            components = Vulkan.ComponentMapping Vulkan.COMPONENT_SWIZZLE_IDENTITY Vulkan.COMPONENT_SWIZZLE_IDENTITY Vulkan.COMPONENT_SWIZZLE_IDENTITY Vulkan.COMPONENT_SWIZZLE_IDENTITY,
+            subresourceRange = Vulkan.ImageSubresourceRange Vulkan.IMAGE_ASPECT_DEPTH_BIT 0 1 0 1
           }
   liftIO $ Vulkan.createImageView dev createInfo Nothing
 

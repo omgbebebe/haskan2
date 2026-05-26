@@ -16,10 +16,10 @@ import Data.Vector qualified as Vector
 import Graphics.Haskan.Logger (LogCategory (..), logInfoIO, logWarnIO)
 import Graphics.Haskan.Resources (alloc)
 import Vulkan qualified as Vk26
-import Vulkan.CStruct.Extends (SomeStruct(..))
-import Vulkan.Core10.DeviceInitialization (ApplicationInfo(..), InstanceCreateInfo(..))
-import Vulkan.Core10.ExtensionDiscovery (ExtensionProperties(..))
-import Vulkan.Core10.LayerDiscovery (LayerProperties(..))
+import Vulkan.CStruct.Extends (SomeStruct (..))
+import Vulkan.Core10.DeviceInitialization (ApplicationInfo (..), InstanceCreateInfo (..))
+import Vulkan.Core10.ExtensionDiscovery (ExtensionProperties (..))
+import Vulkan.Core10.LayerDiscovery (LayerProperties (..))
 import Vulkan.Zero (zero)
 
 managedInstance :: (MonadManaged m) => [ByteString] -> m (Vk26.Instance, [String])
@@ -81,21 +81,23 @@ createInstance extraExtensions = do
 
   let layers = fmap BC.unpack layersBS
 
-      appInfo = Vk26.ApplicationInfo
-        { applicationName = Nothing
-        , applicationVersion = Vk26.MAKE_API_VERSION 1 0 0
-        , engineName = Nothing
-        , engineVersion = Vk26.MAKE_API_VERSION 1 0 0
-        , apiVersion = Vk26.API_VERSION_1_2
-        }
+      appInfo =
+        Vk26.ApplicationInfo
+          { applicationName = Nothing,
+            applicationVersion = Vk26.MAKE_API_VERSION 1 0 0,
+            engineName = Nothing,
+            engineVersion = Vk26.MAKE_API_VERSION 1 0 0,
+            apiVersion = Vk26.API_VERSION_1_2
+          }
 
-      instanceInfo = Vk26.InstanceCreateInfo
-        { next = ()
-        , flags = zero
-        , applicationInfo = Just appInfo
-        , enabledLayerNames = Vector.fromList layersBS
-        , enabledExtensionNames = Vector.fromList extensionsBS
-        }
+      instanceInfo =
+        Vk26.InstanceCreateInfo
+          { next = (),
+            flags = zero,
+            applicationInfo = Just appInfo,
+            enabledLayerNames = Vector.fromList layersBS,
+            enabledExtensionNames = Vector.fromList extensionsBS
+          }
 
   inst <- liftIO $ Vk26.createInstance instanceInfo Nothing
   pure (inst, layers)

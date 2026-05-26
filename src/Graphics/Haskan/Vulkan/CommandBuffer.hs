@@ -4,10 +4,10 @@ import Control.Monad.IO.Class (MonadIO, liftIO)
 import Data.Bits ((.|.))
 import Data.Int (Int32)
 import Data.Vector qualified as Vector
-import Vulkan qualified as Vk26
-import Vulkan.CStruct.Extends (SomeStruct(..))
-import Vulkan.Zero (zero)
 import Data.Word (Word32)
+import Vulkan qualified as Vk26
+import Vulkan.CStruct.Extends (SomeStruct (..))
+import Vulkan.Zero (zero)
 
 createCommandBuffer ::
   (MonadIO m) =>

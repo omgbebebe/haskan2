@@ -7,8 +7,8 @@ import Data.Functor.Contravariant
 import Data.Functor.Contravariant.Divisible
 import Data.Word (Word32, Word8)
 import Foreign.C qualified
-import Vulkan qualified
 import Linear (V2, V3, V4)
+import Vulkan qualified
 
 newtype Component = Component {format :: Vulkan.Format}
   deriving (Show)

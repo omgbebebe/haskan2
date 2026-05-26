@@ -189,7 +189,7 @@ createDeferredResources DeferredConfig {..} = do
   let extent = rcSurfaceExtent ctx
       cloudExtent =
         let Vk26.Extent2D w h = extent
-        in Vk26.Extent2D (w `div` 2) (h `div` 2)
+         in Vk26.Extent2D (w `div` 2) (h `div` 2)
       gbufPosFormat = Vk26.FORMAT_R16G16B16A16_SFLOAT
       gbufColorFormat = Vk26.FORMAT_R8G8B8A8_UNORM
       depthFormat = Vk26.FORMAT_D32_SFLOAT
@@ -315,19 +315,19 @@ createDeferredResources DeferredConfig {..} = do
         Vk26.Extent3D (fromIntegral apWidth) (fromIntegral apHeight) (fromIntegral apDepth)
       apCreateInfo =
         Vk26.ImageCreateInfo
-          { next = ()
-          , imageType = Vk26.IMAGE_TYPE_3D
-          , extent = apExtent
-          , mipLevels = 1
-          , arrayLayers = 1
-          , format = apFormat
-          , tiling = Vk26.IMAGE_TILING_OPTIMAL
-          , initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED
-          , usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT)
-          , sharingMode = Vk26.SHARING_MODE_EXCLUSIVE
-          , samples = Vk26.SAMPLE_COUNT_1_BIT
-          , flags = zero
-          , queueFamilyIndices = Vector.empty
+          { next = (),
+            imageType = Vk26.IMAGE_TYPE_3D,
+            extent = apExtent,
+            mipLevels = 1,
+            arrayLayers = 1,
+            format = apFormat,
+            tiling = Vk26.IMAGE_TILING_OPTIMAL,
+            initialLayout = Vk26.IMAGE_LAYOUT_UNDEFINED,
+            usage = (Vk26.IMAGE_USAGE_STORAGE_BIT .|. Vk26.IMAGE_USAGE_SAMPLED_BIT),
+            sharingMode = Vk26.SHARING_MODE_EXCLUSIVE,
+            samples = Vk26.SAMPLE_COUNT_1_BIT,
+            flags = zero,
+            queueFamilyIndices = Vector.empty
           }
   apImage <- alloc "APVolumeImage" (liftIO $ Vk26.createImage device apCreateInfo Nothing) (\ptr -> liftIO $ Vk26.destroyImage device ptr Nothing)
   apMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements device apImage

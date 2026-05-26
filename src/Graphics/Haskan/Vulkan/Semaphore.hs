@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+
 module Graphics.Haskan.Vulkan.Semaphore where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)

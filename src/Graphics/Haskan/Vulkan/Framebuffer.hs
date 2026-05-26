@@ -33,16 +33,16 @@ createFramebuffer ::
   Vulkan.ImageView ->
   m Vulkan.Framebuffer
 createFramebuffer dev renderPass extent imageView depthView = do
-  let Vulkan.Extent2D{width = w, height = h} = extent
+  let Vulkan.Extent2D {width = w, height = h} = extent
       createInfo =
         Vulkan.FramebufferCreateInfo
-          { next = ()
-          , flags = zero
-          , renderPass = renderPass
-          , attachments = Vector.fromList [imageView, depthView]
-          , width = w
-          , height = h
-          , layers = 1
+          { next = (),
+            flags = zero,
+            renderPass = renderPass,
+            attachments = Vector.fromList [imageView, depthView],
+            width = w,
+            height = h,
+            layers = 1
           }
   liftIO $ Vulkan.createFramebuffer dev createInfo Nothing
 
@@ -69,16 +69,16 @@ createGBufferFramebuffer ::
   Vulkan.ImageView ->
   m Vulkan.Framebuffer
 createGBufferFramebuffer dev renderPass extent colorViews depthView = do
-  let Vulkan.Extent2D{width = w, height = h} = extent
+  let Vulkan.Extent2D {width = w, height = h} = extent
       createInfo =
         Vulkan.FramebufferCreateInfo
-          { next = ()
-          , flags = zero
-          , renderPass = renderPass
-          , attachments = Vector.fromList (colorViews ++ [depthView])
-          , width = w
-          , height = h
-          , layers = 1
+          { next = (),
+            flags = zero,
+            renderPass = renderPass,
+            attachments = Vector.fromList (colorViews ++ [depthView]),
+            width = w,
+            height = h,
+            layers = 1
           }
   liftIO $ Vulkan.createFramebuffer dev createInfo Nothing
 
@@ -103,15 +103,15 @@ createLightingFramebuffer ::
   Vulkan.ImageView ->
   m Vulkan.Framebuffer
 createLightingFramebuffer dev renderPass extent imageView = do
-  let Vulkan.Extent2D{width = w, height = h} = extent
+  let Vulkan.Extent2D {width = w, height = h} = extent
       createInfo =
         Vulkan.FramebufferCreateInfo
-          { next = ()
-          , flags = zero
-          , renderPass = renderPass
-          , attachments = Vector.fromList [imageView]
-          , width = w
-          , height = h
-          , layers = 1
+          { next = (),
+            flags = zero,
+            renderPass = renderPass,
+            attachments = Vector.fromList [imageView],
+            width = w,
+            height = h,
+            layers = 1
           }
   liftIO $ Vulkan.createFramebuffer dev createInfo Nothing

@@ -8,9 +8,10 @@
 
 -- | Mesh shader terrain pipeline.
 module Graphics.Haskan.Vulkan.Shaders.Deferred.TerrainMesh
-  ( terrainMesh
-  , terrainFragment
-  ) where
+  ( terrainMesh,
+    terrainFragment,
+  )
+where
 
 import FIR
 import Math.Linear
@@ -22,34 +23,36 @@ import Math.Linear
 -- | Terrain node SSBO layout (matches TerrainNodeGPU).
 type TerrainNodeData =
   Struct
-    '[ "worldOffset"    ':-> V 2 Float
-     , "worldSize"      ':-> Float
-     , "heightScale"    ':-> Float
-     , "lodLevel"       ':-> Int32
-     , "heightmapLayer" ':-> Word32
-     , "climateLayer"   ':-> Word32
-     , "morphStart"     ':-> Float
+    '[ "worldOffset" ':-> V 2 Float,
+       "worldSize" ':-> Float,
+       "heightScale" ':-> Float,
+       "lodLevel" ':-> Int32,
+       "heightmapLayer" ':-> Word32,
+       "climateLayer" ':-> Word32,
+       "morphStart" ':-> Float
      ]
 
 type MeshDefs =
-  '[ "out_position" ':-> Output '[Location 0] (Array 64 (V 4 Float))
-   , "out_normal"   ':-> Output '[Location 1] (Array 64 (V 4 Float))
-   , "out_uv"       ':-> Output '[Location 2] (Array 64 (V 2 Float))
-   , "out_climate"  ':-> Output '[Location 3] (Array 64 Word32)
-   , "nodes"
+  '[ "out_position" ':-> Output '[Location 0] (Array 64 (V 4 Float)),
+     "out_normal" ':-> Output '[Location 1] (Array 64 (V 4 Float)),
+     "out_uv" ':-> Output '[Location 2] (Array 64 (V 2 Float)),
+     "out_climate" ':-> Output '[Location 3] (Array 64 Word32),
+     "nodes"
        ':-> StorageBuffer
-            '[Binding 0, DescriptorSet 0]
-            (Struct '[ "data" ':-> Array 1024 TerrainNodeData ])
-   , "heightmap"
+              '[Binding 0, DescriptorSet 0]
+              (Struct '["data" ':-> Array 1024 TerrainNodeData]),
+     "heightmap"
        ':-> Texture2D
-            '[Binding 1, DescriptorSet 0]
-            (R16 SNorm)
-   , "main"
-       ':-> EntryPoint '[ LocalSize 64 1 1
-                        , OutputVertices 64
-                        , OutputPrimitivesEXT 98
-                        , OutputTrianglesEXT
-                        ] Mesh
+              '[Binding 1, DescriptorSet 0]
+              (R16 SNorm),
+     "main"
+       ':-> EntryPoint
+              '[ LocalSize 64 1 1,
+                 OutputVertices 64,
+                 OutputPrimitivesEXT 98,
+                 OutputTrianglesEXT
+               ]
+              Mesh
    ]
 
 -- | 8x8 terrain patch mesh shader.
@@ -62,8 +65,8 @@ terrainMesh = meshShader do
 
   -- Read node data from SSBO
   nodeOffset <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "worldOffset") wxId
-  nodeSize   <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "worldSize") wxId
-  _nodeLOD   <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "lodLevel") wxId
+  nodeSize <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "worldSize") wxId
+  _nodeLOD <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "lodLevel") wxId
   heightScale <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "heightScale") wxId
   _hmapLayer <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "heightmapLayer") wxId
   climateLayer <- use @(Name "nodes" :.: Name "data" :.: AnIndex Word32 :.: Name "climateLayer") wxId
@@ -98,7 +101,8 @@ terrainMesh = meshShader do
 
   -- Write per-vertex builtin position
   assign @(Name "gl_MeshVerticesEXT" :.: AnIndex Word32 :.: Name "gl_Position")
-    localIdx pos
+    localIdx
+    pos
 
   -- Write per-vertex user outputs
   assign @(Name "out_position" :.: AnIndex Word32) localIdx pos
@@ -111,23 +115,23 @@ terrainMesh = meshShader do
 -- ---------------------------------------------------------------------------
 
 type FragmentDefs =
-  '[ "in_position" ':-> Input '[Location 0] (V 4 Float)
-   , "in_normal"   ':-> Input '[Location 1] (V 4 Float)
-   , "in_uv"       ':-> Input '[Location 2] (V 2 Float)
-   , "in_climate"  ':-> Input '[Location 3, Flat] Word32
-   , "out_color"   ':-> Output '[Location 0] (V 4 Float)
-   , "climateTex"
-        ':-> Texture2D
-             '[Binding 2, DescriptorSet 0]
-             (RGBA32 F)
-   , "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
+  '[ "in_position" ':-> Input '[Location 0] (V 4 Float),
+     "in_normal" ':-> Input '[Location 1] (V 4 Float),
+     "in_uv" ':-> Input '[Location 2] (V 2 Float),
+     "in_climate" ':-> Input '[Location 3, Flat] Word32,
+     "out_color" ':-> Output '[Location 0] (V 4 Float),
+     "climateTex"
+       ':-> Texture2D
+              '[Binding 2, DescriptorSet 0]
+              (RGBA32 F),
+     "main" ':-> EntryPoint '[OriginUpperLeft] Fragment
    ]
 
 terrainFragment :: ShaderModule "main" FragmentShader FragmentDefs _
 terrainFragment = shader do
-  pos    <- get @"in_position"
+  pos <- get @"in_position"
   normal <- get @"in_normal"
-  uv     <- get @"in_uv"
+  uv <- get @"in_uv"
   _climateLayer <- get @"in_climate"
 
   let Vec4 worldX _ worldZ _ = pos
