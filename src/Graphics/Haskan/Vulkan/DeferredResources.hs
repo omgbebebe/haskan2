@@ -329,9 +329,9 @@ createDeferredResources DeferredConfig {..} = do
           , flags = zero
           , queueFamilyIndices = Vector.empty
           }
-  apImage <- liftIO $ Vk26.createImage device apCreateInfo Nothing
+  apImage <- alloc "APVolumeImage" (liftIO $ Vk26.createImage device apCreateInfo Nothing) (\ptr -> liftIO $ Vk26.destroyImage device ptr Nothing)
   apMemoryRequirements <- liftIO $ Vk26.getImageMemoryRequirements device apImage
-  apMemory <- Memory.allocateMemoryFor pdev device apMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]
+  apMemory <- alloc "APVolumeMemory" (Memory.allocateMemoryFor pdev device apMemoryRequirements [Vk26.MEMORY_PROPERTY_DEVICE_LOCAL_BIT]) (\ptr -> liftIO $ Vk26.freeMemory device ptr Nothing)
   liftIO $ Vk26.bindImageMemory device apImage apMemory 0
   apImageView <- ImageView.managedImageView3D device apFormat apImage
   -- Transition to GENERAL for compute writes

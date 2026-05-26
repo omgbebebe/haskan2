@@ -863,6 +863,8 @@ renderLoop RenderLoopConfig {..} = do
       forM_ (HashMap.toList offsets) $ \(mh, (fi, vo)) -> do
         mMesh <- lookupMesh rm mh
         forM_ mMesh $ \mesh -> do
+          brDestroy (mrVertexBuffer mesh)
+          brDestroy (mrIndexBuffer mesh)
           updateMesh rm mh $
             mesh
               { mrVertexBuffer = sharedVertBuf,

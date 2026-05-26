@@ -142,6 +142,20 @@ createImageView3DMips dev format img mipLevels = do
           subresourceRange
   liftIO $ Vk26.createImageView dev createInfo Nothing
 
+managedImageView3DSingleMip ::
+  (MonadManaged m) =>
+  Vk26.Device ->
+  Vk26.Format ->
+  Vk26.Image ->
+  -- | base mip level
+  Word32 ->
+  m Vk26.ImageView
+managedImageView3DSingleMip dev format img baseMip =
+  alloc
+    "ImageView3DSingleMip"
+    (createImageView3DSingleMip dev format img baseMip)
+    (\ptr -> Vk26.destroyImageView dev ptr Nothing)
+
 createImageView3DSingleMip ::
   (MonadIO m) =>
   Vk26.Device ->

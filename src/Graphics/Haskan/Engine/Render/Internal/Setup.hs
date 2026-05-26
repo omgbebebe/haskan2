@@ -299,7 +299,7 @@ loadIBLTextures ::
   Bool ->
   m IBLTextures
 loadIBLTextures vc@VulkanContext {..} rm envMapDir proceduralSkyEnabled = do
-  lightingSampler <- Texture.createSamplerWithLod vcDevice 0
+  lightingSampler <- Texture.managedSamplerWithLod vcDevice 0
   logInfo LogGeneral "lighting sampler created"
 
   if proceduralSkyEnabled
@@ -883,7 +883,7 @@ dispatchCloudNoiseGeneration VulkanContext {..} rm noiseHandle NoiseParams {..} 
   mipViews <-
     if noiseImage /= zero
       then forM [0 .. mipLevels - 1] $ \mip -> do
-        liftIO $ ImageView.createImageView3DSingleMip vcDevice noiseFormat noiseImage (fromIntegral mip)
+        ImageView.managedImageView3DSingleMip vcDevice noiseFormat noiseImage (fromIntegral mip)
       else pure (replicate mipLevels zero)
 
   -- Create per-mip UBOs and pre-update all descriptor sets
